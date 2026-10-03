@@ -320,6 +320,7 @@ import LinsheInput from './ui/LinsheInput.vue'
 import MomentCommentItem from './MomentCommentItem.vue'
 import { groupMomentComments } from '../utils/momentComments.js'
 import { extractMomentImageRequest, stripMomentImageRequest, appendMomentImageRequest } from '../utils/momentImageRequest.js'
+import { emitMomentLikeEnabled } from '../utils/characterReactionProducers.js'
 
 const props = defineProps({
   post: { type: Object, required: true },
@@ -763,6 +764,8 @@ async function onLike() {
   await moments.toggleLike(props.post.id)
   // 点赞成功：爱心爆心动画（粒子环扩散），600ms 后复位
   if (props.post.liked) {
+    // 业务成功分支才发事件：用户自己的动态、镇民动态由生产者侧直接忽略（§4.1）
+    emitMomentLikeEnabled({ post: props.post, liked: true })
     likeBursting.value = false
     requestAnimationFrame(() => {
       likeBursting.value = true

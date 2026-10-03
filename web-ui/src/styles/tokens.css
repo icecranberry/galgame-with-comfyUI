@@ -169,8 +169,28 @@
   --z-drawer: 1000;
   --z-modal: 10000;
   --z-popover: 11000;
-  --z-toast: 12000;
+  --z-toast: 13000;
   --z-float: 15000;
+
+  /* ── 角色通知（左下角轻通知）：暖纸质感岛，沿用原 Toast 的既有例外 ──
+       两种主题共用同一组暖纸色值，保证纸面墨色对比；尺寸与 300ms 动效走
+       --dur-interaction / --ease-standard，不再把硬编码色值复制进组件。 */
+  --ct-bg: #F7F4EF;
+  --ct-border: rgba(var(--accent-rgb), 0.24);
+  --ct-shadow: 0 10px 30px rgba(50, 40, 35, 0.18), 0 2px 8px rgba(50, 40, 35, 0.10);
+  --ct-text: #3E3A36;
+  --ct-name: #55483B;
+  --ct-muted: #8B8179;
+  --ct-close: #B4AA9E;
+  --ct-media-bg: rgba(85, 72, 59, 0.08);
+  --ct-radius: 18px;
+  --ct-gap: 12px;
+  --ct-pad: 12px 10px 14px 12px;
+  --ct-width: 336px;
+  --ct-media-size: 56px;
+  --ct-offset-x: 16px;
+  --ct-offset-y: 16px;
+  --ct-offset-y-mobile: 76px;
 }
 
 /* ══ 暗夜：深色玻璃 · 珊瑚夜灯 ══ */

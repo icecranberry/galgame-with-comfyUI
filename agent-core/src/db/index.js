@@ -29,6 +29,7 @@ import { migrateWeatherHourlySchema } from './weatherHourlySchema.js';
 
 import { migrateExpressionStandings, recoverExpressionStandingJobs } from './expressionStandingSchema.js';
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
+import { migrateCharacterReactionPacksSchema } from './characterReactionPackSchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1035,6 +1036,8 @@ function initSchema(db) {
   migrateEmojiCategoriesV2(db);
   // 迁移: 表情包多配置单（emoji_sets + character_emojis.set_id，旧数据回填默认配置单）
   migrateEmojiSetsSchema(db);
+  // 迁移: 角色操作反馈短句包（每角色一份，保存完整 JSON 与人格指纹）
+  migrateCharacterReactionPacksSchema(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);

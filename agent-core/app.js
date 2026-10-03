@@ -32,6 +32,7 @@ import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
 import newspaperRoutes from './src/routes/newspaper.js';
 import townRoutes from './src/routes/town.js';
+import characterReactionsRoutes from './src/routes/characterReactions.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -134,6 +135,8 @@ app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event
 app.use('/api/items', wrapRouterAsync(itemsRoutes));
 app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
 app.use('/api/town', wrapRouterAsync(townRoutes));
+// 角色操作反馈：/api/character-reactions/instant 低概率即时反应（额度 + 幂等在后端）
+app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));
 
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 

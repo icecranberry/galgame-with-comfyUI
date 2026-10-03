@@ -381,6 +381,7 @@ import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import GearIcon from '../components/GearIcon.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import { emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
@@ -957,12 +958,26 @@ async function onCardWake(id: number) {
 
 // ── 卡片置顶 ──
 async function toggleCharPin(c: any) {
+  const wasPinned = !!c.pinned
   const pinned = c.pinned ? 0 : 1
   c.pinned = pinned
   // enrichedChars 是 .map() 出来的副本，必须回写 store 源对象，否则切页签后状态回退
   const src = store.characters.find((ch: any) => ch.id === c.id)
   if (src) src.pinned = pinned
-  try { await api.togglePin(c.id, pinned) } catch {}
+  try {
+    const res = await api.togglePin(c.id, pinned)
+    // 只有接口确认成功、且确实从未置顶变成置顶才产生角色通知（§2.2）
+    emitCharacterPinEnabled({
+      characterId: c.id,
+      characterName: c.display_name || c.name || '',
+      wasPinned,
+      pinned: !!pinned,
+      ok: res?.ok === true && res?.pinned === pinned,
+    })
+  } catch {
+    c.pinned = wasPinned ? 1 : 0
+    if (src) src.pinned = wasPinned ? 1 : 0
+  }
 }
 
 // ── 叫醒系统（抽屉内） ──

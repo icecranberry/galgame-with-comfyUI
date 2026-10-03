@@ -211,6 +211,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { getFontFamily, loadFont, getPageDefaultFontFamily, getWriteFontFamily } from '../composables/useHandwritingFont.js'
 import LetterViewer from './LetterViewer.vue'
+import { emitLetterReopened } from '../utils/characterReactionProducers.js'
 import LetterWrite from './LetterWrite.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import LinsheButton from './ui/LinsheButton.vue'
@@ -346,7 +347,12 @@ function selectLetter(letter) {
   viewingLetterId.value = null
   viewerSourceRect.value = null
   if (letter.handwriting_font) loadFont(letter.handwriting_font)
-  if (letter.direction === 'char_to_user' && !letter.is_read) store.markRead(letter.id)
+  if (letter.direction === 'char_to_user' && !letter.is_read) {
+    store.markRead(letter.id)
+  } else {
+    // 只有显式打开「先前已读、且完成超过 7 天」的回信才作为玩家操作采集（§2.2）
+    emitLetterReopened({ letter })
+  }
 }
 
 function isReplied(letter) {

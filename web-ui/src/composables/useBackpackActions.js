@@ -1,5 +1,6 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useBackpackStore } from '../stores/backpack.js'
+import { emitAppearanceApplied, emitAppearanceRestored } from '../utils/characterReactionProducers.js'
 
 /** 道具详情里的种类说明文案 */
 export const ITEM_KIND_LABELS = {
@@ -323,6 +324,15 @@ export function useBackpackActions({ confirm, toast }) {
           offerTitle: result.itemName || item.name,
         } }
       } else if (result.ok) {
+        // 外观类道具结算成功 → 角色通知；礼物叙事与已有效果台词由原流程负责，不重复说话（§2.2 / §2.3）
+        emitAppearanceApplied({
+          characterId: char.id,
+          itemName: result.item?.name || result.activeEffect?.item_name || item.name,
+          effectKey: result.activeEffect?.effect_key || result.effect?.effect_key || '',
+          effectId: result.activeEffect?.id ?? null,
+          kind: result.activeEffect?.kind || result.effect?.kind || '',
+          hasNarrative: false,
+        })
         toast?.(result.summary || '道具已使用', 'success')
       } else {
         toast?.(result.error || '使用失败', 'error')
@@ -368,6 +378,16 @@ export function useBackpackActions({ confirm, toast }) {
     try {
       const result = await store.removeActiveEffect(effect.id)
       if (result.ok) {
+        // P1：玩家主动移除生效中的外观效果；继承认知「换回原来那一套」，自动到期不算玩家操作
+        if (effect.character_id != null) {
+          emitAppearanceRestored({
+            characterId: effect.character_id,
+            itemName: effect.item_name || effect.effect_name || '',
+            effectKey: effect.effect_key || '',
+            effectId: effect.id ?? null,
+            kind: effect.kind || '',
+          })
+        }
         toast?.(`已移除 ${effect.character_name} 的「${effectName}」`, 'success')
       } else {
         toast?.(result.error || '移除失败', 'error')

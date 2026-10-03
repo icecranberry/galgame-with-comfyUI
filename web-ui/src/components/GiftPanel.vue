@@ -173,6 +173,7 @@ const loading = ref(false)
 const error = ref('')
 let countdownTimer = null
 
+
 const giftLabel = computed(() => {
   const labels = { small: '小惊喜', large: '特别准备', ring: '誓约之戒' }
   return labels[selectedType.value] || ''

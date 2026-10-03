@@ -186,6 +186,7 @@ cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
 import { computed, nextTick, ref, reactive, inject, watch, onUnmounted } from 'vue'
 import { useTooltip } from '../composables/useTooltip.js'
 import { updateScheduleActivity } from '../api/index.js'
+import { emitScheduleAgreement } from '../utils/characterReactionProducers.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import LinsheInput from './ui/LinsheInput.vue'
@@ -224,6 +225,8 @@ async function saveEdit() {
   try {
     const d = await updateScheduleActivity(props.char.id, editIndex.value, { ...editForm })
     // 成功提示由后端 schedule_changed 广播统一弹出，这里不重复提示
+    // 2.3：只记录「明确保存了日程约定」，不声称已经赴约
+    emitScheduleAgreement({ characterId: props.char.id, activity: editForm.activity, index: editIndex.value })
     emit('updated', d.activities || [])
     editOpen.value = false
   } catch (err: any) {

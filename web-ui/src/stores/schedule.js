@@ -10,6 +10,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
+import { emitSchedulePeeked } from '../utils/characterReactionProducers.js'
 
 export const useScheduleStore = defineStore('schedule', () => {
   // ── 状态 ──
@@ -131,6 +132,8 @@ export const useScheduleStore = defineStore('schedule', () => {
     try {
       // 立即返回活动信息，图片异步通过 SSE 推送
       await api.peekSnapshot(characterId, true, activityContext)
+      // §2.2：成功发起「瞄一眼」后记录一次角色反应（不描述快照内容）
+      emitSchedulePeeked({ characterId, activityName: activityContext?.activity || '' })
       // 图片结果将通过 unifiedStream 的 schedule_peek_ready 事件回调处理
     } catch (err) {
       peekError.value = err.message

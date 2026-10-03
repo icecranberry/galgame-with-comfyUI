@@ -28,6 +28,8 @@
   </div>
   <ConfirmDialog ref="confirmDialog" />
   <Toast ref="toastEl" />
+  <!-- 角色操作反馈宿主：左下角轻通知，不依赖立绘小窗是否打开 -->
+  <CharacterReactionHost />
   <InstallGuideDialog ref="guideDialog" />
   <ChangelogDialog ref="changelogDialog" @close="onChangelogClose" />
   <ImageEditTaskFloater />
@@ -57,6 +59,7 @@ import NavBar from './components/NavBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import Toast from './components/Toast.vue'
+import CharacterReactionHost from './components/CharacterReactionHost.vue'
 import InstallGuideDialog from './components/InstallGuideDialog.vue'
 import ChangelogDialog from './components/ChangelogDialog.vue'
 import ImageEditTaskFloater from './components/ImageEditTaskFloater.vue'

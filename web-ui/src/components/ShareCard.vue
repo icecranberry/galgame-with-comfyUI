@@ -127,6 +127,7 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import { emitMomentShareExported } from '../utils/characterReactionProducers.js'
 import {
   renderMomentShareCard,
   MOMENT_SHARE_STYLES,
@@ -538,6 +539,8 @@ async function downloadPoster() {
     await savePoster()
     downloaded.value = true
     setTimeout(() => { downloaded.value = false }, 2000)
+    // P1：实际导出入口成功发起后才记录；作者可确认时才反馈（不声称已发到外部平台）
+    emitMomentShareExported({ post: props.post, channel: 'download' })
   } catch (err) {
     console.error('[ShareCard] download poster failed:', err)
     toastFn?.('分享图下载失败', 'error')
@@ -559,6 +562,7 @@ async function copyPoster() {
     ])
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
+    emitMomentShareExported({ post: props.post, channel: 'copy' })
   } catch (err) {
     console.error('[ShareCard] copy poster failed:', err)
     // 剪贴板不可用时降级为下载，仍保证能拿到图片
@@ -566,6 +570,7 @@ async function copyPoster() {
       await savePoster()
       copied.value = false
       downloaded.value = true
+      emitMomentShareExported({ post: props.post, channel: 'copy-fallback' })
       toastFn?.('复制失败，已保存分享图到下载', 'info')
     } catch (fallbackErr) {
       console.error('[ShareCard] poster fallback failed:', fallbackErr)

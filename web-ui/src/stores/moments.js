@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 // unifiedStream 不依赖 moments store，无循环依赖；统一静态导入（消除构建警告）
 import { onEvent as onStreamEvent } from './unifiedStream.js'
+import { emitMomentComment } from '../utils/characterReactionProducers.js'
 
 const PAGE_SIZE = 20
 
@@ -142,6 +143,8 @@ export const useMomentsStore = defineStore('moments', () => {
       const added = (result.comment ? 1 : 0) + (result.replies?.length || (result.reply ? 1 : 0))
       post.comment_count = (post.comment_count || 0) + added
     }
+    // §2.3：只记录评论事实，原评论回复优先，不做左下角复述
+    emitMomentComment({ post, commentId: result?.comment?.id })
     return result
   }
 

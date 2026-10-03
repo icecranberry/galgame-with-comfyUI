@@ -47,6 +47,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   imgs: { type: [String, Array, Object], default: '' },
   index: { type: Number, default: 0 },
+
   showRegenerate: { type: Boolean, default: true },
   showUpscale: { type: Boolean, default: true },
   showDelete: { type: Boolean, default: true },
@@ -245,6 +246,7 @@ function getCurrentUrl() {
   return ''
 }
 
+
 // ── 下载 ──
 // 浏览器：fetch → blob → <a download>；Android 壳内 WebView 不处理下载，
 // 检测到注入的 AndroidBridge 时改为 base64 交给原生存相册（见 android-shell MainActivity）。
@@ -290,9 +292,14 @@ async function onDownload() {
     const bridge = window.AndroidBridge
     if (bridge && typeof bridge.saveImage === 'function') {
       const res = bridge.saveImage(filename, await blobToDataURL(blob))
-      if (res === 'ok') toastFn?.('已保存到相册', 'success')
-      else if (res === 'permission_pending') toastFn?.('已请求存储权限，授权后将自动保存', 'info')
-      else toastFn?.('保存失败: ' + (res || '未知错误'), 'error')
+      if (res === 'ok') {
+        toastFn?.('已保存到相册', 'success')
+      } else if (res === 'permission_pending') {
+        // 权限待授权不算完成，也不发 saved
+        toastFn?.('已请求存储权限，授权后将自动保存', 'info')
+      } else {
+        toastFn?.('保存失败: ' + (res || '未知错误'), 'error')
+      }
     } else {
       const objUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -306,7 +313,8 @@ async function onDownload() {
     }
   } catch (err) {
     console.error('[ImageLightbox] download failed:', err.message)
-    // 拉取失败（多为跨域图片）：退化为直链，支持则直接下载，否则新标签打开手动保存
+    // 拉取失败（多为跨域图片）：退化为直链，支持则直接下载，否则新标签打开手动保存。
+    // 这条路径不产生角色反馈——请求失败不发（§2.2 / §2.6）
     const a = document.createElement('a')
     a.href = url
     a.download = deriveFilename(url, null)

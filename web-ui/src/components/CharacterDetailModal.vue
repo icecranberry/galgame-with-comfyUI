@@ -440,6 +440,7 @@ import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
+import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -626,6 +627,7 @@ async function removeOath() {
 async function saveCharDetail() {
   const c = props.character
   if (!c || !detail.dirty) return
+  const previousName = c.display_name || ''
   await api.updateCharacter(c.id, {
     name: detail.editCharName,
     display_name: detail.editName,
@@ -638,6 +640,8 @@ async function saveCharDetail() {
   c.display_name = detail.editName
   detail.dirty = false
   emit('saved', c)
+  // P1：保存成功后新旧显示名确实不同才反馈；不声称已有独立昵称系统
+  emitCharacterDisplayNameChanged({ characterId: c.id, previousName, nextName: c.display_name, ok: true })
 }
 
 async function deleteChar() {
@@ -992,6 +996,7 @@ const standingDisplayUrl = computed(() => {
   overwriteBustTick.value // 依赖登记表 tick：覆盖确认后即使弹窗开着也能立即换新图
   return bustUrlIfOverwritten(props.character?.standing_url || '')
 })
+
 
 // 立绘姿势风格（普通 / 张力！）：全局设置，system_settings 持久化
 const standingMode = ref('normal')

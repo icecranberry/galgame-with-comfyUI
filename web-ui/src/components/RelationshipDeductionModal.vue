@@ -119,6 +119,7 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
+import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 
@@ -274,6 +275,14 @@ async function confirmAll() {
           await api.createRelationship(item.from_id, item.to_id, item.relationship_text)
         }
       }
+    }
+    // §2.2：批量确认推演结果后，按角色去重记录（冷却与去重负责限流）
+    const seen = new Set()
+    for (const item of confirmed.value) {
+      const cid = props.mode === 'user' ? item.to_id : item.from_id
+      if (cid === undefined || cid === null || seen.has(cid)) continue
+      seen.add(cid)
+      emitRelationshipChanged({ characterId: cid, action: 'deduced' })
     }
     emit('saved')
     emit('close')

@@ -480,6 +480,37 @@ export async function updateFeatureFlag(key, value) {
   await request(`/config/features`, { method: 'PUT', body: { key, value } })
 }
 
+// ── 角色操作反馈（左下角轻通知）──
+
+/** 本次候选需要的素材：该角色启用表情包配置单里已完成的图片 + 头像（不做任何生成） */
+export function getCharacterReactionAssets(characterId) {
+  return request(`/characters/${characterId}/reaction-assets`)
+}
+
+/** 低概率即时反应：一次获准事件至多一次请求，由后端校验事实与额度 */
+export function requestCharacterReaction(payload, { signal } = {}) {
+  return request(`/character-reactions/instant`, { method: 'POST', body: payload, signal })
+}
+
+/** 短句包（M2）：按角色读取 / 用户主动生成 / 删除。只有 generate 会产生模型调用 */
+export function getCharacterReactionPack(characterId) {
+  return request(`/character-reactions/packs/${characterId}`)
+}
+
+export function generateCharacterReactionPack(characterId, eventTypes) {
+  const body = Array.isArray(eventTypes) ? { eventTypes } : {}
+  return request(`/character-reactions/packs/${characterId}/generate`, { method: 'POST', body })
+}
+
+export function deleteCharacterReactionPack(characterId) {
+  return request(`/character-reactions/packs/${characterId}`, { method: 'DELETE' })
+}
+
+/** 保存用户手动编辑的短句包（服务端走同一套严格校验） */
+export function saveCharacterReactionPack(characterId, pack) {
+  return request(`/character-reactions/packs/${characterId}`, { method: 'PUT', body: { pack } })
+}
+
 /** 更新主动聊天频率 0~1 */
 export async function updateProactiveFreq(value) {
   await request(`/config/proactive-freq`, { method: 'PUT', body: { value } })

@@ -95,6 +95,7 @@ import { Background } from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import * as api from '../api/index.js'
+import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
 import { userAvatar, userNickname } from '../userConfig.js'
 import CharacterNode from './CharacterNode.vue'
 import UserNode from './UserNode.vue'
@@ -351,6 +352,7 @@ async function confirmInput() {
       // Update local cache
       const cached = existingRels.value.find(r => r.id === inputDialog.edgeId)
       if (cached) cached.relationship_text = text
+      emitRelationshipChanged({ characterId: parseInt(inputDialog.targetId), action: 'update', targetName: inputDialog.targetName })
     } catch (err) {
       console.error('[UserRelationshipGraph] update failed:', err.message)
       toastFn('保存失败: ' + err.message, 'error')
@@ -372,6 +374,7 @@ async function confirmInput() {
         toastFn('创建失败: 服务器返回数据异常', 'error')
         return
       }
+      emitRelationshipChanged({ characterId: parseInt(inputDialog.targetId), action: 'create', targetName: inputDialog.targetName })
       // Add edge via imperative API — compute optimal handles from target position
       const targetNode = elements.value.find(el => el.id === String(created.character_id))
       const handles = targetNode ? computeHandles(targetNode.position) : { sourceHandle: undefined, targetHandle: undefined }
@@ -419,6 +422,7 @@ async function deleteEdge() {
   try {
     await api.deleteUserRelationship(inputDialog.edgeId)
     removeEdges([edgeId])
+    emitRelationshipChanged({ characterId: parseInt(inputDialog.targetId), action: 'delete', targetName: inputDialog.targetName })
     elements.value = elements.value.filter(el => el.id !== edgeId)
     existingRels.value = existingRels.value.filter(r => r.id !== inputDialog.edgeId)
   } catch (err) {

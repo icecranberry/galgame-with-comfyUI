@@ -223,6 +223,7 @@ import LetterViewer from '../components/LetterViewer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import { emitLetterReopened } from '../utils/characterReactionProducers.js'
 
 const router = useRouter()
 const chatStore = useChatStore()
@@ -255,7 +256,12 @@ function selectLetter(letter) {
   activeLetterId.value = letter.id
   panelIndex.value = 1
   if (letter.handwriting_font) loadFont(letter.handwriting_font)
-  if (letter.direction === 'char_to_user' && !letter.is_read) store.markRead(letter.id)
+  if (letter.direction === 'char_to_user' && !letter.is_read) {
+    store.markRead(letter.id)
+  } else {
+    // 只有显式打开「先前已读、且完成超过 7 天」的回信才作为玩家操作采集（§2.2）
+    emitLetterReopened({ letter })
+  }
 }
 
 const activeHandwritingFontStyle = computed(() => {

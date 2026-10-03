@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { useMessageWindow } from '../composables/useMessageWindow.js'
 import { useProactiveStore } from './notifications.js'
+import { emitCharacterAvatarChanged } from '../utils/characterReactionProducers.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -279,8 +280,12 @@ export const useChatStore = defineStore('chat', () => {
   async function uploadAvatar(base64) {
     const id = activeCharId.value
     if (!id) return
+    const before = characters.value.find(c => c.id === id)?.avatar_path || ''
     const r = await api.uploadAvatar(id, base64 || '')
     await loadCharacters()
+    const after = characters.value.find(c => c.id === id)?.avatar_path || ''
+    // P1：只有版本确实变化且保存成功才反馈；移除头像（after 为空）静默
+    emitCharacterAvatarChanged({ characterId: id, previousVersion: before, nextVersion: after, ok: true })
     return r
   }
 

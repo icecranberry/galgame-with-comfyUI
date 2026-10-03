@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="svc-modal">
-      <div v-if="open" class="svc-overlay" @click="onOverlayClick">
+      <div v-if="open" class="svc-overlay" data-ct-blocker="town-service" @click="onOverlayClick">
         <div class="svc-film" @click.stop>
           <div class="svc-film-edge svc-film-edge-top" aria-hidden="true"></div>
 

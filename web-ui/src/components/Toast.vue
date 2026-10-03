@@ -47,10 +47,70 @@
       </TransitionGroup>
     </div>
   </Teleport>
-</template>
+
+  <!--  角色通知（左下角轻通知）：非模态、可叠多条、独立层级与命名 class 
+       与右上角系统 Toast 共用同一套暖纸皮肤与动效语言，但不继承
+       .__toast__root 的 99999 强制层级；新卡片从下往上顶，最多叠 3 条。 -->
+  <Teleport v-if="ready" to="body">
+    <TransitionGroup name="ct" tag="div" class="character-toast-host">
+      <div
+        v-for="card in characterCards"
+        :key="card.id"
+        class="live-toast character-toast"
+        :class="{ 'is-leaving': card.leaving }"
+        data-ct-card
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        tabindex="0"
+        @mouseenter="emit('character-pause', card.id, true)"
+        @mouseleave="emit('character-pause', card.id, false)"
+        @focusin="emit('character-pause', card.id, true)"
+        @focusout="emit('character-pause', card.id, false)"
+        @keydown.esc.stop.prevent="emit('character-dismiss', card.id)"
+      >
+        <div class="character-toast-media" aria-hidden="true">
+          <img
+            v-if="card.mediaUrl"
+            :src="card.mediaUrl"
+            :class="card.mediaKind === 'emoji' ? 'is-emoji' : 'is-avatar'"
+            alt=""
+            @error="emit('character-media-fallback', card.id)"
+          />
+          <span v-else class="character-toast-initial">{{ initialOf(card) }}</span>
+        </div>
+        <div class="live-toast-body character-toast-body">
+          <p class="character-toast-name">{{ card.name }}</p>
+          <p class="live-toast-message">{{ card.text }}</p>
+        </div>
+        <linshe-button
+          variant="icon"
+          size="sm"
+          class="character-toast-close"
+          aria-label="关闭角色通知"
+          title="关闭"
+          @click="emit('character-dismiss', card.id)"
+        >
+          <svg viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <path d="M1.6 1.6l6.8 6.8M8.4 1.6 1.6 8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </linshe-button>
+        <span class="live-toast-life character-toast-life" aria-hidden="true"></span>
+      </div>
+    </TransitionGroup>
+  </Teleport></template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import LinsheButton from './ui/LinsheButton.vue'
+import { notifyToastActivity } from '../utils/characterReactionScene.js'
+
+const props = defineProps({
+  /** 角色通知卡片数组（由外部控制）；空数组时渲染空容器 */
+  characterCards: { type: Array, default: () => [] },
+})
+
+const emit = defineEmits(['character-dismiss', 'character-pause', 'character-media-fallback'])
 
 const MAX_VISIBLE = 4
 
@@ -87,6 +147,7 @@ function show(message, type = 'info', duration, description) {
   while (toasts.value.length > MAX_VISIBLE) {
     dismiss(toasts.value[toasts.value.length - 1].id)
   }
+  notifyToastActivity()
 }
 
 function dismiss(id) {
@@ -94,6 +155,7 @@ function dismiss(id) {
   if (idx === -1) return
   const [item] = toasts.value.splice(idx, 1)
   clearTimeout(item.timer)
+  notifyToastActivity()
 }
 
 // 悬停暂停:冻结剩余时长,与底部生命周期线的 animation-play-state 同步
@@ -127,6 +189,12 @@ function pinLeaving(el) {
   el.style.top = `${rect.top - hostRect.top}px`
   el.style.width = `${rect.width}px`
   el.style.height = `${rect.height}px`
+}
+
+//  角色通知（左下角）：素材加载失败由宿主回退头像 / 首字占位，不重置计时 
+function initialOf(card) {
+  const name = String(card?.name || '').trim()
+  return name ? Array.from(name)[0] : '角'
 }
 
 onMounted(() => {
@@ -303,7 +371,7 @@ defineExpose({ show })
   to   { opacity: 1; }
 }
 
-/* ── 移动端:收紧边距,宽度不越界 ── */
+/* ── 移动端：收紧边距,宽度不越界 ── */
 @media (max-width: 640px) {
   .live-toast-host {
     top: max(12px, env(safe-area-inset-top, 12px));
@@ -313,5 +381,148 @@ defineExpose({ show })
     min-width: min(280px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
   }
+}
+
+/* ══════════════════════════════════════════════════════════
+   角色通知（左下角轻通知）—— 复用 .live-toast 暖纸皮肤
+   宿主 pointer-events:none，仅卡片可交互；层级用 --z-toast，
+   不继承 .__toast__root 的 99999 强制层级。
+   ══════════════════════════════════════════════════════════ */
+.character-toast-host {
+  position: fixed;
+  left: var(--ct-offset-x, 16px);
+  bottom: var(--ct-offset-y, 16px);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.character-toast {
+  align-items: flex-start;
+  gap: var(--ct-gap, 12px);
+  width: var(--ct-width, 336px);
+  max-width: calc(100vw - 32px);
+  min-width: 0;
+  padding: var(--ct-pad, 12px 10px 14px 12px);
+  background: var(--ct-bg);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius, 18px);
+  box-shadow: var(--ct-shadow);
+  pointer-events: auto;
+}
+
+.character-toast-media {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: var(--ct-media-size, 56px);
+  height: var(--ct-media-size, 56px);
+  overflow: hidden;
+}
+.character-toast-media img.is-emoji {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.character-toast-media img.is-avatar {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 1px solid var(--ct-border);
+}
+.character-toast-initial {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--ct-media-bg);
+  color: var(--ct-name);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.character-toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+.character-toast-name {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ct-name);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.character-toast .live-toast-message {
+  color: var(--ct-text);
+  font-size: var(--fs-md);
+  word-break: break-word;
+}
+
+/* 关闭钮：视觉 28px，移动端用不可见外扩热区补到 44px（不改皮肤） */
+.character-toast-close {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  color: var(--ct-close);
+}
+.character-toast-close svg { width: 10px; height: 10px; }
+.character-toast:hover .character-toast-close { color: var(--ct-name); }
+
+.character-toast .character-toast-life {
+  background: var(--ct-accent);
+  animation-duration: var(--lt-life, 5000ms);
+}
+.character-toast:hover .character-toast-life { animation-play-state: paused; }
+
+/* 卡片不可见淡出：宿主收到 dismissed 后由本状态驱动 300ms 渐出 */
+.character-toast.is-leaving {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--dur-interaction) var(--ease-standard),
+              transform var(--dur-interaction) var(--ease-standard);
+  pointer-events: none;
+}
+
+/* 入场：从左下角轻轻浮起；离场：渐隐下沉后卸载 */
+.ct-enter-active { transition: opacity var(--dur-interaction) var(--ease-out), transform var(--dur-interaction) var(--ease-out); }
+.ct-leave-active { transition: opacity var(--dur-interaction) var(--ease-standard), transform var(--dur-interaction) var(--ease-standard); }
+.ct-enter-from,
+.ct-leave-to { opacity: 0; transform: translateY(10px); }
+
+@media (max-width: 767px) {
+  .character-toast-host {
+    left: max(12px, env(safe-area-inset-left, 12px));
+    bottom: calc(var(--ct-offset-y-mobile, 76px) + env(safe-area-inset-bottom, 0px));
+    right: max(12px, env(safe-area-inset-right, 12px));
+  }
+  .character-toast {
+    width: auto;
+    max-width: none;
+  }
+  .character-toast-close::after {
+    content: '';
+    position: absolute;
+    inset: -8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ct-enter-active,
+  .ct-leave-active,
+  .character-toast.is-leaving { transition: opacity 120ms ease; }
+  .ct-enter-from,
+  .ct-leave-to,
+  .character-toast.is-leaving { transform: none; }
 }
 </style>

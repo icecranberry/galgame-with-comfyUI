@@ -125,6 +125,25 @@ export function getCharacterEmojiMap(characterId, db = getDb()) {
   return new Map(rows.map(r => [r.emoji_key, r.image_path]));
 }
 
+/**
+ * 角色通知用：把一个表情类别名映射到语义标记（😊 开心 / 😳 害羞 / 😮 惊讶 / 🙂 其他）。
+ * 类别可被用户改名或删除，因此这里只做尽力而为的语义匹配；匹配不到由前端回退头像。
+ * 优先级从具体到宽泛，保证一个类别只落一个标记，「难过」不会被「兴」误判成开心。
+ */
+const REACTION_MARKER_RULES = [
+  ['\u{1F60A}', ['开心', '高兴', '快乐', '愉快', '喜', '笑', '得意', '比心', '爱', '兴奋', '满足']],
+  ['\u{1F633}', ['害羞', '脸红', '羞']],
+  ['\u{1F62E}', ['惊讶', '震惊', '吃惊', '惊']],
+];
+
+export function pickReactionMarker(emojiKey) {
+  const key = String(emojiKey || '');
+  for (const [marker, words] of REACTION_MARKER_RULES) {
+    if (words.some(word => key.includes(word))) return marker;
+  }
+  return '\u{1F642}';
+}
+
 // ── 表情包配置单（多套切换） ──
 
 export const DEFAULT_EMOJI_SET_NAME = '默认表情包';

@@ -2,7 +2,7 @@
   <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示） ── -->
   <Teleport to="body">
     <Transition name="fs-fade">
-      <div v-if="show" class="fs-overlay">
+      <div v-if="show" class="fs-overlay" data-ct-blocker="chest-reveal">
         <div class="fs-backdrop"></div>
         <div class="fs-flash" :class="{ on: flashOn }"></div>
         <div class="fs-content">

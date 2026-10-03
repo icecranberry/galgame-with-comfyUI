@@ -659,6 +659,7 @@ import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import StandingManagerModal from '../components/StandingManagerModal.vue'
 import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
+import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import { useBurst } from '../composables/useBurst.js'
 import { useMailboxStore } from '../stores/mailbox.js'
@@ -1358,8 +1359,22 @@ function onPinClick(c) {
 
 async function toggleCharPin(c) {
   // sortedCharacters 是浅拷贝，元素与 store 同引用，改这里即改 store
+  const wasPinned = !!c.pinned
   c.pinned = c.pinned ? 0 : 1
-  try { await api.togglePin(c.id, c.pinned) } catch {}
+  try {
+    const res = await api.togglePin(c.id, c.pinned)
+    // 只有接口确认成功、且确实从未置顶变成置顶才产生角色通知（§2.2）
+    emitCharacterPinEnabled({
+      characterId: c.id,
+      characterName: c.display_name || c.name || '',
+      wasPinned,
+      pinned: !!c.pinned,
+      ok: res?.ok === true && res?.pinned === c.pinned,
+    })
+  } catch {
+    // 失败回滚本地状态，不发事件（§2.6）
+    c.pinned = wasPinned ? 1 : 0
+  }
 }
 
 function closeCharDetail() {
@@ -1427,11 +1442,14 @@ async function switchToRecent() {
 
 async function onCharAvatarSave(base64) {
   if (!detailChar.value) return
-  await api.uploadAvatar(detailChar.value.id, base64 || '')
+  const id = detailChar.value.id
+  const before = detailChar.value.avatar_path || ''
+  await api.uploadAvatar(id, base64 || '')
   await chat.loadCharacters()
-  const updated = chat.characters.find(x => x.id === detailChar.value.id)
+  const updated = chat.characters.find(x => x.id === id)
   if (updated) detailChar.value = updated
   showCharAvatarPicker.value = false
+  emitCharacterAvatarChanged({ characterId: id, previousVersion: before, nextVersion: updated?.avatar_path || '', ok: true })
 }
 
 async function removeCharAvatar() {

@@ -26,6 +26,7 @@ import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, del
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
+import { pickReactionMarker } from '../services/emojiService.js';
 
 const router = Router();
 
@@ -339,6 +340,33 @@ router.post('/:id/avatar', (req, res) => {
 router.get('/:id/recent-images', (req, res) => {
   const urls = collectCharacterImageUrls(req.params.id).filter(u => imageUrlExists(u));
   res.json({ images: urls });
+});
+
+// GET /api/characters/:id/reaction-assets — 角色通知需要的素材（只读，不触发生成）
+// 仅返回该角色「启用中表情包配置单」里已完成的图片，供前端按情绪语义挑选；
+// 表情类别可被用户改名 / 删除、图片也可能已被清理，因此前端必须能回退到头像 → 首字占位。
+router.get('/:id/reaction-assets', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, display_name, name, avatar_path FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const rows = db.prepare(`
+    SELECT ce.emoji_key, ce.image_path
+    FROM character_emojis ce
+    JOIN emoji_sets es ON es.id = ce.set_id AND es.is_active = 1
+    WHERE ce.character_id = ? AND ce.status = 'done' AND ce.image_path IS NOT NULL
+    ORDER BY ce.id
+  `).all(char.id);
+
+  res.json({
+    characterId: char.id,
+    display_name: char.display_name || char.name || '角色',
+    avatar_url: char.avatar_path || null,
+    // 语义标记由 emojiService 统一映射（类别可被改名 / 删除，映射不到时前端回退头像）
+    emojis: rows
+      .filter(row => !!row.image_path)
+      .map(row => ({ key: row.emoji_key, marker: pickReactionMarker(row.emoji_key), url: row.image_path })),
+  });
 });
 
 // DELETE /api/characters/:id — 删除角色并清理所有关联数据

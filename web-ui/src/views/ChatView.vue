@@ -122,7 +122,7 @@
               </div>
               <ImageGenBubble
                 :msg="item.msg"
-                @preview="previewImage = $event"
+                @preview="onChatImagePreview($event)"
                 @loaded="scrollToBottom(true)"
               />
             </div>
@@ -868,6 +868,10 @@ const inputEl = ref(null)
 const msgList = ref(null)
 const msgListInner = ref(null)
 const previewImage = ref(null)
+
+function onChatImagePreview(url) {
+  previewImage.value = url
+}
 
 function onChatImageDeleted(deletedUrl) {
   const base = deletedUrl.replace(/\?.*$/, '')
