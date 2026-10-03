@@ -673,7 +673,7 @@ async function generateMomentPostImpl(character, opts = {}) {
       isFreeMode = true;
     } else {
       // 话题库存于 moment_topics 表（用户可在「朋友圈话题库」弹窗中管理），代码侧硬随机避免 LLM 偏见
-      const topics = db.prepare(`SELECT name, desc FROM moment_topics WHERE is_active = 1`).all();
+      const topics = db.prepare(`SELECT name, desc FROM moment_topics WHERE is_active = 1 AND COALESCE(checked, 1) = 1`).all();
       if (topics.length === 0) {
         isFreeMode = true; // 库被清空时兜底自由发挥
       } else {

@@ -1477,6 +1477,12 @@ export function deleteTopic(id) {
   return request(`/library/topics/${id}`, { method: 'DELETE' })
 }
 
+// 批量勾选 / 取消勾选话题（决定参不参与抽题，条目本身保留）
+// 传 { all: true } 表示全选/清空，或 { ids: [...] } 指定条目
+export function setTopicsChecked({ ids = null, all = false, checked }) {
+  return request(`/library/topics/set-checked`, { method: 'POST', body: { ids, all, checked } })
+}
+
 export function generateTopics(direction) {
   return request(`/library/topics/generate`, { method: 'POST', body: { direction } })
 }

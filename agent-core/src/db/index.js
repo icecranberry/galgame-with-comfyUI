@@ -1007,6 +1007,9 @@ function initSchema(db) {
   // 迁移: 我的表情库 — user_emojis 表
   migrateUserEmojiSchema(db);
 
+  // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+  migrateMomentTopicCheckedSchema(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1610,6 +1613,26 @@ function migrateDisturbSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateDisturbSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+ *
+ * 不能复用 is_active：那张表里 is_active 是「软删除」标记（DELETE 接口把它置 0，
+ * 列表就不再返回），拿它当「临时停用」用的话，用户一取消勾选就再也找不回来了。
+ * 所以另起 checked：只有 is_active = 1 且 checked = 1 才参与抽题。
+ * 默认 1，保证老库升级后行为与现在完全一致。
+ */
+function migrateMomentTopicCheckedSchema(db) {
+  try {
+    const cols = db.prepare('PRAGMA table_info(moment_topics)').all();
+    if (!cols.find(c => c.name === 'checked')) {
+      db.exec('ALTER TABLE moment_topics ADD COLUMN checked INTEGER DEFAULT 1');
+      console.log('[db] Added moment_topics.checked column (default 1)');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentTopicCheckedSchema error:', err.message);
   }
 }
 
