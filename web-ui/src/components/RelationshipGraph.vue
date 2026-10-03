@@ -170,7 +170,8 @@ function isValidConnection(connection) {
 // ── Build nodes / edges from characters ──
 async function buildGraph() {
   const center = props.centerCharacter
-  const others = props.allCharacters.filter(c => c.id !== center.id)
+  // 归档角色不进关系图：它们不参与任何活动，几十个节点挤在环上只会干扰拖拽连线
+  const others = props.allCharacters.filter(c => c.id !== center.id && !c.archived)
   const radius = Math.max(336, Math.ceil(others.length * 16))
 
   // Build nodes synchronously first — show avatars immediately

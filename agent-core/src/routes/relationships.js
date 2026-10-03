@@ -63,7 +63,10 @@ router.post('/deduce', async (req, res) => {
       fromName = centerChar.name;
     }
 
-    const allChars = db.prepare('SELECT * FROM characters').all();
+    // 归档角色不参与关系推演：既不作为候选，也不写进 prompt。
+    // （55 个角色里 53 个已归档时，它们的简介会白白占掉大半个 prompt，还会让推演结果里
+    //   混进一堆不参与活动的角色。）中心角色是上面单独查的，不受影响。
+    const allChars = db.prepare('SELECT * FROM characters WHERE COALESCE(archived, 0) = 0').all();
     const excludeSet = new Set([
       ...(isUserMode ? [] : [centerName]),
       'default',
