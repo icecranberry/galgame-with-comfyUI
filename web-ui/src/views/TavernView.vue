@@ -997,7 +997,14 @@ async function onFolderDrop(ev, target) {
   try {
     await folderStore.reorderFolders(list.map(x => x.id))
   } catch (err) {
-    toastFn?.('保存文件夹顺序失败: ' + (err?.message || '未知错误'), 'error')
+    const msg = err?.message || '未知错误'
+    // 后端还是旧代码时，'/folders/reorder' 会被 '/folders/:id' 吃掉并回 'invalid folder id'。
+    // 这个报错本身看不出原因，补一句指向性提示，省得再去猜。
+    const stale = /invalid folder id|请求失败 \(40[0-9]\)/.test(msg)
+    toastFn?.(
+      '保存文件夹顺序失败: ' + msg + (stale ? '（后端可能仍是旧代码，请在启动器里重启服务）' : ''),
+      'error',
+    )
   }
 }
 
