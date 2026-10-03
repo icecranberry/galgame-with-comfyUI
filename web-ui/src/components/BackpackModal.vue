@@ -17,6 +17,8 @@
               </div>
             </div>
             <div class="header-actions">
+              <!-- 背包 / 橱窗 视图切换：宝箱开箱演出仍是共用入口，这里只切右侧内容 -->
+              <linshe-tabs v-model="view" :options="VIEW_OPTIONS" size="sm" aria-label="背包视图切换" />
               <linshe-button variant="icon" @click="close" title="关闭">&times;</linshe-button>
             </div>
           </div>
@@ -48,8 +50,12 @@
               <p class="chest-hint">{{ formatChestCooldown(store.chest.cooldownSeconds) }}</p>
             </div>
 
-            <!-- ── Right: 道具网格 ── -->
+            <!-- ── Right: 道具网格 / 橱窗 ── -->
             <div class="items-panel">
+              <!-- 橱窗视图：按分类浏览商品 → 挑选 → 带走进背包 -->
+              <LootWindow v-if="view === 'loot'" @taken="onLootTaken" />
+
+              <template v-else>
               <Transition name="effects-panel">
                 <section class="active-effects" aria-labelledby="active-effects-title">
                   <div class="effects-heading">
@@ -155,6 +161,7 @@
                   </div>
                 </div>
               </TransitionGroup>
+              </template>
             </div>
           </div>
 
@@ -227,6 +234,8 @@
 <script setup>
 import { ref, watch, onUnmounted, inject } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
+import LootWindow from './LootWindow.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ChestSvg from './ChestSvg.vue'
 import ItemFallbackIcon from './ItemFallbackIcon.vue'
@@ -243,6 +252,17 @@ const emit = defineEmits(['close'])
 
 const toast = inject('toast')
 const confirmRef = ref(null)
+
+// 右侧内容视图：背包（原有道具网格） / 橱窗（分页浏览商品）
+const VIEW_OPTIONS = [
+  { value: 'backpack', label: '背包' },
+  { value: 'loot', label: '橱窗' },
+]
+const view = ref('backpack')
+/** 从橱窗带走的商品已进背包，切回背包视图时刷新一下列表 */
+function onLootTaken() {
+  try { store.fetchItems() } catch { /* 失败不阻塞，SSE 会兜底刷新 */ }
+}
 
 const {
   store,

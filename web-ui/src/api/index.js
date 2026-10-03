@@ -1592,6 +1592,28 @@ export function removeActiveEffect(effectId) {
   return request(`/items/effects/${effectId}`, { method: 'DELETE' })
 }
 
+// ── 宝箱橱窗（分页浏览商品 → 挑选 → 带走）──
+
+/** 分页配置 + 各页可选商品数 */
+export function getLootPages() {
+  return request('/loot/pages')
+}
+
+/** 某页当前橱窗（8 个格子，未刷新过时全为空位） */
+export function getLootWindow(page) {
+  return request(`/loot/window?page=${encodeURIComponent(page)}`)
+}
+
+/** 刷新某页（重抽 8 个；缺图的会异步排队生成，完成后经 loot_image_ready 事件推送） */
+export function rollLootWindow(page) {
+  return request('/loot/window/roll', { method: 'POST', body: { page } })
+}
+
+/** 带走选中的格子（写进背包），slots 为格子下标数组 */
+export function takeLootItems(page, slots) {
+  return request('/loot/window/take', { method: 'POST', body: { page, slots } })
+}
+
 // ── AI 小镇（世界页）──
 
 // 全量快照：地图/POI/agents/玩家/天气/活跃相遇
