@@ -115,8 +115,9 @@ function toISODate(sqliteDT) {
 
 // DELETE /api/characters/:id/messages — 清空角色对话记录
 // POST /api/chat/upload-image — 用户发图前的上传（base64 data URI → /images/chat/...）
-// 只负责落盘并回传路径，真正发给模型是聊天链路的事
-router.post('/upload-image', (req, res) => {
+// 注意：本 router 挂在 '/api'（见 app.js），所以这里要写完整的 '/chat/upload-image'，
+// 不能只写 '/upload-image'（那会变成 /api/upload-image，前端调 /api/chat/upload-image 就 404）。
+router.post('/chat/upload-image', (req, res) => {
   try {
     const base64 = req.body?.base64;
     if (typeof base64 !== 'string' || !base64) return res.status(400).json({ error: '缺少图片数据' });
