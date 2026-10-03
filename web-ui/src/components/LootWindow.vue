@@ -40,7 +40,7 @@
         >带走选中的 {{ selectedSlots.length || '' }}</linshe-button>
       </div>
 
-      <!-- 8 格 -->
+      <!-- 4 格 -->
       <div v-if="!slots.length" class="loot-empty">
         点「换一批」抽取这个分类的商品
       </div>
@@ -245,12 +245,12 @@ onUnmounted(() => {
 .loot-refresh:disabled { opacity: 0.55; cursor: default; }
 .loot-count { font-size: 12px; color: var(--text-secondary); }
 
+/* 每页 4 格：宽屏一行排开，窄屏 2×2（不要 3 列，那会变成 3+1 的别扭布局） */
 .loot-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
   overflow-y: auto; padding-right: 2px; min-height: 0;
 }
-@media (max-width: 900px) { .loot-grid { grid-template-columns: repeat(3, 1fr); } }
-@media (max-width: 640px) { .loot-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 900px) { .loot-grid { grid-template-columns: repeat(2, 1fr); } }
 
 .loot-card {
   position: relative;

@@ -18,8 +18,8 @@ import { broadcast } from './unifiedStreamBus.js';
 
 /** 分页配置的 settings key */
 export const LOOT_PAGES_KEY = 'loot_pages';
-/** 每页格子数 */
-export const PAGE_SIZE = 8;
+/** 每页格子数。4 而非 8：一次刷新要等 4 张图生成完才看得齐，8 张等待太久了 */
+export const PAGE_SIZE = 4;
 
 /** cat → useItem 的落地 kind */
 const KIND_BY_CAT = {
