@@ -191,6 +191,24 @@
           @focus="inputFocused = true"
           @blur="inputFocused = false"
         ></textarea>
+        <!-- 我的表情库：选中的表情以 [名字] 标记插入输入框，后端会替换成图片 -->
+        <div
+          role="button"
+          tabindex="0"
+          class="gift-btn emoji-btn"
+          title="发表情"
+          aria-label="发表情"
+          @keydown.enter.prevent="showEmojiPicker = true"
+          @keydown.space.prevent="showEmojiPicker = true"
+          @click="showEmojiPicker = true"
+        >
+          <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8.5 14.4s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8" />
+            <line x1="9" y1="9.6" x2="9.01" y2="9.6" />
+            <line x1="15" y1="9.6" x2="15.01" y2="9.6" />
+          </svg>
+        </div>
         <div v-if="isCharSleeping" role="button" tabindex="0" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @keydown.enter.prevent="onWakeChar" @keydown.space.prevent="onWakeChar" @click="onWakeChar" title="叫醒角色">
           <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         </div>
@@ -231,6 +249,11 @@
         :affinity="chat.activeChar?.affinity ?? 50"
         @close="showGiftPanel = false"
         @sent="onGiftSent"
+      />
+      <UserEmojiPicker
+        v-if="showEmojiPicker"
+        @close="showEmojiPicker = false"
+        @pick="onPickEmoji"
       />
     </template>
 
@@ -603,6 +626,7 @@ import ChatBgPanel from '../components/ChatBgPanel.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
+import UserEmojiPicker from '../components/UserEmojiPicker.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
@@ -632,6 +656,26 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
+const showEmojiPicker = ref(false)
+
+/** 表情面板选中：把 [名字] 标记插到光标处，用户可以继续补文字再发 */
+function onPickEmoji(key) {
+  showEmojiPicker.value = false
+  const marker = `[${key}]`
+  const el = inputEl.value
+  if (el && typeof el.selectionStart === 'number') {
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    inputText.value = inputText.value.slice(0, start) + marker + inputText.value.slice(end)
+    nextTick(() => {
+      el.focus()
+      const pos = start + marker.length
+      el.setSelectionRange(pos, pos)
+    })
+  } else {
+    inputText.value += marker
+  }
+}
 const inputFocused = ref(false)
 const wakeShaking = ref(false)
 
@@ -2058,6 +2102,14 @@ function renderContent(text) {
 .gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
 .gift-btn:hover .gift-btn-icon { transform: rotate(12deg) scale(1.1); }
 .gift-btn:active { transform: scale(0.94); }
+
+/* ── 表情按钮：复用礼物按钮的尺寸与交互，换一套青色以免两个圆钮混淆 ── */
+.emoji-btn {
+  background: linear-gradient(135deg, #9fd8d0 0%, #5fb8ab 100%);
+  box-shadow: 0 2px 8px rgba(95, 184, 171, 0.25);
+}
+.emoji-btn:hover { box-shadow: 0 4px 16px rgba(95, 184, 171, 0.35); }
+.emoji-btn:hover .gift-btn-icon { transform: scale(1.1); }
 
 /* ── 叫醒按钮（覆盖送礼按钮样式） ── */
 .wake-btn {

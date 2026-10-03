@@ -225,6 +225,23 @@ export function deleteEmoji(characterId, key, setId = null) {
   return request(`/characters/emoji/${characterId}/${key}${query}`, { method: 'DELETE' })
 }
 
+// ── 我的表情库（用户自己的表情包，跨角色通用）──
+
+export function listUserEmojis() {
+  return request(`/user-emoji`)
+}
+
+export function uploadUserEmoji(key, base64) {
+  return request(`/user-emoji/${encodeURIComponent(key)}/upload`, {
+    method: 'POST',
+    body: { base64 },
+  })
+}
+
+export function deleteUserEmoji(key) {
+  return request(`/user-emoji/${encodeURIComponent(key)}`, { method: 'DELETE' })
+}
+
 export async function deleteCharacter(id) {
   return request(`/characters/${id}`, { method: 'DELETE' })
 }

@@ -15,6 +15,7 @@ import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
 import emojiRoutes from './src/routes/emoji.js';
+import userEmojiRoutes from './src/routes/userEmoji.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
@@ -119,6 +120,7 @@ app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/c
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
 app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
+app.use('/api/user-emoji', wrapRouterAsync(userEmojiRoutes));    // 我的表情库（用户自己的，跨角色通用）
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/moments', wrapRouterAsync(momentsRoutes));

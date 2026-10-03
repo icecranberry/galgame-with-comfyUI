@@ -1004,6 +1004,9 @@ function initSchema(db) {
   // 迁移: 角色归档 — characters 表新增 archived 列
   migrateCharacterArchiveSchema(db);
 
+  // 迁移: 我的表情库 — user_emojis 表
+  migrateUserEmojiSchema(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1607,6 +1610,34 @@ function migrateDisturbSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateDisturbSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 我的表情库 — user_emojis 表
+ *
+ * 用户自己的表情包，跨角色通用（与角色的 character_emojis 分开存）。
+ * 不复用 character_emojis 的原因：那张表的 character_id 是 NOT NULL 外键到 characters(id)，
+ * 借一个特殊 id 代表「用户」既违反外键约束，语义上也说不通；这里也不分 set（用户只有一套）。
+ */
+function migrateUserEmojiSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'done'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.log('[db] migrateUserEmojiSchema error:', err.message);
   }
 }
 

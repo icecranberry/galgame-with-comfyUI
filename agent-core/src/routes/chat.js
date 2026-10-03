@@ -28,7 +28,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
-import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
+import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap, getUserEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { detectAndApplyAppointment } from '../services/appointmentDetector.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
@@ -328,7 +328,7 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
   const conversationId = convId(characterId);
   const emojiMap = getCharacterEmojiMap(characterId, db);
   const emojiNote = buildEmojiNote([...emojiMap.keys()]);
-  const parsedUserMessage = parseEmojiText(message, emojiMap);
+  const parsedUserMessage = parseEmojiText(message, new Map([...emojiMap, ...getUserEmojiMap(db)]));
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {
