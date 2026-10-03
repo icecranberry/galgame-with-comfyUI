@@ -1085,6 +1085,9 @@ function initSchema(db) {
   // 迁移: 角色间关系的亲密度分级（决定朋友圈多人场景的概率与画面尺度）
   migrateRelationshipIntimacy(db);
 
+  // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
+  migrateCharacterOutfitScene(db);
+
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
 
@@ -2720,6 +2723,28 @@ function migrateLootCatalogSchema(db) {
     console.log('[db] loot catalog schema ready');
   } catch (err) {
     console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色服装的场景标记 — character_outfits 加 scene 列
+ *
+ * 用途：角色可同时拥有多套「场景服装」（工装 work / 外出 casual / 居家 home / 睡眠 sleep），
+ * 由日程决定当前穿哪套。取值见 services/outfitScene.js 的 OUTFIT_SCENES。
+ *
+ * **刻意不复用 `enabled`**：现有的 `enabled` 承载「同时只启用一套」的互斥语义
+ * （道具变身/临时形态靠它，见 getActiveOutfits 的 LIMIT 1）。场景服装改用
+ * `scene IS NOT NULL` 标记，两条通道互不干扰。
+ */
+function migrateCharacterOutfitScene(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_outfits)`).all();
+    if (!cols.find(c => c.name === 'scene')) {
+      db.exec(`ALTER TABLE character_outfits ADD COLUMN scene TEXT`);
+      console.log('[db] Added character_outfits.scene column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterOutfitScene error:', err.message);
   }
 }
 

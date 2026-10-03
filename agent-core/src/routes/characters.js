@@ -23,6 +23,7 @@ import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '.
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
+import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, OUTFIT_SCENES } from '../services/outfitScene.js';
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
@@ -1835,6 +1836,59 @@ function _parseCharLoras(raw) {
 }
 
 // ── 角色专属外观/形态（角色外观系统，生图注入见 services/characterPersona.js）──
+
+// ── 场景服装（工装/外出/居家/睡眠，由日程决定穿哪套）──
+// 注意：这几个路径都是 3 段，与下面的 '/:id/outfits/:outfitId' 同形。
+// 靠 HTTP 方法区分（这里都是 GET/POST，下面那条是 PUT/DELETE），所以不会互相吃；
+// 但仍统一放在前面，并保持路径里出现语义词（scene/generate/current），便于日后排查。
+
+// GET /api/characters/:id/outfits/scene — 列出该角色的场景服装（含场景标签）
+router.get('/:id/outfits/scene', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  res.json({ scenes: OUTFIT_SCENES, outfits: listSceneOutfits(char.id) });
+});
+
+// GET /api/characters/:id/outfit-now — 此刻按日程该穿哪套（调试 / 界面展示用）
+router.get('/:id/outfit-now', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  res.json({ character_id: char.id, ...(getSceneOutfitForNow(char.id) || { outfit: null, scene: null, source: 'none' }) });
+});
+
+// POST /api/characters/:id/outfits/generate — 用 LLM 生成四套基础场景服装
+// Body: { save?: boolean }  save=true 时直接写入（同场景已存在则更新描述）
+router.post('/:id/outfits/generate', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  try {
+    const outfits = await generateSceneOutfits(char);
+    const saved = req.body?.save === true ? upsertSceneOutfits(char.id, outfits) : null;
+    res.json({ ok: true, outfits, saved });
+  } catch (err) {
+    console.error('[outfit-scene] generate failed:', err.message);
+    res.status(500).json({ error: '生成服装失败: ' + err.message });
+  }
+});
+
+// PUT /api/characters/:id/outfits/scene — 批量保存场景服装（一次覆盖四套，供界面"编辑后保存"）
+// Body: { outfits: [{ scene, name, description }] }
+router.put('/:id/outfits/scene', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const list = Array.isArray(req.body?.outfits) ? req.body.outfits : null;
+  if (!list) return res.status(400).json({ error: 'outfits 必须是数组' });
+  const clean = list
+    .map(o => ({ scene: String(o?.scene || '').trim(), name: String(o?.name || '').trim().slice(0, 60), description: String(o?.description || '').trim().slice(0, 2000) }))
+    .filter(o => o.scene && o.name && o.description);
+  if (!clean.length) return res.status(400).json({ error: '没有有效的服装条目' });
+  const saved = upsertSceneOutfits(char.id, clean);
+  res.json({ ok: true, saved, outfits: listSceneOutfits(char.id) });
+});
 
 // GET /api/characters/:id/outfits — 列出角色全部专属外观
 router.get('/:id/outfits', (req, res) => {
