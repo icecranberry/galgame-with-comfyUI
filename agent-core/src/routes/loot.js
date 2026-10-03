@@ -57,10 +57,12 @@ router.post('/window/take', (req, res) => {
 });
 
 // POST /api/loot/repair-images — 给缺图的商品排队生图（管理用，不阻塞返回）
+// body: { limit?, tags? }  tags 为清单 tag 数组时只补这几件
 router.post('/repair-images', (req, res) => {
   try {
     const limit = Number(req.body?.limit) || 50;
-    res.json({ ok: true, ...repairMissingImages({ limit }), queue: getImageQueueState() });
+    const tags = Array.isArray(req.body?.tags) ? req.body.tags : null;
+    res.json({ ok: true, ...repairMissingImages({ limit, tags }), queue: getImageQueueState() });
   } catch (err) {
     console.error('[loot] repair error:', err.message);
     res.status(500).json({ error: err.message });

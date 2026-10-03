@@ -32,9 +32,68 @@ const KIND_BY_CAT = {
 
 /**
  * 各类别的生图提示词。
- * 清单存的是 Danbooru 系 tag；这里补上「是什么东西 + 展示方式 + 不要人」的框架，
- * 让单件商品图干净可辨认（而不是出一张穿在人身上的插画）。
+ *
+ * 服装 / 配饰 / 发型：用清单里的 Danbooru tag 直接出图，效果稳定（实测女仆装、束缚套装、
+ *   耳罩都准确），且能吃到 tag 本身的风格。
+ *
+ * 成人用品：**不能用 tag 直生** —— 实测 `butt_plug` 会画成一只黄色小生物（模型把生僻 tag
+ *   自由发挥成了角色）。改用英文描述「商品 + 单件 + 白底 + 无人无脸无生物」才稳定出商品图。
+ *   所以这类走 TOY_PROMPT 表；表里没有的 tag 回落到标签的中文名英文意译兜底。
  */
+const TOY_PROMPT = {
+  vibrator: 'a sleek handheld wand vibrator massager, rounded head and slim handle, glossy finish',
+  wand_vibrator: 'a magic-wand style massager with a round ball head and long slim handle',
+  egg_vibrator: 'a small egg-shaped vibrator with a thin cord tail',
+  remote_control_vibrator: 'an egg vibrator paired with a small square remote control',
+  bullet_vibrator: 'a tiny bullet-shaped mini vibrator, short cylinder',
+  rabbit_vibrator: 'a wand vibrator with a pair of small rabbit-ear attachments',
+  dildo: 'a smooth realistic-shaped silicone dildo, flat base',
+  double_ended_dildo: 'a long double-ended smooth silicone dildo, symmetric shape',
+  suction_cup_dildo: 'a smooth silicone dildo with a round suction cup base',
+  dragon_dildo: 'a fantasy textured silicone dildo with scale-like ridges, gradient color',
+  butt_plug: 'a small silicone butt plug with a flared flat base, teardrop shape',
+  tail_plug: 'a silicone anal plug with a fluffy animal tail attached to its base',
+  anal_beads: 'a string of smooth graduated silicone anal beads on a thin cord with a pull ring',
+  nipple_clamps: 'a pair of small metal nipple clamps connected by a chain',
+  nipple_suction: 'a pair of small bell-shaped transparent suction cups with squeeze bulbs',
+  clitoral_suction_device: 'a small rounded pebble-shaped suction sex toy with buttons',
+  cervical_cap: 'a small shallow bowl-shaped silicone cervical cap, translucent',
+  bondage_rope: 'a coil of braided bondage rope, neatly wound bundle',
+  shibari: 'several bundles of natural hemp bondage rope, japanese style',
+  handcuffs: 'a pair of metal handcuffs linked by a short chain, silver',
+  padded_cuffs: 'a pair of padded leather wrist cuffs with metal buckles, black and red',
+  leg_cuffs: 'a pair of wide padded leather ankle cuffs connected by a chain',
+  bondage_straps: 'a set of nylon bondage straps with metal buckles, black',
+  bondage_harness: 'a strappy leather body harness with metal O-rings, black',
+  spreader_bar: 'a straight metal spreader bar with rings at both ends',
+  bondage_bed: 'a dark wooden bed frame with metal rings at the four corners and straps',
+  ball_gag: 'a ball gag with a red silicone ball and black leather straps',
+  ring_gag: 'a metal O-ring gag with black leather straps',
+  blindfold: 'a wide satin sleep blindfold with long tie ribbons, black',
+  collar: 'a wide black leather collar with a metal ring and studs',
+  leash: 'a short leather leash with a metal clasp at one end',
+  choke_chain: 'a thin metal chain necklace with a small pendant',
+  riding_crop: 'a slim leather riding crop with a flat leather tongue at the tip',
+  flogger: 'a leather flogger with a handle and many thin leather tails',
+  paddle: 'a flat rectangular leather paddle with a handle, black',
+  feather_teaser: 'a slim wand tipped with a cluster of soft feathers',
+  low_temperature_candle: 'a colored low-temperature massage candle in a glass jar',
+  lubricant: 'a pump bottle of clear lubricant with a minimal white label',
+  condom: 'a small square foil condom wrapper with a serrated edge',
+  crotchless_panties: 'a pair of black lace crotchless panties with side ties',
+  sheer_lingerie: 'a sheer black lace lingerie set with frilled trim',
+  garter_belt: 'a black satin garter belt with several straps and clips',
+  pasties: 'a pair of small heart-shaped pasties with sequins',
+  body_stocking: 'a sheer fishnet full body stocking',
+  bunny_suit: 'a black bunny girl suit with white fluffy cuffs and a pair of rabbit ears',
+  anal_plug_tail: 'a silicone anal plug with a fluffy fox tail attached to its base',
+  bullet: 'a tiny bullet-shaped mini vibrator, short cylinder',
+  rabbit: 'a wand vibrator with a pair of small rabbit-ear attachments',
+  plug: 'a small silicone butt plug with a flared flat base, teardrop shape',
+};
+
+const TOY_FRAME = 'single object, centered, floating, seamless plain white studio background, no humans, no person, no face, no eyes, no creature, product photograph for an adult shop catalogue, soft even lighting, best quality';
+
 const IMAGE_FRAME_BY_KEY = {
   'clothes/full': tag => `${tag}, the outfit alone displayed as a clothing item, no humans, no person, flat front view, plain white background, soft even lighting, product photograph, best quality`,
   'clothes/socks': tag => `${tag}, legwear alone displayed as a clothing item, no humans, no person, flat lay, plain white background, product photograph, best quality`,
@@ -44,10 +103,13 @@ const IMAGE_FRAME_BY_KEY = {
   'accessory/hair': tag => `${tag}, hair accessory alone, no humans, plain white background, product photograph, best quality`,
   'accessory/ear': tag => `${tag}, ear accessory alone, no humans, plain white background, product photograph, best quality`,
   'accessory/hand': tag => `${tag}, hand accessory alone, no humans, plain white background, product photograph, best quality`,
-  'adult_toy/toy': tag => `${tag}, the object alone, no humans, plain white background, product photograph, soft studio lighting, best quality`,
 };
 
 function imagePromptFor(row) {
+  if (row.cat === 'adult_toy') {
+    const desc = TOY_PROMPT[row.tag] || `${row.name} sex toy`;
+    return `${desc}, ${TOY_FRAME}`;
+  }
   const key = `${row.cat}/${row.slot}`;
   const fn = IMAGE_FRAME_BY_KEY[key] || ((tag) => `${tag}, no humans, plain white background, product photograph, best quality`);
   return fn(row.tag);
@@ -355,14 +417,19 @@ async function generateOneImage(catalogId) {
   }
 }
 
-/** 手动补图（管理用）：给缺图的商品排队，返回排队数 */
-export function repairMissingImages({ limit = 50 } = {}) {
+/** 手动补图（管理用）：给缺图的商品排队，返回排队数。传 tags 可只补指定的几件 */
+export function repairMissingImages({ limit = 50, tags = null } = {}) {
   const db = getDb();
-  const rows = db.prepare(`SELECT id, image_url FROM loot_catalog WHERE image_status != 'generating' ORDER BY id`).all()
-    .filter(r => !r.image_url || !imageUrlExists(r.image_url))
-    .slice(0, Math.max(0, limit));
-  for (const r of rows) enqueueImage(r.id);
-  return { queued: rows.length, running: imageRunning };
+  let rows;
+  if (Array.isArray(tags) && tags.length) {
+    const ph = tags.map(() => '?').join(',');
+    rows = db.prepare(`SELECT id, tag, image_url FROM loot_catalog WHERE tag IN (${ph})`).all(...tags);
+  } else {
+    rows = db.prepare('SELECT id, tag, image_url FROM loot_catalog WHERE image_status != \'generating\' ORDER BY id').all();
+  }
+  const targets = rows.filter(r => !r.image_url || !imageUrlExists(r.image_url)).slice(0, Math.max(0, limit));
+  for (const r of targets) enqueueImage(r.id);
+  return { queued: targets.length, running: imageRunning };
 }
 
 /** 队列状态（前端可显示"还有几张在生成"） */
