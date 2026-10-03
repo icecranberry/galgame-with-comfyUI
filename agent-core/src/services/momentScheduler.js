@@ -101,6 +101,12 @@ async function tick() {
     return;
   }
 
+  // 频率闸门：momentFreq=0 表示关闭自动发帖（报纸吐槽帖也一并停，因为它同样是自动触发）
+  const momentFreq = config.features.momentFreq ?? 1;
+  if (momentFreq <= 0) {
+    return;
+  }
+
   const db = getDb();
   try {
     // 0. 报纸吐槽帖：《小镇早知道》当期主角的额外发圈（优先于常规发帖，处理过就结束本 tick）
@@ -173,10 +179,10 @@ async function tick() {
         console.log(`[momentScheduler] No pending posts. Next: ${nextUp.display_name} at ${nextUp.next_moment_at}`);
       } else {
         console.log('[momentScheduler] No active characters or all have NULL next_moment_at — initializing...');
-        // 首次启动：给所有角色设定首次发帖时间（1~4 小时内）
+        // 首次启动：给所有角色设定首次发帖时间（基准 1~4 小时，按 momentFreq 缩放）
         const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND COALESCE(archived, 0) = 0 AND next_moment_at IS NULL').all();
         for (const c of chars) {
-          const delay = 1 * 3600_000 + Math.random() * 3 * 3600_000;
+          const delay = (1 * 3600_000 + Math.random() * 3 * 3600_000) / Math.max(0.01, momentFreq);
           const nextAt = new Date(Date.now() + delay).toISOString();
           db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
             .run(toSQLiteDate(nextAt), c.id);

@@ -601,6 +601,11 @@ export async function updateEventFreq(value) {
   await request(`/config/event-freq`, { method: 'PUT', body: { value } })
 }
 
+/** 更新朋友圈发帖频率（0~3，1=默认 2~8 小时一条，0=关闭自动发帖） */
+export async function updateMomentFreq(value) {
+  await request(`/config/moment-freq`, { method: 'PUT', body: { value } })
+}
+
 /** 更新日程刷新周期（天，1~3） */
 export async function updateScheduleRefreshDays(value) {
   await request(`/config/schedule-refresh-days`, { method: 'PUT', body: { value } })

@@ -650,6 +650,21 @@ type="range" min="0" max="1" step="0.1"
           </div>
         </div>
 
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">朋友圈发帖频率</div>
+            <div class="td">{{ momentFreqHint }}</div>
+          </div>
+          <div class="freq-control">
+            <input
+type="range" min="0" max="3" step="0.5"
+              v-model.number="momentFreqSlider"
+              @change="onMomentFreqChange"
+            />
+            <span class="freq-val">{{ momentFreqSlider.toFixed(1) }}</span>
+          </div>
+        </div>
+
         <!-- 防打扰模式 -->
         <div class="toggle-row">
           <div style="flex:1">
@@ -1147,7 +1162,7 @@ base
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1303,6 +1318,16 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+const momentFreqSlider = ref(1)
+// 把倍率换算成「大约多久一条」，比单看数字直观（基准：1 → 2~8 小时）
+const momentFreqHint = computed(() => {
+  const f = momentFreqSlider.value
+  if (f <= 0) return '0 = 关闭自动发帖（仍可手动发）。'
+  const lo = (2 / f).toFixed(1).replace(/\.0$/, '')
+  const hi = (8 / f).toFixed(1).replace(/\.0$/, '')
+  const base = f === 1 ? '，1 为默认节奏' : ''
+  return `每个角色约 ${lo}~${hi} 小时一条${base}。调高会明显增加 LLM 与生图消耗。`
+})
 const backgroundConcurrency = ref(3)
 
 // ── 防打扰模式 ──
@@ -1789,6 +1814,7 @@ async function switchProfile(id) {
         backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
         freqSlider.value = cfg.features.proactiveChatFreq ?? 0.5
         eventFreqSlider.value = cfg.features.eventFreq ?? 1
+        momentFreqSlider.value = cfg.features.momentFreq ?? 1
       }
     }
   } catch (err) {
@@ -1904,6 +1930,7 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
+    momentFreqSlider.value = features.momentFreq ?? 1
     backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
@@ -2262,6 +2289,17 @@ async function onEventFreqChange() {
   const v = eventFreqSlider.value
   features.eventFreq = v
   try { await updateEventFreq(v) } catch { /* 非关键 */ }
+}
+
+async function onMomentFreqChange() {
+  const v = momentFreqSlider.value
+  features.momentFreq = v
+  try {
+    await updateMomentFreq(v)
+    toastFn?.(v <= 0 ? '已关闭自动发帖' : `朋友圈频率已设为 ${v.toFixed(1)}`, 'success')
+  } catch (err) {
+    toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
+  }
 }
 
 // ── 防打扰模式 ──
