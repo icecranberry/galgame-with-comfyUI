@@ -1,5 +1,10 @@
 <template>
-  <aside class="sidebar" :class="{ 'mobile-open': isMobile && mobileOpen }">
+  <aside
+    class="sidebar"
+    :class="{ 'mobile-open': isMobile && mobileOpen }"
+    :aria-hidden="(!isMobile && collapsed) ? 'true' : undefined"
+    :inert="(!isMobile && collapsed) ? true : undefined"
+  >
     <div ref="charListEl" class="char-list stagger">
       <!-- 群聊分区 -->
       <div class="group-section-header">
@@ -337,6 +342,8 @@ import { selectStandingCharacter } from '../utils/standingDisplay.js'
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
   mobileOpen: { type: Boolean, default: false },
+  // 桌面端收纳状态：宽度由 .app-layout 的 --sidebar-width 变量驱动，这里只用于可达性
+  collapsed: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['charSelected'])
@@ -531,7 +538,8 @@ function formatTime(iso) {
 
 <style scoped>
 .sidebar {
-  width: 300px; min-width: 300px;
+  /* 宽度由 .app-layout 的 --sidebar-width 驱动：桌面端收纳时被置 0，配 transition 向左收起 */
+  width: var(--sidebar-width, 300px); min-width: var(--sidebar-width, 300px);
   height: 100vh; height: 100dvh;
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
@@ -540,6 +548,9 @@ function formatTime(iso) {
   display: flex; flex-direction: column; overflow: hidden;
   position: relative;
   user-select: none;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.22s ease;
 }
 
 .char-list {
