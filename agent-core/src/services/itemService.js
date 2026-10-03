@@ -30,6 +30,7 @@ import { generateImageRaw } from './imageSkill.js';
 import { saveBase64Image, deleteImageFileByUrl, imageUrlExists } from './imagePaths.js';
 import { PLAYER_ITEM_SQL, CHEST_ITEM_SQL, hasGeneratingChest, completeChestItem, completeStaleChestItems } from './itemLifecycle.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { getLootEffect } from './lootService.js';
 import {
   loadEmotionState, saveEmotionSnapshot, loadAffinity, saveAffinity,
 } from './emotionEngine.js';
@@ -613,7 +614,8 @@ function useItemInTransaction(itemId, characterId, options) {
   if (!item.collected_at) return { ok: false, error: '道具还未收下' };
   // 小镇货摊买来的道具是「送给角色的礼物」：没有固定效果，使用时走礼物叙事出图 + 描述。
   const isGift = item.source_type === 'trade';
-  const effect = isGift ? null : ITEM_EFFECTS[item.effect_key];
+  // 橱窗带走的商品（source_type='loot'）不在固定道具池里，回落到清单查它的效果定义
+  const effect = isGift ? null : (ITEM_EFFECTS[item.effect_key] || getLootEffect(item.effect_key));
   if (!isGift && !effect) return { ok: false, error: '未知的道具效果类型' };
   const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
   if (!char) return { ok: false, error: '目标角色不存在' };

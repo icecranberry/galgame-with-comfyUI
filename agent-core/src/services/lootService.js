@@ -1,0 +1,371 @@
+/**
+ * 宝箱橱窗（loot window）
+ *
+ * 与旧的「盲盒单抽」不同，这里一次给 8 个候选让你挑。清单来自外部（E:\邻舍-local\loot-catalog\），
+ * 经导入工具写进 loot_catalog 表；本服务负责：分页配置、刷新橱窗、带走、单件生图缓存。
+ *
+ * 几个刻意的设计
+ *  1. 橱窗状态存库（loot_offers），不放内存 —— 刷新页面不该把橱窗清空。
+ *  2. 图片按「单件」缓存（loot_catalog.image_url）。候选组合随机、几乎不重复，
+ *     按整套生图等于每次刷新都烧 8 次算力；按单件缓存后每种只生一次，之后刷新近乎零成本。
+ *  3. 生图串行排队。一次刷 8 张并行会把 ComfyUI 撑爆。
+ *  4. 分页配置存在 system_settings（导入时写入），运行时后端不依赖外部文件是否存在。
+ */
+import { getDb, getSetting, setSetting } from '../db/index.js';
+import { generateImageRaw } from './imageSkill.js';
+import { saveBase64Image, imageUrlExists, deleteImageFileByUrl } from './imagePaths.js';
+import { broadcast } from './unifiedStreamBus.js';
+
+/** 分页配置的 settings key */
+export const LOOT_PAGES_KEY = 'loot_pages';
+/** 每页格子数 */
+export const PAGE_SIZE = 8;
+
+/** cat → useItem 的落地 kind */
+const KIND_BY_CAT = {
+  clothes: 'outfit',
+  accessory: 'outfit',
+  hairstyle: 'hairstyle',
+  transform: 'transform',
+  adult_toy: 'buff',
+};
+
+/**
+ * 各类别的生图提示词。
+ * 清单存的是 Danbooru 系 tag；这里补上「是什么东西 + 展示方式 + 不要人」的框架，
+ * 让单件商品图干净可辨认（而不是出一张穿在人身上的插画）。
+ */
+const IMAGE_FRAME_BY_KEY = {
+  'clothes/full': tag => `${tag}, the outfit alone displayed as a clothing item, no humans, no person, flat front view, plain white background, soft even lighting, product photograph, best quality`,
+  'clothes/socks': tag => `${tag}, legwear alone displayed as a clothing item, no humans, no person, flat lay, plain white background, product photograph, best quality`,
+  'hairstyle/hair': tag => `${tag}, hairstyle sample shown on a mannequin head silhouette, no face, plain white background, reference sheet, best quality`,
+  'transform/body': tag => `${tag}, creature form, full body, plain white background, concept art, best quality`,
+  'accessory/head': tag => `${tag}, headwear accessory alone, no humans, plain white background, product photograph, best quality`,
+  'accessory/hair': tag => `${tag}, hair accessory alone, no humans, plain white background, product photograph, best quality`,
+  'accessory/ear': tag => `${tag}, ear accessory alone, no humans, plain white background, product photograph, best quality`,
+  'accessory/hand': tag => `${tag}, hand accessory alone, no humans, plain white background, product photograph, best quality`,
+  'adult_toy/toy': tag => `${tag}, the object alone, no humans, plain white background, product photograph, soft studio lighting, best quality`,
+};
+
+function imagePromptFor(row) {
+  const key = `${row.cat}/${row.slot}`;
+  const fn = IMAGE_FRAME_BY_KEY[key] || ((tag) => `${tag}, no humans, plain white background, product photograph, best quality`);
+  return fn(row.tag);
+}
+
+// ── 分页 ────────────────────────────────────────────────────
+
+/** 读分页配置（导入工具写入；没导入过时返回空数组） */
+export function getPages() {
+  try {
+    const raw = getSetting(LOOT_PAGES_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 导入工具用：写入分页配置 */
+export function savePages(pages) {
+  setSetting(LOOT_PAGES_KEY, JSON.stringify(pages || []));
+}
+
+/** 各页当前有多少可选商品（前端显示用） */
+export function getPageStats() {
+  const db = getDb();
+  // 注意：SQLite 里双引号是「标识符」，判空串必须用单引号 ''，否则会报 no such column: ""
+  const rows = db.prepare(`SELECT page, COUNT(*) AS n,
+      SUM(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 ELSE 0 END) AS withImage
+    FROM loot_catalog GROUP BY page`).all();
+  const map = new Map(rows.map(r => [r.page, r]));
+  return getPages().map(p => {
+    const r = map.get(p.key) || { n: 0, withImage: 0 };
+    return { ...p, count: r.n || 0, withImage: r.withImage || 0 };
+  });
+}
+
+// ── 清单导入 ────────────────────────────────────────────────
+
+/**
+ * 导入商品清单（幂等）。
+ * 以 tag 为键 upsert，**不动 image_url / image_status** —— 重跑导入不该把已生成的图丢掉。
+ * 清单里已消失的条目会被删除（连带清理它的图片文件与橱窗格子）。
+ */
+export function importCatalog(items, pages) {
+  const db = getDb();
+  const result = { added: 0, updated: 0, removed: 0, total: 0 };
+  const tx = db.transaction(() => {
+    const existing = new Map(db.prepare('SELECT id, tag FROM loot_catalog').all().map(r => [r.tag, r.id]));
+    const upsert = db.prepare(`
+      INSERT INTO loot_catalog (tag, name, meaning, cat, slot, page)
+      VALUES (@tag, @name, @meaning, @cat, @slot, @page)
+      ON CONFLICT(tag) DO UPDATE SET
+        name = excluded.name, meaning = excluded.meaning,
+        cat = excluded.cat, slot = excluded.slot, page = excluded.page,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    const incoming = new Set();
+    for (const it of items) {
+      const row = {
+        tag: it.tag, name: it.name, meaning: it.meaning || '',
+        cat: it.cat, slot: it.slot,
+        // page 决定它归哪个标签页；导入的清单里已带，缺省时回落到 cat
+        page: it.page || it.cat,
+      };
+      incoming.add(row.tag);
+      const before = existing.get(row.tag);
+      upsert.run(row);
+      if (before) result.updated++; else result.added++;
+    }
+    // 清单里已不存在的条目 → 删（同时清图与橱窗格子）
+    const gone = [];
+    for (const [tag, id] of existing) if (!incoming.has(tag)) gone.push({ tag, id });
+    for (const g of gone) {
+      const row = db.prepare('SELECT image_url FROM loot_catalog WHERE id = ?').get(g.id);
+      if (row?.image_url) { try { deleteImageFileByUrl(row.image_url); } catch { /* 文件可能已被清 */ } }
+      db.prepare('DELETE FROM loot_offers WHERE item_id = ?').run(g.id);
+      db.prepare('DELETE FROM loot_catalog WHERE id = ?').run(g.id);
+      result.removed++;
+    }
+    result.total = items.length;
+  });
+  tx();
+  if (pages) savePages(pages);
+  console.log(`[loot] catalog imported: +${result.added} ~${result.updated} -${result.removed} = ${result.total}`);
+  return result;
+}
+
+// ── 橱窗 ────────────────────────────────────────────────────
+
+function serializeCatalogItem(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    tag: row.tag,
+    name: row.name,
+    meaning: row.meaning || '',
+    cat: row.cat,
+    slot: row.slot,
+    page: row.page,
+    imageUrl: row.image_url || null,
+    imageStatus: row.image_url ? 'done' : (row.image_status || ''),
+  };
+}
+
+/** 读某页当前橱窗（按插槽顺序，空位为 null） */
+export function getWindow(page) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT o.slot_index, c.* FROM loot_offers o
+    JOIN loot_catalog c ON c.id = o.item_id
+    WHERE o.page = ? ORDER BY o.slot_index ASC
+  `).all(page);
+  const slots = new Array(PAGE_SIZE).fill(null);
+  for (const r of rows) {
+    if (r.slot_index >= 0 && r.slot_index < PAGE_SIZE) slots[r.slot_index] = serializeCatalogItem(r);
+  }
+  return { page, pageSize: PAGE_SIZE, slots };
+}
+
+/** 该页当前橱窗里的商品 id（用于刷新时避开重复） */
+function currentOfferIds(db, page) {
+  return new Set(db.prepare('SELECT item_id FROM loot_offers WHERE page = ?').all(page).map(r => r.item_id));
+}
+
+/**
+ * 刷新某页：重抽 8 个，替换该页橱窗。
+ * 尽量避开页内已有商品（`excludeCurrent` 默认开），否则连点刷新总是看到同样几个。
+ * 抽中的商品若尚未生图，异步排队生成（不阻塞返回）。
+ */
+export function rollWindow(page, { excludeCurrent = true } = {}) {
+  const db = getDb();
+  const pools = db.prepare('SELECT * FROM loot_catalog WHERE page = ?').all(page);
+  if (!pools.length) return { ok: false, error: `「${page}」页还没有商品，请先导入清单` };
+
+  const avoid = excludeCurrent ? currentOfferIds(db, page) : new Set();
+  // 优先从「不在当前橱窗里」的池子抽；不够 8 个再补上（不能因为排除而抽不满）
+  const primary = pools.filter(p => !avoid.has(p.id));
+  const secondary = pools.filter(p => avoid.has(p.id));
+  const need = Math.min(PAGE_SIZE, pools.length);
+  // 洗牌后取前 need 个：先 primary 后 secondary
+  const pick = [];
+  for (const src of [primary, secondary]) {
+    const arr = [...src];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    for (const x of arr) { if (pick.length < need) pick.push(x); }
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM loot_offers WHERE page = ?').run(page);
+    const ins = db.prepare('INSERT INTO loot_offers (page, slot_index, item_id) VALUES (?, ?, ?)');
+    pick.forEach((it, i) => ins.run(page, i, it.id));
+  });
+  tx();
+
+  // 缺图的排队生成
+  for (const it of pick) {
+    if (!it.image_url || !imageUrlExists(it.image_url)) enqueueImage(it.id);
+  }
+  return { ok: true, ...getWindow(page) };
+}
+
+/**
+ * 带走选中的格子：写进背包并从橱窗移除该格（留空位）。
+ * @param {string} page
+ * @param {number[]} slotIndexes
+ */
+export function takeItems(page, slotIndexes) {
+  const db = getDb();
+  const idxs = (Array.isArray(slotIndexes) ? slotIndexes : []).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n < PAGE_SIZE);
+  if (!idxs.length) return { ok: false, error: '没有选中任何商品' };
+
+  const taken = [];
+  const tx = db.transaction(() => {
+    for (const idx of idxs) {
+      const offer = db.prepare('SELECT item_id FROM loot_offers WHERE page = ? AND slot_index = ?').get(page, idx);
+      if (!offer) continue;
+      const item = db.prepare('SELECT * FROM loot_catalog WHERE id = ?').get(offer.item_id);
+      if (!item) { db.prepare('DELETE FROM loot_offers WHERE page = ? AND slot_index = ?').run(page, idx); continue; }
+
+      const hasImg = item.image_url && imageUrlExists(item.image_url);
+      const payload = buildPayload(item);
+      const r = db.prepare(`
+        INSERT INTO backpack_items (effect_key, name, description, image_url, status, payload_json, owner_key, source_type, collected_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'me', 'loot', datetime('now'))
+      `).run(
+        item.tag,
+        item.name,
+        item.meaning || item.name,
+        hasImg ? item.image_url : null,
+        hasImg ? 'ready' : 'generating',
+        JSON.stringify(payload),
+      );
+      db.prepare('DELETE FROM loot_offers WHERE page = ? AND slot_index = ?').run(page, idx);
+      if (!hasImg) enqueueImage(item.id);   // 图还没好，顺手排上
+      taken.push({ catalogId: item.id, backpackId: r.lastInsertRowid, name: item.name, imageUrl: hasImg ? item.image_url : null });
+    }
+  });
+  tx();
+  if (taken.length) broadcast('loot_taken', { page, count: taken.length });
+  return { ok: true, taken };
+}
+
+/** 背包条目要带的落地数据（useItem 会读 payload.outfit_name / outfit_description） */
+function buildPayload(item) {
+  const kind = KIND_BY_CAT[item.cat];
+  if (kind === 'outfit' || kind === 'hairstyle' || kind === 'transform') {
+    return { outfit_name: item.name, outfit_description: item.meaning || item.name, lootTag: item.tag };
+  }
+  return { lootTag: item.tag };
+}
+
+// ── 供 useItem 回落：把清单条目当作道具效果 ────────────────
+
+/**
+ * 旧道具池（ITEM_EFFECTS）里没有的 effect_key，回落到清单里查。
+ * 这样带走的商品可以直接「使用」，不必为 454 条各写一份效果定义。
+ */
+export function getLootEffect(tag) {
+  try {
+    const row = getDb().prepare('SELECT * FROM loot_catalog WHERE tag = ?').get(tag);
+    if (!row) return null;
+    const kind = KIND_BY_CAT[row.cat] || 'outfit';
+    const base = { kind, name: row.name, theme: row.meaning || row.name, lootTag: row.tag };
+    if (kind === 'buff') {
+      // 成人用品走 buff：注入一段状态描述影响对话。按大类给模板，避免为 45 条各写一段。
+      base.effectText = toyEffectText(row);
+      base.durationHours = 6;
+    }
+    return base;
+  } catch {
+    return null;
+  }
+}
+
+/** 成人用品的状态描述模板（按 tag 关键词归类；用户可在清单里改 tag 归属来调整） */
+function toyEffectText(row) {
+  const t = `${row.tag} ${row.name}`.toLowerCase();
+  if (/rope|shibari|bondage|cuff|strap|harness|spreader|collar|leash|chain|gag|blindfold|拘束|束缚|绳|手铐|口球|项圈|牵引|分腿|遮眼/.test(t)) {
+    return '身上还留着束缚的痕迹，动作放不太开，被人多看两眼就会想起刚才的处境，语气里带着没散尽的紧绷。';
+  }
+  if (/lingerie|panty|pasties|garter|stocking|bunny|透明|蕾丝|内衣|吊袜|乳贴|连身袜|兔女郎/.test(t)) {
+    return '身上穿得比平时少得多，布料贴着皮肤，随便动一下都在提醒自己现在的样子，注意力很难从这上面移开。';
+  }
+  if (/vibrat|wand|egg|bullet|rabbit|dildo|plug|beads|suction|按摩|震动|跳蛋|仿真|后庭|珠链|吸吮/.test(t)) {
+    return '小腹里还留着钝钝的胀感，腿总忍不住想并紧，说话的节奏比平时慢半拍，容易走神。';
+  }
+  if (/whip|crop|flogger|paddle|鞭|拍板/.test(t)) {
+    return '皮肤上还留着发烫的印子，坐下来会想起来，被碰到时下意识缩一下。';
+  }
+  return '身上还带着刚才那件东西留下的感觉，注意力时不时会飘回去。';
+}
+
+// ── 单件生图（串行队列 + 缓存） ──────────────────────────────
+
+const imageQueue = [];
+let imageRunning = false;
+const queued = new Set();
+
+function enqueueImage(catalogId) {
+  if (queued.has(catalogId)) return;
+  queued.add(catalogId);
+  imageQueue.push(catalogId);
+  pumpImageQueue();
+}
+
+async function pumpImageQueue() {
+  if (imageRunning) return;
+  imageRunning = true;
+  try {
+    while (imageQueue.length) {
+      const id = imageQueue.shift();
+      queued.delete(id);
+      try { await generateOneImage(id); } catch (err) { console.error('[loot] 生图异常:', err.message); }
+    }
+  } finally {
+    imageRunning = false;
+  }
+}
+
+async function generateOneImage(catalogId) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM loot_catalog WHERE id = ?').get(catalogId);
+  if (!row) return;
+  if (row.image_url && imageUrlExists(row.image_url)) return;   // 已有图，跳过
+
+  db.prepare(`UPDATE loot_catalog SET image_status = 'generating', image_error = NULL WHERE id = ?`).run(catalogId);
+  try {
+    const result = await generateImageRaw(imagePromptFor(row), {
+      scene: 'items', disableRAG: true, persistPreparation: false, width: 512, height: 512, artist: '@ebora',
+    });
+    if (!result.success || !result.images?.length) throw new Error(result.error || 'ComfyUI 未返回图片');
+    const url = saveBase64Image('items', `loot_${row.tag}_${Date.now()}.png`, result.images[0].base64);
+    db.prepare(`UPDATE loot_catalog SET image_url = ?, image_status = 'done', image_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(url, catalogId);
+    // 背包里已经带走、但当时还没图的同款，一并回填
+    db.prepare(`UPDATE backpack_items SET image_url = ?, status = 'ready'
+                WHERE effect_key = ? AND source_type = 'loot' AND status = 'generating' AND image_url IS NULL`).run(url, row.tag);
+    broadcast('loot_image_ready', { catalogId, tag: row.tag, imageUrl: url });
+  } catch (err) {
+    db.prepare(`UPDATE loot_catalog SET image_status = 'failed', image_error = ? WHERE id = ?`).run(String(err.message).slice(0, 300), catalogId);
+    console.error(`[loot] 生图失败 ${row.tag}:`, err.message);
+  }
+}
+
+/** 手动补图（管理用）：给缺图的商品排队，返回排队数 */
+export function repairMissingImages({ limit = 50 } = {}) {
+  const db = getDb();
+  const rows = db.prepare(`SELECT id, image_url FROM loot_catalog WHERE image_status != 'generating' ORDER BY id`).all()
+    .filter(r => !r.image_url || !imageUrlExists(r.image_url))
+    .slice(0, Math.max(0, limit));
+  for (const r of rows) enqueueImage(r.id);
+  return { queued: rows.length, running: imageRunning };
+}
+
+/** 队列状态（前端可显示"还有几张在生成"） */
+export function getImageQueueState() {
+  return { pending: imageQueue.length + (imageRunning ? 1 : 0) };
+}

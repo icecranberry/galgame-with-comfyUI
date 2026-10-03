@@ -1079,6 +1079,9 @@ function initSchema(db) {
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
 
+  // 迁移: 宝箱橱窗（loot_catalog 商品清单 + loot_offers 当前橱窗）
+  migrateLootCatalogSchema(db);
+
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
 
@@ -2672,6 +2675,48 @@ function migrateChatBgSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateChatBgSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 宝箱橱窗 —— 商品清单与当前橱窗
+ *
+ * loot_catalog：由外部清单（E:\邻舍-local\loot-catalog\catalog.json）导入的商品池。
+ *   图片按「单件」缓存（image_url），因为候选组合随机、几乎不重复，按整套生图等于每次刷新都烧算力。
+ * loot_offers：当前橱窗里每页的 8 个格子。放库里而不是内存 —— 刷新页面不该把橱窗清空。
+ */
+function migrateLootCatalogSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tag TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        meaning TEXT NOT NULL DEFAULT '',
+        cat TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        page TEXT NOT NULL,
+        image_url TEXT,
+        image_status TEXT NOT NULL DEFAULT '',
+        image_error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_loot_catalog_page ON loot_catalog(page)`);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_offers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        page TEXT NOT NULL,
+        slot_index INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(page, slot_index)
+      )
+    `);
+    console.log('[db] loot catalog schema ready');
+  } catch (err) {
+    console.log('[db] migrateLootCatalogSchema error:', err.message);
   }
 }
 
