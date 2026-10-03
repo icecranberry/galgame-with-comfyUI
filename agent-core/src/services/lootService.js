@@ -125,13 +125,20 @@ export function needsImage(row) {
 }
 
 function imagePromptFor(row) {
+  // 成人用品走独立的英文描述表（这类必须用完整英文描述，tag 直生会画出生物）
   if (row.cat === 'adult_toy' && row.slot !== 'play') {
     const desc = TOY_PROMPT[row.tag] || `${row.name} sex toy`;
     return `${desc}, ${TOY_FRAME}`;
   }
+  // 其余一律以 **image_tags（英文 Danbooru tag 组合）** 为准。
+  //
+  // 为什么不用 `tag` 字段：词典里大量 tag 是生僻写法（如 sheer_babydoll），模型不认识就会自由发挥
+  // —— A/B 实测「纯 tag」画出的是一个玻璃罐子；「中文描述」同样无效（Danbooru 系模型不吃中文）；
+  // 「英文 tag 组合」才准确，且细节最完整。image_tags 由 backfill 脚本用 LLM 生成后存库。
+  const core = String(row.image_tags || '').trim() || row.tag;
   const key = `${row.cat}/${row.slot}`;
-  const fn = IMAGE_FRAME_BY_KEY[key] || ((tag) => `${tag}, no humans, plain white background, product photograph, best quality`);
-  return fn(row.tag);
+  const fn = IMAGE_FRAME_BY_KEY[key] || ((t) => `${t}, no humans, plain white background, product photograph, best quality`);
+  return fn(core);
 }
 
 // ── 分页 ────────────────────────────────────────────────────

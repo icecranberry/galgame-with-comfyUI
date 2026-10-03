@@ -2710,6 +2710,17 @@ function migrateLootCatalogSchema(db) {
       )
     `);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_loot_catalog_page ON loot_catalog(page)`);
+    // 生图用英文 Danbooru tag 组合。
+    // 原先生图 prompt 只用 tag 字段，但词典里大量 tag 是生僻写法（如 sheer_babydoll），
+    // 模型不认识就自由发挥 —— A/B 实测「纯 tag」会画出一个玻璃罐子；
+    // 「中文描述」同样无效（Danbooru 系模型不吃中文）；「英文 tag 组合」才准确。
+    {
+      const cols = db.prepare(`PRAGMA table_info(loot_catalog)`).all();
+      if (!cols.find(c => c.name === 'image_tags')) {
+        db.exec(`ALTER TABLE loot_catalog ADD COLUMN image_tags TEXT`);
+        console.log('[db] Added loot_catalog.image_tags column');
+      }
+    }
     db.exec(`
       CREATE TABLE IF NOT EXISTS loot_offers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
