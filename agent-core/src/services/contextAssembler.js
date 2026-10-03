@@ -1,8 +1,14 @@
 import crypto from 'node:crypto';
 import { stripPromptJson } from './summarizer.js';
+import { imageUrlToDataUri } from './imagePaths.js';
 
 export const PROMPT_REVISION = 'chat-context-v3';
 export const MAX_UNCOMPACTED_MESSAGES = 60;
+
+// 历史里最多回看几条带图消息、单条最多送几张图。
+// 图片要被读成 base64 塞进请求，不设上限的话「翻到很久以前」会瞬间撑爆上下文。
+const MAX_HISTORY_IMAGE_MESSAGES = 3;
+const MAX_MESSAGE_IMAGES = 3;
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -23,8 +29,41 @@ export function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
+/** DB 行里的 images 是 JSON 字符串数组（/images/... 路径）；解析失败按无图处理 */
+function parseImageList(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  try {
+    const arr = JSON.parse(String(raw));
+    return Array.isArray(arr) ? arr.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 function cloneMessage(message) {
   return { role: message.role, content: String(message.content ?? '') };
+}
+
+/**
+ * 带图消息 → 多段 content（文本 + image_url）。
+ * 图片文件读不出来（缺失 / 被 AVIF 回退也对不上）时退回纯文本，不让整轮请求挂掉。
+ */
+function messageWithImages(message, maxImages = MAX_MESSAGE_IMAGES) {
+  const paths = parseImageList(message.images);
+  if (!paths.length) return cloneMessage(message);
+
+  const text = String(message.content ?? '').trim();
+  const parts = [{ type: 'text', text: text || '(发送了一张图片)' }];
+  let added = 0;
+  for (const p of paths) {
+    if (added >= maxImages) break;
+    const uri = imageUrlToDataUri(p);
+    if (!uri) continue;
+    parts.push({ type: 'image_url', image_url: { url: uri } });
+    added++;
+  }
+  return added > 0 ? { role: message.role, content: parts } : cloneMessage(message);
 }
 
 /**
@@ -41,7 +80,19 @@ function cloneMessage(message) {
  */
 export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, preHistoryMessages = [], history = [], dynamicBlocks = [] } = {}) {
   const stableMessages = stableBlocks.filter(Boolean).map(content => ({ role: 'system', content: String(content) }));
-  const historyMessages = history.map(cloneMessage);
+
+  // 只给最近几条带图消息附上图片：从后往前扫，额度用尽后其余一律按纯文本处理
+  let imageQuota = MAX_HISTORY_IMAGE_MESSAGES;
+  const historyMessages = [];
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (imageQuota > 0 && parseImageList(m?.images).length > 0) {
+      imageQuota--;
+      historyMessages.unshift(messageWithImages(m));
+    } else {
+      historyMessages.unshift(cloneMessage(m));
+    }
+  }
 
   // 摘要前 system：多条按空行拼成一条（空段自动省略）
   const preSummaryContent = (Array.isArray(preSummarySystem) ? preSummarySystem : [preSummarySystem])

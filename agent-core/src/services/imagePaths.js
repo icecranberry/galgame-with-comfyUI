@@ -98,6 +98,33 @@ export function imageUrlExists(url) {
   return true;
 }
 
+/**
+ * 把 /images/... 的图片读成 data URI，供多模态请求使用。
+ * 找不到文件（含 PNG 已压成 AVIF 的回退情形）时返回 null，由调用方降级为纯文本。
+ */
+export function imageUrlToDataUri(url) {
+  const cleanUrl = String(url || '').replace(/\?.*$/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(cleanUrl); } catch { decoded = cleanUrl; }
+
+  const m = decoded.match(/^\/images\/(.+)$/);
+  if (!m) return null;
+  let filePath = path.resolve(DATA_DIR, m[1]);
+  if (!filePath.startsWith(DATA_DIR + path.sep)) return null;
+  if (!fs.existsSync(filePath) && /\.png$/i.test(filePath)) {
+    // 与 imageUrlExists 同一回退口径：PNG 被 AVIF 压缩替换后按原 URL 是找不到文件的
+    filePath = filePath.replace(/\.png$/i, '.avif');
+  }
+  try {
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const mime = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', webp: 'webp', gif: 'gif', avif: 'avif' }[ext];
+    if (!mime) return null;
+    return `data:image/${mime};base64,${fs.readFileSync(filePath).toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 export function saveBase64Image(category, filename, dataUri) {
   const dir = getImageDir(category);
   fs.mkdirSync(dir, { recursive: true });
