@@ -1082,6 +1082,9 @@ function initSchema(db) {
   // 迁移: 宝箱橱窗（loot_catalog 商品清单 + loot_offers 当前橱窗）
   migrateLootCatalogSchema(db);
 
+  // 迁移: 角色间关系的亲密度分级（决定朋友圈多人场景的概率与画面尺度）
+  migrateRelationshipIntimacy(db);
+
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
 
@@ -2717,6 +2720,28 @@ function migrateLootCatalogSchema(db) {
     console.log('[db] loot catalog schema ready');
   } catch (err) {
     console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色间关系的亲密度 — character_relationships 加 intimacy 列
+ *
+ * 0=泛泛 1=熟悉 2=亲近 3=亲密。分级用于决定朋友圈多人场景的概率与画面尺度。
+ *
+ * **列默认为 NULL，并且刻意不做全量回填**：NULL 表示「未设定」，读取时按关系文本
+ * 关键词实时推断（见 services/relationshipIntimacy.js 的 resolveIntimacy）。
+ * 这样关系文本一改，判定就跟着变；而一旦回填成显式值，PUT 会保留该值，
+ * 改文本就不会再重推断了。用户在图里手动选定后才落为显式值。
+ */
+function migrateRelationshipIntimacy(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_relationships)`).all();
+    if (!cols.find(c => c.name === 'intimacy')) {
+      db.exec(`ALTER TABLE character_relationships ADD COLUMN intimacy INTEGER`);
+      console.log('[db] Added character_relationships.intimacy column');
+    }
+  } catch (err) {
+    console.log('[db] migrateRelationshipIntimacy error:', err.message);
   }
 }
 

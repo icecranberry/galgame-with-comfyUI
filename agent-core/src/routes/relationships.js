@@ -3,6 +3,7 @@ import { getDb, getSystemRules, getWorldSetting } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
+import { inferIntimacy, resolveIntimacy } from '../services/relationshipIntimacy.js';
 
 const router = Router();
 
@@ -116,7 +117,7 @@ router.post('/deduce', async (req, res) => {
     const taskWorldPrefix = worldSetting ? '在上述世界观框架下，' : '';
     const targetType = isUserMode ? '用户信息' : '目标角色';
 
-    const userPrompt = `${boostInstruction}## 任务\n你是同人小说作家。${taskWorldPrefix}根据${isUserMode ? '用户（User）的信息' : '目标角色和候选角色的信息'}，推演${isUserMode ? '用户对每个候选角色的关系' : '目标角色对每个候选角色的关系'}。${worldRecontextLine}\n## ${targetType}\n名称: ${isUserMode ? 'user' : centerName}\n显示名: ${centerDisplay}\n完整设定:\n${centerPrompt}\n\n## 候选角色\n${charLines}\n\n## 要求\n1. from_name 固定为 "${fromName}"，to_name 使用候选角色列表中的「名称」字段值\n2. 每条关系只涉及一个候选角色（${isUserMode ? '用户' : '目标角色'} → 候选角色）\n3. 生成 5~10 条，不足 5 条也可\n4. 关系描述像真人说话一样自然，最终拼接成「ta是你的XXX」句式。仅允许名词或形容词+名词结构，禁止动词、介词和动态描写。15 字以内。\n  好例子: 互相看不顺眼的同事 / 一直暗恋的学姐 / 从小一起长大的死党${worldExamplesLine}\n  坏例子: 时空编织的共鸣者（太像设定集词条）/ 值得尊敬的指挥官（纯社会标签，无世界感）\n\n## 输出格式\n严格输出以下 JSON，不要其他内容:\n{"relationships":[{"from_name":"${fromName}","to_name":"角色名称","relationship_text":"关系描述"}]}`;
+    const userPrompt = `${boostInstruction}## 任务\n你是同人小说作家。${taskWorldPrefix}根据${isUserMode ? '用户（User）的信息' : '目标角色和候选角色的信息'}，推演${isUserMode ? '用户对每个候选角色的关系' : '目标角色对每个候选角色的关系'}。${worldRecontextLine}\n## ${targetType}\n名称: ${isUserMode ? 'user' : centerName}\n显示名: ${centerDisplay}\n完整设定:\n${centerPrompt}\n\n## 候选角色\n${charLines}\n\n## 要求\n1. from_name 固定为 "${fromName}"，to_name 使用候选角色列表中的「名称」字段值\n2. 每条关系只涉及一个候选角色（${isUserMode ? '用户' : '目标角色'} → 候选角色）\n3. 生成 5~10 条，不足 5 条也可\n4. 关系描述像真人说话一样自然，最终拼接成「ta是你的XXX」句式。仅允许名词或形容词+名词结构，禁止动词、介词和动态描写。15 字以内。\n  好例子: 互相看不顺眼的同事 / 一直暗恋的学姐 / 从小一起长大的死党${worldExamplesLine}\n  坏例子: 时空编织的共鸣者（太像设定集词条）/ 值得尊敬的指挥官（纯社会标签，无世界感）\n5. **同时给出 intimacy（亲密度等级）**，用于判断两人能否同框、以及画面尺度。只填数字 0~3：\n   0 = 泛泛（职业性认识、上下级、对立、点头之交，如「公司女总裁」「麻烦的警官」「需要提防的黑影」）\n   1 = 熟悉（相识但保持距离，如「吵闹的网友」「上游供给的同事」）\n   2 = 亲近（朋友、搭档、有情感投入，如「并肩作战的挚友」「默契的搭档」）\n   3 = 亲密（恋人、家人、婚约，如「暗恋的学姐」「青梅竹马」）\n   判断依据是**这个角色在心里把对方放得多近**，不是社会地位高低。\n   注意：大多数关系应当落在 0 或 1 —— 真正的挚友与恋人是少数，不要为了戏剧性而普遍填高。\n\n## 输出格式\n严格输出以下 JSON，不要其他内容:\n{"relationships":[{"from_name":"${fromName}","to_name":"角色名称","relationship_text":"关系描述","intimacy":1}]}`;
 
     messages.push({ role: 'user', content: userPrompt });
 
@@ -144,11 +145,20 @@ router.post('/deduce', async (req, res) => {
     const nameToChar = {};
     for (const c of allChars) nameToChar[c.name] = c;
 
+    // LLM 给的 intimacy 可能缺失或越界 → 回落关键词推断（与历史数据同一套口径）
+    const pickIntimacy = (item, text) => {
+      const n = Number(item?.intimacy);
+      if (Number.isInteger(n) && n >= 0 && n <= 3) return n;
+      return inferIntimacy(text);
+    };
+
     const relationships = [];
     for (const item of parsed.relationships) {
       if (!item.from_name || !item.to_name || !item.relationship_text) continue;
       if (item.from_name === item.to_name) continue;
       if (item.from_name !== fromName) continue;
+
+      const relText = item.relationship_text.slice(0, 20).trim();
 
       if (isUserMode) {
         const toChar = nameToChar[item.to_name];
@@ -160,7 +170,8 @@ router.post('/deduce', async (req, res) => {
           to_id: toChar.id,
           to_name: toChar.name,
           to_display: toChar.display_name,
-          relationship_text: item.relationship_text.slice(0, 20).trim(),
+          relationship_text: relText,
+          intimacy: pickIntimacy(item, relText),
         });
       } else {
         const fromChar = nameToChar[item.from_name];
@@ -174,7 +185,8 @@ router.post('/deduce', async (req, res) => {
           to_id: toChar.id,
           to_name: toChar.name,
           to_display: toChar.display_name,
-          relationship_text: item.relationship_text.slice(0, 20).trim(),
+          relationship_text: relText,
+          intimacy: pickIntimacy(item, relText),
         });
       }
     }
@@ -200,6 +212,7 @@ router.get('/', (req, res) => {
       cr.from_character_id,
       cr.to_character_id,
       cr.relationship_text,
+      cr.intimacy,
       cr.created_at,
       c.display_name AS to_display_name,
       c.avatar_path AS to_avatar_path
@@ -208,7 +221,11 @@ router.get('/', (req, res) => {
     JOIN characters c ON c.id = cr.to_character_id
     WHERE cr.from_character_id = ? AND cr.relationship_text != ''
     ORDER BY cr.created_at ASC
-  `).all(character_id);
+  `).all(character_id).map(r => ({
+    ...r,
+    // 库里 NULL 表示「未设定」，这里统一解析成 0~3 供前端直接显示
+    intimacy: resolveIntimacy(r),
+  }));
 
   // 该角色与「用户」的关系（user_relationships 是单向存角色侧，这里取出来给关系图画一条连到用户的线）
   const userRel = db.prepare(`
@@ -224,7 +241,8 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/relationships — 创建关系
-// Body: { from_character_id, to_character_id, relationship_text }
+// Body: { from_character_id, to_character_id, relationship_text, intimacy? }
+// intimacy 省略时按关系文本推断（0~3，见 services/relationshipIntimacy.js）
 router.post('/', (req, res) => {
   const db = getDb();
   const { from_character_id, to_character_id, relationship_text } = req.body;
@@ -246,11 +264,17 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: 'Cannot create self-relationship' });
   }
 
+  const text = relationship_text.trim();
+  const rawIntimacy = Number(req.body?.intimacy);
+  const intimacy = Number.isInteger(rawIntimacy) && rawIntimacy >= 0 && rawIntimacy <= 3
+    ? rawIntimacy
+    : inferIntimacy(text);
+
   try {
     const result = db.prepare(`
-      INSERT INTO character_relationships (from_character_id, to_character_id, relationship_text)
-      VALUES (?, ?, ?)
-    `).run(from_character_id, to_character_id, relationship_text.trim());
+      INSERT INTO character_relationships (from_character_id, to_character_id, relationship_text, intimacy)
+      VALUES (?, ?, ?, ?)
+    `).run(from_character_id, to_character_id, text, intimacy);
 
     const created = db.prepare(`
       SELECT
@@ -272,13 +296,15 @@ router.post('/', (req, res) => {
   }
 });
 
-// PUT /api/relationships/:id — 修改关系文本
-// Body: { relationship_text }
+// PUT /api/relationships/:id — 修改关系文本 / 亲密度
+// Body: { relationship_text, intimacy? }
+//   intimacy 省略时**保留已显式设定的值**（若原本为空则按新文本推断）——
+//   避免改个错字就把用户手工调过的亲密度冲掉。
 router.put('/:id', (req, res) => {
   const db = getDb();
   const { relationship_text } = req.body;
 
-  const rel = db.prepare('SELECT id FROM character_relationships WHERE id = ?').get(req.params.id);
+  const rel = db.prepare('SELECT id, intimacy FROM character_relationships WHERE id = ?').get(req.params.id);
   if (!rel) {
     return res.status(404).json({ error: 'Relationship not found' });
   }
@@ -287,8 +313,22 @@ router.put('/:id', (req, res) => {
     return res.status(400).json({ error: 'relationship_text cannot be empty' });
   }
 
-  db.prepare('UPDATE character_relationships SET relationship_text = ? WHERE id = ?')
-    .run(relationship_text.trim(), req.params.id);
+  const text = relationship_text.trim();
+  const rawIntimacy = req.body?.intimacy;
+  let intimacy;
+  if (rawIntimacy === null) {
+    intimacy = inferIntimacy(text);                       // 显式清空 → 回到推断
+  } else if (rawIntimacy !== undefined && Number.isInteger(Number(rawIntimacy))) {
+    const n = Number(rawIntimacy);
+    intimacy = n >= 0 && n <= 3 ? n : inferIntimacy(text);
+  } else {
+    intimacy = rel.intimacy === null || rel.intimacy === undefined
+      ? inferIntimacy(text)
+      : rel.intimacy;                                     // 保留用户已设的值
+  }
+
+  db.prepare('UPDATE character_relationships SET relationship_text = ?, intimacy = ? WHERE id = ?')
+    .run(text, intimacy, req.params.id);
 
   const updated = db.prepare(`
     SELECT

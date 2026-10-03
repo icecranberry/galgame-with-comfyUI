@@ -72,6 +72,24 @@
                   placeholder="输入关系，如：女同事"
                   @keydown.enter="confirmInput"
                 />
+                <!-- 亲密度：决定这两人能否在朋友圈同框、以及同框时的画面尺度 -->
+                <div class="rel-intimacy">
+                  <div class="rel-intimacy-label">
+                    亲密度
+                    <span class="rel-intimacy-hint">决定能否在朋友圈同框、以及画面尺度</span>
+                  </div>
+                  <div class="rel-intimacy-row">
+                    <button
+                      v-for="opt in INTIMACY_OPTIONS"
+                      :key="opt.level"
+                      type="button"
+                      class="rel-intimacy-btn"
+                      :class="{ active: inputDialog.intimacy === opt.level }"
+                      :title="opt.desc"
+                      @click="inputDialog.intimacy = opt.level"
+                    >{{ opt.label }}</button>
+                  </div>
+                </div>
                 <div class="rel-dialog-actions">
                   <linshe-button v-if="inputDialog.isEdit" variant="danger" @click="deleteEdge">🗑 删除</linshe-button>
                   <div class="rel-dialog-actions-right">
@@ -141,6 +159,7 @@ const inputDialog = reactive({
   show: false,
   isEdit: false,
   text: '',
+  intimacy: 1,           // 与后端一致：0 泛泛 / 1 熟悉 / 2 亲近 / 3 亲密
   targetName: '',
   sourceId: '',
   targetId: '',
@@ -149,6 +168,14 @@ const inputDialog = reactive({
   edgeId: null,   // non-null when editing existing
   pendingEdge: null, // { source, target, sourceHandle, targetHandle }
 })
+
+/** 亲密度档位（label 与 desc 与后端 relationshipIntimacy.js 保持一致） */
+const INTIMACY_OPTIONS = [
+  { level: 0, label: '泛泛', desc: '职业性认识 / 上下级 / 对立 —— 不会在朋友圈同框' },
+  { level: 1, label: '熟悉', desc: '相识但保持距离 —— 可同框，仅限公共场合、社交距离' },
+  { level: 2, label: '亲近', desc: '朋友 / 搭档 —— 可同框，允许自然的亲昵举动' },
+  { level: 3, label: '亲密', desc: '恋人 / 家人 —— 不做额外限制' },
+]
 
 // ── Existing relationships (loaded from API) ──
 const existingRels = ref([])
@@ -365,6 +392,7 @@ function onConnect(connection) {
   inputDialog.show = true
   inputDialog.isEdit = false
   inputDialog.text = ''
+  inputDialog.intimacy = 1   // 与后端推断的兜底档一致
   inputDialog.targetName = targetNode.data.display_name
   inputDialog.sourceId = connection.source
   inputDialog.targetId = connection.target
@@ -385,6 +413,8 @@ function onEdgeClick({ edge }) {
   inputDialog.show = true
   inputDialog.isEdit = true
   inputDialog.text = edge.label || ''
+  // 回填已保存的亲密度（GET /relationships 已解析成 0~3；缺省按「熟悉」）
+  inputDialog.intimacy = Number(existingRels.value.find(r => r.id === relId)?.intimacy ?? 1)
   inputDialog.targetName = targetNode?.data?.display_name || ''
   inputDialog.edgeId = relId
   inputDialog.pendingEdge = null
@@ -410,7 +440,7 @@ async function confirmInput() {
   if (inputDialog.isEdit) {
     // Edit existing
     try {
-      const res = await api.updateRelationship(inputDialog.edgeId, text)
+      const res = await api.updateRelationship(inputDialog.edgeId, text, inputDialog.intimacy)
       if (res.error) {
         toastFn('保存失败: ' + res.error, 'error')
         return
@@ -426,7 +456,12 @@ async function confirmInput() {
       if (edge) edge.label = text
       // Update local cache
       const cached = existingRels.value.find(r => r.id === inputDialog.edgeId)
-      if (cached) cached.relationship_text = text
+      // ⚠ 2026-10-08 合并 v3.7.0：本地新增 intimacy 缓存（亲密度分级）、
+      //    上游新增 emitRelationshipChanged 事件（通知外部刷新）—— 两者都要，合并保留。
+      if (cached) {
+        cached.relationship_text = text
+        cached.intimacy = inputDialog.intimacy
+      }
       emitRelationshipChanged({ characterId: props.centerCharacter?.id, action: 'update', targetName: inputDialog.targetName })
     } catch (err) {
       console.error('[RelationshipGraph] update failed:', err.message)
@@ -439,12 +474,14 @@ async function confirmInput() {
       console.log('[RelationshipGraph] creating relationship:', {
         from: parseInt(inputDialog.sourceId),
         to: parseInt(inputDialog.targetId),
-        text
+        text,
+        intimacy: inputDialog.intimacy,
       })
       const res = await api.createRelationship(
         parseInt(inputDialog.sourceId),
         parseInt(inputDialog.targetId),
-        text
+        text,
+        inputDialog.intimacy
       )
       console.log('[RelationshipGraph] API response:', res)
       if (res.error) {
@@ -590,6 +627,33 @@ async function deleteEdge() {
   font-size: 14px;
   box-sizing: border-box;
 }
+/* ── 亲密度选择（决定朋友圈同框与画面尺度） ── */
+.rel-intimacy { margin-top: 10px; }
+.rel-intimacy-label {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--text-bright);
+  margin-bottom: 6px;
+}
+.rel-intimacy-hint { font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.rel-intimacy-row { display: flex; gap: 6px; }
+.rel-intimacy-btn {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.rel-intimacy-btn:hover { color: var(--text-bright); border-color: var(--accent-light); }
+.rel-intimacy-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
 .rel-dialog-actions {
   display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }

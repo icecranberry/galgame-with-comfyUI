@@ -270,9 +270,9 @@ async function confirmAll() {
         const existing = await api.getRelationships(item.from_id)
         const match = (existing.relationships || []).find(r => r.to_character_id === item.to_id)
         if (match) {
-          await api.updateRelationship(match.id, item.relationship_text)
+          await api.updateRelationship(match.id, item.relationship_text, item.intimacy)
         } else {
-          await api.createRelationship(item.from_id, item.to_id, item.relationship_text)
+          await api.createRelationship(item.from_id, item.to_id, item.relationship_text, item.intimacy)
         }
       }
     }

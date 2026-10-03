@@ -330,12 +330,20 @@ export async function getRelationships(characterId) {
   return request(`/relationships?character_id=${characterId}`)
 }
 
-export async function createRelationship(from_character_id, to_character_id, relationship_text) {
-  return request(`/relationships`, { method: 'POST', body: { from_character_id, to_character_id, relationship_text } })
+// intimacy 可选（0 泛泛 / 1 熟悉 / 2 亲近 / 3 亲密）；省略时后端按关系文本推断
+export async function createRelationship(from_character_id, to_character_id, relationship_text, intimacy) {
+  return request(`/relationships`, {
+    method: 'POST',
+    body: { from_character_id, to_character_id, relationship_text, ...(intimacy === undefined ? {} : { intimacy }) },
+  })
 }
 
-export async function updateRelationship(id, relationship_text) {
-  return request(`/relationships/${id}`, { method: 'PUT', body: { relationship_text } })
+// 省略 intimacy 时后端保留已显式设定的值（不会因改错字而丢失手工调整）
+export async function updateRelationship(id, relationship_text, intimacy) {
+  return request(`/relationships/${id}`, {
+    method: 'PUT',
+    body: { relationship_text, ...(intimacy === undefined ? {} : { intimacy }) },
+  })
 }
 
 export async function deleteRelationship(id) {
