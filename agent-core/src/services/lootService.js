@@ -99,17 +99,33 @@ const IMAGE_FRAME_BY_KEY = {
   // 逆装/露出向：这类衣服的「开口在哪」就是它的全部卖点，只摆一件衣服看不出结构，
   // 所以展示在无头人体模型上（无头无脸，只到躯干与胯），开口位置才一目了然。
   'clothes/lewd': tag => `${tag}, the outfit displayed on a headless dress form mannequin, torso down to hips only, no head, no face, no person, plain white background, soft even lighting, product photograph, best quality`,
+  'clothes/lewd_socks': tag => `${tag}, legwear alone displayed as a clothing item, no humans, no person, flat lay, plain white background, product photograph, best quality`,
   'clothes/socks': tag => `${tag}, legwear alone displayed as a clothing item, no humans, no person, flat lay, plain white background, product photograph, best quality`,
   'hairstyle/hair': tag => `${tag}, hairstyle sample shown on a mannequin head silhouette, no face, plain white background, reference sheet, best quality`,
   'transform/body': tag => `${tag}, creature form, full body, plain white background, concept art, best quality`,
+  'accessory/lewd_acc': tag => `${tag}, the item alone displayed as a wearable accessory, no humans, no person, plain white background, soft even lighting, product photograph, best quality`,
   'accessory/head': tag => `${tag}, headwear accessory alone, no humans, plain white background, product photograph, best quality`,
   'accessory/hair': tag => `${tag}, hair accessory alone, no humans, plain white background, product photograph, best quality`,
   'accessory/ear': tag => `${tag}, ear accessory alone, no humans, plain white background, product photograph, best quality`,
   'accessory/hand': tag => `${tag}, hand accessory alone, no humans, plain white background, product photograph, best quality`,
 };
 
+/**
+ * 不生成图片的槽位。
+ *
+ * `adult_toy/play`（情趣玩法：无内衣 / 只穿衬衫 / 走光 / 半脱装…）描述的是**状态**而不是物件，
+ * 硬生图只会得到一张难看的怪图；而且不给它生图也顺带省下等待时间。
+ * 这类卡片由前端显示名称 + 说明即可。
+ */
+const NO_IMAGE_SLOTS = new Set(['adult_toy/play']);
+
+/** 该条目是否需要生成图片 */
+export function needsImage(row) {
+  return !NO_IMAGE_SLOTS.has(`${row.cat}/${row.slot}`);
+}
+
 function imagePromptFor(row) {
-  if (row.cat === 'adult_toy') {
+  if (row.cat === 'adult_toy' && row.slot !== 'play') {
     const desc = TOY_PROMPT[row.tag] || `${row.name} sex toy`;
     return `${desc}, ${TOY_FRAME}`;
   }
@@ -205,6 +221,7 @@ export function importCatalog(items, pages) {
 
 function serializeCatalogItem(row) {
   if (!row) return null;
+  const needs = needsImage(row);
   return {
     id: row.id,
     tag: row.tag,
@@ -214,7 +231,10 @@ function serializeCatalogItem(row) {
     slot: row.slot,
     page: row.page,
     imageUrl: row.image_url || null,
-    imageStatus: row.image_url ? 'done' : (row.image_status || ''),
+    // imageStatus：'none' 表示这类条目本就不生成图（玩法/状态类），
+    // 前端据此**不要**为它轮询等待，否则会一直等不到图。
+    imageStatus: !needs ? 'none' : (row.image_url ? 'done' : (row.image_status || 'pending')),
+    needsImage: needs,
   };
 }
 
@@ -271,8 +291,9 @@ export function rollWindow(page, { excludeCurrent = true } = {}) {
   });
   tx();
 
-  // 缺图的排队生成
+  // 缺图的排队生成（玩法/状态类条目不需要图，跳过）
   for (const it of pick) {
+    if (!needsImage(it)) continue;
     if (!it.image_url || !imageUrlExists(it.image_url)) enqueueImage(it.id);
   }
   return { ok: true, ...getWindow(page) };
@@ -297,6 +318,8 @@ export function takeItems(page, slotIndexes) {
       if (!item) { db.prepare('DELETE FROM loot_offers WHERE page = ? AND slot_index = ?').run(page, idx); continue; }
 
       const hasImg = item.image_url && imageUrlExists(item.image_url);
+      // 玩法/状态类不需要图，直接算就绪（否则会永远停在 generating）
+      const needImg = needsImage(item);
       const payload = buildPayload(item);
       const r = db.prepare(`
         INSERT INTO backpack_items (effect_key, name, description, image_url, status, payload_json, owner_key, source_type, collected_at)
@@ -306,11 +329,11 @@ export function takeItems(page, slotIndexes) {
         item.name,
         item.meaning || item.name,
         hasImg ? item.image_url : null,
-        hasImg ? 'ready' : 'generating',
+        (hasImg || !needImg) ? 'ready' : 'generating',
         JSON.stringify(payload),
       );
       db.prepare('DELETE FROM loot_offers WHERE page = ? AND slot_index = ?').run(page, idx);
-      if (!hasImg) enqueueImage(item.id);   // 图还没好，顺手排上
+      if (needImg && !hasImg) enqueueImage(item.id);   // 图还没好，顺手排上
       taken.push({ catalogId: item.id, backpackId: r.lastInsertRowid, name: item.name, imageUrl: hasImg ? item.image_url : null });
     }
   });
@@ -430,7 +453,10 @@ export function repairMissingImages({ limit = 50, tags = null } = {}) {
   } else {
     rows = db.prepare('SELECT id, tag, image_url FROM loot_catalog WHERE image_status != \'generating\' ORDER BY id').all();
   }
-  const targets = rows.filter(r => !r.image_url || !imageUrlExists(r.image_url)).slice(0, Math.max(0, limit));
+  const targets = rows
+    .filter(r => needsImage(r))                     // 玩法/状态类不生成图，跳过（否则会永远排队）
+    .filter(r => !r.image_url || !imageUrlExists(r.image_url))
+    .slice(0, Math.max(0, limit));
   for (const r of targets) enqueueImage(r.id);
   return { queued: targets.length, running: imageRunning };
 }

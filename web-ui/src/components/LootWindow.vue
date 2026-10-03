@@ -55,6 +55,13 @@
           <template v-if="cell">
             <div class="loot-thumb">
               <img v-if="cell.imageUrl" :src="cell.imageUrl" :alt="cell.name" loading="lazy" />
+              <!-- 玩法/状态类条目本就不生成图（后端 needsImage=false），显示一个中性图标而不是转圈等图 -->
+              <span v-else-if="cell.needsImage === false" class="loot-thumb-none" aria-hidden="true">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3 13.8 8.2 19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/>
+                  <path d="m9 18 .5 1.5L11 20l-1.5.5L9 22l-.5-1.5L7 20l1.5-.5L9 18Z"/>
+                </svg>
+              </span>
               <span v-else class="loot-thumb-wait">
                 <span class="loot-spinner" aria-hidden="true"></span>
                 <span>生成中</span>
@@ -63,7 +70,11 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4.5 4.5L19 7"/></svg>
               </span>
             </div>
-            <div class="loot-name" :title="cell.name">{{ cell.name }}</div>
+            <div class="loot-name">
+              <span class="loot-name-text" :title="cell.name">{{ cell.name }}</span>
+              <!-- 情趣页混了「情趣玩具」与「情趣玩法」两类，标一下便于区分 -->
+              <span v-if="slotLabel(cell)" class="loot-kind">{{ slotLabel(cell) }}</span>
+            </div>
             <div class="loot-meaning" :title="cell.meaning">{{ cell.meaning || cell.tag }}</div>
           </template>
           <div v-else class="loot-card-empty">已拿走</div>
@@ -109,14 +120,15 @@ function applyImage({ tag, imageUrl }) {
 function startPoll() {
   stopPoll()
   pollTimer = setInterval(async () => {
-    const waiting = slots.value.filter(c => c && !c.imageUrl).length
+    // 只等「需要图但还没有」的格子 —— 玩法/状态类 needsImage=false，等它等于永远等不到
+    const waiting = slots.value.filter(c => c && c.needsImage !== false && !c.imageUrl).length
     if (!waiting) { stopPoll(); return }
     try {
       const d = await api.getLootWindow(activePage.value)
       // 保留用户已勾选状态；只更新图片与内容
       slots.value = d.slots || []
       queuePending.value = d.queue?.pending || 0
-      if (!slots.value.some(c => c && !c.imageUrl)) stopPoll()
+      if (!slots.value.some(c => c && c.needsImage !== false && !c.imageUrl)) stopPoll()
     } catch { /* 网络抖动忽略，下轮再试 */ }
   }, 4000)
 }
@@ -140,7 +152,7 @@ async function loadWindow(page) {
     const d = await api.getLootWindow(page)
     slots.value = d.slots || []
     queuePending.value = d.queue?.pending || 0
-    if (slots.value.some(c => c && !c.imageUrl)) startPoll()
+    if (slots.value.some(c => c && c.needsImage !== false && !c.imageUrl)) startPoll()
   } catch {
     slots.value = []
   }
@@ -161,7 +173,7 @@ async function refresh() {
     const d = await api.rollLootWindow(activePage.value)
     slots.value = d.slots || []
     queuePending.value = d.queue?.pending || 0
-    if (slots.value.some(c => c && !c.imageUrl)) startPoll()
+    if (slots.value.some(c => c && c.needsImage !== false && !c.imageUrl)) startPoll()
     // 刷新后重新拉一次分页统计（已有图数量会变）
     const ps = await api.getLootPages()
     pages.value = ps.pages || pages.value
@@ -176,6 +188,13 @@ function togglePick(idx) {
   const i = selectedSlots.value.indexOf(idx)
   if (i >= 0) selectedSlots.value.splice(i, 1)
   else selectedSlots.value.push(idx)
+}
+
+/** 同一页里有多种槽位时，给卡片标出它属于哪种（目前只有「情趣」页需要） */
+const SLOT_LABELS = { toy: '玩具', play: '玩法' }
+function slotLabel(cell) {
+  if (!cell) return ''
+  return SLOT_LABELS[cell.slot] || ''
 }
 
 async function takeSelected() {
@@ -277,6 +296,8 @@ onUnmounted(() => {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   font-size: 11px; color: var(--text-secondary);
 }
+/* 玩法/状态类不生成图，给一个中性图标位（避免空白或误以为在加载） */
+.loot-thumb-none { color: var(--text-secondary); opacity: 0.55; }
 .loot-spinner {
   width: 16px; height: 16px; border-radius: 50%;
   border: 2px solid rgba(var(--accent-rgb), 0.25); border-top-color: var(--accent);
@@ -292,8 +313,19 @@ onUnmounted(() => {
 }
 
 .loot-name {
+  display: flex; align-items: center; gap: 5px;
   font-size: 12.5px; font-weight: 500; color: var(--text-bright);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.loot-name-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.loot-kind {
+  flex-shrink: 0;
+  padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; font-weight: 400;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
 }
 .loot-meaning {
   font-size: 11px; color: var(--text-secondary); line-height: 1.45;
