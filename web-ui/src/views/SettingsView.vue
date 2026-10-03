@@ -354,8 +354,10 @@
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
             style="margin-bottom:0"
+            name="linshe-llm-key"
+            autocomplete="new-password"
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            @input="markLlmDirty"
+            @input="onLlmKeyInput"
           />
           <linshe-button class="sp-btn-small" size="sm" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
           <linshe-button class="sp-btn-small" variant="ghost" size="sm" style="flex-shrink:0" @click="showApiKey = !showApiKey">
@@ -1459,6 +1461,19 @@ async function removeFavorite(id) {
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
 const freeEgg = ref(false)
 const llmApiKey = ref('')
+/**
+ * 用户是否**手动输入过** API Key。
+ *
+ * 这个字段是「只写」的：后端只回脱敏 preview、从不回填真实值，所以正常情况下输入框
+ * 应该是空的，只有用户主动输入才提交。但输入框是 type=password，浏览器会把它当密码框
+ * 记住并自动填充旧值 —— 一保存就把浏览器里的旧 key 写回库，覆盖掉正确的那个。
+ * 所以提交时以这个标志为准：没手动输入过就**不提交 apiKey**，浏览器填什么都不影响。
+ */
+const llmApiKeyTouched = ref(false)
+function onLlmKeyInput() {
+  llmApiKeyTouched.value = true
+  markLlmDirty()
+}
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
 const llmModels = ref([])
@@ -1698,6 +1713,7 @@ async function toggleFreeEgg() {
       llmPreview.value = { ...result }
       settingsStore.setHasApiKey(result.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
       toastFn?.(freeEgg.value ? '已开启每日免费鸡蛋 🥚' : '已恢复自有 LLM 配置', 'success')
@@ -1763,7 +1779,8 @@ async function loadAvailableModels() {
     const headers = llmHeadersEnabled.value ? JSON.parse(llmHeadersText.value) : {}
     const result = await fetchLlmModels({
       baseURL: llmBaseURL.value.trim(),
-      apiKey: llmApiKey.value.trim() || undefined,
+      // 未手动输入时不传 key，由后端回落到库里存的那个（避免用浏览器自动填充的旧值去请求）
+      apiKey: llmApiKeyTouched.value ? (llmApiKey.value.trim() || undefined) : undefined,
       headers,
     })
     llmModels.value = result.models || []
@@ -1824,6 +1841,7 @@ async function switchProfile(id) {
           ? JSON.stringify(result.llmConfig.extraBody, null, 2) : '{}'
         settingsStore.setHasApiKey(result.llmConfig.hasApiKey)
         llmApiKey.value = ''
+        llmApiKeyTouched.value = false
         llmDirty.value = false
         llmSaved.value = false
         // 刷新完整的 features 和 concurrency（profile 切换会影响这些）
@@ -1893,6 +1911,7 @@ async function removeProfile(id) {
       backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
       settingsStore.setHasApiKey(cfg.llm.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
     }
@@ -2187,7 +2206,8 @@ async function fetchNovelaiModels() {
 
 function buildLlmPayload() {
   const payload = {}
-  if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+  // 只有用户手动输入过才提交 apiKey —— 否则浏览器自动填充的旧值会被当成"用户的输入"写回库
+  if (llmApiKeyTouched.value && llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
   if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
   if (llmModel.value) payload.model = llmModel.value
   payload.thinkingMode = llmThinkingMode.value
@@ -2243,6 +2263,7 @@ async function saveLlmConfig() {
       llmExtraBodyText.value = result.extraBody && Object.keys(result.extraBody).length
         ? JSON.stringify(result.extraBody, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
+      llmApiKeyTouched.value = false
 
       // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）
       if (isCustomBaseURL.value) {
