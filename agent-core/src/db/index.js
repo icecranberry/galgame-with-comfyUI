@@ -1010,6 +1010,9 @@ function initSchema(db) {
   // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
   migrateMomentTopicCheckedSchema(db);
 
+  // 迁移: 允许系统/自定义话题同名共存 — 唯一约束改为 (source, name)
+  migrateMomentTopicAllowDuplicateName(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1613,6 +1616,51 @@ function migrateDisturbSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateDisturbSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 允许「系统话题」与「自定义话题」同名共存
+ *
+ * 上游把 moment_topics.name 设成全局 UNIQUE，于是「自定义一条与系统同名的话题」根本插不进去。
+ * 但同名共存是合理需求：用户想用自己的文案，同时保留系统那份，靠 checked 决定抽谁。
+ * 所以把约束从 UNIQUE(name) 放宽成 UNIQUE(source, name)（同一来源内仍然不允许重名）。
+ *
+ * SQLite 不支持直接删除列约束，只能重建表；重建前后字段与数据原样保留。
+ */
+function migrateMomentTopicAllowDuplicateName(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='moment_topics'"
+    ).get();
+    if (!row?.sql) return;
+    if (!/name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) return;   // 已经是新结构，跳过
+
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE moment_topics__migrate (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        desc TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        checked INTEGER DEFAULT 1,
+        UNIQUE(source, name)
+      )
+    `);
+    db.exec(`
+      INSERT INTO moment_topics__migrate (id, name, desc, source, is_active, created_at, updated_at, checked)
+      SELECT id, name, desc, source, is_active, created_at, updated_at, checked FROM moment_topics
+    `);
+    db.exec('DROP TABLE moment_topics');
+    db.exec('ALTER TABLE moment_topics__migrate RENAME TO moment_topics');
+    db.exec('COMMIT');
+    console.log('[db] moment_topics: name 唯一约束放宽为 UNIQUE(source, name)，允许系统/自定义同名共存');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* 事务可能已提交 */ }
+    console.log('[db] migrateMomentTopicAllowDuplicateName error:', err.message);
   }
 }
 
