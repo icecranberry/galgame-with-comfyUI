@@ -210,7 +210,17 @@ router.get('/', (req, res) => {
     ORDER BY cr.created_at ASC
   `).all(character_id);
 
-  res.json({ relationships });
+  // 该角色与「用户」的关系（user_relationships 是单向存角色侧，这里取出来给关系图画一条连到用户的线）
+  const userRel = db.prepare(`
+    SELECT id, relationship_text FROM user_relationships
+    WHERE character_id = ? AND relationship_text IS NOT NULL AND relationship_text != ''
+    LIMIT 1
+  `).get(character_id);
+
+  res.json({
+    relationships,
+    userRelationship: userRel ? { id: userRel.id, text: userRel.relationship_text } : null,
+  });
 });
 
 // POST /api/relationships — 创建关系
