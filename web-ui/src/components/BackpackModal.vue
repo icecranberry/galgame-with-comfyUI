@@ -312,7 +312,7 @@ function close() {
   z-index: 10000;
 }
 .backpack-modal {
-  background: #f4f1eeed;
+  background: var(--modal-bg);
   border-radius: 18px;
   width: min(1280px, 96vw);
   height: 86vh;
@@ -330,7 +330,7 @@ function close() {
   justify-content: space-between;
   align-items: center;
   padding: 18px 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  border-bottom: 1px solid var(--glass-border);
 }
 .header-left { display: flex; align-items: center; gap: 12px; color: var(--text-primary); }
 .header-svg { color: var(--accent); }
@@ -343,7 +343,7 @@ function close() {
   gap: 16px;
   margin: 16px 22px 22px;
   padding: 16px;
-  background: #ffffffb3;
+  background: var(--glass-bg);
   border-radius: 16px;
   overflow: hidden;
   flex: 1;
@@ -506,7 +506,7 @@ function close() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #f5efe7;
+  background: var(--bg-tertiary);
   color: #8a7a6a;
 }
 .effect-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -611,7 +611,7 @@ function close() {
   justify-content: center;
   gap: 8px;
   border-radius: 11px;
-  background: rgba(255, 255, 255, 0.54);
+  background: var(--glass-bg);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -632,7 +632,7 @@ function close() {
   gap: 14px;
 }
 .item-card {
-  background: #fffdf9;
+  background: var(--bg-secondary);
   border-radius: 14px;
   padding: 10px;
   display: flex;
@@ -648,7 +648,7 @@ function close() {
   position: relative;
   aspect-ratio: 1;
   border-radius: 10px;
-  background: #f5efe7;
+  background: var(--bg-tertiary);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -696,14 +696,14 @@ function close() {
 .item-detail-overlay {
   position: absolute;
   inset: 0;
-  background: #f6f2eef1;
+  background: var(--modal-bg);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 6;
 }
 .item-detail-dialog {
-  background: #fffdf9;
+  background: var(--bg-secondary);
   border-radius: 16px;
   padding: 16px;
   width: min(430px, 90%);
@@ -725,7 +725,7 @@ function close() {
   width: 208px;
   height: 208px;
   border-radius: 16px;
-  background: #f5efe7;
+  background: var(--bg-tertiary);
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -749,14 +749,14 @@ function close() {
 .char-picker-overlay {
   position: absolute;
   inset: 0;
-  background: #f6f2eef1;
+  background: var(--modal-bg);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 7;
 }
 .char-picker-dialog {
-  background: #fffdf9;
+  background: var(--bg-secondary);
   border-radius: 16px;
   padding: 16px;
   width: min(420px, 88%);
@@ -780,7 +780,7 @@ function close() {
   overflow-y: auto;
 }
 .char-card { cursor: pointer; border-radius: 12px; transition: background 0.15s; }
-.char-card:hover { background: #f5efe7; }
+.char-card:hover { background: var(--bg-tertiary); }
 .char-card-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; }
 .char-avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; }
 .char-avatar-fallback {
@@ -868,4 +868,60 @@ function close() {
   .effect-time.urgent .effect-time-dot,
   .effect-remove { animation: none; transition: none; }
 }
+
+/* ── 暗夜主题适配 ──────────────────────────────────────────
+   上面那些语义色（区分 装备 / 状态 / 好感 等）原本是按亮色主题调的柔和彩色，
+   深色下原样保留会在深色面板里亮成一块。这里**只覆盖颜色、不动结构**：
+   保留同一色相但压暗并降到半透明，既适配深色又不丢失「一眼分辨类型」的作用。
+   亮色主题下这些规则不生效，观感与之前完全一致。 */
+[data-theme="dark"] .effect-card.card-buff {
+  --effect-surface: rgba(150, 120, 220, 0.16);
+  --effect-border: rgba(150, 120, 220, 0.30);
+  --effect-shadow: rgba(0, 0, 0, 0.32);
+}
+[data-theme="dark"] .effect-card.card-mood {
+  --effect-surface: rgba(var(--accent-rgb), 0.15);
+  --effect-border: rgba(var(--accent-rgb), 0.30);
+  --effect-shadow: rgba(0, 0, 0, 0.32);
+}
+[data-theme="dark"] .effect-card.card-favor {
+  --effect-surface: rgba(230, 170, 60, 0.15);
+  --effect-border: rgba(230, 170, 60, 0.30);
+  --effect-shadow: rgba(0, 0, 0, 0.32);
+}
+/* 0.05 的强调色在深色下几乎看不见，提到 0.12 才分得出卡片 */
+[data-theme="dark"] .effect-card.card-hairstyle,
+[data-theme="dark"] .effect-card.card-world-outfit,
+[data-theme="dark"] .effect-card.card-outfit,
+[data-theme="dark"] .effect-card.card-transform {
+  --effect-surface: rgba(var(--accent-rgb), 0.12);
+  --effect-border: rgba(var(--accent-rgb), 0.26);
+  --effect-shadow: rgba(0, 0, 0, 0.32);
+}
+/* 卡片顶部的内高光是为浅底设计的，深底上要减弱，否则边缘发白 */
+[data-theme="dark"] .effect-card {
+  box-shadow: 0 3px 0 var(--effect-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+[data-theme="dark"] .effect-card:hover,
+[data-theme="dark"] .effect-card:focus-within {
+  box-shadow: 0 4px 0 var(--effect-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* 小色块（缩略图底 / 类型标签）：同色相压暗 + 文字提亮，保证在深底上可读 */
+[data-theme="dark"] .effect-thumb.thumb-world-outfit,
+[data-theme="dark"] .effect-thumb.thumb-outfit,
+[data-theme="dark"] .effect-thumb.thumb-transform,
+[data-theme="dark"] .effect-thumb.thumb-hairstyle { background: rgba(218, 140, 90, 0.20); color: #e8a97f; }
+[data-theme="dark"] .effect-thumb.thumb-buff { background: rgba(150, 120, 220, 0.22); color: #bda9ec; }
+[data-theme="dark"] .effect-thumb.thumb-mood { background: rgba(var(--accent-rgb), 0.20); color: #f09a8a; }
+[data-theme="dark"] .effect-thumb.thumb-favor { background: rgba(230, 170, 60, 0.20); color: #e2b45c; }
+
+[data-theme="dark"] .kind-world-outfit,
+[data-theme="dark"] .kind-outfit,
+[data-theme="dark"] .kind-transform,
+[data-theme="dark"] .kind-hairstyle { background: rgba(218, 140, 90, 0.20); color: #e8a97f; }
+[data-theme="dark"] .kind-buff { background: rgba(150, 120, 220, 0.22); color: #bda9ec; }
+[data-theme="dark"] .kind-mood { background: rgba(var(--accent-rgb), 0.20); color: #f09a8a; }
+[data-theme="dark"] .kind-favor { background: rgba(230, 170, 60, 0.20); color: #e2b45c; }
+[data-theme="dark"] .kind-unknown { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); }
 </style>
