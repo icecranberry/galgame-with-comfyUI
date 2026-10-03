@@ -96,6 +96,9 @@ const TOY_FRAME = 'single object, centered, floating, seamless plain white studi
 
 const IMAGE_FRAME_BY_KEY = {
   'clothes/full': tag => `${tag}, the outfit alone displayed as a clothing item, no humans, no person, flat front view, plain white background, soft even lighting, product photograph, best quality`,
+  // 逆装/露出向：这类衣服的「开口在哪」就是它的全部卖点，只摆一件衣服看不出结构，
+  // 所以展示在无头人体模型上（无头无脸，只到躯干与胯），开口位置才一目了然。
+  'clothes/lewd': tag => `${tag}, the outfit displayed on a headless dress form mannequin, torso down to hips only, no head, no face, no person, plain white background, soft even lighting, product photograph, best quality`,
   'clothes/socks': tag => `${tag}, legwear alone displayed as a clothing item, no humans, no person, flat lay, plain white background, product photograph, best quality`,
   'hairstyle/hair': tag => `${tag}, hairstyle sample shown on a mannequin head silhouette, no face, plain white background, reference sheet, best quality`,
   'transform/body': tag => `${tag}, creature form, full body, plain white background, concept art, best quality`,
