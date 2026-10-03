@@ -23,7 +23,7 @@ import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '.
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
-import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
+import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { pickReactionMarker } from '../services/emojiService.js';
@@ -1728,6 +1728,100 @@ router.post('/refine-appearance-draft', async (req, res) => {
       });
     }
     res.status(500).json({ error: '修正外观失败: ' + rawMsg });
+  }
+});
+
+// ── 人设润色（纯文本 LLM 改写人设；「## 你的外观」段原样保留）──
+// 与「修正外观」同构：只产出草稿并回传整卡，落库由前端走既有保存链路。
+// 外观段单独剥离、润色完再拼回 —— 不依赖模型自觉，从结构上保证生图描述不被改动。
+
+const REFINE_PERSONA_SYSTEM_PROMPT = `你是角色卡人设润色助手。用户会给你一段角色卡的人设正文（Markdown，可能带「## 」小标题），请按要求改写它。
+
+【铁律】
+1. 不得新增、删除或改动任何设定事实。身份、年龄、经历、组织、人际、能力、好恶、口头禅、对特定对象的称呼方式等一律照旧 —— 只改「怎么表达」，不改「表达了什么」。
+2. 绝对不要输出「## 你的外观」段。外观由另一个工具负责，出现即属越界。
+3. 原有的「## 」小标题必须原样保留（标题文字、顺序、数量都不变）；原文没有小标题时也不要自行添加。
+4. 保持原文的人称与视角（原文用第二人称「你」就继续用「你」）。
+5. 直接输出改写后的正文，不要任何前言、后记、解释，也不要用 markdown 代码块包裹。
+
+【文字要求】
+凝练、有画面感、有张力；去掉同义反复、口水话与空泛形容。保留原文中具体的专有名词与数字。`;
+
+const PERSONA_REFINE_MODES = {
+  polish: '润色表达：信息量与篇幅与原文基本持平，只提升文字质量。',
+  enrich: '丰富细节：在原有设定骨架上补充感官细节、具体情境与内在矛盾，让形象更立体。可以增加氛围和心理描写，但不得新增原文未提及的硬设定（亲属、组织、事件、能力等）。篇幅可比原文长约五成。',
+  concise: '精简凝练：删去冗余与重复表达，保留全部设定要点，目标篇幅约为原文的七成。',
+};
+
+/**
+ * 为人设润色做「三段切分」：外观标题之前（要润色的）/ 外观段（原样保留）/ 外观之后（原样保留）。
+ *
+ * 刻意不用 splitAppearanceSection —— 它返回的 `after` 是**外观段之后**的内容、并不含外观段本身，
+ * 拿 before+after 直接拼回会把整个外观段丢掉（已用单测确认过这个坑）。
+ */
+function splitPersonaAroundAppearance(basePrompt) {
+  const base = String(basePrompt || '');
+  const m = base.match(APPEARANCE_HEADING_RE);
+  if (!m) return { target: base.trim(), appearance: '', tail: '' };
+  const next = base.indexOf('\n## ', m.index + 1);
+  return {
+    target: base.slice(0, m.index).trim(),
+    appearance: base.slice(m.index, next >= 0 ? next : base.length).trim(),
+    tail: next >= 0 ? base.slice(next).trim() : '',
+  };
+}
+
+// POST /api/characters/refine-persona-draft — 润色人设（外观段原样保留）
+// Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise' }
+// → { ok, base_prompt（润色后整卡）, original_prompt, mode }
+router.post('/refine-persona-draft', async (req, res) => {
+  const basePrompt = typeof req.body?.base_prompt === 'string' ? req.body.base_prompt : '';
+  if (!basePrompt.trim()) {
+    return res.status(400).json({ error: '人格提示词为空，没有可润色的内容' });
+  }
+  const displayName = String(req.body?.display_name || '').trim() || '角色';
+  const mode = PERSONA_REFINE_MODES[req.body?.mode] ? req.body.mode : 'polish';
+
+  // 只把「外观段之前」的部分交给模型；外观段与它之后的内容原样拼回
+  const { target, appearance, tail } = splitPersonaAroundAppearance(basePrompt);
+  if (target.length < 10) {
+    return res.status(400).json({ error: '外观段之前没有可润色的人设内容' });
+  }
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[refine-persona] polishing "${displayName}" (mode: ${mode}, ${target.length} chars)`);
+
+    const llmResult = await chatSync([
+      // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
+      { role: 'system', content: getSystemRules({ roleplay: false }) },
+      { role: 'system', content: REFINE_PERSONA_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: `角色名：${displayName}\n润色方式：${PERSONA_REFINE_MODES[mode]}\n\n以下是该角色的人设正文（已排除外观段），请输出润色结果：\n\n${target}`,
+      },
+    ], { model, temperature: 0.7, max_tokens: 4096, label: '人设润色' });
+
+    let polished = String(llmResult || '').trim()
+      .replace(/^```(?:markdown|md)?\s*/i, '')   // 去掉可能的代码围栏
+      .replace(/```\s*$/, '')
+      .trim();
+    // 防御：模型若擅自带上外观段，就地截断（外观一律以拼回的原段为准）
+    const intrudedAt = polished.search(/##\s*你的外观/);
+    if (intrudedAt >= 0) polished = polished.slice(0, intrudedAt).trim();
+
+    // 合理性校验：太短多半是被截断或跑偏，宁可报错也不写坏用户的卡
+    if (polished.length < Math.max(20, target.length * 0.3)) {
+      return res.status(502).json({ error: '润色结果过短，可能被模型截断，请重试或换个力度' });
+    }
+
+    // 原顺序拼回：润色后的前段 + 原外观段 + 原外观之后的段落
+    const newBasePrompt = [polished, appearance, tail].filter(Boolean).join('\n\n');
+    console.log(`[refine-persona] done (${target.length} → ${polished.length} chars)`);
+    res.json({ ok: true, base_prompt: newBasePrompt, original_prompt: basePrompt, mode });
+  } catch (err) {
+    console.error('[refine-persona] error:', err.message);
+    res.status(500).json({ error: '人设润色失败: ' + String(err?.message || err) });
   }
 });
 

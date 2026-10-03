@@ -292,6 +292,14 @@ export function refineAppearanceDraft({ image, basePrompt, displayName }) {
   })
 }
 
+/** 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存 */
+export function refinePersonaDraft({ basePrompt, displayName, mode }) {
+  return request('/characters/refine-persona-draft', {
+    method: 'POST',
+    body: { base_prompt: basePrompt, display_name: displayName, mode },
+  })
+}
+
 /** 生成角色立绘任务（已有立绘时走对比确认，requirement 为额外需求 / prompt 为直接复用提示词） */
 export function generateStandingTask(characterId, body = {}) {
   return request(`/characters/${characterId}/generate-standing-task`, { method: 'POST', body })

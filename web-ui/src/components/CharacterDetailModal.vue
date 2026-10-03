@@ -2,7 +2,9 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <!-- ⚠ 2026-10-08 合并 v3.7.0：上游新增 inlineLayout 类（内联布局）、本地新增 showPersonaRefineModal
+           互斥条件（人设润色弹窗打开时收起遮罩）—— 两者叠加，**都保留**。 -->
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal && !showPersonaRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -161,6 +163,10 @@
               <linshe-button variant="secondary" @click="openRefineModal">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m13 7 3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                 修正外观
+              </linshe-button>
+              <linshe-button variant="secondary" @click="openPersonaRefineModal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="m18.4 2.6 2.9 2.9-8.5 8.5-3.6.7.7-3.6 8.5-8.5Z" /></svg>
+                人设润色
               </linshe-button>
               <div class="recruit-appearance-hint">
                 外观描述补充tag查阅
@@ -441,6 +447,14 @@
       :base-prompt="detail.editPrompt"
       @applied="onAppearanceRefined"
     />
+
+    <!-- ── 人设润色弹窗：纯文本改写人设（外观段原样保留）── -->
+    <PersonaRefineModal
+      v-model="showPersonaRefineModal"
+      :display-name="character?.display_name || ''"
+      :base-prompt="detail.editPrompt"
+      @applied="onPersonaRefined"
+    />
   </Teleport>
 </template>
 
@@ -456,6 +470,7 @@ import LinsheModal from './ui/LinsheModal.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
+import PersonaRefineModal from './PersonaRefineModal.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
@@ -1020,6 +1035,7 @@ async function saveOutfits() {
 // ═══════════════════════════════════════
 
 const showRefineModal = ref(false)
+const showPersonaRefineModal = ref(false)
 
 function openRefineModal() {
   if (!props.character) return
@@ -1037,6 +1053,19 @@ async function onAppearanceRefined({ basePrompt }) {
     console.error('onAppearanceRefined save failed:', err)
     toastFn('外观已应用到人格卡，但自动保存失败，请手动点击「保存」', 'error')
   }
+}
+
+// 人设润色：与「修正外观」不同，这里**不自动保存** —— 改的是整张人设，
+// 交回文本框让用户自己核对；确认无误再点「保存」提交。
+function openPersonaRefineModal() {
+  if (!props.character) return
+  showPersonaRefineModal.value = true
+}
+
+function onPersonaRefined({ basePrompt }) {
+  detail.editPrompt = basePrompt
+  detail.dirty = true
+  toastFn('润色已填入人格提示词，请核对后点「保存」生效', 'success')
 }
 
 // ═══════════════════════════════════════
