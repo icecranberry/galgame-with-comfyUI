@@ -241,12 +241,23 @@
         v-for="f in folders"
         :key="f.id"
         class="chip folder-chip"
-        :class="{ active: folderFilter === f.id }"
+        :class="{
+          active: folderFilter === f.id,
+          'is-dragging': dragFolderId === f.id,
+          'is-drop-target': dragOverFolderId === f.id,
+        }"
+        draggable="true"
         role="button"
         tabindex="0"
+        title="点击筛选，按住拖动可调整顺序"
         @click="folderFilter = f.id"
         @keydown.enter.prevent="folderFilter = f.id"
         @keydown.space.prevent="folderFilter = f.id"
+        @dragstart="onFolderDragStart($event, f)"
+        @dragover="onFolderDragOver($event, f)"
+        @dragleave="onFolderDragLeave(f)"
+        @drop.prevent="onFolderDrop($event, f)"
+        @dragend="onFolderDragEnd"
       >
         <span class="folder-chip-name">{{ f.name }}</span>
         <span class="folder-chip-count">{{ f.count }}</span>
@@ -938,6 +949,62 @@ const folderFeatureReady = computed(() => folderStore.ready)
 // 'all' | 'uncategorized' | 文件夹 id
 const folderFilter = ref('all')
 const charSearch = ref('')
+
+// ── 文件夹拖拽排序 ──
+// 用原生 HTML5 拖放：这一排就是个扁平的 chip 列表，没必要为此引入拖拽库。
+// 「全部 / 未分类」是固定项，不参与排序，所以只有 v-for 里的文件夹 chip 是 draggable。
+const dragFolderId = ref(null)
+const dragOverFolderId = ref(null)
+
+function onFolderDragStart(ev, f) {
+  dragFolderId.value = f.id
+  dragOverFolderId.value = null
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = 'move'
+    // Firefox 必须 setData 才会真正开始拖拽
+    ev.dataTransfer.setData('text/plain', String(f.id))
+  }
+}
+
+function onFolderDragOver(ev, f) {
+  if (dragFolderId.value == null || dragFolderId.value === f.id) return
+  ev.preventDefault()   // 不 preventDefault 就不会触发 drop
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+  dragOverFolderId.value = f.id
+}
+
+function onFolderDragLeave(f) {
+  if (dragOverFolderId.value === f.id) dragOverFolderId.value = null
+}
+
+async function onFolderDrop(ev, target) {
+  const fromId = dragFolderId.value
+  dragFolderId.value = null
+  dragOverFolderId.value = null
+  if (fromId == null || fromId === target.id) return
+
+  const list = [...folders.value]
+  const fromIdx = list.findIndex(x => x.id === fromId)
+  const toIdx = list.findIndex(x => x.id === target.id)
+  if (fromIdx < 0 || toIdx < 0) return
+
+  // 语义是「插到目标之前」：向后拖时目标索引会因先移除而前移一位，所以要减 1，
+  // 否则会落到目标后面（拖 A 到 C 会变成 B,C,A,D 而不是 B,A,C,D）。
+  const [moved] = list.splice(fromIdx, 1)
+  const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx
+  list.splice(insertAt, 0, moved)
+
+  try {
+    await folderStore.reorderFolders(list.map(x => x.id))
+  } catch (err) {
+    toastFn?.('保存文件夹顺序失败: ' + (err?.message || '未知错误'), 'error')
+  }
+}
+
+function onFolderDragEnd() {
+  dragFolderId.value = null
+  dragOverFolderId.value = null
+}
 
 const showFolderEditor = ref(false)
 const editingFolder = ref(null)   // null = 新建；否则为被重命名的文件夹
@@ -2631,6 +2698,19 @@ onMounted(async () => {
 .folder-chip {
   user-select: none;
   max-width: 220px;
+  /* 提示可拖动；实际拖拽用 HTML5 draggable，不依赖光标样式 */
+  cursor: grab;
+}
+.folder-chip:active { cursor: grabbing; }
+/* 正在被拖走的那一枚：淡出让位 */
+.folder-chip.is-dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+/* 拖到谁头上，谁高亮成"将插到这里" */
+.folder-chip.is-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
 }
 .folder-chip-name {
   max-width: 120px;

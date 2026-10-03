@@ -105,6 +105,11 @@ export function deleteCharacterFolder(id) {
   return request(`/characters/folders/${id}`, { method: 'DELETE' })
 }
 
+/** 重排文件夹顺序（拖拽排序），ids 为期望的先后顺序 */
+export function reorderCharacterFolders(ids) {
+  return request('/characters/folders/reorder', { method: 'PUT', body: { ids } })
+}
+
 // folderId 传 null 表示移回「未分类」
 export function moveCharacterToFolder(characterId, folderId) {
   return request(`/characters/${characterId}/folder`, { method: 'PUT', body: { folder_id: folderId } })

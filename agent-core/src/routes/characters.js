@@ -234,6 +234,30 @@ router.post('/folders', (req, res) => {
   res.status(201).json({ id: r.lastInsertRowid, name, sort_order: next, count: 0 });
 });
 
+// PUT /api/characters/folders/reorder — 重排文件夹顺序（拖拽排序）
+// 注意：必须注册在下面的 '/folders/:id' 之前，否则 'reorder' 会被当成 id 匹配掉。
+router.put('/folders/reorder', (req, res) => {
+  const db = getDb();
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(n => parseInt(n, 10)) : null;
+  if (!ids || !ids.length || ids.some(n => !Number.isInteger(n))) {
+    return res.status(400).json({ error: 'ids 必须是文件夹 id 数组' });
+  }
+  // 只接受真实存在的文件夹，且以库里的现状为准做交集，防止前端传了脏数据把 sort_order 写乱
+  const existing = db.prepare('SELECT id FROM character_folders').all().map(r => r.id);
+  const existingSet = new Set(existing);
+  const ordered = ids.filter(id => existingSet.has(id));
+  if (!ordered.length) return res.status(400).json({ error: '没有有效的文件夹 id' });
+  // 没被前端列到的文件夹保留在末尾，保持相对顺序（避免漏传导致它们乱序）
+  for (const id of existing) if (!ordered.includes(id)) ordered.push(id);
+
+  const stmt = db.prepare('UPDATE character_folders SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    ordered.forEach((id, i) => stmt.run(i + 1, id));
+  });
+  tx();
+  res.json({ ok: true, order: ordered });
+});
+
 // PUT /api/characters/folders/:id — 重命名文件夹
 router.put('/folders/:id', (req, res) => {
   const db = getDb();

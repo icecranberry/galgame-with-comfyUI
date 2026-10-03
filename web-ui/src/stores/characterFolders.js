@@ -67,9 +67,28 @@ export const useCharacterFoldersStore = defineStore('characterFolders', () => {
     await load()
   }
 
+  /**
+   * 拖拽重排文件夹。
+   * 先乐观更新本地顺序（拖完立刻见效果），失败再回滚 —— 顺序是纯观感数据，
+   * 没必要等接口回来才动。ids 之外没提到的文件夹保留在末尾，避免界面凭空丢项。
+   */
+  async function reorderFolders(ids) {
+    const prev = folders.value
+    const byId = new Map(prev.map(f => [f.id, f]))
+    const next = ids.map(id => byId.get(id)).filter(Boolean)
+    for (const f of prev) if (!ids.includes(f.id)) next.push(f)
+    folders.value = next
+    try {
+      await api.reorderCharacterFolders(ids)
+    } catch (err) {
+      folders.value = prev      // 回滚，避免本地顺序与库里不一致
+      throw err
+    }
+  }
+
   return {
     folders, uncategorizedCount, ready,
-    load, moveCharacter, createFolder, renameFolder, removeFolder,
+    load, moveCharacter, createFolder, renameFolder, removeFolder, reorderFolders,
   }
 })
 
