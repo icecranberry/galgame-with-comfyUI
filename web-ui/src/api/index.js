@@ -354,7 +354,12 @@ export async function deleteUserRelationship(id) {
   return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext) {
+// 上传一张聊天图片（base64 data URI → 返回 /images/chat/... 路径），发图前先调它
+export function uploadChatImage(base64) {
+  return request('/chat/upload-image', { method: 'POST', body: { base64 } })
+}
+
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext, images = null) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -375,7 +380,7 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(townContext === undefined ? {} : { townContext }) }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(Array.isArray(images) && images.length ? { images } : {}), ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
