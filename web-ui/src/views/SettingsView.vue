@@ -685,10 +685,10 @@ type="range" min="0" max="1" step="0.1"
         </div>
       </div>
 
-      <!-- 角色通知（左下角轻通知） -->
+      <!-- 角色通知（右下角轻通知） -->
       <div class="card">
         <h3>角色通知</h3>
-        <p class="fd">你与角色有关的操作（下载她分享的图、置顶、点赞动态、换外观、重开旧回信）后，左下角偶尔出现一句角色反应。不依赖立绘小窗，也不占用聊天消息。</p>
+        <p class="fd">你与角色有关的操作（下载她分享的图、置顶、点赞动态、换外观、重开旧回信）后，右下角偶尔出现一句角色反应。不依赖立绘小窗，也不占用聊天消息。</p>
 
         <div class="toggle-row">
           <div style="flex:1">
@@ -779,7 +779,7 @@ type="range" min="0" max="1" step="0.1"
           <div class="toggle-row">
             <div style="flex:1">
               <div class="tl">即时生成反应</div>
-              <div class="td">小概率由模型结合人设与本次事实现写一句，其余使用内置短句；命中与否不影响操作结果</div>
+              <div class="td">小概率由模型结合人设与本次事实现写一句，未命中不弹通知（配置了专属短句包的角色会改用短句包）；命中与否不影响操作结果</div>
             </div>
             <linshe-switch
               :model-value="reactions.config.llmEnabled"
@@ -793,7 +793,7 @@ type="range" min="0" max="1" step="0.1"
             <div class="toggle-row ct-slider-row">
               <div>
                 <div class="tl">即时反应概率</div>
-                <div class="td">只对已经通过冷却与去重的候选抽签一次，命中就请求模型，未命中使用内置短句</div>
+                <div class="td">只对已经通过冷却与去重的候选抽签一次，命中就请求模型；未命中不弹通知，配置了专属短句包的角色改用短句包</div>
               </div>
               <div class="ct-slider-control">
                 <linshe-slider
@@ -1356,7 +1356,7 @@ const toastFn = inject('toast')
 const confirmFn = inject('confirm')
 const showChangelogFn = inject('showChangelog', null)
 
-// ── 角色通知（左下角轻通知）：配置与预览都走 store，设置页只做入口 ──
+// ── 角色通知（右下角轻通知）：配置与预览都走 store，设置页只做入口 ──
 const reactions = useCharacterReactionsStore()
 const chat = useChatStore()
 const previewReaction = () => {
@@ -1400,7 +1400,7 @@ async function onGeneratePack(character) {
 
 async function onDeletePack(character) {
   const ok = confirmFn
-    ? await confirmFn({ message: `删除「${character.name}」的短句包？删除后回退到内置短句。`, okText: '删除', danger: true })
+    ? await confirmFn({ message: `删除「${character.name}」的短句包？删除后该角色未命中概率时将不再弹通知。`, okText: '删除', danger: true })
     : window.confirm('确定删除这份短句包吗？')
   if (!ok) return
   const result = await reactions.deletePack(`character:${character.id}`)
@@ -3178,7 +3178,7 @@ function resetTestPrompts() {
   font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
 }
 
-/* ── 角色通知（左下角轻通知）设置 ── */
+/* ── 角色通知（右下角轻通知）设置 ── */
 .ct-preview-btn { flex-shrink: 0; margin-right: 4px; }
 .ct-slider-row { align-items: flex-start; }
 .ct-slider-control {

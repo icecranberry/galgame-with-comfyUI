@@ -1,12 +1,13 @@
 /**
- * 角色操作反馈（左下角轻通知）——纯规则层。
+ * 角色操作反馈（右下角轻通知）——纯规则层。
  *
  * 这一层只做判断，不碰 DOM、不碰网络、不读 Pinia：
  *   · 事件目录（哪些语义事件允许弹、谁生产、事实边界）
  *   · 目标角色与去重键解析
  *   · 资源级 / 日级去重、全局与角色冷却、类别开关
  *   · 一次概率抽签（命中即请求模型，无额度 / 间隔 / 并发限制）
- *   · 缓存短句（未命中即时反应时的回退，没有合适短句则静默）
+ *   · 角色级短句（短句包 / 手动编辑）：仅未命中且该角色配置了短句时显示，否则静默；
+ *     内置基础短句已移除（§18）
  *
  * 时钟（now）与随机源（random）由调用方注入，便于测试固定边界；
  * 见 docs/character-reaction-notification-plan.md §2.2 / §5.4 / §6 / §7.1。
@@ -266,66 +267,7 @@ export function clampText(text) {
   return chars.length > MAX_VISIBLE_TEXT ? chars.slice(0, MAX_VISIBLE_TEXT).join('') : clean
 }
 
-// ── 缓存短句（首期手工基础短句 + 角色级覆盖，§6.3）──
-
-export const BASE_PHRASES = {
-  'character.pin_enabled': [
-    { text: '哦？给我留了个最前面的位置。', emotion: 'pleased' },
-    { text: '把我放在最上面了啊。', emotion: 'neutral' },
-    { text: '这么显眼，想装作没看见都难。', emotion: 'shy' },
-  ],
-  'moment.like_enabled': [
-    { text: '这个你也喜欢啊。', emotion: 'pleased' },
-    { text: '看见了就点一下，是吧。', emotion: 'neutral' },
-    { text: '随手一个赞，我倒记住了。', emotion: 'shy' },
-  ],
-  'moment.like_enabled:old': [
-    { text: '你都翻到那么前面去了？', emotion: 'surprised' },
-    { text: '这么久以前的，你也找得到。', emotion: 'pleased' },
-    { text: '翻旧账翻到我这里来了。', emotion: 'neutral' },
-  ],
-  'appearance.applied': [
-    { text: '怎么样，这一身还合适吗？', emotion: 'pleased' },
-    { text: '换上了，你看看。', emotion: 'neutral' },
-    { text: '……别一直盯着看。', emotion: 'shy' },
-  ],
-  'appearance.restored': [
-    { text: '还是这身穿着习惯。', emotion: 'neutral' },
-    { text: '换回来了，安稳。', emotion: 'pleased' },
-    { text: '绕了一圈，还是原来的好。', emotion: 'neutral' },
-  ],
-  'letter.reopened': [
-    { text: '那封信，你还留着啊。', emotion: 'pleased' },
-    { text: '又翻到那封信了？', emotion: 'surprised' },
-    { text: '写过的字，再看一遍。', emotion: 'shy' },
-  ],
-  // M3：P1 行为的缓存短句（不责怪、不索要，§2.2）
-  'character.avatar_changed': [
-    { text: '以后就用这张认我了？', emotion: 'pleased' },
-    { text: '换成这张，你挑的。', emotion: 'neutral' },
-    { text: '……看久了会不会不习惯。', emotion: 'shy' },
-  ],
-  'character.display_name_changed': [
-    { text: '那就试试这么叫我吧。', emotion: 'neutral' },
-    { text: '换个名字，你叫着顺口就行。', emotion: 'pleased' },
-    { text: '名字换了，我还是我。', emotion: 'shy' },
-  ],
-  'moment.share_exported': [
-    { text: '记得挑好看的那张。', emotion: 'pleased' },
-    { text: '要发出去的话，别配太土的词。', emotion: 'neutral' },
-    { text: '……截得干净点。', emotion: 'shy' },
-  ],
-
-  'character.relationship_changed': [
-    { text: '你对我们之间的说法，改了。', emotion: 'neutral' },
-    { text: '原来在你眼里是这样啊。', emotion: 'surprised' },
-    { text: '记下了。', emotion: 'shy' },
-  ],
-  'schedule.peeked': [
-    { text: '被我发现了，你在偷看。', emotion: 'pleased' },
-    { text: '看看就算了，别一直盯着。', emotion: 'shy' },
-    { text: '这个瞬间，你倒是没赶上。', emotion: 'neutral' },
-  ],}
+// ── 角色级短句（M2 短句包 / 手动编辑，§6.3）；内置基础短句已移除（§18）──
 
 /** 分支选择：点赞旧动态走 :old 分支（§2.2） */
 export function phraseBranchFor(event) {
@@ -357,15 +299,14 @@ export function fillPhrase(text, event) {
 }
 
 /**
- * 取一条缓存短句。角色级覆盖优先于基础短句；都没有合适短句时返回 null（静默）。
+ * 取一条角色级短句（短句包 / 手动编辑）。没有配置或没有合法短句时返回 null（静默）。
  * @param {object} event
  * @param {object} [overrides] `{ [phraseKey]: [{text,emotion}] }` 角色级短句
  * @param {() => number} [random]
  */
 export function resolveCachedText(event, overrides = null, random = Math.random) {
   const key = phraseKeyFor(event)
-  const own = overrides && Array.isArray(overrides[key]) ? overrides[key] : null
-  const pool = (own && own.length ? own : BASE_PHRASES[key]) || null
+  const pool = overrides && Array.isArray(overrides[key]) ? overrides[key] : null
   if (!pool || pool.length === 0) return null
   const start = Math.floor(random() * pool.length) % pool.length
   for (let i = 0; i < pool.length; i += 1) {
@@ -619,7 +560,7 @@ export function createReactionEngine(options = {}) {
     if (displayGapBlocked(t)) return { action: 'ignore', reason: 'global-cooldown' }
     if (categoryGapBlocked(event, t)) return { action: 'ignore', reason: 'category-cooldown' }
 
-    // 即时反应：一次概率抽签，命中即请求模型；未命中 → 缓存短句
+    // 即时反应：一次概率抽签，命中即请求模型；未命中只在该角色配置了短句（包 / 手动编辑）时显示，否则静默
     if (spec.llm && config.llmEnabled) {
       if (!hasRolled(event)) markRolled(event, t)
       const hit = opts.llmForced === true || rollLlm()
@@ -630,27 +571,9 @@ export function createReactionEngine(options = {}) {
       }
     }
 
-    const cached = fallbackTextWithOverrides(event, opts.overrides)
+    const cached = resolveCachedText(event, opts.overrides || null, random)
     if (!cached) return { action: 'silent', reason: 'no-cached-line' }
     return { action: 'display', source: 'cached', ...cached, event }
-  }
-
-  function fallbackText(event, overrides = null) {
-    const picked = resolveCachedText(event, overrides, random)
-    if (!picked) return null
-    return { ...picked, event }
-  }
-
-  /**
-   * 带两层短句来源的缓存回退：先按基础短句抽一次，再按角色覆盖（短句包 / 手动编辑）抽一次。
-   * 两层都抽同一个随机序列，测试注入固定随机源时结果确定。
-   */
-  function fallbackTextWithOverrides(event, overrides) {
-    const base = fallbackText(event)
-    if (base) return base
-    if (!overrides) return null
-    const seed = random()
-    return fallbackText(event, overrides, () => ((seed * 9301 + 49297) % 233280) / 233280)
   }
 
   /** 只做「这次事实是否还值得展示」的终检（异步返回后调用，§7.1-6） */
@@ -706,8 +629,6 @@ export function createReactionEngine(options = {}) {
     stillValid,
     markDisplayed,
     markSuppressed,
-    fallbackText,
-    fallbackTextWithOverrides,
     hasRolled,
     markRolled,
     isDuplicate,

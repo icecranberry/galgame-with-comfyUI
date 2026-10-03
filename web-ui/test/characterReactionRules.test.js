@@ -200,10 +200,11 @@ test('paused scene still normalizes explicit operations instead of throwing', ()
 
 test('100 repeats inside one dedupe window produce at most one candidate and one dice roll', () => {
   const { engine } = makeEngine({ llmProbability: 0.5 })
+  const overrides = { 'appearance.applied': [{ text: '包里的台词。', emotion: 'neutral' }] }
   let displayed = 0
   let modelRequests = 0
   for (let i = 0; i < 100; i += 1) {
-    const decision = engine.decide(event({ operationId: `op-${i}` }))
+    const decision = engine.decide(event({ operationId: `op-${i}` }), now(), { overrides })
     if (decision.action === 'display') { displayed += 1; engine.markDisplayed(event()) }
     if (decision.action === 'request-llm') modelRequests += 1
   }
@@ -220,7 +221,8 @@ test('resource dedupe follows the catalog window and the same fact never repeats
   clock += 4 * 60_000
   assert.equal(engine.decide({ ...first, occurredAtMs: clock }).reason, 'duplicate')
   clock += 2 * 60_000
-  assert.ok(['display', 'request-llm'].includes(engine.decide({ ...first, occurredAtMs: clock }).action))
+  // 走出窗口后按正常流程判定；未命中抽签且没有角色级短句时是 silent（§18）
+  assert.ok(['display', 'request-llm', 'silent'].includes(engine.decide({ ...first, occurredAtMs: clock }).action))
 })
 
 test('per-day facts use the local day: crossing midnight does not replay them', () => {
@@ -229,15 +231,16 @@ test('per-day facts use the local day: crossing midnight does not replay them', 
   engine.markDisplayed(liked)
   clock += 26 * 3600_000
   // 同帖本地日内一次：跨日后该帖子不再重复通知（新的本地日会重新允许新帖子）
-  assert.ok(['display', 'request-llm'].includes(engine.decide({ ...liked, occurredAtMs: clock }).action))
+  assert.ok(['display', 'request-llm', 'silent'].includes(engine.decide({ ...liked, occurredAtMs: clock }).action))
   const another = event({ type: 'moment.like_enabled', subject: { kind: 'moment', id: 'post-10' }, outcome: 'confirmed', occurredAtMs: clock })
-  assert.ok(['display', 'request-llm'].includes(engine.decide(another).action))
+  assert.ok(['display', 'request-llm', 'silent'].includes(engine.decide(another).action))
 })
 
 test('the 400ms merge window keeps only one semantic event of one business operation', () => {
   const { engine } = makeEngine({ llmProbability: 0 })
   const first = event({ type: 'appearance.applied', subject: { kind: 'outfit', id: 'outfit-a' }, outcome: 'applied', operationId: 'op-merge' })
-  assert.equal(engine.decide(first).action, 'display')
+  // 没有角色级短句时未命中抽签即静默（§18），但事实仍被合并窗口记录
+  assert.equal(engine.decide(first).action, 'silent')
   engine.markDisplayed(first)
   // 同一次操作在 400ms 内派生的另一类语义事件（换装触发的道具更新 + 外观更新）被合并掉
   clock += 120
@@ -252,28 +255,23 @@ test('the 400ms merge window keeps only one semantic event of one business opera
   assert.equal(engine.isWithinMergeWindow(other, clock), false)
 })
 
-test('a character pack overrides the base lines and is used by decide / fallbackTextWithOverrides', () => {
+test('character pack lines are used on a dice miss; without them the miss is silent', () => {
   const packOverrides = {
     'appearance.applied': [
       { text: '包里的第一条台词。', emotion: 'shy' },
       { text: '包里的第二条台词。', emotion: 'neutral' },
     ],
   }
-  // fallbackText 显式传覆盖时直接命中包
   const { engine } = makeEngine({ llmProbability: 0 })
-  const viaFallback = engine.fallbackText(event(), packOverrides)
-  assert.ok(['包里的第一条台词。', '包里的第二条台词。'].includes(viaFallback.text))
+  // 配置了角色级短句：未命中抽签时显示短句包
+  const withPack = engine.decide(event(), now(), { overrides: packOverrides })
+  assert.equal(withPack.action, 'display')
+  assert.ok(['包里的第一条台词。', '包里的第二条台词。'].includes(withPack.text))
 
-  // decide 的 opts.overrides 只在基础短句不可用时兜底（两层都抽，结果确定）
-  const seeded = createReactionEngine({ now, random: () => 0.9, config: { ...DEFAULT_CONFIG, llmProbability: 0 } })
-  const decision = seeded.decide(event(), now(), { overrides: packOverrides })
-  assert.equal(decision.action, 'display')
-  assert.ok(decision.text.length > 0)
-
-  // 未配置覆盖时行为不变
-  const plain = createReactionEngine({ now, random: () => 0.9, config: { ...DEFAULT_CONFIG, llmProbability: 0 } })
-  const plainDecision = plain.decide(event(), now(), {})
-  assert.equal(plainDecision.action, 'display')
+  // 没有角色级短句：未命中即静默，不再有内置基础短句（§18）
+  const plain = engine.decide(event({ operationId: 'op-plain' }))
+  assert.equal(plain.action, 'silent')
+  assert.equal(plain.reason, 'no-cached-line')
 })
 
 test('display cooldowns run before the dice roll and never queue', () => {
@@ -320,7 +318,7 @@ test('events older than the 8 second validity window are dropped', () => {
 
 test('dice: 0% never requests the model, a forced hit requests once and never re-rolls the same fact', () => {
   const zero = makeEngine({ llmProbability: 0 })
-  assert.equal(zero.engine.decide(event()).action, 'display')
+  assert.equal(zero.engine.decide(event()).action, 'silent', '未命中且没有角色级短句时静默（§18）')
 
   const full = makeEngine({ llmProbability: 1 })
   assert.equal(full.engine.decide(event()).action, 'request-llm')
@@ -329,10 +327,10 @@ test('dice: 0% never requests the model, a forced hit requests once and never re
   assert.notEqual(full.engine.decide(event({ operationId: 'other-op' }), now(), { llmForced: true }).action, 'request-llm')
 })
 
-test('the default 15% roll is decided once per fact; a miss still shows a cached line', () => {
+test('the default 15% roll is decided once per fact; a miss is silent without role-level lines', () => {
   assert.equal(DEFAULT_CONFIG.llmProbability, 0.15)
   const miss = createReactionEngine({ now, random: () => 0.5, config: { ...DEFAULT_CONFIG, llmProbability: 0.15 } })
-  assert.equal(miss.decide(event()).action, 'display')
+  assert.equal(miss.decide(event()).action, 'silent')
   assert.equal(miss.hasRolled(event()), true)
 
   const hit = createReactionEngine({ now, random: () => 0.05, config: { ...DEFAULT_CONFIG, llmProbability: 0.15 } })
@@ -359,17 +357,22 @@ test('stillValid re-checks switches and expiry for late model results', () => {
 
 // ── 缓存短句与素材语义（§3.3 / §6.3）──
 
-test('cached lines cover every displayable event and the old-moment branch', () => {
-  for (const type of EVENT_TYPES) {
-    const line = resolveCachedText(event({ type, subject: { kind: 'character', id: '42' }, outcome: 'confirmed' }), null, () => 0)
-    assert.ok(line && line.text.length > 0, `${type} 缺少缓存短句`)
-    assert.ok(['neutral', 'pleased', 'shy', 'surprised'].includes(line.emotion))
+test('role-level phrase pools (including the old-moment branch key) are the only line source', () => {
+  const pools = {
+    'character.pin_enabled': [{ text: '置顶包台词。', emotion: 'pleased' }],
+    'moment.like_enabled:old': [{ text: '旧动态专属。', emotion: 'surprised' }],
   }
-  const oldLine = resolveCachedText(event({ type: 'moment.like_enabled', payload: { old: true } }), null, () => 0)
-  assert.equal(oldLine.text, '你都翻到那么前面去了？')
+  const pinned = resolveCachedText(event({ type: 'character.pin_enabled', subject: { kind: 'character', id: '42' }, outcome: 'confirmed' }), pools, () => 0)
+  assert.equal(pinned.text, '置顶包台词。')
+  const oldLine = resolveCachedText(event({ type: 'moment.like_enabled', payload: { old: true } }), pools, () => 0)
+  assert.equal(oldLine.text, '旧动态专属。', '旧动态走 :old 分支键')
+
+  // 没有角色级短句时返回 null：不再有内置基础短句兜底（§18）
+  assert.equal(resolveCachedText(event({ type: 'letter.reopened' }), null, () => 0), null)
+  assert.equal(resolveCachedText(event({ type: 'letter.reopened' }), {}, () => 0), null)
 })
 
-test('role-level phrase overrides win over base lines and unknown placeholders are dropped', () => {
+test('role-level phrase overrides resolve with unknown placeholders dropped', () => {
   const override = { 'appearance.applied': [{ text: '角色专属台词。', emotion: 'shy' }] }
   const line = resolveCachedText(event(), override, () => 0)
   assert.equal(line.text, '角色专属台词。')

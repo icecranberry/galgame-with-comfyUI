@@ -119,7 +119,7 @@ router.put('/packs/:characterId', (req, res) => {
   }
 });
 
-/** DELETE /api/character-reactions/packs/:characterId — 删除短句包，回到基础短句 */
+/** DELETE /api/character-reactions/packs/:characterId — 删除短句包（删除后该角色未命中概率时不再弹通知） */
 router.delete('/packs/:characterId', (req, res) => {
   try {
     const removed = deleteReactionPack(req.params.characterId);

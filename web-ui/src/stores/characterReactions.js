@@ -75,7 +75,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
 
   const engine = createReactionEngine({ config: { ...config } })
 
-  /** 展示中的卡片：左下角可叠多条，从下往上顶 */
+  /** 展示中的卡片：右下角可叠多条，从下往上顶 */
   const shown = ref([])             // [{ id, actorKey, name, text, emotion, mediaUrl, mediaKind, source, duration, ... }]
   const pending = ref(null)         // 阻塞期间最多保留 1 条候选（§6.1）
   const blocked = ref(false)
@@ -168,7 +168,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
   }
 
   /**
-   * 读取某角色的短句包并缓存。失败静默（回退基础短句），
+   * 读取某角色的短句包并缓存。失败静默（该角色未命中概率时不再弹通知），
    * 不因为读取失败而触发生成。
    */
   async function loadPack(actorKey) {
@@ -216,7 +216,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     }
   }
 
-  /** 删除短句包，回到基础短句 */
+  /** 删除短句包（删除后该角色未命中概率时不再弹通知） */
   async function deletePack(actorKey) {
     const parsed = parseActorKey(actorKey)
     if (!parsed || parsed.kind !== 'character') return { ok: false, error: '目标角色无效' }
@@ -312,7 +312,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     return { kind: 'initial', url: null }
   }
 
-  //  候选与展示（可叠多条，左下角从下往上顶）
+  //  候选与展示（可叠多条，右下角从下往上顶）
 
   const cardTimers = new Map()   // cardId -> timeout
 
@@ -461,7 +461,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     if (!config.enabled || blocked.value || sceneBlocked.value) return
     present(candidate)
   }
-  /** 请求即时反应；4 秒超时 / 失败 / 非法输出 → 一次缓存回退（§7.1-5） */
+  /** 请求即时反应；4 秒超时 / 失败 / 非法输出 → 静默丢弃（§7.1-5 / §18） */
   async function requestInstantReaction(event, history = null) {
     try {
       const controller = new AbortController()
@@ -491,8 +491,8 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     }
   }
 
-  // 执行一次判定结果：展示缓存短句或请求一次即时反应（失败回退缓存）
-  async function runDecision(event, decision, overrides, history = null) {
+  // 执行一次判定结果：展示角色级短句（包 / 手动编辑）或请求一次即时反应（失败静默，不回退短句）
+  async function runDecision(event, decision, history = null) {
     if (decision.action === 'display') {
       await present({ event, text: decision.text, emotion: decision.emotion, source: decision.source })
       return
@@ -501,11 +501,8 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
       const result = await requestInstantReaction(event, history)
       if (result && engine.stillValid(event)) {
         await present(result)
-        return
       }
-      // 超时 / 失败 / 失效时允许一次缓存回退（基础短句或角色短句包），没有短句则静默
-      const cached = engine.fallbackText(event) || engine.fallbackText(event, overrides)
-      if (cached) await present({ event, text: cached.text, emotion: cached.emotion, source: 'cached' })
+      // 超时 / 失败 / 失效：静默丢弃，不做缓存短句回退（§18）
     }
   }
 
@@ -514,9 +511,9 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     const overrides = mergedPhraseOverrides(event.actorKey)
     const decision = engine.decide(event, Date.now(), overrides ? { overrides } : {})
     if (decision.action === 'ignore') return
-    // 静默（没有合适短句）也要把这次事实记下来：反复操作不会每次重新抽签、也不会积攒候选
+    // 静默（未命中且没有角色级短句）也要把这次事实记下来：反复操作不会每次重新抽签、也不会积攒候选
     if (decision.action === 'silent') { engine.markSuppressed(event); return }
-    await runDecision(event, decision, overrides, history)
+    await runDecision(event, decision, history)
   }
 
   // ── 生命周期 ──

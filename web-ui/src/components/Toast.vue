@@ -48,7 +48,7 @@
     </div>
   </Teleport>
 
-  <!--  角色通知（左下角轻通知）：非模态、可叠多条、独立层级与命名 class 
+  <!--  角色通知（右下角轻通知）：非模态、可叠多条、独立层级与命名 class 
        与右上角系统 Toast 共用同一套暖纸皮肤与动效语言，但不继承
        .__toast__root 的 99999 强制层级；新卡片从下往上顶，最多叠 3 条。 -->
   <Teleport v-if="ready" to="body">
@@ -191,7 +191,7 @@ function pinLeaving(el) {
   el.style.height = `${rect.height}px`
 }
 
-//  角色通知（左下角）：素材加载失败由宿主回退头像 / 首字占位，不重置计时 
+//  角色通知（右下角）：素材加载失败由宿主回退头像 / 首字占位，不重置计时 
 function initialOf(card) {
   const name = String(card?.name || '').trim()
   return name ? Array.from(name)[0] : '角'
@@ -384,18 +384,18 @@ defineExpose({ show })
 }
 
 /* ══════════════════════════════════════════════════════════
-   角色通知（左下角轻通知）—— 复用 .live-toast 暖纸皮肤
+   角色通知（右下角轻通知）—— 复用 .live-toast 暖纸皮肤
    宿主 pointer-events:none，仅卡片可交互；层级用 --z-toast，
    不继承 .__toast__root 的 99999 强制层级。
    ══════════════════════════════════════════════════════════ */
 .character-toast-host {
   position: fixed;
-  left: var(--ct-offset-x, 16px);
+  right: var(--ct-offset-x, 16px);
   bottom: var(--ct-offset-y, 16px);
   z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 8px;
   pointer-events: none;
 }
@@ -494,7 +494,7 @@ defineExpose({ show })
   pointer-events: none;
 }
 
-/* 入场：从左下角轻轻浮起；离场：渐隐下沉后卸载 */
+/* 入场：从右下角轻轻浮起；离场：渐隐下沉后卸载 */
 .ct-enter-active { transition: opacity var(--dur-interaction) var(--ease-out), transform var(--dur-interaction) var(--ease-out); }
 .ct-leave-active { transition: opacity var(--dur-interaction) var(--ease-standard), transform var(--dur-interaction) var(--ease-standard); }
 .ct-enter-from,
@@ -502,9 +502,9 @@ defineExpose({ show })
 
 @media (max-width: 767px) {
   .character-toast-host {
-    left: max(12px, env(safe-area-inset-left, 12px));
-    bottom: calc(var(--ct-offset-y-mobile, 76px) + env(safe-area-inset-bottom, 0px));
     right: max(12px, env(safe-area-inset-right, 12px));
+    bottom: calc(var(--ct-offset-y-mobile, 76px) + env(safe-area-inset-bottom, 0px));
+    left: max(12px, env(safe-area-inset-left, 12px));
   }
   .character-toast {
     width: auto;

@@ -317,7 +317,7 @@ export function saveReactionPack({ characterId, pack, personaFingerprint: finger
   return getReactionPack(character.id, db);
 }
 
-/** 删除某个角色的短句包（回到基础短句） */
+/** 删除某个角色的短句包 */
 export function deleteReactionPack(characterId, db = getDb()) {
   const id = parseInt(characterId, 10);
   if (!Number.isInteger(id)) return false;
