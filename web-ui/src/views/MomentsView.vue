@@ -16,6 +16,9 @@
     <Transition name="picker-fade">
       <div v-if="showPicker" ref="pickerRef" class="picker-dropdown" @click.stop>
         <div class="picker-title">选择发朋友圈的角色：</div>
+        <div v-if="!characters.length" class="picker-empty">
+          没有可选的角色。归档角色不参与主动发帖，如需使用请先取消归档。
+        </div>
         <div
           v-for="c in characters"
           :key="c.id"
@@ -30,6 +33,7 @@
 </div>
           <span>{{ c.display_name }}</span>
         </div>
+        <div v-if="archivedCount" class="picker-note">已隐藏 {{ archivedCount }} 个归档角色</div>
       </div>
     </Transition>
 
@@ -220,7 +224,12 @@ function onFilterWheel(e) {
   if (!filterScrollFrame) filterScrollFrame = requestAnimationFrame(animateFilterScroll)
 }
 
-const characters = computed(() => [...chat.characters].sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
+// 归档角色不参与任何主动行为，而这个选择器正是「让某角色主动发一条朋友圈」，
+// 故归档的从候选中排除。它们已有的帖子仍会在下方筛选条里出现（那是既有内容，不算主动行为）。
+const archivedCount = computed(() => chat.characters.filter(c => c.archived).length)
+const characters = computed(() => [...chat.characters]
+  .filter(c => !c.archived)
+  .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 function onPreview({ images, index }) {
   previewImg.value = { imgs: images, index }
@@ -334,7 +343,7 @@ async function triggerGenerate(c) {
 .moments-header {
   padding: 14px 24px;
   border-bottom: 1px solid var(--glass-border);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--glass-bg);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   display: flex;
@@ -411,7 +420,10 @@ async function triggerGenerate(c) {
   top: 60px;
   right: 24px;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.95);
+  /* 别硬编码白色：这里原先写死 rgba(255,255,255,.95)，暗夜主题下会变成一块白板，
+     而文字用的是 var(--text-secondary)（暗色下是浅色），于是白底浅字几乎看不见。
+     --popover-bg 就是为这种浮层准备的，亮色下取值与原来完全相同，暗色下自动切换。 */
+  background: var(--popover-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--glass-border);
@@ -434,6 +446,18 @@ async function triggerGenerate(c) {
   transition: background 0.15s;
 }
 .picker-item:hover { background: rgba(var(--accent-rgb), 0.08); }
+/* 空态：候选全被归档过滤掉时给个说法，否则用户会以为列表坏了 */
+.picker-empty {
+  padding: 12px 10px 8px;
+  font-size: 12px; line-height: 1.6;
+  color: var(--text-secondary);
+}
+/* 底部说明：告知隐藏了归档角色，避免「角色怎么少了」的困惑 */
+.picker-note {
+  margin-top: 6px; padding: 6px 10px 2px;
+  border-top: 1px solid var(--glass-border);
+  font-size: 11px; color: var(--text-secondary);
+}
 .picker-avatar {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -526,7 +550,7 @@ async function triggerGenerate(c) {
 
 /* 「全部」按钮：只覆盖视觉属性，结构尺寸继承 .filter-avatar */
 .filter-all {
-  background: rgba(255,255,255,0.75);
+  background: var(--bg-tertiary);
   color: var(--text-secondary);
   font-size: 12px;
   width: 54px;
@@ -543,7 +567,7 @@ async function triggerGenerate(c) {
 
 /* 赞过筛选心形按钮 */
 .filter-heart {
-  background: rgba(255,255,255,0.75);
+  background: var(--bg-tertiary);
   color: var(--text-secondary);
   opacity: 0.7;
 }
