@@ -25,8 +25,8 @@
 
           <!-- ── Body ── -->
           <div class="backpack-body">
-            <!-- ── Left: 每日宝箱 ── -->
-            <div class="chest-panel">
+            <!-- ── 左栏：每日宝箱（已被「橱窗」取代，见 SHOW_CHEST 注释；隐藏后右栏自动占满） ── -->
+            <div v-if="SHOW_CHEST" class="chest-panel">
               <div
                 class="chest-stage"
                 :class="{ 'is-ready': store.chest.canOpen }"
@@ -216,11 +216,13 @@
     </Transition>
   </Teleport>
 
-  <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示） ── -->
+  <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示）──
+       宝箱隐藏时一并禁用：没有任何入口会触发它，留着只会让人以为它还会出现 -->
   <!-- 礼物叙事：把小镇货摊买来的道具送给角色，图片 + 描述沿用小镇服务/打工的胶片样式 -->
   <TownServiceStage :open="giftStage.open" :session="giftStage.session" @close="giftStage.open = false" />
 
   <ChestRevealOverlay
+    v-if="SHOW_CHEST"
     :show="fullscreen"
     :chest-anim="chestAnim"
     :flash-on="flashOn"
@@ -259,6 +261,19 @@ const VIEW_OPTIONS = [
   { value: 'loot', label: '橱窗' },
 ]
 const view = ref('backpack')
+
+/**
+ * 是否显示「每日宝箱」面板。
+ *
+ * 2026-10-04 起宝箱已被「橱窗」取代（分标签页浏览 + 挑选，比盲盒单抽更直观），
+ * 故默认隐藏。**代码与后端全部保留**，改回 true 即可恢复，调试时也方便对照。
+ *
+ * 隐藏后仍保留的部分：`store.startPolling()` 不能一起停 —— 它负责背包道具的轮询与
+ * `item_ready` 事件，橱窗带走的道具也靠它刷新。
+ * 随宝箱一起停掉的：开箱冷却倒计时、未完成开箱演出的恢复。
+ */
+const SHOW_CHEST = false
+
 /** 从橱窗带走的商品已进背包，切回背包视图时刷新一下列表 */
 function onLootTaken() {
   try { store.fetchItems() } catch { /* 失败不阻塞，SSE 会兜底刷新 */ }
@@ -283,12 +298,15 @@ const {
 watch(() => props.visible, (v) => {
   if (v) {
     store.startPolling()
-    startCountdown()
-    // 中途离开留下的未收下道具：重开背包时续播揭示演出
-    resumePendingReveal()
+    // 宝箱相关：隐藏宝箱时不必空转（startPolling 不能停，背包与橱窗都依赖它）
+    if (SHOW_CHEST) {
+      startCountdown()
+      // 中途离开留下的未收下道具：重开背包时续播揭示演出
+      resumePendingReveal()
+    }
   } else {
     store.stopPolling()
-    stopCountdown()
+    if (SHOW_CHEST) stopCountdown()
     resetUi()
   }
 })
@@ -357,7 +375,7 @@ function close() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: rgba(255, 253, 250, 0.75);
+  background: var(--glass-bg);
   border-radius: 16px;
   padding: 16px 16px;
 }
@@ -381,7 +399,7 @@ function close() {
   margin-bottom: 22px;
   padding: 14px;
   border-radius: 16px;
-  background: rgba(255, 250, 245, 0.82);
+  background: var(--glass-bg);
   box-shadow: 0 2px 14px rgba(122, 91, 63, 0.04);
 }
 .effects-heading {
