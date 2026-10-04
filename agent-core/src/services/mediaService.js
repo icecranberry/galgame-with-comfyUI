@@ -1235,10 +1235,16 @@ export async function publishIssue(outletId, { force = false } = {}) {
     return { existed: true, post, issue: issueNoOf(safeParse(post?.payload_json, null)) };
   }
 
-  // 按形态分派生成器
-  const post = outlet.layout === 'poster' ? await generatePosterIssue(outlet)
+  // 按形态分派生成器。
+  // ⚠ 三个生成器的返回值**不一致**：`generatePortalIssue` 返回 **DB 行**，
+  //   而 `generatePosterIssue` / `generateWeeklyIssue` 返回 **summary 对象**（含 postId）。
+  //   这里统一取"DB 行"再返回，免得每个调用方各写一套判断。
+  //   （踩过：直接读 `res.payload_json` 对海报是 undefined → 期号读成 0、post 丢成 undefined。）
+  const res = outlet.layout === 'poster' ? await generatePosterIssue(outlet)
     : outlet.layout === 'weekly' ? await generateWeeklyIssue(outlet)
       : await generatePortalIssue(outlet);
+  const postId = res?.id ?? res?.postId ?? null;
+  const post = postId ? getDb().prepare('SELECT * FROM media_posts WHERE id = ?').get(postId) : null;
   return { existed: false, post, issue: issueNoOf(safeParse(post?.payload_json, null)) };
 }
 
