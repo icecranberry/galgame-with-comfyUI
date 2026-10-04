@@ -532,7 +532,9 @@
       :display-name="character?.display_name || ''"
       :base-prompt="refineBasePrompt"
       :scene-label="refineSceneLabel"
-      :apply-text="`应用到「${refineSceneLabel}」并保存`"
+      :apply-text="refineSceneOutfit?.scene === 'nude'
+        ? '应用到「身体」并保存'
+        : `拆分为「身体 + ${refineSceneLabel}」并保存`"
       apply-hint="应用后写回该场景并自动保存"
       @applied="onAppearanceRefined"
     />
@@ -1345,22 +1347,85 @@ function openRefineModal() {
   showRefineModal.value = true
 }
 
+/**
+ * 把「修正外观」产出的整段拆分回 **身体 / 服装** 两部分。
+ *
+ * ── 为什么需要拆（2026-10-04）──────────────────────────────
+ * 外观产出格式由后端提示词严格约束为：
+ *   `角色名 (作品名) has <身体特征>, wearing <服装>`
+ * 是一个**连续完整**的句子。但「外观」现在是**身体（五套共用）+ 每套各自的衣服**两层，
+ * 若整段塞进某一套的 description，就会：① 其余四套拿不到身体；
+ * ② 与该角色已有的 body 打架（实测花火：图片反推说黑发红眼，body 还是绿发粉眼）。
+ * 所以应用时必须按 `, wearing ` 拆开：身体 → body 字段，衣服 → 该套 description。
+ *
+ * `wearing` 是提示词里写死的连接词，拆点稳定；万一没命中，再用关键词兜底判断
+ * 这段到底是"身体"还是"衣服"，而不是瞎猜。
+ */
+const CLOTHING_HINT = /\b(dress|skirt|pants|trousers|shirt|blouse|jacket|coat|hoodie|sweater|cardigan|kimono|yukata|robe|shorts|jeans|stockings?|socks?|shoes?|boots?|slippers?|heels?|gloves?|bra|panties|camisole|nightgown|blazer|uniform|apron|sash|obi|scarf|hat|beret|headwear|choker|necklace|earrings?|goggles|mask|armor|suit)\b/i
+const BODY_HINT = /\b(hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?)\b/i
+
+function splitBodyGarment(text) {
+  const raw = String(text || '').trim()
+  if (!raw) return { body: '', garment: '' }
+
+  // ① 去掉「角色名 (作品名) has 」/「角色名 has 」前缀
+  let t = raw.replace(/^[^,]{0,70}?\bhas\s+/i, '').trim()
+
+  // ② 按 wearing 拆点（提示词固定的连接词）
+  // ⚠ 逗号后**可能没有空格** —— 实测后端产出过 `fair skin,wearing a ...`，
+  //   所以这里是 `[,;]?\s*` 而不是 `\s+`（用 \s+ 会整个匹配失败，导致整段被当成身体）。
+  const m = t.match(/^(.*?)[,;]?\s*\b(?:wearing|wears|dressed in)\s+(.*)$/i)
+  if (m) {
+    const left = m[1].replace(/[,\s]+$/, '').trim()
+    const right = m[2].replace(/^[,\s]+/, '').trim()
+    // 「wearing no clothing / nothing」这类 = 没穿衣服，右半边不算服装
+    if (/^(n(o|othing)|no clothing|nothing)\b/i.test(right)) return { body: left, garment: '' }
+    return { body: left, garment: right }
+  }
+
+  // ③ 没有 wearing：判断这段是身体还是衣服
+  const looksBody = BODY_HINT.test(t) && !CLOTHING_HINT.test(t)
+  if (looksBody) return { body: t, garment: '' }
+  const looksCloth = CLOTHING_HINT.test(t)
+  if (looksCloth) return { body: '', garment: t }
+  // ④ 都判不出来 → 当身体（身体缺失的代价更大：五套都会丢身体）
+  return { body: t, garment: '' }
+}
+
 async function onAppearanceRefined({ basePrompt }) {
-  // 弹窗返回整卡：只取外观段，写回打开时那一套场景（人设框不动）
+  // 弹窗返回整卡：只取外观段
   const split = splitPersona(basePrompt)
   const target = detail.sceneOutfits[refineSceneIdx.value]
+  const appearance = String(split.appearance || '').trim()
+
   if (target) {
-    target.description = split.appearance
-    // 非工装场景原本没名字时补一个，否则保存链路会因「名称必填」跳过它
-    if (target.scene !== 'work' && !String(target.name || '').trim() && split.appearance) {
-      target.name = target.sceneLabel
+    if (target.scene === 'nude') {
+      // 裸体那套没有"衣服" —— 整段就是身体（这正是修裸体时最有价值的信息）
+      const { body } = splitBodyGarment(appearance)
+      if (body) detail.body = body
+      // description 保持「裸体声明」不动，画面主体由身体决定
+    } else {
+      const { body, garment } = splitBodyGarment(appearance)
+      // 身体回填到**共用**字段（五套一起受益）；它为空时不要用空值覆盖已有的
+      if (body) detail.body = body
+      // 衣服写回这一套；拆不出衣服（整段都是身体）时不要清空原描述
+      if (garment) target.description = garment
+      else if (body) target.description = ''   // 整段被判定为身体 → 该套暂时没有衣服
+      if (target.scene !== 'work' && !String(target.name || '').trim() && target.description) {
+        target.name = target.sceneLabel
+      }
     }
   }
   detail.dirty = true
   // 复用详情卡的保存链路（PUT /:id 会同步重裁 short_prompt、标记日程重生成）
   try {
     await saveCharDetail()
-    toastFn(`「${refineSceneLabel.value}」外观已修正并保存`, 'success')
+    toastFn(
+      target?.scene === 'nude'
+        ? '已按参考图更新「身体」并保存'
+        : `「${refineSceneLabel.value}」已修正并保存（身体回填到五套共用字段）`,
+      'success',
+    )
   } catch (err) {
     console.error('onAppearanceRefined save failed:', err)
     toastFn('外观已修正，但自动保存失败，请手动点击「保存」', 'error')
