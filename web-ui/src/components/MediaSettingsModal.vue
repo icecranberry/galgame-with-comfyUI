@@ -160,8 +160,7 @@ async function doCleanup() {
     const r = await api.cleanupMediaImages()
     toastFn?.(`已清理 ${r.removed} 个孤儿配图${r.staleReset ? `，重置 ${r.staleReset} 条卡住的生成` : ''}`, 'success')
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('清理失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('清理失败' + '：' + (err?.message || ''), 'error')
   } finally {
     cleaning.value = false
   }

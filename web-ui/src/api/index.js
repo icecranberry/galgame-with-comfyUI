@@ -1,6 +1,14 @@
 const BASE = '/api'
 
-// 统一请求基元：非 2xx 自动抛出服务端 error 信息，成功返回解析后的 JSON
+/**
+ * 统一请求基元：非 2xx 自动抛出服务端 error 信息，成功返回解析后的 JSON。
+ *
+ * ★ 关于「新功能报 404」：本机后端没有热重载，改了 agent-core 的代码后必须重启服务，
+ *   否则新路由根本不存在 —— Express 会直接吐一段 HTML（`Cannot POST /api/xxx`），
+ *   而不是我们约定的 JSON `{ error }`。这类 404 极容易被误当成功能 bug。
+ *   这里统一识别并补一句人话提示，省得每个调用点各写一遍
+ *   （已踩三次：日报删除 / 传媒批量操作 / 外观扩写）。
+ */
 async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -8,8 +16,17 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   })
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+  const raw = await res.text()
+  let result = {}
+  try { result = raw ? JSON.parse(raw) : {} } catch { /* 非 JSON（多半是 Express 默认 HTML 错误页） */ }
+  if (!res.ok) {
+    // 404 + 拿不到结构化 error ⇒ 路由没注册（后端是旧代码），而不是"功能坏了"
+    const isMissingRoute = res.status === 404 && !result.error && !result.message
+    if (isMissingRoute) {
+      throw new Error('接口不存在：后端服务还是旧代码，请先在启动器里重启服务再试')
+    }
+    throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+  }
   return result
 }
 

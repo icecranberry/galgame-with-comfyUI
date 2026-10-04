@@ -695,8 +695,7 @@ async function applyFreq(i) {
     console.error('[media] 保存自动频率失败:', err)
     auto.value = { ...auto.value, minutes: prev }
     // 404 = 后端还没重启（这条路由是新增的），提示要说清楚，别让用户以为是网络问题
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('保存失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('保存失败' + '：' + (err?.message || ''), 'error')
   }
 }
 
@@ -833,8 +832,7 @@ async function batchDelete() {
     // 必须重载：本地移除会让 loadMore 的 offset 基准失真（与相册同因）
     await reloadAll()
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('批量删除失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('批量删除失败' + '：' + (err?.message || ''), 'error')
   } finally {
     batchBusy.value = false
   }
@@ -854,8 +852,7 @@ async function batchRegenerate() {
     exitBatchMode()
     await loadPage(0)
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('批量重新生图失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('批量重新生图失败' + '：' + (err?.message || ''), 'error')
   } finally {
     batchBusy.value = false
   }
@@ -873,8 +870,7 @@ async function regenerateImage(p) {
     await api.regenerateMediaPostImage(p.id)
     toastFn?.('已重新排队生图，稍候…', 'success')
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('重新生图失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('重新生图失败' + '：' + (err?.message || ''), 'error')
   } finally {
     regeneratingId.value = null
     busyPostId.value = null
@@ -902,8 +898,7 @@ async function removePost(p) {
     await reloadOutlets()   // 标签上的计数要跟着变
     toastFn?.('已删除', 'success')
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('删除失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('删除失败' + '：' + (err?.message || ''), 'error')
   } finally {
     busyPostId.value = null
   }

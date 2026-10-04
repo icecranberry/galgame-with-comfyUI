@@ -613,11 +613,13 @@ async function resyncAfterDelete({ deletedDate }) {
   closeDetail()
 }
 
-/** 删除/清除失败的统一提示：404 几乎总是「后端还没重启，新接口没生效」，直接说清楚 */
+/**
+ * 删除/清除失败的提示。
+ * 「后端未重启导致接口不存在」这句人话已由 api/index.js 的 request() 统一补上，
+ * 这里只负责加动作前缀，不再重复判断状态码。
+ */
 function deleteErrorText(action, err) {
-  const msg = err?.message || '未知错误'
-  if (/404/.test(msg)) return `${action}失败：后端服务还是旧代码，请先在启动器里重启服务再试。`
-  return `${action}失败：${msg}`
+  return `${action}失败：${err?.message || '未知错误'}`
 }
 
 async function deleteCurrent() {

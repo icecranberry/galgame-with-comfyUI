@@ -230,8 +230,7 @@ async function scan() {
       checked[t.key] = t.group === 'content' && (t.rows > 0 || t.files > 0)
     }
   } catch (err) {
-    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
-    toastFn?.('扫描失败' + hint + '：' + (err?.message || ''), 'error')
+    toastFn?.('扫描失败' + '：' + (err?.message || ''), 'error')
   } finally {
     scanning.value = false
   }
