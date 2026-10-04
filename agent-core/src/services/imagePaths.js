@@ -140,11 +140,15 @@ export function deleteImageFileByUrl(url) {
   const category = extractCategoryFromUrl(cleanUrl);
   if (!category) return false;
 
-  // 文件名白名单提取：仅接受字母/数字/点/横线/下划线/空格的纯文件名，
-  // 从源头杜绝任何路径穿越形态（`..`、路径分隔符都会匹配失败直接返回 false）
-  const m = /^([\w.\- ]+)$/.exec(cleanUrl.split('/').pop() || '');
-  if (!m) return false;
-  const filename = m[1];
+  // 文件名安全提取：**只禁止路径分隔符与控制字符**，其余（含中文——表情包文件名就是中文）
+  // 一律放行。踩过的坑：原来用 `[\w.\- ]+` 白名单，而 JS 的 `\w` 不匹配非 ASCII，
+  // 于是「char_80_哭_1788362733025.png」被判非法直接 return false —— 中文表情包静默删不掉。
+  // 安全性不依赖字符白名单，而由下面的「解析后必须仍在目录内」双保险保证。
+  let filename = cleanUrl.split('/').pop() || '';
+  try { filename = decodeURIComponent(filename); } catch { /* 非法编码：按原样处理 */ }
+  if (!filename || filename === '.' || filename === '..') return false;
+  if (/[\\/\u0000-\u001f]/.test(filename)) return false;
+  if (path.basename(filename) !== filename) return false;
 
   const dir = getImageDir(category);
   const filePath = path.join(dir, filename);
@@ -157,12 +161,10 @@ export function deleteImageFileByUrl(url) {
     removed = true;
   }
   // AVIF 压缩会把原 PNG 换成同名 .avif；按 .png URL 删除时把孪生文件一并清掉
-  if (/\.png$/i.test(filename)) {
-    const avifTwin = filePath.replace(/\.png$/i, '.avif');
-    if (fs.existsSync(avifTwin)) {
-      try { fs.unlinkSync(avifTwin); } catch {}
-      removed = true;
-    }
+  const avifTwin = /\.png$/i.test(filename) ? filePath.replace(/\.png$/i, '.avif') : null;
+  if (avifTwin && fs.existsSync(avifTwin)) {
+    try { fs.unlinkSync(avifTwin); } catch { /* 孪生删除失败不影响主流程 */ }
+    removed = true;
   }
   return removed;
 }

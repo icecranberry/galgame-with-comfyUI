@@ -759,19 +759,18 @@ router.post('/edit-tasks/:id/discard', (req, res) => {
   } catch (err) { sendTaskError(res, err); }
 });
 
-/**
- * 删除单张图片文件并清理相关 DB 引用（不含相册缓存失效，由调用方统一处理）。
- *
- * 抽出来的原因：单删路由与批量删除共用同一套「URL 解析 + 防目录穿越 + 聊天引用清理」逻辑，
- * 批量删除若走前端循环调单删，N 张图就会触发 N 次 invalidateGalleryCache 与 N 个 HTTP 往返。
- *
- * @param {string} imageUrl - 形如 /images/<folder>/<file> 或旧扁平格式 /images/<file>
- * @returns {{ ok: boolean, error?: string, status?: number }}
- */
-function deleteOneImage(imageUrl) {
-  if (!imageUrl) return { ok: false, error: 'url is required', status: 400 };
+/** .png 文件对应的 AVIF 孪生路径（图片压缩会把原 PNG 换成同名 .avif） */
+function avifTwinPath(filePath) {
+  return /\.png$/i.test(filePath) ? filePath.replace(/\.png$/i, '.avif') : null;
+}
 
-  const cleanUrl = String(imageUrl).replace(/\?.*$/, '');
+/**
+ * 把图片 URL 解析成 { dirPath, filename, category, filePath }；不合法时返回 { error, status }。
+ *
+ * 防目录穿越：文件名不允许路径分隔符与 .. 形态，且解析后必须仍在目标目录内。
+ * 注意：**不对中文等非 ASCII 文件名的存在性负责**，存在性由调用方判断。
+ */
+function resolveImageTarget(cleanUrl) {
   const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
 
   let dirPath, filename, category;
@@ -782,38 +781,97 @@ function deleteOneImage(imageUrl) {
     for (const [cat, info] of Object.entries(IMAGE_CATEGORIES)) {
       if (info.dir === folder) { category = cat; break; }
     }
-    if (!category && folder === '') category = LEGACY_CATEGORY;
-    if (!category) return { ok: false, error: `unknown folder: ${folder}`, status: 400 };
+    if (!category) return { error: `unknown folder: ${folder}`, status: 400 };
     dirPath = getImageDir(category);
   } else {
     // legacy flat format: /images/xxx.png
     const legacyMatch = cleanUrl.match(/^\/images\/([^/]+)$/);
-    if (!legacyMatch) return { ok: false, error: `invalid image url format: ${imageUrl}`, status: 400 };
+    if (!legacyMatch) return { error: `invalid image url format: ${cleanUrl}`, status: 400 };
     filename = legacyMatch[1];
     category = LEGACY_CATEGORY;
     dirPath = getImageDir(LEGACY_CATEGORY);
   }
 
-  // 防目录穿越：文件名不允许路径分隔符与 .. 形态，且解析后必须仍在目录内
   if (!filename || filename === '.' || filename === '..') {
-    return { ok: false, error: 'invalid filename', status: 400 };
+    return { error: 'invalid filename', status: 400 };
   }
   if (path.basename(filename) !== filename) {
-    return { ok: false, error: 'invalid filename', status: 400 };
+    return { error: 'invalid filename', status: 400 };
   }
   const filePath = path.join(dirPath, filename);
   if (!path.resolve(filePath).startsWith(path.resolve(dirPath) + path.sep)) {
-    return { ok: false, error: 'invalid path', status: 400 };
+    return { error: 'invalid path', status: 400 };
   }
-  if (!fs.existsSync(filePath)) {
-    return { ok: false, error: 'file not found', status: 404 };
+  return { dirPath, filename, category, filePath };
+}
+
+/**
+ * 删除单张图片文件并清理相关 DB 引用（不含相册缓存失效，由调用方统一处理）。
+ *
+ * 抽出来的原因：单删路由与批量删除共用同一套「URL 解析 + 防目录穿越 + 聊天引用清理」逻辑，
+ * 批量删除若走前端循环调单删，N 张图就会触发 N 次 invalidateGalleryCache 与 N 个 HTTP 往返。
+ *
+ * ★ 两个曾经的坑（都表现为「删除失败: file not found」，且图片怎么点都删不掉）：
+ *   1. **百分号编码**：表情包等中文文件名可能以 `%E5%93%AD` 形态传来。原实现直接把它当
+ *      文件名去 existsSync，必然找不到 —— 而 imageUrlExists / imageUrlToDataUri 都会
+ *      decodeURIComponent，只有删图这一条链路漏了。现在原样 + 解码后各试一次。
+ *   2. **AVIF 孪生**：图片压缩会把原 PNG 换成同名 .avif。按 .png URL 删除时磁盘上已经没有
+ *      该文件，原实现直接 404；deleteImageFileByUrl 里有孪生回退，这里漏了。
+ *   3. **幂等**：文件本就不存在（幽灵引用——DB 还存着 URL 但文件早没了）时，原实现返回 404，
+ *      导致界面上那张卡片永远删不掉。删除的目标是「让这张图不存在」，已达成即视为成功，
+ *      同时照常清理聊天里的 DB 引用。结构非法的 URL 仍然照旧报错，不掩盖真正的调用错误。
+ *
+ * @param {string} imageUrl - 形如 /images/<folder>/<file> 或旧扁平格式 /images/<file>
+ * @returns {{ ok: boolean, missing?: boolean, error?: string, status?: number }}
+ */
+function deleteOneImage(imageUrl) {
+  if (!imageUrl) return { ok: false, error: 'url is required', status: 400 };
+
+  const rawUrl = String(imageUrl).replace(/\?.*$/, '');
+  // 候选形态：原样 → 百分号解码（中文文件名）；解码结果与原文相同或解码失败则不重复尝试
+  const candidates = [rawUrl];
+  try {
+    const decoded = decodeURIComponent(rawUrl);
+    if (decoded !== rawUrl) candidates.push(decoded);
+  } catch { /* 非法百分号序列：忽略，按原样处理 */ }
+
+  let target = null;
+  let firstError = null;
+  for (const candidate of candidates) {
+    const resolved = resolveImageTarget(candidate);
+    if (resolved.error) { if (!firstError) firstError = resolved; continue; }
+    target = { ...resolved, cleanUrl: candidate };
+    // 文件或 .avif 孪生任一存在 → 就是它，不再试后续形态
+    const twin = avifTwinPath(resolved.filePath);
+    if (fs.existsSync(resolved.filePath) || (twin && fs.existsSync(twin))) break;
   }
+  if (!target) {
+    return { ok: false, error: firstError?.error || 'invalid image url format', status: firstError?.status || 400 };
+  }
+
+  const { filename, category, filePath, cleanUrl } = target;
 
   try {
-    fs.unlinkSync(filePath);
-    console.log(`[delete] removed ${filePath}`);
+    // ── 物理删除：主文件 + .avif 孪生（压缩后原 PNG 会被同名 .avif 取代）──
+    let removed = false;
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      removed = true;
+      console.log(`[delete] removed ${filePath}`);
+    }
+    const avifTwin = avifTwinPath(filePath);
+    if (avifTwin && fs.existsSync(avifTwin)) {
+      try {
+        fs.unlinkSync(avifTwin);
+        removed = true;
+        console.log(`[delete] removed ${avifTwin}`);
+      } catch (err) {
+        console.warn(`[delete] 删除 .avif 孪生失败（不影响主流程）: ${avifTwin} — ${err.message}`);
+      }
+    }
 
     // 聊天图片：清理 messages.images 和 raw_messages.prompt
+    // ★ 即使文件已不在（幽灵引用）也照常清理 —— 否则这些引用永远删不掉。
     if (category === 'chat') {
       try {
         const db = getDb();
@@ -853,7 +911,9 @@ function deleteOneImage(imageUrl) {
       }
     }
 
-    return { ok: true };
+    // 幂等：文件本就没了也算删除成功 —— DELETE 的目标「这张图不存在了」已经达成。
+    // 否则 DB 里那些指向已丢失文件的「幽灵引用」会让界面上那张卡片永远卡住、点多少次都失败。
+    return removed ? { ok: true } : { ok: true, missing: true };
   } catch (err) {
     console.error('[delete] error:', err.message);
     return { ok: false, error: 'Delete failed: ' + err.message, status: 500 };
@@ -865,7 +925,7 @@ router.delete('/delete', (req, res) => {
   const r = deleteOneImage(req.body?.url);
   if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
   invalidateGalleryCache();
-  res.json({ success: true });
+  res.json({ success: true, missing: r.missing === true });
 });
 
 // POST /api/images/delete-batch — 批量删除（相册多选后用）Body: { urls: [] }
