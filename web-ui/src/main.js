@@ -29,6 +29,7 @@ import MemorySettingsView from './views/MemorySettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
+import WorldMapView from './views/WorldMapView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -39,6 +40,7 @@ const routes = [
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
   { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
+  { path: '/worldmap', component: WorldMapView },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/media', component: MediaView },

@@ -30,6 +30,18 @@
         <span class="nav-label">奇遇</span>
       </div>
 
+      <!-- 地图：世界地图骨架（叙事地理）的规划工具。
+           与世界(内测)不同 —— 那边是可行走的游戏网格图，这边是从世界观落出地理结构。 -->
+      <router-link to="/worldmap" data-nav="worldmap" class="nav-item" :class="{ active: $route.path.startsWith('/worldmap') }" title="地图">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/>
+            <path d="M9 4v14M15 6v14"/>
+          </svg>
+        </div>
+        <span class="nav-label">地图</span>
+      </router-link>
+
       <!-- 「网络」= 原「传媒」（2026-10-04 改名；路由与 data-nav 仍为 media，避免破坏深链与前端逻辑） -->
       <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="网络">
         <div class="nav-icon-wrap">

@@ -1168,6 +1168,9 @@ function initSchema(db) {
   // 迁移 + 种子: 媒体内容页（传媒 / 板块 / 帖子）
   migrateMediaSchema(db);
 
+  // 迁移: 世界地图骨架（独立于游戏小镇的 town_maps —— 那是可行走的网格图，本表是叙事地理）
+  migrateWorldMapSchema(db);
+
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
 
@@ -2815,6 +2818,48 @@ function migrateLootCatalogSchema(db) {
     console.log('[db] loot catalog schema ready');
   } catch (err) {
     console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 世界地图骨架（叙事地理）。
+ *
+ * ⚠ 与游戏小镇的 `town_maps` 是**两回事**，别混：
+ *   · `town_maps`  —— 可行走的**网格图**（tile 图层 + 寻路 + 资产），供「世界(内测)」用；
+ *   · `world_maps` —— 叙事**地理骨架**（大地区 → 子地区 → 场景 → POI），供「地图」页规划用。
+ * 两者将来可通过「导入小镇」打通，但数据模型刻意分开：
+ * 骨架是纯文本、秒级生成、不烧生图额度；网格图要资产生成与布局，重得多。
+ */
+function migrateWorldMapSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS world_maps (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        name             TEXT NOT NULL,
+        world_setting_id INTEGER,
+        note             TEXT NOT NULL DEFAULT '',
+        created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS world_map_places (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        map_id     INTEGER NOT NULL REFERENCES world_maps(id) ON DELETE CASCADE,
+        parent_id  INTEGER REFERENCES world_map_places(id) ON DELETE CASCADE,
+        level      INTEGER NOT NULL,
+        key        TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        name_en    TEXT,
+        kind       TEXT NOT NULL DEFAULT '',
+        summary    TEXT NOT NULL DEFAULT '',
+        pois_json  TEXT NOT NULL DEFAULT '[]',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_wmp_map    ON world_map_places(map_id, level, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_wmp_parent ON world_map_places(parent_id, sort_order);
+    `);
+  } catch (err) {
+    console.error('[db] migrateWorldMapSchema 失败:', err.message);
   }
 }
 
