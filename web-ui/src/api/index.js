@@ -341,6 +341,14 @@ export function refineAppearanceDraft({ image, basePrompt, displayName }) {
   })
 }
 
+/** 修正外观·文字模式：按纯文字要点扩写外观描述（不出图，只走文本 LLM；不入库，由前端回填） */
+export function expandAppearanceDraft({ brief, basePrompt, displayName, sceneLabel }) {
+  return request('/characters/expand-appearance-draft', {
+    method: 'POST',
+    body: { brief, base_prompt: basePrompt, display_name: displayName, scene_label: sceneLabel },
+  })
+}
+
 /** 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存 */
 export function refinePersonaDraft({ basePrompt, displayName, mode }) {
   return request('/characters/refine-persona-draft', {

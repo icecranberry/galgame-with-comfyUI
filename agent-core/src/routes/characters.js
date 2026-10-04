@@ -1919,6 +1919,88 @@ function splitPersonaAroundAppearance(basePrompt) {
   };
 }
 
+// ── 修正外观·文字模式（按用户给的文字要点扩写外观描述）──
+// 与图片模式并列的第二条入口：不想找参考图时，直接写几个词让邻舍补全细节。
+// 产出格式对齐 character_outfits.description 的既有约定（中文叙述 + 英文 tag 混合），
+// 而不是图片模式那套「角色名 (作品名) has ...」——后者是人格卡外观段的口径，写进服装描述会与四套服装风格割裂。
+
+const EXPAND_APPEARANCE_SYSTEM_PROMPT = `你是角色服装外观描述助手。用户会给你一段**简短的文字要点**（可能只是几个词、也可能是一两句），请把它**扩写**成一段可直接用于 AI 生图的服装外观描述。
+
+【最重要的原则：扩写，不是重写】
+- 用户提到的**每一个元素都必须保留**：单品、颜色、材质、纹样、配饰、穿法、赤足与否……一个都不能丢，也不能换成别的东西。
+- 你只负责**补全用户没说到的细节**（廓形、面料质感、层次、领口袖口、配饰质感、整体气质）。
+- 用户没说的地方你才可以自由发挥；用户说了的地方一律以用户为准。
+- 若用户写的是抽象气质（如「想更慵懒一点」），把它翻译成**可见的**服装细节，不要写成情绪或氛围描写。
+
+【输出格式（严格遵守）】
+- **中文叙述与英文 tag 混合**：先写中文的自然语言描述，末尾接一串逗号分隔的英文 tag（把同一套服装的可视要素转成 Danbooru 风格英文标签）。
+- 长度 60~150 字（含英文 tag）。
+- 示例：
+宽松的米白针织长衫，下摆印着歪斜的黑色小兔涂鸦，袖口和领口是红色包边。一条太长的黑白格纹居家裤松松垮垮，赤脚踩在木地板上。loose knit loungewear, off-white, rabbit doodle print, red piping, checkered pants, barefoot
+
+【硬性要求】
+- **第三人称、只描述服装与外观本身**：不要出现「她」「他」「用户」「我」，不要写身份、职业、性格、动作、姿势、表情。
+- 不要出现场景、背景、道具、光线、画质与镜头描述（那是生图环节另外加的）。
+- 只输出这段描述本身：不要解释、不要前言后语、不要引号、不要 markdown、不要换行分点。`;
+
+// POST /api/characters/expand-appearance-draft — 按文字要点扩写外观段
+// 与 refine-appearance-draft 同一套「只出草稿不落库」的契约：
+// 返回新外观段 + 前后文，由前端回填人格卡文本框走既有保存链路。
+// Body: { brief, base_prompt, display_name, scene_label } → { appearance, base_prompt, prompt_before, prompt_after }
+router.post('/expand-appearance-draft', async (req, res) => {
+  const brief = typeof req.body?.brief === 'string' ? req.body.brief.trim() : '';
+  if (!brief) {
+    return res.status(400).json({ error: '请先写下你想要的服装要点（几个词也可以）' });
+  }
+  if (brief.length > 2000) {
+    return res.status(400).json({ error: '文字要点太长了，请精简到 2000 字以内' });
+  }
+  const basePrompt = typeof req.body?.base_prompt === 'string' ? req.body.base_prompt : '';
+  if (!basePrompt.trim()) {
+    return res.status(400).json({ error: '缺少人格卡内容，无法定位外观段落' });
+  }
+  const displayName = String(req.body?.display_name || '').trim() || '角色';
+  const sceneLabel = String(req.body?.scene_label || '').trim();
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    const sceneLine = sceneLabel
+      ? `这套是「${sceneLabel}」（${sceneLabel === '工装' ? '上班/出勤的常态形象' : sceneLabel === '私服' ? '上街、休闲外出' : sceneLabel === '居家' ? '在家里休息、做家务' : sceneLabel === '睡衣' ? '睡觉时穿的贴身衣物，不要设计成能穿出门的服装' : '该场景'}），整体要符合这个场合。`
+      : '';
+    console.log(`[expand-appearance] expanding ${brief.length} chars for "${displayName}"${sceneLabel ? ` (scene: ${sceneLabel})` : ''}`);
+
+    const llmResult = await chatSync([
+      // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
+      { role: 'system', content: getSystemRules({ roleplay: false }) },
+      { role: 'system', content: EXPAND_APPEARANCE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: `角色：${displayName}\n${sceneLine}\n\n用户想要的服装要点：\n${brief}\n\n请按格式扩写成一段服装外观描述。`,
+      },
+    ], { model, temperature: 0.75, max_tokens: 1024, label: '外观扩写' });
+
+    // 与图片模式同一套清洗：剥代码围栏与引号，压成单段
+    const appearance = String(llmResult || '').trim()
+      .replace(/^```(?:[a-z]+)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/^["'「『]+|["'」』]+$/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (appearance.length < 15) {
+      return res.status(502).json({ error: '扩写结果太短，可能被模型截断，请重试或把要点写详细一点' });
+    }
+
+    const newBasePrompt = replaceAppearanceSection(basePrompt, appearance);
+    const { before, after } = splitAppearanceSection(basePrompt);
+    console.log(`[expand-appearance] appearance expanded (${brief.length} → ${appearance.length} chars) for "${displayName}"`);
+    res.json({ ok: true, appearance, base_prompt: newBasePrompt, prompt_before: before, prompt_after: after });
+  } catch (err) {
+    console.error('[expand-appearance] error:', err.message);
+    res.status(500).json({ error: '外观扩写失败: ' + String(err?.message || err) });
+  }
+});
+
+
 // POST /api/characters/refine-persona-draft — 润色人设（外观段原样保留）
 // Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise' }
 // → { ok, base_prompt（润色后整卡）, original_prompt, mode }
