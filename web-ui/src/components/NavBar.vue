@@ -2,12 +2,13 @@
   <nav class="nav-bar">
     <div class="nav-top" ref="navTopEl">
       <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色。
-           指示器按 data-nav 查元素取 offsetTop，所以**导航项顺序可自由调整**，不用改这里。 -->
+           指示器按 data-nav 查元素取 offsetTop —— 所以**导航项顺序可自由调整**。
+           ⚠ 但新增导航项时，`activeNavKey` 必须能推导出它的 data-nav 键，
+             否则指示器会跑到别处（该键现在由路由首段推导，一般无需再改）。 -->
       <div class="nav-indicator" :style="indicatorStyle" aria-hidden="true"></div>
 
-      <!-- 顺序（2026-10-04 按用户要求重排）：
-           世界 → 奇遇 → 网络 → 聊天 → 朋友圈 → 日程 → 相册 → 酒馆
-           世界与奇遇是「沉浸玩法」入口，提到最前；聊天/朋友圈是日常高频，居中。 -->
+      <!-- 顺序（2026-10-04 按用户要求重排）：世界 → 奇遇 → 地图 → 网络 → 聊天 → 朋友圈 → 日程 → 相册 → 酒馆
+           世界/奇遇/地图是「规划与沉浸玩法」入口，提到最前；聊天/朋友圈是日常高频，居中。 -->
       <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -178,19 +179,26 @@ function handleScheduleClick() {
 const navTopEl = ref(null)
 const indicatorStyle = ref({ opacity: 0 })
 
+/**
+ * 当前路由 → 导航项的 data-nav 键（决定指示器滑到哪一格）。
+ *
+ * ★ 改为**从路径首段推导**，而不是一串硬编码分支。
+ *   原因：原先是一长串 `if (p.startsWith('/xxx')) return 'xxx'`，末尾 `return 'chat'` 兜底 ——
+ *   于是**任何没被列举到的路由都会把指示器错误地滑到「聊天」**
+ *   （实测：新增 `/worldmap` 后未同步这里，点「地图」指示器跑去了「聊天」；
+ *    `/mailbox`、`/backpack`、`/standing-display` 也一样会错高亮聊天）。
+ *
+ *   改为推导后：段名即键；只有真实存在的导航项才会有元素可匹配，
+ *   匹配不到时 updateIndicator 会把指示器**隐藏**（如 /mailbox、/standing-display），
+ *   这比"随便高亮一个"正确。以后新增导航项/路由**不需要再动这里**。
+ */
+const SEG_ALIAS = { group: 'chat' }   // 特例：群聊属于「聊天」
 const activeNavKey = computed(() => {
-  const p = route.path
-  if (p.startsWith('/chat') || p.startsWith('/group')) return 'chat'
-  if (p.startsWith('/moments')) return 'moments'
-  if (p.startsWith('/events')) return 'events'
-  if (p.startsWith('/town')) return 'town'
-  if (p.startsWith('/schedule')) return 'schedule'
-  if (p.startsWith('/gallery')) return 'gallery'
-  if (p.startsWith('/media')) return 'media'
-  if (p.startsWith('/tavern')) return 'tavern'
-  if (p.startsWith('/settings')) return 'settings'
-  return 'chat'
+  const seg = (route.path.split('/')[1] || '').trim()
+  if (!seg) return 'chat'             // 根路径 → 默认落在聊天
+  return SEG_ALIAS[seg] || seg
 })
+
 
 function updateIndicator() {
   const wrap = navTopEl.value
