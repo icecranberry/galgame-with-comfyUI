@@ -329,7 +329,15 @@ export function buildOutfitAnnotateLayer(characterId) {
 
   const list = outfits.map(o => `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）：${o.description.slice(0, 60)}`).join('\n');
   const hasSleep = outfits.some(o => o.scene === 'sleep');
+  const sleepName = outfits.find(o => o.scene === 'sleep')?.name;
+  const workName = outfits.find(o => o.scene === 'work')?.name;
+  const casualName = outfits.find(o => o.scene === 'casual')?.name;
+  const homeName = outfits.find(o => o.scene === 'home')?.name;
   const dayNames = outfits.filter(o => o.scene !== 'sleep').map(o => `"${o.name}"`).join(' / ') || '（无）';
+
+  // 示例用角色真实拥有的服装名，避免出现"示例里写了 A、可选清单里没有 A"的自相矛盾
+  const exOut = workName || casualName || outfits[0].name;
+  const exHome = homeName || outfits[0].name;
 
   return `## 着装标注（额外要求）
 这个角色在一天中会换衣服。可选服装如下：
@@ -338,15 +346,144 @@ ${list}
 请在生成日程时，为**每个时段**额外输出一个字段 \`outfit\`：
 - 值为上面某套服装的**名称**（原样照抄，不要改写）。
 - **只在「换装的那一刻」填写**，其余时段填 \`null\`（表示沿用上一段的穿着）。
-  —— 也就是说，一天里 \`outfit\` 非 null 的时段应当只有 2~4 个。
-- 换装必须发生在**合理的时点**：起床后、出门前、回到家、准备就寝、以及活动性质明显变化时
-  （如「下班回家」「换上运动服去锻炼」）。不要在一天中频繁换装，最多 4 次。
-- 外出活动不要穿居家服出门，在家不要穿工装。${hasSleep ? `
-- **睡眠时段的 outfit 必须填 "${outfits.find(o => o.scene === 'sleep').name}"**（睡觉不会穿着上面的外出装）。` : ''}
+
+### 一、先给每个时段判断「在自己住所内 / 在住所外」
+- **住所内**＝这个角色自己的住处（卧室、浴室、客厅、厨房等）。
+- **住所外**＝其余一切地方：街道、商店、胡同、车站、广场、公园、河岸、酒馆、学校、公司，
+  以及**别人家**（哪怕在室内，也不是"在家"）。
+
+### 二、以下 4 个时点**必须**标 outfit，一个都不能漏
+1. **入睡** → 标"${sleepName || '睡衣'}"（睡眠时段的 outfit 必须是它）。
+2. **睡醒起床** → 标一套白天的衣服。
+3. **从住所出门**（去任何"住所外"的地方）→ 标一套**外出**的（工装或私服）。
+4. **从外面回到住所** → 标"${exHome}"。
+
+### 三、写完自检（逐时段过，发现矛盾就补标）
+- 某个"住所外"的时段，穿的却是**居家服或睡衣** → ✗ 错。在这一段补标一套外出服。
+  （唯一例外：明确写的是家门口的短暂活动，如"下楼取快递""楼下便利店"，可沿用。）
+- 某个"住所内"的时段，穿的却是外出服 → ✗ 错。在这一段补标居家服。
+- \`outfit\` 非 null 的时段**通常是 4~6 个**；一天里出门几次、回家几次，就要标几次。
+  **不要为了凑少数几次，把"出门"或"回家"漏掉** —— 漏掉的后果是角色会穿着睡衣/居家服在街上活动。
+- 反过来也别无理由频繁换装（同一地点、同一活动内不要反复换）。
+
 - 可用作白天的服装：${dayNames}。
 
-示例（仅示意 outfit 字段的密度，实际按角色真实日程）：
-{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗","location":"公寓浴室","replyDelay":0,"tags":["日常"],"description":"……","outfit":null}
-{"startTime":"08:00","endTime":"18:00","activity":"上班","location":"公司","replyDelay":0,"tags":["工作"],"description":"……","outfit":"${outfits.find(o => o.scene === 'work')?.name || outfits[0].name}"}
-{"startTime":"22:00","endTime":"07:00","activity":"就寝","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"……","outfit":${hasSleep ? `"${outfits.find(o => o.scene === 'sleep').name}"` : 'null'}}`;
+示例（仅示意 outfit 字段的密度与位置，实际按角色真实日程；注意"出门"与"回家"两处都有标注）：
+{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗","location":"公寓浴室","replyDelay":0,"tags":["日常"],"description":"……","outfit":"${exHome}"}
+{"startTime":"08:00","endTime":"12:00","activity":"上班","location":"公司","replyDelay":0,"tags":["工作"],"description":"……","outfit":"${exOut}"}
+{"startTime":"12:00","endTime":"13:00","activity":"午休回公寓","location":"公寓客厅","replyDelay":0,"tags":["日常"],"description":"……","outfit":"${exHome}"}
+{"startTime":"13:00","endTime":"18:00","activity":"继续上班","location":"公司","replyDelay":0,"tags":["工作"],"description":"……","outfit":"${exOut}"}
+{"startTime":"19:00","endTime":"22:00","activity":"在家做饭休息","location":"公寓客厅","replyDelay":0,"tags":["日常"],"description":"……","outfit":"${exHome}"}
+{"startTime":"22:00","endTime":"07:00","activity":"就寝","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"……","outfit":${hasSleep ? `"${sleepName}"` : 'null'}}`;
+}
+
+// ── 生成后校验 + 一次专注修复 ────────────────────────────────
+
+/**
+ * 校验日程的 outfit 标注，不达标就用一次**只做标注**的专注调用补回来。
+ *
+ * ── 为什么需要这道兜底（实测，2026-10-04）────────────────────
+ * 提示词已明确要求「出门/回家必须标」，但 LLM 有波动：同一角色连跑两次，
+ * 一次给了 6 个换装点（含「换装出门」「回家换装」），另一次只有 3 个
+ * —— 漏掉出门那一次，角色就会**穿着居家服/睡衣在街上活动**（用户报的就是这个）。
+ * 只靠提示词压不住，所以加一道确定性的「生成 → 校验 → 修复」。
+ *
+ * 修复之所以有效：让模型**只干一件事**（对着已有日程填 outfit）比它同时
+ * 编日程又填标注要可靠得多，且这份 prompt 极小、很快。
+ *
+ * @param {Array} schedule 已解析通过的日程数组（不改原数组）
+ * @param {number} characterId
+ * @returns {Promise<{schedule: Array, repaired: boolean, reason: string}>}
+ */
+export async function ensureOutfitAnnotations(schedule, characterId) {
+  const outfits = listSceneOutfits(characterId);
+  if (outfits.length < 2 || !Array.isArray(schedule) || !schedule.length) {
+    return { schedule, repaired: false, reason: 'no-outfits' };
+  }
+  const valid = new Set(outfits.map(o => o.name));
+
+  // ── 校验 ──
+  const marked = schedule.filter(a => a?.outfit).length;
+  const illegal = schedule.filter(a => a?.outfit && !valid.has(String(a.outfit).trim()));
+
+  /**
+   * 阈值取「固定 4」而不是按地点切换次数推算。
+   *
+   * 曾试过 `transitions - 1`（地点段变了就大概要换装），但那个估算**过于激进**：
+   * 「公寓卧室 → 公寓浴室」这种同住处的移动也会被算成一次切换，于是几乎每次都触发修复
+   * —— 等于每次生成日程都白跑一次 LLM 调用（实测 3 轮全部触发）。
+   *
+   * 一天正常至少需要 4 个换装点（入睡 / 起床 / 出门 / 回家）；低于 4 才可疑。
+   * 用户报的那个 case 正是 3 个 —— 能被抓住。而 6~9 个的正常日程不会再被误触发。
+   */
+  const floor = 4;
+
+  const needsRepair = illegal.length > 0 || marked < floor;
+  if (!needsRepair) return { schedule, repaired: false, reason: 'ok' };
+
+  const reason = illegal.length
+    ? `非法服装名 ${illegal.length} 处`
+    : `换装点偏少（${marked} < ${floor}）`;
+  console.log(`[outfitScene] 标注不合格（${reason}），发起一次专注修复`);
+
+  // ── 修复：只输出与日程等长的 outfit 数组 ──
+  const list = outfits.map(o => `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）`).join('\n');
+  const sleepName = outfits.find(o => o.scene === 'sleep')?.name;
+  const homeName = outfits.find(o => o.scene === 'home')?.name;
+  const exOut = outfits.find(o => o.scene === 'work')?.name
+    || outfits.find(o => o.scene === 'casual')?.name || outfits[0].name;
+  const lines = schedule.map((a, i) =>
+    `${i}. ${a.startTime}-${a.endTime}　${a.activity}　@${a.location || '（未写）'}`
+    + `${Number(a.replyDelay) === -1 ? '　【睡眠】' : ''}`
+  ).join('\n');
+
+  const msgs = [
+    { role: 'system', content: `你是着装校对员。下面是某角色一天的日程，请为**每个时段**判定该穿哪套衣服。
+
+可选服装：
+${list}
+
+判定规则（逐时段过）：
+1. 先判断该时段在「这个角色自己的住处内」还是「住所外」。
+   住所内＝自己的卧室/浴室/客厅/厨房；住所外＝其余一切地方（街道、商店、车站、广场、公园、
+   河岸、酒馆、学校、公司，以及**别人家**）。
+2. 睡眠时段（标了【睡眠】的）→ 必须穿${sleepName ? ` "${sleepName}"` : '睡衣'}。
+3. **住所外**的时段 → 必须穿外出服（工装或私服），**绝不能是居家服或睡衣**。
+4. 回到自己住处 → 穿${homeName ? ` "${homeName}"` : '居家服'}。
+5. **只在穿着发生变化的那一段**给出名字，没变化就填 null（表示沿用上一段）。
+   出门、回家都是变化，都要给。
+
+⚠ 只输出 JSON，格式严格如下（数组长度必须等于 ${schedule.length}，第 i 项对应上面第 i 条）：
+{"outfits": ["${exOut}", null, "..."]}
+不要输出任何解释或 JSON 以外的文字。` },
+    { role: 'user', content: lines },
+  ];
+
+  let fixed = null;
+  try {
+    const raw = await chatSync(msgs, {
+      temperature: 0.2, max_tokens: 900,
+      response_format: { type: 'json_object' }, label: 'schedule-gen:着装校对',
+    });
+    const parsed = JSON.parse(String(raw || '')
+      .replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim());
+    const arr = Array.isArray(parsed?.outfits) ? parsed.outfits : null;
+    // 只接受「长度对齐 + 名字全合法」的结果 —— 宁可保留原样，也不拿脏数据覆盖
+    if (arr && arr.length === schedule.length
+      && arr.every(v => v == null || valid.has(String(v).trim()))) {
+      fixed = arr;
+    } else {
+      console.warn('[outfitScene] 修复结果不合格，保留原标注',
+        arr ? `（长度 ${arr.length}≠${schedule.length}）` : '（无数组）');
+    }
+  } catch (err) {
+    console.warn('[outfitScene] 修复调用失败，保留原标注:', err.message);
+  }
+
+  if (!fixed) return { schedule, repaired: false, reason: 'repair-failed' };
+
+  const next = schedule.map((a, i) => ({ ...a, outfit: fixed[i] ? String(fixed[i]).trim() : null }));
+  const newMarks = next.filter(a => a.outfit).length;
+  console.log(`[outfitScene] 标注已修复：${marked} → ${newMarks} 个换装点`);
+  return { schedule: next, repaired: true, reason };
 }

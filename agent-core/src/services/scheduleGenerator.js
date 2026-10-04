@@ -16,7 +16,7 @@ import { config } from '../config.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
-import { buildOutfitAnnotateLayer } from './outfitScene.js';
+import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
 
 /**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
@@ -289,8 +289,19 @@ ${directionMsg}`;
         label: `schedule-gen:${character.display_name}`,
       });
 
-      const schedule = parseAndValidateSchedule(rawResult, character.display_name);
+      let schedule = parseAndValidateSchedule(rawResult, character.display_name);
       if (schedule) {
+        // 着装标注校验 + 一次专注修复（仅当该角色配了场景服装）。
+        // 提示词要求"出门/回家必须标"但 LLM 有波动，实测同一角色两次生成可能一次给 6 个
+        // 换装点、一次只给 3 个 —— 漏标会让角色穿着居家服在街上活动。只压提示词不够，加这道兜底。
+        if (outfitLayer) {
+          try {
+            const r = await ensureOutfitAnnotations(schedule, character.id);
+            schedule = r.schedule;
+          } catch (err) {
+            console.warn(`[scheduleGen] 着装标注修复失败（不影响日程生成）: ${err.message}`);
+          }
+        }
         const json = JSON.stringify(schedule);
         const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(character.id);
 
