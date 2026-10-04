@@ -51,3 +51,6 @@ HyperFrames/
 krea2-posters/
 
 # Isolated M1 UI build (screenshots and verification report remain reviewable)
+
+# TavernWeave 进度画板：本地工具产物 + 派生数据（由 docs/ 权威投影而来），不进补丁
+progress/
