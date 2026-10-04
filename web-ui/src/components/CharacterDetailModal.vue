@@ -170,27 +170,41 @@
                     role="tab"
                     :aria-selected="i === detail.sceneTab"
                     class="scene-tab"
-                    :class="{ active: i === detail.sceneTab, filled: !!String(o.description || '').trim() }"
+                    :class="{
+                      active: i === detail.sceneTab,
+                      filled: isTabFilled(o),
+                      auto: o.scene === 'nude',
+                    }"
                     @click="detail.sceneTab = i"
                   >
                     {{ o.sceneLabel }}
                     <span v-if="o.scene === 'sleep'" class="scene-tab-tag">强制</span>
-                    <span v-else-if="o.scene === 'nude'" class="scene-tab-tag is-nude">私密</span>
+                    <span v-else-if="o.scene === 'nude'" class="scene-tab-tag is-nude">自动</span>
                   </button>
                 </div>
                 <div v-if="activeSceneOutfit" class="scene-edit">
-                  <!-- 只填「这一套的衣服」。身体在上面统一填，这里不重复 -->
-                  <linshe-input
-                    v-model="activeSceneOutfit.description"
-                    type="textarea"
-                    class="fi scene-edit-desc"
-                    rows="6"
-                    :placeholder="scenePlaceholder(activeSceneOutfit.scene)"
-                    @input="detail.dirty = true"
-                  />
-                  <p v-if="activeSceneOutfit.scene === 'nude'" class="scene-edit-note">
-                    裸体只用于洗浴与私密性场景。这里保持「completely nude…」不动即可，画面主体由上面的身体描述决定。
-                  </p>
+                  <!-- 裸体：没有可填的东西。它的描述是全角色一致的常量、由后端维护，
+                       真正决定画面的是上面的「身体」—— 所以这里只解释，不给输入框。 -->
+                  <div v-if="activeSceneOutfit.scene === 'nude'" class="scene-auto-note">
+                    <p class="scene-auto-lead">这一套不用填。</p>
+                    <p class="scene-auto-body">
+                      「裸体」的含义就是没穿衣服，所有角色都一样，内容固定为
+                      <code>{{ NUDE_DESCRIPTION }}</code>，由系统自动写入。
+                      真正决定画面的是上面的<b>「身体」</b>—— 洗浴与私密性场景会只用身体、不叠任何衣物。
+                    </p>
+                  </div>
+
+                  <!-- 其余四套：只填「这一套的衣服」。身体在上面统一填，这里不重复 -->
+                  <template v-else>
+                    <linshe-input
+                      v-model="activeSceneOutfit.description"
+                      type="textarea"
+                      class="fi scene-edit-desc"
+                      rows="6"
+                      :placeholder="scenePlaceholder(activeSceneOutfit.scene)"
+                      @input="detail.dirty = true"
+                    />
+                  </template>
                 </div>
                 <div v-else class="scene-edit-empty">加载中…</div>
               </div>
@@ -751,29 +765,34 @@ async function generateOtherSceneOutfits() {
   if (!c || outfitGenerating.value) return
 
   /**
-   * 锚点（seeds）= **真正填了内容**的那几套。
+   * 锚点（seeds）= **真正填了衣服**的那几套，**不含裸体**。
    *
-   * ⚠ 不能把「身体非空」也算成「这一套已填」。身体是五套共用的一层，
-   *   而 seeds 的语义是"已填好的分项" —— 后端会把这些 scene **从待生成目标里剔除**。
-   *   若身体非空就把五套全当种子，目标会被剔空、后端直接返回空数组，表现为"点了没反应"
-   *   （2026-10-04 实测踩到：填了身体 + 常服 + 私服，点反推 → 居家/睡衣/裸体 一个都没填）。
-   *
-   * 身体另有通道：通过下面的 `baseAppearance` 传给后端（后端 pickBody 会用），
-   * 所以即使一套都没填、只填了身体，也能正常反推。
+   * 两条约束都不能破：
+   *  ① 不能把「身体非空」也算成「这一套已填」—— 身体是五套共用的一层，
+   *    而 seeds 的语义是"已填好的分项"，后端会据此把它们**从待生成目标里剔除**。
+   *    若身体非空就把五套全当种子，目标会被剔空、后端直接返回空数组，
+   *    表现为"点了没反应"（2026-10-04 实测踩到）。
+   *  ② 裸体也不进 seeds —— 它的描述是系统常量，当"参考服装"没有意义
+   *    （身体另有 `baseAppearance` 通道传给后端，后端 `pickBody` 会用）。
    */
   const seeds = detail.sceneOutfits
-    .filter(o => String(o.description || '').trim())
+    .filter(o => o.scene !== 'nude' && String(o.description || '').trim())
     .map(o => ({
       scene: o.scene,
       name: o.name,
       body: String(detail.body || '').trim(),
       description: String(o.description || '').trim(),
     }))
+  /**
+   * 目标 = **还没填衣服**的那几套，且**排除裸体**。
+   * 裸体是系统常量（后端 `upsertSceneOutfits` 自动维护那一行），既没有可生成的内容，
+   * 也不该被 LLM "设计" —— 把它算进目标只会白白多一次调用、还可能把常量写坏。
+   */
   const targets = detail.sceneOutfits
-    .filter(o => !String(o.description || '').trim())
+    .filter(o => o.scene !== 'nude' && !String(o.description || '').trim())
     .map(o => o.scene)
 
-  if (!targets.length) { toastFn('五套都已经填好了，没有需要反推的', 'info'); return }
+  if (!targets.length) { toastFn('四套都已经填好了，没有需要反推的', 'info'); return }
   // 既没有已填的套、也没有身体 → 真的没有可依据的东西
   if (!seeds.length && !String(detail.body || '').trim()) {
     toastFn('先填任意一套、或先填「身体」，才能据此反推其余', 'warning'); return
@@ -987,9 +1006,14 @@ async function saveCharDetail() {
   // 四套场景服装一并保存（只提交填了描述的；工装内容与 base_prompt 外观段一致）。
   // 名称由前端自动补（沿用已有 / 场景默认名）—— 界面不暴露该字段，它只服务日程标注的匹配。
   const payload = detail.sceneOutfits
-    // ⚠ 不再要求 description 非空 —— 「裸体」那套允许只留默认声明，
-    //   而且用户可能先保存其他套。只要场景名有了就提交，后端会 upsert。
-    .filter(o => o.scene)
+    /**
+     * ⚠ 两处过滤都是有意的：
+     *  · 排除 `nude` —— 它的描述是系统常量、由后端维护；界面传空值反而会把它写坏
+     *    （曾经就是这样把姬子的裸体描述存成了空串，注入里没了「裸体」声明，模型会画上衣服）。
+     *  · 其余四套都要提交（即使描述为空）—— 用户可能先保存一部分，后端会 upsert；
+     *    名称取自库里已有的，保住已生成日程里的标注。
+     */
+    .filter(o => o.scene && o.scene !== 'nude')
     .map(o => ({
       scene: o.scene,
       name: (o.name || '').trim() || o.defaultName || o.sceneLabel || o.scene,
@@ -1415,6 +1439,23 @@ function openRefineModal() {
  * `wearing` 是提示词里写死的连接词，拆点稳定；万一没命中，再用关键词兜底判断
  * 这段到底是"身体"还是"衣服"，而不是瞎猜。
  */
+/**
+ * 裸体那一套的固定描述 —— 与后端 `outfitScene.NUDE_DESCRIPTION` 必须一致。
+ * 它是**系统常量**（所有角色都一样），所以这里只用于展示，不提供输入。
+ */
+const NUDE_DESCRIPTION = 'completely nude, wearing no clothing at all, bare skin visible'
+
+/**
+ * 标签上要不要显示「已填」的圆点。
+ *
+ * 裸体**不参与**这个标记：它的描述是系统常量、后端总会写成常量，
+ * 若照常判断就会一直显示"已填"，让人以为它也是需要自己填的一项。
+ */
+function isTabFilled(o) {
+  if (o?.scene === 'nude') return false
+  return !!String(o?.description || '').trim()
+}
+
 const CLOTHING_HINT = /\b(dress|skirt|pants|trousers|shirt|blouse|jacket|coat|hoodie|sweater|cardigan|kimono|yukata|robe|shorts|jeans|stockings?|socks?|shoes?|boots?|slippers?|heels?|gloves?|bra|panties|camisole|nightgown|blazer|uniform|apron|sash|obi|scarf|hat|beret|headwear|choker|necklace|earrings?|goggles|mask|armor|suit)\b/i
 const BODY_HINT = /\b(hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?)\b/i
 
@@ -2112,9 +2153,12 @@ const standingPanel = reactive({
   color: var(--accent);
 }
 .scene-tab.active .scene-tab-tag { background: rgba(var(--accent-rgb), 0.22); }
-/* 裸体那套是"私密场景专用"，标签用中性色区分，别和"强制"的睡眠混同一种强调 */
+/* 裸体那套由系统维护（描述是常量），标签用中性色标「自动」，别和「强制」的睡眠混同一种强调 */
 .scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
 .scene-tab.active .scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
+/* 自动维护的那一格：标签不用「已填」圆点，改用虚线下划线暗示"无需你管" */
+.scene-tab.auto { opacity: 0.85; }
+.scene-tab.auto.active { opacity: 1; }
 
 /* 身体字段：五套共用，视觉上单独成块并与下面的服装标签拉开距离 */
 .scene-body-field {
@@ -2141,6 +2185,16 @@ const standingPanel = reactive({
   margin: 0; font-size: 11px; line-height: 1.6;
   color: var(--text-secondary);
 }
+/* 裸体那一套的只读说明（没有可填的东西，解释清楚就行） */
+.scene-auto-note { display: flex; flex-direction: column; gap: 5px; }
+.scene-auto-lead { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.scene-auto-body { margin: 0; font-size: 11.5px; line-height: 1.75; color: var(--text-secondary); }
+.scene-auto-body code {
+  display: inline-block; padding: 1px 6px; border-radius: 5px;
+  background: var(--glass-bg); color: var(--text-primary);
+  font-size: 10.5px; word-break: break-all;
+}
+.scene-auto-body b { color: var(--text-primary); }
 .scene-edit-empty { font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }

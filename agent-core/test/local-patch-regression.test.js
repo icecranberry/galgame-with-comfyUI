@@ -21,6 +21,7 @@ import {
 import {
   composeOutfitText, listSceneOutfits, upsertSceneOutfits,
   getSceneOutfitForNow, ensureOutfitAnnotations, planOutfitTargets, PRIVATE_SCENE, OUTFIT_SCENES,
+  NUDE_DESCRIPTION,
 } from '../src/services/outfitScene.js';
 import {
   OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
@@ -141,22 +142,69 @@ test('planOutfitTargets：只有「有服装描述」的才算已填，带了 bo
   ];
   assert.deepEqual(
     planOutfitTargets(loose, ['nude', 'home', 'sleep']),
-    ['nude', 'home', 'sleep'],
-    '带 body 的空套必须仍算作待生成目标（否则反推静默返回空）',
+    ['home', 'sleep'],
+    '带 body 的空套必须仍算作待生成目标（否则反推静默返回空）；裸体不算目标',
   );
 });
 
-test('planOutfitTargets：已填的那些会被排除；全空则返回全部五套', () => {
+test('planOutfitTargets：已填的那些会被排除；全空则返回四套（不含裸体）', () => {
   assert.deepEqual(planOutfitTargets([{ scene: 'work', description: 'x' }], ['work', 'home']), ['home']);
-  // 一套都没填（只给了身体，走 baseAppearance）→ 五套全生成
-  assert.deepEqual(planOutfitTargets([], []), ['nude', 'work', 'casual', 'home', 'sleep']);
-  assert.deepEqual(planOutfitTargets([{ scene: 'work', body: 'b', description: '' }], []), ['nude', 'work', 'casual', 'home', 'sleep']);
+  // 一套都没填（只给了身体，走 baseAppearance）→ 四套全生成
+  const FOUR = ['work', 'casual', 'home', 'sleep'];
+  assert.deepEqual(planOutfitTargets([], []), FOUR);
+  assert.deepEqual(planOutfitTargets([{ scene: 'work', body: 'b', description: '' }], []), FOUR);
+});
+
+test('planOutfitTargets：裸体永远不是生成目标（即使被显式要求）', () => {
+  // 它的描述是系统常量，让 LLM 生成纯属浪费、还可能把常量写坏
+  assert.deepEqual(planOutfitTargets([], ['nude']), ['work', 'casual', 'home', 'sleep']);
+  assert.deepEqual(planOutfitTargets([], ['nude', 'home']), ['home']);
+  assert.deepEqual(planOutfitTargets([{ scene: 'home', description: 'x' }], ['nude', 'sleep']), ['sleep']);
 });
 
 test('planOutfitTargets：忽略非法场景名，且全部已填时返回空', () => {
   assert.deepEqual(planOutfitTargets([], ['不存在的场景', 'home']), ['home']);
   const allFilled = ['nude', 'work', 'casual', 'home', 'sleep'].map(s => ({ scene: s, description: 'x' }));
   assert.deepEqual(planOutfitTargets(allFilled, []), []);
+});
+
+// ─────────────────────────────────────────────────────────
+// 裸体是「系统维护的常量」——不提供输入，且能自愈
+// ─────────────────────────────────────────────────────────
+
+test('裸体：写入时描述一律规范化成常量（自愈空描述）', () => {
+  makeChar();
+  // 模拟"界面把裸体传了空描述"——曾经就是这样把姬子的裸体行存成空串，
+  // 注入里没了「裸体」声明，模型会照基础外观把衣服画上
+  upsertSceneOutfits(CID, [{ scene: 'nude', name: '裸体', description: '' }]);
+  let nude = listSceneOutfits(CID).find(o => o.scene === 'nude');
+  assert.equal(nude.description, NUDE_DESCRIPTION, '空描述必须被规范化为常量');
+
+  // 传别的内容也一样以常量为准（不接受自定义）
+  upsertSceneOutfits(CID, [{ scene: 'nude', name: '裸体', description: '随便写的别的' }]);
+  nude = listSceneOutfits(CID).find(o => o.scene === 'nude');
+  assert.equal(nude.description, NUDE_DESCRIPTION);
+  cleanup();
+});
+
+test('裸体：调用方不传它时也会自动补齐那一行（日程标注要靠它匹配）', () => {
+  cleanup();
+  db.prepare('INSERT INTO characters (id, name, display_name, base_prompt) VALUES (?,?,?,?)')
+    .run(CID, '__zz_regress_nude', '__zz_regress_nude', '## 人设\nx\n\n## 你的外观\nlong black hair');
+  // 只写四套，故意不带 nude —— 前端现在就是这样（裸体不再参与输入）
+  upsertSceneOutfits(CID, [
+    { scene: 'work', name: '工作装', description: 'black blazer', body: 'long black hair' },
+    { scene: 'casual', name: '便装', description: 'hoodie', body: 'long black hair' },
+    { scene: 'home', name: '居家服', description: 'grey tee', body: 'long black hair' },
+    { scene: 'sleep', name: '睡衣', description: 'camisole, barefoot', body: 'long black hair' },
+  ]);
+  const list = listSceneOutfits(CID);
+  const nude = list.find(o => o.scene === 'nude');
+  assert.ok(nude, '裸体行必须被自动补齐 —— 否则日程标的「裸体」匹配不上');
+  assert.equal(nude.description, NUDE_DESCRIPTION);
+  assert.equal(nude.name, '裸体', '默认名要与日程标注口径一致');
+  assert.equal(nude.body, 'long black hair', 'body 应从该角色已有行继承（五套共用）');
+  cleanup();
 });
 
 // ─────────────────────────────────────────────────────────

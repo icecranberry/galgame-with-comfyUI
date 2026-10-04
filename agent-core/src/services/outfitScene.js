@@ -103,6 +103,25 @@ export function setCharacterBody(characterId, body) {
   return { ok: true, updated: r.changes };
 }
 
+/**
+ * 裸体那套的**固定描述** —— 所有角色、任何情况都一样，是**系统常量**，不提供用户输入。
+ *
+ * 为什么它必须是常量而不是"可填的一项"：
+ *   · 「裸体」的含义本身就是"没穿衣服"，没有任何可定制的余地；
+ *   · 真正需要因人而异的是**身体**，那已经由共用的 `body` 承担；
+ *   · 让它可填反而会出问题 —— 一旦被存成空字符串，注入里就没有"裸体"这个声明了，
+ *     模型会照基础外观把衣服画上（2026-10-04 实测：姬子那条裸体行的描述就是空的）。
+ */
+export const NUDE_DESCRIPTION = 'completely nude, wearing no clothing at all, bare skin visible';
+/** 裸体那一套的默认名（日程标注按名字匹配，全库统一用它） */
+export const NUDE_NAME = '裸体';
+
+/** 规范化形态的写入：裸体的描述一律用常量，调用方传什么都以常量为准 */
+function normalizeGarment(scene, description) {
+  if (scene === PRIVATE_SCENE) return NUDE_DESCRIPTION;
+  return String(description || '').trim().slice(0, 1200);
+}
+
 /** 批量写入场景服装（供「一键生成」用）。同名同场景则更新描述，避免重复堆叠 */
 export function upsertSceneOutfits(characterId, outfits) {
   const db = getDb();
@@ -113,17 +132,45 @@ export function upsertSceneOutfits(characterId, outfits) {
     `UPDATE character_outfits SET name = ?, description = ?, body = COALESCE(?, body) WHERE id = ?`
   );
   const find = db.prepare(
-    `SELECT id FROM character_outfits WHERE character_id = ? AND scene = ? LIMIT 1`
+    `SELECT id, name FROM character_outfits WHERE character_id = ? AND scene = ? LIMIT 1`
   );
   let added = 0, updated = 0;
   const tx = db.transaction(() => {
     for (const o of outfits) {
-      // `nude` 那套允许 description 为空（纯身体），所以这里只卡 scene/name
       if (!o?.scene || !SCENE_KEYS.includes(o.scene) || !o.name) continue;
       const body = o.body != null ? String(o.body).trim().slice(0, 2000) : null;
+      const desc = normalizeGarment(o.scene, o.description);
       const exist = find.get(characterId, o.scene);
-      if (exist) { upd.run(o.name, String(o.description || '').trim().slice(0, 1200), body, exist.id); updated++; }
-      else { ins.run(characterId, o.name, String(o.description || '').trim().slice(0, 1200), o.scene, body || ''); added++; }
+      if (exist) {
+        /**
+         * 裸体那套**保留已有名字**：日程标注是按「名字」匹配的，
+         * 若这里被改名，已生成的日程里那些 `outfit: "裸体"` 就匹配不上了。
+         * 其余套按调用方给的名字更新。
+         */
+        const name = o.scene === PRIVATE_SCENE ? (exist.name || o.name) : o.name;
+        upd.run(name, desc, body, exist.id);
+        updated++;
+      } else {
+        ins.run(characterId, o.name, desc, o.scene, body || '');
+        added++;
+      }
+    }
+
+    /**
+     * 兜底：**保证裸体行存在**。
+     *
+     * 前端不再提供裸体的输入（它是常量），所以调用方可能根本不传它 ——
+     * 但 `getSceneOutfitForNow` 是按「名字」匹配日程标注的，
+     * 没有这一行，日程里标的「裸体」就匹配不上；`buildOutfitAnnotateLayer`
+     * 也靠它决定要不要渲染「裸体什么时候才用」那段提示。
+     * 所以由这里负责建（缺则补、有则上面已把描述规范化为常量 → 顺带自愈空描述）。
+     */
+    if (!find.get(characterId, PRIVATE_SCENE)) {
+      const anyBytes = db.prepare(
+        `SELECT body FROM character_outfits WHERE character_id = ? AND body IS NOT NULL AND body != '' LIMIT 1`
+      ).get(characterId);
+      ins.run(characterId, NUDE_NAME, NUDE_DESCRIPTION, PRIVATE_SCENE, anyBytes?.body || '');
+      added++;
     }
   });
   tx();
@@ -226,10 +273,13 @@ ${bodySource}
  * 若把"带 body"当已填，调用方只要顺手给每一条都附上 body，目标就会被**全部剔空**，
  * 上层静默拿到空数组，表现为"点了反推没反应"。
  *
- * 抽成独立函数是为了**能在不调 LLM 的前提下单测**这条语义。
+ * ② **裸体永远不在生成目标里** —— 它的描述是系统常量（`NUDE_DESCRIPTION`），
+ *    让 LLM 去"设计"它纯属浪费、还可能被写坏；那一行由 `upsertSceneOutfits` 负责维护。
+ *
+ * 抽成独立函数是为了**能在不调 LLM 的前提下单测**这几条语义。
  *
  * @param {Array<{scene:string, body?:string, description?:string}>} seeds 已填好的分项
- * @param {string[]} [wanted] 调用方指定的目标；留空 = 全部还没填的
+ * @param {string[]} [wanted] 调用方指定的目标；留空 = 全部还没填的（不含裸体）
  */
 export function planOutfitTargets(seeds, wanted = []) {
   const rows = (Array.isArray(seeds) ? seeds : [])
@@ -237,8 +287,10 @@ export function planOutfitTargets(seeds, wanted = []) {
   const filled = new Set(
     rows.filter(s => String(s.description || '').trim()).map(s => s.scene),
   );
-  const want = (Array.isArray(wanted) ? wanted : []).filter(s => SCENE_KEYS.includes(s));
-  return (want.length ? want : SCENE_KEYS).filter(s => !filled.has(s));
+  // 可生成的场景：**排除裸体** —— 它的描述是系统常量，不需要（也不该）让 LLM 生成
+  const generable = SCENE_KEYS.filter(s => s !== PRIVATE_SCENE);
+  const want = (Array.isArray(wanted) ? wanted : []).filter(s => generable.includes(s));
+  return (want.length ? want : generable).filter(s => !filled.has(s));
 }
 
 /**
