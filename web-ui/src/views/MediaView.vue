@@ -143,9 +143,13 @@
           @click="onOutletChange(o.id)"
         >
           <span v-if="o.icon" class="outlet-icon">{{ o.icon }}</span>{{ o.name }}
-          <!-- 形态标记：这一类不是帖子流，而是按「期」出刊 -->
-          <span v-if="o.layout === 'weekly'" class="outlet-kind is-weekly">刊</span>
-          <span v-else-if="o.layout === 'poster'" class="outlet-kind is-poster">报</span>
+          <!-- 形态标记：这一类不是帖子流，而是按「期」出刊。
+               portal 是周刊/海报升级后的统一形态（两个刊都在用），统一标「刊」。 -->
+          <span
+            v-if="isDigitalOutlet(o)"
+            class="outlet-kind"
+            :class="o.layout === 'poster' ? 'is-poster' : 'is-weekly'"
+          >{{ o.layout === 'poster' ? '报' : '刊' }}</span>
           <span class="outlet-num">{{ o.post_count }}</span>
         </button>
       </template>
@@ -567,13 +571,27 @@ const CATEGORIES = [
 const activeCategory = ref('social')   // 默认落在内容最多的社交平台
 
 /** 当前分类下的媒体（普通用户自建媒体） */
+/**
+ * 媒体是否属于「数字报刊」。
+ *
+ * ★ 必须与后端 `listPosts` 的分类口径**逐字对齐**（`services/mediaService.js`）：
+ *     digital → `o.layout IN ('weekly','poster','portal')`
+ *     social  → `o.layout IS NULL OR o.layout = 'feed'`
+ *
+ * ⚠️ 这两处曾经各自硬编码 `layout === 'weekly' || layout === 'poster'`。
+ *    portal 迁移（周刊/海报 → 门户）时只改了后端、**漏了前端**，结果两个刊
+ *    在后端分类里属「数字报刊」，前端标签栏却把它们判定成"非数字"→ 归进社交平台。
+ *    新增 layout 形态时，**后端 listPosts 与这里必须一起改**。
+ */
+function isDigitalOutlet(o) {
+  const layout = o.layout || 'feed'
+  return layout === 'weekly' || layout === 'poster' || layout === 'portal'
+}
+
 const filteredOutlets = computed(() => {
   if (activeCategory.value === 'traditional') return []
   const wantDigital = activeCategory.value === 'digital'
-  return outlets.value.filter(o => {
-    const isDigital = o.layout === 'weekly' || o.layout === 'poster'
-    return isDigital === wantDigital
-  })
+  return outlets.value.filter(o => isDigitalOutlet(o) === wantDigital)
 })
 
 /** 「全部」标签上的数字：当前分类下所有媒体的帖子数之和 */
@@ -584,7 +602,7 @@ function categoryCount(key) {
   if (key === 'traditional') return newspaperStore.unread ? 1 : 0   // 只表示"有未读"
   const wantDigital = key === 'digital'
   return outlets.value
-    .filter(o => ((o.layout === 'weekly' || o.layout === 'poster') === wantDigital))
+    .filter(o => isDigitalOutlet(o) === wantDigital)
     .reduce((s, o) => s + (o.post_count || 0), 0)
 }
 
@@ -880,8 +898,13 @@ async function regenerateImage(p) {
 /** 删除这条内容（含其图片文件）。破坏性操作 → 二次确认 */
 async function removePost(p) {
   if (busyPostId.value !== null) return
-  const isIssue = (p.layout || 'feed') !== 'feed'
-  const label = isIssue ? (p.layout === 'poster' ? '这一期海报' : '这一期周刊') : '这条内容'
+  // 用 postKind 而不是裸 layout：迁移后两个刊的 layout 都是 portal，
+  // 拿 layout 判断会把所有刊都说成「周刊」（海报也不例外）。
+  const kind = postKind(p)
+  const label = kind === 'feed' ? '这条内容'
+    : kind === 'poster' ? '这一期海报'
+    : kind === 'portal' ? '这一期刊物'
+    : '这一期周刊'
   const msg = `确定删除${label}吗？\n\n「${p.title}」\n\n配图文件会一并删除，且不可恢复。`
   const ok = confirmFn
     ? await confirmFn({ title: '删除', message: msg, okText: '删除', danger: true })
