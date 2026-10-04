@@ -262,12 +262,21 @@ export function listPosts({ outletId = null, boardId = null, category = null, li
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
-  const total = db.prepare(`SELECT COUNT(*) AS n FROM media_posts p ${whereSql}`).get(...params).n;
-  const rows = db.prepare(`
-    SELECT p.*, o.name AS outlet_name, o.layout AS layout, b.name AS board_name
+  // ★ 分类过滤引用 o.layout，所以**计数查询也必须带上同一套 JOIN**。
+  //   踩过的坑：计数只写 `FROM media_posts p` → SQLite 报 `no such column: o.layout`
+  //   → 整个 listPosts() 抛错 → 前端 catch 后把列表置空 → 分类标签有数字但正文区
+  //   显示「还没有任何帖子」。两个查询共用 fromSql，从结构上杜绝再次跑偏。
+  //   LEFT JOIN 对 outlet/board 都是 1:1（外键指向唯一主键），COUNT 不会重复计数。
+  const fromSql = `
     FROM media_posts p
     LEFT JOIN media_outlets o ON o.id = p.outlet_id
     LEFT JOIN media_boards  b ON b.id = p.board_id
+  `;
+
+  const total = db.prepare(`SELECT COUNT(*) AS n ${fromSql} ${whereSql}`).get(...params).n;
+  const rows = db.prepare(`
+    SELECT p.*, o.name AS outlet_name, o.layout AS layout, b.name AS board_name
+    ${fromSql}
     ${whereSql}
     ORDER BY p.id DESC
     LIMIT ? OFFSET ?

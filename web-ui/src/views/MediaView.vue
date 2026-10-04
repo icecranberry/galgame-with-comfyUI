@@ -2,11 +2,42 @@
   <div class="media-view">
     <!-- 顶栏 -->
     <div class="media-header">
-      <span
-        class="media-title"
-        :class="{ 'is-clickable': isMobile }"
-        @click="isMobile && toggleMobileSidebar()"
-      >传媒</span>
+      <!-- 移动端：侧栏入口。
+           原先靠「传媒」标题点击唤出，标题去掉后改成一个图标按钮，
+           否则手机上这一页就没有回导航的路了。 -->
+      <linshe-button
+        v-if="isMobile"
+        variant="icon"
+        class="btn-mobile-back"
+        title="导航"
+        @click="toggleMobileSidebar?.()"
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </linshe-button>
+
+      <!-- 分类分页：占原来「传媒」标题的位置。
+           报刊类不混进「社交平台」（社交平台 = 瀑布流帖子流）——
+           《邻舍日报》是整版报纸、周刊/海报是按期出刊，三者形态完全不同，
+           混在一个流里既乱又难找。 -->
+      <div class="cat-bar" role="tablist" aria-label="内容分类">
+        <button
+          v-for="c in CATEGORIES"
+          :key="c.key"
+          type="button"
+          role="tab"
+          :aria-selected="activeCategory === c.key"
+          class="cat-tab"
+          :class="{ active: activeCategory === c.key }"
+          :title="c.hint"
+          @click="onCategoryChange(c.key)"
+        >
+          <span class="cat-icon">{{ c.icon }}</span>{{ c.label }}
+          <span class="cat-num">{{ categoryCount(c.key) }}</span>
+        </button>
+      </div>
+
       <div class="header-right">
         <span class="media-count" v-if="activeCategory !== 'traditional' && total > 0">共 {{ total }} 帖</span>
         <!-- 自动抓帖频率：常显当前档位，点开就地调（不塞进设置页，传媒自己管自己的节奏）
@@ -78,24 +109,6 @@
         </div>
       </div>
     </Transition>
-
-    <!-- 分类分页：报刊类不混进「其他」（社交平台帖子流） -->
-    <div class="cat-bar" role="tablist" aria-label="内容分类">
-      <button
-        v-for="c in CATEGORIES"
-        :key="c.key"
-        type="button"
-        role="tab"
-        :aria-selected="activeCategory === c.key"
-        class="cat-tab"
-        :class="{ active: activeCategory === c.key }"
-        :title="c.hint"
-        @click="onCategoryChange(c.key)"
-      >
-        <span class="cat-icon">{{ c.icon }}</span>{{ c.label }}
-        <span class="cat-num">{{ categoryCount(c.key) }}</span>
-      </button>
-    </div>
 
     <!-- 媒体标签页（跟随分类筛选） -->
     <div class="outlet-bar">
@@ -288,8 +301,18 @@
          选中的是周刊/海报时 feedPosts 本就为空，不能因此误报"没有内容"；
          传统报纸分类也不适用（内容在整版报纸里） -->
     <div v-if="activeCategory !== 'traditional' && !posts.length && !loading" class="media-empty">
-      <p class="empty-title">{{ activeOutlet === null ? '还没有任何帖子' : '这个媒体还没有内容' }}</p>
-      <p class="empty-hint">点右上角「刷新」抓一批新帖；内容由该媒体的提示词 + 世界观生成，活跃角色会随机出现在帖子里。</p>
+      <!-- ★ 加载失败必须与"真的没有内容"区分开。
+           踩过的坑：后端 listPosts 的 COUNT 查询缺 JOIN → 接口报错 → catch 里静默置空 posts
+           → 页面显示「还没有任何帖子」，看起来像"内容被清空了"，实际是请求挂了。 -->
+      <template v-if="loadError">
+        <p class="empty-title">内容加载失败</p>
+        <p class="empty-hint">{{ loadError }}</p>
+        <linshe-button variant="secondary" size="sm" class="empty-retry" @click="reloadAll()">重试</linshe-button>
+      </template>
+      <template v-else>
+        <p class="empty-title">{{ activeOutlet === null ? '还没有任何帖子' : '这个媒体还没有内容' }}</p>
+        <p class="empty-hint">点右上角「刷新」抓一批新帖；内容由该媒体的提示词 + 世界观生成，活跃角色会随机出现在帖子里。</p>
+      </template>
     </div>
 
     <div v-if="loading" class="media-loading"><span class="spinner"></span> 加载中…</div>
@@ -432,6 +455,8 @@ const boards = ref([])
 const posts = ref([])
 const total = ref(0)
 const loading = ref(true)
+/** 帖子列表加载失败的原因（空串=正常）。用于把"请求失败"与"真的没有内容"区分开 */
+const loadError = ref('')
 const loadingMore = ref(false)
 const refreshing = ref(false)
 const showSettings = ref(false)
@@ -447,13 +472,13 @@ const activeOutlet = ref(null)
 const activeBoard = ref(null)
 
 // ── 顶栏分类分页 ──
-// 报刊类不混进「其他」（社交平台帖子流）——《邻舍日报》是整版报纸、周刊/海报是按期出刊，
-// 三者形态完全不同，混在一个流里既乱又难找。
-// 分类由 layout 推导（weekly/poster → 数字报刊；feed → 其他），加新媒体时自动归类。
+// 报刊类不混进「社交平台」（社交平台 = 瀑布流帖子流）：《邻舍日报》是整版报纸、
+// 周刊/海报是按期出刊，三者形态完全不同，混在一个流里既乱又难找。
+// 分类由 layout 推导（weekly/poster → 数字报刊；feed → 社交平台），加新媒体时自动归类。
 const CATEGORIES = [
   { key: 'traditional', label: '传统报纸', icon: '📰', hint: '《邻舍日报》—— 整版报纸，每天零点印发' },
   { key: 'digital', label: '数字报刊', icon: '📸', hint: '周刊 / 海报 —— 按期出刊的数字刊物' },
-  { key: 'social', label: '其他', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
+  { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
 ]
 const activeCategory = ref('social')   // 默认落在内容最多的社交平台
 
@@ -485,6 +510,7 @@ async function onCategoryChange(key) {
   activeOutlet.value = null
   activeBoard.value = null
   boards.value = []
+  loadError.value = ''
   if (key === 'traditional') { posts.value = []; total.value = 0; return }
   await loadPage(0)
 }
@@ -715,12 +741,17 @@ async function loadPage(offset = 0) {
       offset,
     })
     if (seq !== loadSeq) return
+    loadError.value = ''
     if (offset === 0) posts.value = d.posts || []
     else posts.value.push(...(d.posts || []))
     total.value = d.total || 0
   } catch (err) {
     console.error('[media] 读取帖子失败:', err)
-    if (seq === loadSeq && offset === 0) posts.value = []
+    if (seq !== loadSeq) return
+    // 不能只是清空 posts —— 那会让"请求失败"看起来像"这里真的没有内容"。
+    // 记下错误，交给空状态渲染成「加载失败 + 重试」。
+    loadError.value = err?.message || '请求失败'
+    if (offset === 0) { posts.value = []; total.value = 0 }
   }
 }
 
@@ -825,7 +856,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  gap: 14px;
+  padding: 10px 20px;
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -835,9 +867,12 @@ onUnmounted(() => {
   top: 0;
   z-index: 6;
 }
-.media-title { font-size: 18px; font-weight: 700; color: var(--text-bright); user-select: none; }
-.media-title.is-clickable { cursor: pointer; }
-.header-right { display: flex; align-items: center; gap: 10px; }
+/* 移动端侧栏入口（原来靠「传媒」标题点击，标题去掉后换成图标按钮） */
+.btn-mobile-back {
+  width: 40px; height: 40px; flex-shrink: 0;
+  background: transparent;
+}
+.header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .media-count { font-size: 13px; color: var(--text-secondary); }
 .btn-op, .btn-refresh { padding: 8px 18px; }
 
@@ -906,37 +941,42 @@ onUnmounted(() => {
 .freq-enter-from, .freq-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
 .freq-enter-to, .freq-leave-from { opacity: 1; max-height: 200px; }
 
-/* ── 顶栏分类分页：报刊与社交分开，避免混在一个流里 ── */
+/* ── 分类分页：占据原「传媒」标题的位置（在顶栏左侧） ──
+   窄屏时三档放不下 → 横向滚动，不换行、不挤压右侧按钮 */
 .cat-bar {
   display: flex;
-  gap: 0;
-  padding: 10px 20px 0;
-  flex-shrink: 0;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
+.cat-bar::-webkit-scrollbar { display: none; }
 .cat-tab {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: 10px;
   background: none;
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 13px; font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.15s, background 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
-.cat-tab:hover:not(.active) { color: var(--text-primary); }
-.cat-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.cat-tab:hover:not(.active) { color: var(--text-primary); background: var(--bg-tertiary); }
+.cat-tab.active { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
 .cat-icon { font-size: 14px; }
 .cat-num {
   font-size: 11px; font-weight: 500; opacity: 0.65;
   padding: 1px 6px; border-radius: 999px;
   background: var(--bg-tertiary);
 }
-.cat-tab.active .cat-num { background: rgba(var(--accent-rgb), 0.14); opacity: 1; }
+.cat-tab.active .cat-num { background: rgba(var(--accent-rgb), 0.16); opacity: 1; }
 
 /* ── 传统报纸：日报入口卡 ── */
 .np-entry-wrap { padding: 16px 20px; }
@@ -970,8 +1010,7 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  /* 紧贴上面的分类分页，间距收小一点 */
-  padding: 6px 20px 10px;
+  padding: 12px 20px 10px;
   scrollbar-width: none;
   flex-shrink: 0;
 }
@@ -1211,6 +1250,7 @@ onUnmounted(() => {
 .media-empty { padding: 60px 24px; text-align: center; }
 .empty-title { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin: 0 0 8px; }
 .empty-hint { font-size: 12px; color: var(--text-secondary); opacity: 0.75; line-height: 1.7; margin: 0 auto; max-width: 460px; }
+.empty-retry { margin-top: 14px; }
 .media-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 50px; font-size: 13px; color: var(--text-secondary); }
 .spinner {
   width: 15px; height: 15px; border-radius: 50%;
@@ -1236,18 +1276,23 @@ onUnmounted(() => {
 .comment-empty { font-size: 12px; color: var(--text-secondary); opacity: 0.7; }
 
 @media (max-width: 767px) {
-  .media-header { padding: 12px 14px; }
-  .media-title { font-size: 16px; }
+  .media-header { padding: 8px 12px; gap: 8px; }
+  .btn-mobile-back { width: 34px; height: 34px; }
   .btn-op, .btn-refresh { padding: 6px 12px; }
-  /* 窄屏顶栏挤，频率 chip 只留图标 + 档位文字 */
+  /* 窄屏顶栏挤：帖子总数去掉（分类标签上已有数字） */
+  .media-count { display: none; }
+  /* 频率 chip 只留档位文字 */
   .auto-chip { padding: 6px 10px; font-size: 11px; }
   .auto-chip svg:first-child { display: none; }
   .freq-panel { padding: 10px 14px 12px; }
   .freq-row { gap: 10px; }
   .freq-label { font-size: 12px; }
   .freq-val { min-width: 52px; font-size: 12px; }
-  .cat-bar { padding: 8px 14px 0; }
-  .cat-tab { padding: 7px 11px; font-size: 12px; }
+  /* 分类三档放不下 → 缩小 + 去掉图标，横向滚动 */
+  .cat-bar { gap: 0; }
+  .cat-tab { padding: 7px 9px; font-size: 12px; gap: 4px; }
+  .cat-icon { display: none; }
+  .cat-num { padding: 1px 5px; font-size: 10px; }
   .outlet-bar { padding: 10px 14px 8px; }
   .np-entry-wrap { padding: 12px 14px; }
   .np-entry { padding: 16px; gap: 12px; }

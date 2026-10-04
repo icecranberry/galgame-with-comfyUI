@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { readFileSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
+import net from 'node:net';
 import { config, autoDetectWorkflowMode, activateLlmProfile, getActiveProfileId } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
@@ -33,7 +34,10 @@ import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
 import lootRoutes from './src/routes/loot.js';
 import newspaperRoutes from './src/routes/newspaper.js';
+// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary 路由、本地新增 media/cleanup 路由 —— 都保留。
 import diaryRoutes from './src/routes/diary.js';
+import mediaRoutes from './src/routes/media.js';
+import cleanupRoutes from './src/routes/cleanup.js';
 import townRoutes from './src/routes/town.js';
 import characterReactionsRoutes from './src/routes/characterReactions.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
@@ -139,7 +143,10 @@ app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event
 app.use('/api/items', wrapRouterAsync(itemsRoutes));
 app.use('/api/loot', wrapRouterAsync(lootRoutes));       // 宝箱橱窗（分页候选 + 带走）
 app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
+// ⚠ 2026-10-08 合并 v3.7.0：上游挂载 diaries、本地挂载 media/cleanup —— 都保留。
 app.use('/api/diaries', wrapRouterAsync(diaryRoutes));         // /api/diaries/:id 角色日记（后台生成 + SSE）
+app.use('/api/media', wrapRouterAsync(mediaRoutes));           // 媒体内容页（传媒/板块/帖子/刷新）
+app.use('/api/cleanup', wrapRouterAsync(cleanupRoutes));       // 按时间清理图片与内容记录（两段式：survey → purge）
 app.use('/api/town', wrapRouterAsync(townRoutes));
 // 角色操作反馈：/api/character-reactions/instant 低概率即时反应（额度 + 幂等在后端）
 app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));
@@ -238,6 +245,47 @@ function compactDatabaseIfFragmented() {
     console.log(`[db] VACUUM 完成（${Math.round((Date.now() - t0) / 1000)}s）：${(sizeBefore / 1073741824).toFixed(2)} GB → ${(sizeAfter / 1073741824).toFixed(2)} GB`);
   } catch (err) {
     console.warn('[db] 自动压缩跳过（不影响启动）:', err?.message || err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 单实例守卫 —— 必须放在**任何调度器启动之前**
+//
+// 为什么需要：Node 在 Windows 上默认给监听套接字带 SO_REUSEADDR，**多个进程可以「同时绑定」
+// 同一个端口且不报 EADDRINUSE**（app.listen 因此不会进 error 分支，进程也不会退出）。
+// 后果是：启动器每次重启若没清干净上一个 node 子进程，旧进程就会变成一个
+// 「绑着端口却收不到请求」的哑进程 —— 但它启动时挂上的所有调度器（朋友圈发帖 / 日程特殊
+// 朋友圈 / 主动对话 / 奇遇 / 立绘…）照常在后台跑，反复写库并持续向 ComfyUI 派单。
+//
+// 实测（2026-10-04）：积压到 9 个 app.js 实例，其中 5 个同一时刻启动 → 每 5 分钟在同一秒
+// 插入 5 条朋友圈、每条 1~3 张配图，ComfyUI 被长期占满，用户手动生图（火花立绘）根本排不上队；
+// 而且用户把「朋友圈发帖频率」调成 0（关闭）也无效 —— 那些旧实例的 config 是启动时的内存快照，
+// 设置页改的是 DB + 当前进程内存，旧实例永远学不到新值。
+//
+// 守卫方式：listen 之前先探一次端口，有人应答就说明已有实例在服务，本进程直接退出。
+// 之所以要探两次间隔 1.5s：启动器「先杀旧进程再拉起」时旧进程可能还没释放端口，
+// 单次探测会误判、把新实例也挡掉，导致服务彻底起不来。
+// ═══════════════════════════════════════════════════════════
+async function portIsServing(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host: '127.0.0.1' });
+    const done = (v) => { try { sock.destroy(); } catch { /* 忽略 */ } resolve(v); };
+    sock.setTimeout(1200);
+    sock.once('connect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error', () => done(false));
+  });
+}
+
+if (await portIsServing(config.port)) {
+  await new Promise(r => setTimeout(r, 1500));
+  if (await portIsServing(config.port)) {
+    console.error('============================================');
+    console.error(`[agent-core] 端口 ${config.port} 已有实例在服务 —— 本进程退出。`);
+    console.error('  目的是避免重复实例各自跑调度器：会重复发朋友圈 / 跑日程 / 向 ComfyUI 重复派单。');
+    console.error('  若你确认想重启服务，请先在启动器里「停止」，等端口释放后再「启动」。');
+    console.error('============================================');
+    process.exit(0);
   }
 }
 
