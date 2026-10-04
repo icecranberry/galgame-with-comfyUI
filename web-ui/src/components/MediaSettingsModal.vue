@@ -27,7 +27,11 @@
             <span class="ms-item-icon">{{ o.icon || '📄' }}</span>
             <span class="ms-item-main">
               <span class="ms-item-name">{{ o.name }}</span>
-              <span class="ms-item-sub">{{ o.board_count }} 板块 · {{ o.post_count }} 帖</span>
+              <span class="ms-item-sub">
+                <!-- 形态徽标：两种产物差别很大，列表里标出来才好分辨 -->
+                <span class="ms-item-layout" :class="{ portal: o.layout === 'portal' }">{{ layoutShortLabel(o.layout) }}</span>
+                {{ o.board_count }} 板块 · {{ o.post_count }} 帖
+              </span>
             </span>
           </button>
         </div>
@@ -41,6 +45,20 @@
               <label class="ms-label">名称</label>
               <linshe-input v-model="form.name" class="fi" maxlength="24" placeholder="如「网络热门」" />
             </div>
+
+            <!-- 形态：两种产物的**生成与展示方式完全不同**，所以新建时必须显式选，不能默认混同 -->
+            <div class="ms-row">
+              <label class="ms-label">形态</label>
+              <linshe-select
+                v-model="form.layout"
+                :options="layoutOptions"
+                class="fi"
+                aria-label="媒体形态"
+              />
+              <p class="ms-field-hint">{{ layoutHint }}</p>
+              <p v-if="layoutChangeWarn" class="ms-field-warn">{{ layoutChangeWarn }}</p>
+            </div>
+
             <div class="ms-row">
               <label class="ms-label">图标</label>
               <linshe-input v-model="form.icon" class="fi ms-icon-input" maxlength="4" placeholder="一个 emoji" />
@@ -114,11 +132,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, onMounted, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheModal from './ui/LinsheModal.vue'
+import LinsheSelect from './ui/LinsheSelect.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
 
 const props = defineProps({
@@ -137,13 +156,68 @@ const saving = ref(false)
 const newBoardName = ref('')
 const form = ref(null)
 
+/**
+ * 可选的媒体形态。
+ *
+ * 先用一份**静态兜底**，挂载后再向 `/media/layouts` 取权威清单 —— 这样：
+ *   · 后端是旧代码（没这个接口）时，弹窗仍可用（不会因为拿不到选项而空掉）；
+ *   · 后端加了新形态时，界面自动跟上，不用改前端。
+ */
+const FALLBACK_LAYOUTS = [
+  { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
+  { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
+]
+const layoutDefs = ref([...FALLBACK_LAYOUTS])
+const layoutOptions = computed(() => layoutDefs.value.map(l => ({ label: l.label, value: l.key })))
+
+function currentLayoutDef(key) {
+  return layoutDefs.value.find(l => l.key === key) || FALLBACK_LAYOUTS[0]
+}
+/** 列表里的形态短标签（长说明放不下，列表只需要能区分） */
+function layoutShortLabel(key) {
+  if (key === 'portal') return '数字报刊'
+  if (key === 'weekly') return '周刊'
+  if (key === 'poster') return '海报'
+  return '社交平台'
+}
+/** 选中形态的说明（讲清产物差别，避免建错源） */
+const layoutHint = computed(() => currentLayoutDef(form.value?.layout)?.hint || '')
+
+/**
+ * 改形态的提醒：**已有帖子时**换形态，旧帖子仍按原形态渲染，
+ * 新内容才按新形态生成 —— 这是"混着两种产物"的中间状态，必须让用户知情。
+ */
+const layoutChangeWarn = computed(() => {
+  if (isNew.value) return ''
+  const o = list.value.find(x => x.id === editingId.value)
+  if (!o || !form.value) return ''
+  if ((o.layout || 'feed') === form.value.layout) return ''
+  const n = o.post_count || 0
+  return n
+    ? `该媒体已有 ${n} 条内容 —— 改形态后，旧内容仍按原形态展示，只有新生成的才用新形态。`
+    : '该媒体还没有内容，现在改形态没有副作用。'
+})
+
 const canSave = computed(() => !!form.value?.name?.trim() && !!form.value?.prompt?.trim())
 
 watch(() => props.outlets, v => { list.value = [...(v || [])] }, { immediate: true, deep: true })
 
 watch(() => props.modelValue, v => {
-  if (v) { list.value = [...(props.outlets || [])]; editingId.value = null; form.value = null; boards.value = [] }
+  if (v) { list.value = [...(props.outlets || [])]; editingId.value = null; form.value = null; boards.value = []; loadLayouts() }
 })
+
+onMounted(loadLayouts)
+
+async function loadLayouts() {
+  try {
+    const d = await api.listMediaLayouts()
+    const arr = Array.isArray(d?.layouts) ? d.layouts : []
+    if (arr.length) layoutDefs.value = arr
+  } catch {
+    // 拿不到就用兜底（旧后端没有该接口）—— 不打断弹窗使用
+    layoutDefs.value = [...FALLBACK_LAYOUTS]
+  }
+}
 
 function close() { emit('update:modelValue', false) }
 
@@ -173,6 +247,8 @@ async function selectOutlet(o) {
   form.value = {
     name: o.name, icon: o.icon || '', tagline: o.tagline || '',
     prompt: o.prompt || '', enabled: !!o.enabled,
+    // 形态：老数据可能没有该字段（历史默认 feed）—— 与后端 normalizeLayout 同口径
+    layout: o.layout || 'feed',
   }
   await reloadBoards()
 }
@@ -181,7 +257,8 @@ function startCreate() {
   editingId.value = null
   isNew.value = true
   boards.value = []
-  form.value = { name: '', icon: '', tagline: '', prompt: '', enabled: true }
+  // 新建默认「社交平台」：它是历史默认值，也是最常用的形态；但用户在保存前必须能看到并改它
+  form.value = { name: '', icon: '', tagline: '', prompt: '', enabled: true, layout: 'feed' }
 }
 
 async function reloadBoards() {
@@ -205,6 +282,8 @@ async function save() {
       tagline: form.value.tagline.trim(),
       prompt: form.value.prompt.trim(),
       enabled: form.value.enabled,
+      // 形态：新建时决定产物格式；编辑时允许改（改了只影响**新生成**的内容）
+      layout: form.value.layout || 'feed',
     }
     if (isNew.value) {
       const created = await api.createMediaOutlet(payload)
@@ -346,6 +425,16 @@ async function removeBoard(b) {
 .ms-item-main { display: flex; flex-direction: column; min-width: 0; }
 .ms-item-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-item-sub { font-size: 10px; color: var(--text-secondary); }
+/* 形态徽标（列表里用来一眼区分产物格式） */
+.ms-item-layout {
+  display: inline-block; margin-right: 4px; padding: 0 5px;
+  border-radius: 4px; font-weight: 600;
+  background: var(--glass-bg); color: var(--text-secondary);
+}
+.ms-item-layout.portal { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
+/* 表单里字段下方的说明与提醒 */
+.ms-field-hint { margin: 4px 0 0; font-size: 11px; line-height: 1.6; color: var(--text-secondary); }
+.ms-field-warn { margin: 4px 0 0; font-size: 11px; line-height: 1.6; color: var(--warning, #b5691f); }
 
 /* 右：表单 */
 .ms-form { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 11px; }

@@ -22,6 +22,9 @@ import {
   composeOutfitText, listSceneOutfits, upsertSceneOutfits,
   getSceneOutfitForNow, ensureOutfitAnnotations, PRIVATE_SCENE, OUTFIT_SCENES,
 } from '../src/services/outfitScene.js';
+import {
+  OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
+} from '../src/services/mediaService.js';
 
 const db = getDb();
 const CID = 99901;   // 专用测试角色，避免与真实数据相撞
@@ -143,6 +146,58 @@ test('adaptWorldText：裁掉「## 人们的行为」整段，保留规则性章
 test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
   const src = '# 世界\n\n## 深层逻辑\n只这一节。\n';
   assert.equal(adaptWorldText(src), src);
+});
+
+// ─────────────────────────────────────────────────────────
+// 网络（媒体）页：产物形态
+// ─────────────────────────────────────────────────────────
+
+test('媒体形态：只提供 社交平台(feed) / 数字报刊(portal) 两种，且各有说明', () => {
+  assert.equal(OUTLET_LAYOUTS.length, 2);
+  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'portal']);
+  for (const l of OUTLET_LAYOUTS) {
+    assert.ok(l.label && l.hint, `${l.key} 应有 label 与 hint`);
+  }
+});
+
+test('媒体形态：新建时可指定；未指定/非法都回落 feed（兼容旧调用方）', () => {
+  const nameOf = (n) => `__zz_layout_${n}`;
+  const made = [];
+  try {
+    const portal = createOutlet({ name: nameOf('portal'), prompt: '测试提示词', layout: 'portal' });
+    made.push(portal.id);
+    assert.equal(portal.layout, 'portal', '显式传 portal 应存下来');
+
+    const feed = createOutlet({ name: nameOf('feed'), prompt: '测试提示词', layout: 'feed' });
+    made.push(feed.id);
+    assert.equal(feed.layout, 'feed');
+
+    const none = createOutlet({ name: nameOf('none'), prompt: '测试提示词' });
+    made.push(none.id);
+    assert.equal(none.layout, 'feed', '未传应回落 feed');
+
+    const bad = createOutlet({ name: nameOf('bad'), prompt: '测试提示词', layout: '不存在的形态' });
+    made.push(bad.id);
+    assert.equal(bad.layout, 'feed', '非法值应回落 feed');
+  } finally {
+    for (const id of made) { try { deleteOutlet(id); } catch { } }
+  }
+});
+
+test('媒体形态：可改，且列表接口带回 layout（前端据此选渲染组件）', () => {
+  let id = null;
+  try {
+    const o = createOutlet({ name: '__zz_layout_edit', prompt: '测试提示词', layout: 'feed' });
+    id = o.id;
+    assert.equal(getOutlet(id).layout, 'feed');
+    const up = updateOutlet(id, { layout: 'portal' });
+    assert.equal(up.layout, 'portal', '改形态应生效');
+    // 列表里也要带上（否则前端无法分辨）
+    const row = listOutlets().find(x => x.id === id);
+    assert.equal(row.layout, 'portal');
+  } finally {
+    if (id) { try { deleteOutlet(id); } catch { } }
+  }
 });
 
 // ─────────────────────────────────────────────────────────

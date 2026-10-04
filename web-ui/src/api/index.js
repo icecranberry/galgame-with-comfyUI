@@ -2117,6 +2117,11 @@ export function listMediaOutlets() {
   return request('/media/outlets')
 }
 
+/** 可选的媒体形态（社交平台 / 数字报刊）—— 两者产物格式差别很大，新建时必须选 */
+export function listMediaLayouts() {
+  return request('/media/layouts')
+}
+
 export function createMediaOutlet(body) {
   return request('/media/outlets', { method: 'POST', body })
 }

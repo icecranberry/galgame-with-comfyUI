@@ -9,7 +9,7 @@
 
 import { Router } from 'express';
 import {
-  listOutlets, getOutlet, createOutlet, updateOutlet, deleteOutlet,
+  listOutlets, getOutlet, createOutlet, updateOutlet, deleteOutlet, OUTLET_LAYOUTS,
   listBoards, createBoard, updateBoard, deleteBoard,
   listPosts, generateMediaBatch, fillPendingImages, fillPortalImages, getAutoState,
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
@@ -38,14 +38,22 @@ router.get('/outlets', (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// POST /api/media/outlets — 新建媒体 Body: { name, tagline?, prompt, icon? }
+// GET /api/media/layouts — 可选的媒体形态（社交平台 / 数字报刊）
+// 放在 /outlets/:id 之前：字面路径要早于参数路由注册（本项目既有约定）。
+router.get('/layouts', (req, res) => {
+  try {
+    res.json({ layouts: OUTLET_LAYOUTS });
+  } catch (err) { fail(res, err); }
+});
+
+// POST /api/media/outlets — 新建媒体 Body: { name, tagline?, prompt, icon?, layout? }
 router.post('/outlets', (req, res) => {
   try {
     res.status(201).json(createOutlet(req.body || {}));
   } catch (err) { fail(res, err); }
 });
 
-// PUT /api/media/outlets/:id — 改媒体 Body: { name?, tagline?, prompt?, icon?, enabled? }
+// PUT /api/media/outlets/:id — 改媒体 Body: { name?, tagline?, prompt?, icon?, enabled?, layout? }
 router.put('/outlets/:id', (req, res) => {
   try {
     const o = updateOutlet(Number(req.params.id), req.body || {});

@@ -111,7 +111,8 @@ export function listOutlets({ onlyEnabled = false } = {}) {
     tagline: r.tagline,
     prompt: r.prompt,
     icon: r.icon,
-    // 形态：feed=帖子流 / weekly=周刊 / poster=海报（前端据此选渲染组件）
+    // 形态：feed=社交平台（帖子流）/ portal=数字报刊（按「期」出刊，含 portfolio 板块正文）
+    // weekly / poster 是 portal 之前的旧形态，仍可能存在于老数据里，前端据此选渲染组件
     layout: r.layout || 'feed',
     sort_order: r.sort_order,
     enabled: !!r.enabled,
@@ -126,7 +127,24 @@ export function getOutlet(id) {
   return { ...r, enabled: !!r.enabled, layout: r.layout || 'feed' };
 }
 
-export function createOutlet({ name, tagline = '', prompt = '', icon = '' }) {
+/**
+ * 媒体的两种**产物形态**（差别很大，不能混同）：
+ *   · `feed`   —— 社交平台：一批独立帖子（瀑布流），一次生成多条
+ *   · `portal` —— 数字报刊：按「期」出刊。门户版只跑 1 次短 LLM，正文点开板块才按需生成
+ * `weekly` / `poster` 是 portal 之前的旧形态，渲染分支仍兼容，但新建时不再提供。
+ */
+export const OUTLET_LAYOUTS = [
+  { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
+  { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
+];
+const OUTLET_LAYOUT_KEYS = OUTLET_LAYOUTS.map(l => l.key);
+/** 规范化形态：非法或缺失时回落 `feed`（历史默认值，保证兼容旧调用方） */
+function normalizeLayout(v) {
+  const s = String(v || '').trim();
+  return OUTLET_LAYOUT_KEYS.includes(s) ? s : 'feed';
+}
+
+export function createOutlet({ name, tagline = '', prompt = '', icon = '', layout = 'feed' }) {
   const nm = clampText(name, 24);
   if (!nm) throw Object.assign(new Error('媒体名称不能为空'), { statusCode: 400 });
   if (!clampText(prompt, 8000)) throw Object.assign(new Error('媒体提示词不能为空'), { statusCode: 400 });
@@ -135,12 +153,11 @@ export function createOutlet({ name, tagline = '', prompt = '', icon = '' }) {
   if (dup) throw Object.assign(new Error('同名媒体已存在'), { statusCode: 400 });
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM media_outlets').get().m;
   const r = db.prepare(`
-    INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled)
-    VALUES (?, ?, ?, ?, ?, 1)
-  `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1);
+    INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+    VALUES (?, ?, ?, ?, ?, 1, ?)
+  `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, normalizeLayout(layout));
   return getOutlet(Number(r.lastInsertRowid));
 }
-
 export function updateOutlet(id, patch = {}) {
   const db = getDb();
   const cur = db.prepare('SELECT * FROM media_outlets WHERE id = ?').get(id);
@@ -152,7 +169,7 @@ export function updateOutlet(id, patch = {}) {
     if (dup) throw Object.assign(new Error('同名媒体已存在'), { statusCode: 400 });
   }
   db.prepare(`
-    UPDATE media_outlets SET name = ?, tagline = ?, prompt = ?, icon = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+    UPDATE media_outlets SET name = ?, tagline = ?, prompt = ?, icon = ?, enabled = ?, layout = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     name,
@@ -160,6 +177,7 @@ export function updateOutlet(id, patch = {}) {
     patch.prompt !== undefined ? clampText(patch.prompt, 8000) : cur.prompt,
     patch.icon !== undefined ? clampText(patch.icon, 8) : cur.icon,
     patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : cur.enabled,
+    patch.layout !== undefined ? normalizeLayout(patch.layout) : (cur.layout || 'feed'),
     id,
   );
   return getOutlet(id);

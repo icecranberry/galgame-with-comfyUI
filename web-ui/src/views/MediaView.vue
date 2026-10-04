@@ -81,16 +81,66 @@
           </svg>
           批量操作
         </linshe-button>
-        <linshe-button
-          v-if="activeCategory !== 'traditional'"
-          class="btn-refresh" variant="primary" :loading="refreshing" @click="onRefresh"
-        >
-          <svg v-if="!refreshing" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
-            <polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>{{ refreshing ? '刷新中…' : '刷新' }}
-        </linshe-button>
+        <!-- 刷新：分裂按钮。
+             主按钮 = 刷新**当前范围**（选中某个媒体就只刷它，选「全部」则随机抽一个）；
+             右侧箭头 = 展开面板，**直接指定要刷新的那个媒体**。
+             两种形态的产物格式差别很大，所以面板里逐个媒体列出，避免刷错源头。 -->
+        <div v-if="activeCategory !== 'traditional'" class="refresh-group">
+          <linshe-button
+            class="btn-refresh" variant="primary" :loading="refreshing"
+            :title="refreshScopeHint"
+            @click="onRefresh"
+          >
+            <svg v-if="!refreshing" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
+              <polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>{{ refreshing ? '刷新中…' : '刷新' }}
+          </linshe-button>
+          <button
+            type="button"
+            class="refresh-caret"
+            :class="{ active: refreshOpen }"
+            title="指定要刷新的媒体"
+            aria-label="指定要刷新的媒体"
+            @click="refreshOpen = !refreshOpen"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="6,9 12,15 18,9"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
+
+    <!-- 刷新目标面板：就地展开在顶栏下方（与频率面板同一模式，不引弹层定位问题） -->
+    <Transition name="freq">
+      <div v-if="refreshOpen" class="freq-panel refresh-panel">
+        <p class="rp-title">刷新哪个媒体？</p>
+        <div class="rp-list">
+          <button type="button" class="rp-item" :disabled="refreshing" @click="onRefreshOutlet(null)">
+            <span class="rp-icon">🎲</span>
+            <span class="rp-main">
+              <span class="rp-name">全部媒体</span>
+              <span class="rp-hint">随机抽一个抓一批</span>
+            </span>
+          </button>
+          <button
+            v-for="o in filteredOutlets" :key="o.id"
+            type="button" class="rp-item"
+            :class="{ current: activeOutlet === o.id }"
+            :disabled="refreshing"
+            @click="onRefreshOutlet(o.id)"
+          >
+            <span class="rp-icon">{{ o.icon || '📄' }}</span>
+            <span class="rp-main">
+              <span class="rp-name">{{ o.name }}</span>
+              <span class="rp-hint">{{ outletLayoutLabel(o) }}</span>
+            </span>
+            <span v-if="activeOutlet === o.id" class="rp-tag">当前</span>
+          </button>
+        </div>
+        <p v-if="!filteredOutlets.length" class="rp-empty">当前分类下没有可刷新的媒体</p>
+      </div>
+    </Transition>
 
     <!-- 频率面板：就地展开在顶栏下方，不遮挡内容、不引弹层定位问题 -->
     <Transition name="freq">
@@ -1011,6 +1061,46 @@ async function onBoardChange(id) {
 
 // ── 刷新：抓一批新帖（异步，靠 SSE 事件得知完成）──
 let refreshTimer = null
+/** 刷新目标面板是否展开 */
+const refreshOpen = ref(false)
+
+/** 主按钮到底会刷什么 —— 写进 title，避免"点了才发现刷错源" */
+const refreshScopeHint = computed(() => {
+  const o = outlets.value.find(x => x.id === activeOutlet.value)
+  return o ? `刷新「${o.name}」` : '刷新全部媒体（随机抽一个）'
+})
+
+/** 媒体形态的中文名（面板里每个媒体标一下，两种形态产物差别很大） */
+function outletLayoutLabel(o) {
+  if (o?.layout === 'portal') return '数字报刊 · 按「期」出刊'
+  if (o?.layout === 'weekly') return '周刊（旧形态）'
+  if (o?.layout === 'poster') return '海报（旧形态）'
+  return '社交平台 · 一批帖子'
+}
+
+/**
+ * 刷新指定媒体；传 null = 全部（后端随机抽一个）。
+ *
+ * 与 onRefresh 的区别只在**要不要先切中那个媒体**：面板里直接点某个媒体就刷它，
+ * 不用先去标签行选中、再点刷新。
+ */
+async function onRefreshOutlet(outletId) {
+  if (refreshing.value) return
+  refreshOpen.value = false
+  refreshing.value = true
+  try {
+    await api.refreshMediaPosts({ outletId, count: 6 })
+    const o = outlets.value.find(x => x.id === outletId)
+    toastFn?.(o ? `正在刷新「${o.name}」，稍候…` : '正在抓取新帖，稍候…', 'success')
+    // 兜底轮询：即使 SSE 没连上，也能在 60s 内看到结果
+    clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(() => { refreshing.value = false; reloadAll() }, 60_000)
+  } catch (err) {
+    console.error('[media] 刷新失败:', err)
+    toastFn?.('刷新失败：' + (err?.message || ''), 'error')
+    refreshing.value = false
+  }
+}
 
 async function onRefresh() {
   if (refreshing.value) return
@@ -1138,6 +1228,53 @@ onUnmounted(() => {
   background: rgba(var(--accent-rgb), 0.05);
   border-bottom: 1px solid var(--border);
 }
+
+/* ── 刷新分裂按钮：主按钮 + 右侧小箭头（可指定要刷新的媒体）── */
+.refresh-group { display: inline-flex; align-items: stretch; }
+.refresh-group .btn-refresh { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.refresh-caret {
+  /* ★ 显式 padding —— 全局 button 有 padding:7px 14px，会把这枚窄按钮撑变形 */
+  padding: 0 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-left: none;                    /* 与主按钮共边，视觉上连成一体 */
+  border-radius: 0 9px 9px 0;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-fast), background var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+.refresh-caret:hover, .refresh-caret.active { color: var(--accent); background: var(--accent-light); }
+
+/* ── 刷新目标面板 ── */
+.refresh-panel { padding-top: 10px; }
+.rp-title { margin: 0 0 8px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.rp-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.rp-item {
+  /* ★ 同上：必须显式 padding，否则被全局 button 的 7px 14px 撑开 */
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: none;
+  font: inherit; text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+.rp-item:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-light); }
+.rp-item.current { border-color: var(--accent); background: var(--accent-light); }
+.rp-item:disabled { opacity: 0.5; cursor: default; }
+.rp-icon { font-size: 14px; line-height: 1; }
+.rp-main { display: flex; flex-direction: column; gap: 1px; }
+.rp-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }
+.rp-hint { font-size: 10.5px; color: var(--text-secondary); }
+.rp-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-full);
+  background: var(--accent); color: #fff;
+}
+.rp-empty { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
 .freq-row { display: flex; align-items: center; gap: 14px; }
 .freq-label { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--text-bright); }
 .freq-range { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
