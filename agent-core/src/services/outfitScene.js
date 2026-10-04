@@ -38,7 +38,7 @@ export const OUTFIT_SCENES = [
   { key: 'work', label: '工装', defaultName: '日常装', desc: '上班、出勤、执行职务时穿（角色的招牌/常态形象）' },
   { key: 'casual', label: '私服', defaultName: '便装', desc: '上街、社交、休闲外出时穿的便装' },
   { key: 'home', label: '居家', defaultName: '居家服', desc: '在家中休息、做家务时穿的宽松舒适衣物' },
-  { key: 'sleep', label: '睡衣', defaultName: '睡衣', desc: '睡觉时穿的睡衣或内衣。**睡眠时段强制使用这一套**' },
+  { key: 'sleep', label: '睡衣', defaultName: '睡衣', desc: '睡觉时穿的睡衣或内衣，**赤脚、不穿鞋袜**。**睡眠时段强制使用这一套**' },
 ];
 
 /** 场景 key → 默认服装名（界面保存时自动写入，用户看不到这个字段） */
@@ -100,6 +100,9 @@ const GEN_SYSTEM_PROMPT = `你是角色服装设计助手。用户会给你一�
 - casual（私服）：休息日上街、见朋友、逛街时穿的便装。
 - home（居家）：在家里做家务、放松、看书时穿的宽松舒适衣物。
 - sleep（睡衣）：**睡觉时穿的睡衣或内衣**（睡裙 / 睡衣睡裤 / 吊带内衣 + 短裤 / 内裤等）。这一套是最贴身的，不要设计成能穿出门的服装。
+  **★ 必须赤脚**：人睡觉时鞋子袜子早就脱了，所以这一套的 description 里**必须明确写出 barefoot（赤足）**。
+  **画面里不要出现任何鞋类物体** —— 鞋、靴、拖鞋、袜、丝袜、短袜一律不写（shoes / boots / slippers / heels / sandals / socks / stockings / pantyhose / tights），
+  **连「床边摆着一双没穿的拖鞋」这种也不要写**（生图模型看到 slippers 就会把它画出来）。只需交代脚本身是裸的。
 
 【输出字段】
 - scene：上面四个 key 之一
@@ -126,6 +129,11 @@ const GEN_SYSTEM_PROMPT = `你是角色服装设计助手。用户会给你一�
  */
 function buildBaseAppearanceLayer(baseAppearance, scenes) {
   const labels = scenes.map(s => LABEL_BY_KEY[s]).join('、');
+  // 睡衣是唯一「脚上不该有东西」的场景，单独点一句 —— 否则模型会照搬基准外观里的鞋袜
+  const sleepNote = scenes.includes('sleep')
+    ? '\n5. **睡衣那一套要赤脚**：基准外观里的鞋袜不要带过去。脚上不能有任何鞋、靴、拖鞋或袜子，' +
+      '**也不要写「床边摆着一双没穿的拖鞋」这类**（生图模型看到 slippers 就会画出来）——只交代脚是裸的。'
+    : '';
   return `【常态外观（基准，最高优先级）】
 以下是这个角色的**常态外观**，也就是她的招牌形象：
 ${baseAppearance}
@@ -135,7 +143,7 @@ ${baseAppearance}
 2. **只改服装相关**：衣服、鞋袜、配饰，以及随场合变化的小物件。
 3. 设计出来的服装要和常态外观处在**同一套审美体系**里（相近的配色偏好、材质与气质），
    看得出是同一个人换了衣服，而不是换了一个人。
-4. 不要把上面那套衣服原样再写一遍——这几套必须和它明显不同。`;
+4. 不要把上面那套衣服原样再写一遍——这几套必须和它明显不同。${sleepNote}`;
 }
 
 /**

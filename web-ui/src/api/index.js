@@ -333,11 +333,12 @@ export function uploadStanding(characterId, base64) {
   return request(`/characters/${characterId}/standing-upload`, { method: 'POST', body: { base64 } })
 }
 
-/** 修正外观：上传参考图（base64 data URL）+ 当前整卡文本（可为待确认的草稿卡），邻舍分析后重写「## 你的外观」（不入库，由前端回填） */
-export function refineAppearanceDraft({ image, basePrompt, displayName }) {
+/** 修正外观：上传参考图（base64 data URL）+ 当前整卡文本（可为待确认的草稿卡），邻舍分析后重写「## 你的外观」（不入库，由前端回填）
+ *  sceneLabel 用于按场景追加硬性约束（如睡衣必须赤脚）——原先没传，导致修睡衣与修工装走同一条提示词。 */
+export function refineAppearanceDraft({ image, basePrompt, displayName, sceneLabel }) {
   return request('/characters/refine-appearance-draft', {
     method: 'POST',
-    body: { image, base_prompt: basePrompt, display_name: displayName },
+    body: { image, base_prompt: basePrompt, display_name: displayName, scene_label: sceneLabel },
   })
 }
 

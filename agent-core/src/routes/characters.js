@@ -1827,6 +1827,15 @@ router.post('/refine-appearance-draft', async (req, res) => {
     return res.status(400).json({ error: '缺少人格卡内容，无法定位「## 你的外观」段落' });
   }
   const displayName = String(req.body?.display_name || '').trim() || '角色';
+  // ★ 场景信息原先没被用上：前端传了 scene_label 也没读，于是「修睡衣」与「修工装」走完全相同的提示词，
+  //   场景约束（尤其睡衣的赤脚）根本落不到模型那里。这里补上并按场景追加硬性约束。
+  const sceneLabel = String(req.body?.scene_label || '').trim();
+  const sceneConstraint = sceneLabel === '睡衣'
+    ? '\n\n【本套场景约束（最高优先级，覆盖图中不符之处）】这一套是**睡衣**，是睡觉时穿的：'
+      + '（1）**必须赤脚** —— 画面中不得出现任何鞋、靴、拖鞋或袜子；若参考图里脚上有鞋袜，一律按赤脚描述。'
+      + '（2）服装只能是最贴身的睡衣/内衣（睡裙、睡衣睡裤、吊带内衣等），不得是能穿出门的外出服。'
+      + '（3）不要为了保暖或好看给它加上外套、鞋袜、帽子等外出配件（角色长期佩戴的颈饰、发饰可以保留）。'
+    : '';
 
   try {
     // 语料只作为身份上下文传给模型（角色名/作品名的出处），由模型自行组织成「角色名 (作品名) has ...」的开头
@@ -1841,7 +1850,7 @@ router.post('/refine-appearance-draft', async (req, res) => {
       {
         role: 'user',
         content: [
-          { type: 'text', text: `角色「${displayName}」的参考图如下。角色的身份信息（用于生成开头的「角色名 (作品名)」）：${corpus}` },
+          { type: 'text', text: `角色「${displayName}」的参考图如下。角色的身份信息（用于生成开头的「角色名 (作品名)」）：${corpus}${sceneConstraint}` },
           { type: 'image_url', image_url: { url: image } },
         ],
       },
@@ -1964,8 +1973,11 @@ router.post('/expand-appearance-draft', async (req, res) => {
 
   try {
     const model = config.llm.model || 'deepseek-chat';
+    // 睡衣是唯一「脚上不该有东西」的场景：人睡觉时鞋袜早脱了。
+    // 不点明的话模型会顺手写鞋或袜，生图就画出一双鞋 —— 实测 8 套睡衣里有 3 套完全没提脚部。
     const sceneLine = sceneLabel
       ? `这套是「${sceneLabel}」（${sceneLabel === '工装' ? '上班/出勤的常态形象' : sceneLabel === '私服' ? '上街、休闲外出' : sceneLabel === '居家' ? '在家里休息、做家务' : sceneLabel === '睡衣' ? '睡觉时穿的贴身衣物，不要设计成能穿出门的服装' : '该场景'}），整体要符合这个场合。`
+        + (sceneLabel === '睡衣' ? '\n★ 睡衣必须**赤脚**：description 里要明确写出 barefoot（赤足）。画面里不要出现任何鞋类或袜类物体（shoes / boots / slippers / heels / socks / stockings），连「床边摆着一双没穿的拖鞋」也不要写——生图模型看到 slippers 就会画出来。' : '')
       : '';
     console.log(`[expand-appearance] expanding ${brief.length} chars for "${displayName}"${sceneLabel ? ` (scene: ${sceneLabel})` : ''}`);
 

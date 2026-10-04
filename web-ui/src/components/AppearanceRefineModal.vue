@@ -351,6 +351,7 @@ async function startRefineAnalysis() {
       image: refineImage.value,
       basePrompt: props.basePrompt,
       displayName: props.displayName,
+      sceneLabel: props.sceneLabel,
     })
     absorbResult(res)
   } catch (err) {
