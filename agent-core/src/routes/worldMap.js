@@ -12,7 +12,7 @@
 
 import { Router } from 'express';
 import {
-  listMaps, createMap, updateMap, deleteMap, getMap,
+  listMaps, createMap, updateMap, deleteMap, duplicateMap, getMap,
   addPlace, upsertPlace, deletePlace,
   generateSkeleton, expandPlace, exportMarkdown,
   LEVEL_LABEL, POI_TYPES,
@@ -64,6 +64,16 @@ router.delete('/maps/:id', (req, res) => {
   try {
     const r = deleteMap(Number(req.params.id));
     if (!r.ok) return res.status(404).json({ error: '地图不存在' });
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
+
+// POST /api/worldmap/maps/:id/duplicate — 复制一张地图（整棵子树）为新地图
+// 用途：把建好的地图**当模板**新建（如「二相乐园」）
+router.post('/maps/:id/duplicate', (req, res) => {
+  try {
+    const r = duplicateMap(Number(req.params.id), req.body?.name);
+    if (!r.ok) return res.status(404).json({ error: r.error });
     res.json(r);
   } catch (err) { fail(res, err); }
 });

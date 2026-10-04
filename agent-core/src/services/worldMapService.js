@@ -27,11 +27,21 @@ import { chatSync } from '../llm/llm-client.js';
 // 本文件与 mediaService.js 保持同一口径（都用 eventGenerator 版），方便互相参照。
 import { extractFirstJson, repairJson } from './eventGenerator.js';
 
-// ── 层级常量 ──
+// ── 层级 ──
+/**
+ * 层级**不设上限**（数据是自引用的 `parent_id`）。
+ *
+ * 前三层有惯用叫法，第四层起统称「子地点」——
+ * 因为真实项目里会有「二维市 → 珠星集团总部大楼 → 1F 展示大厅 → IP 产品展示厅」这种嵌套，
+ * 硬卡三层会把它们压平成一片（用户报过这个问题）。
+ */
 export const LEVEL = { REGION: 1, DISTRICT: 2, SCENE: 3 };
-export const LEVEL_LABEL = { 1: '大地区', 2: '子地区', 3: '场景' };
-
-/** POI 类型：与知识库范式的「零售 / 餐饮 / 服务 / 配套」一致 */
+const LEVEL_NAMES = { 1: '大地区', 2: '子地区', 3: '场景' };
+export function levelLabel(level) {
+  return LEVEL_NAMES[level] || `子地点（${level} 级）`;
+}
+/** 前三层的固定叫法（给前端做静态映射用；四层以上前端调 levelLabel 的等价逻辑） */
+export const LEVEL_LABEL = { ...LEVEL_NAMES };
 export const POI_TYPES = ['零售', '餐饮', '服务', '配套'];
 
 /** 一次展开最多接受多少个场景（防模型失控吐几十个） */
@@ -145,6 +155,42 @@ export function deleteMap(mapId) {
   return { ok: r.changes > 0 };
 }
 
+/**
+ * 复制一张地图（整棵子树）为新的独立地图。
+ *
+ * 用途：**把「二相乐园」这类建好的地图当模板**新建 —— 比在代码里再维护一份模板数据可靠得多
+ * （模板就是真实数据，改一次即可）。
+ * 复制后两张图完全独立，改一张不影响另一张。
+ */
+export function duplicateMap(sourceId, newName = '') {
+  const db = getDb();
+  const src = db.prepare('SELECT * FROM world_maps WHERE id = ?').get(sourceId);
+  if (!src) return { ok: false, error: '源地图不存在' };
+
+  const name = clampText(newName, 40) || `${src.name} 副本`;
+  return db.transaction(() => {
+    const mid = Number(db.prepare(
+      'INSERT INTO world_maps (name, world_setting_id, note) VALUES (?, ?, ?)'
+    ).run(name, src.world_setting_id, src.note).lastInsertRowid);
+
+    // 按 level 升序插入，保证父节点先于子节点存在（parent_id 需要重映射）
+    const rows = db.prepare(
+      'SELECT * FROM world_map_places WHERE map_id = ? ORDER BY level, sort_order, id'
+    ).all(sourceId);
+    const ins = db.prepare(`INSERT INTO world_map_places
+      (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const idMap = new Map();   // 旧 id → 新 id
+    for (const r of rows) {
+      const newParent = r.parent_id ? (idMap.get(r.parent_id) ?? null) : null;
+      const nid = Number(ins.run(mid, newParent, r.level, r.key, r.name, r.name_en, r.kind,
+        r.summary, r.pois_json, r.sort_order).lastInsertRowid);
+      idMap.set(r.id, nid);
+    }
+    return { ok: true, map: getMap(mid) };
+  })();
+}
+
 /** 手动增改一个地点 */
 export function upsertPlace(placeId, patch = {}) {
   const db = getDb();
@@ -171,8 +217,8 @@ export function addPlace(mapId, { parentId = null, name, nameEn = '', kind = '',
   if (parentId) {
     const parent = db.prepare('SELECT * FROM world_map_places WHERE id = ? AND map_id = ?').get(parentId, mapId);
     if (!parent) return { ok: false, error: '父地点不存在' };
+    // 层级不限深 —— 真实项目有「二维市 → 珠星集团总部大楼 → 1F 展示大厅 → IP 产品展示厅」这种嵌套
     level = parent.level + 1;
-    if (level > LEVEL.SCENE) return { ok: false, error: '场景下不能再挂子级' };
   }
   const clean = clampText(name, 40);
   if (!clean) return { ok: false, error: '名称必填' };
@@ -341,7 +387,7 @@ export async function expandPlace(placeId) {
   const db = getDb();
   const place = db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(placeId);
   if (!place) throw new Error('地点不存在');
-  if (place.level !== LEVEL.DISTRICT) throw new Error('只有「子地区」可以展开出场景');
+  // 任何层级都能展开（AI 给它补下一级）—— 不再限定"只有子地区"
 
   const map = db.prepare('SELECT * FROM world_maps WHERE id = ?').get(place.map_id);
   const parent = place.parent_id ? db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(place.parent_id) : null;
@@ -351,10 +397,10 @@ export async function expandPlace(placeId) {
   const msgs = [
     { role: 'system', content: getSystemRulesWithWorld() || '你是一个世界观设定师。' },
     { role: 'system', content: SCENE_FORMAT() },
-    { role: 'user', content: `请展开这个子地区：**${place.name}**${place.name_en ? `（${place.name_en}）` : ''}
-它属于大地区「${parent?.name || '（未知）'}」。${place.summary ? `这个子地区的定位：${place.summary}` : ''}
+    { role: 'user', content: `请展开这个${levelLabel(place.level)}：**${place.name}**${place.name_en ? `（${place.name_en}）` : ''}
+${parent ? `它属于「${parent.name}」。` : ''}${place.summary ? `它的定位：${place.summary}` : ''}
 
-请给出这个子地区里的**场景**（可理解为街区 / 地标 / 一片区域），以及每个场景里的**生活地点（POI）**。` },
+请给出它下面的**子地点**（可理解为街区 / 地标 / 建筑 / 一片区域），以及每个子地点里的**生活地点（POI）**。` },
   ];
 
   const raw = await chatSync(msgs, {

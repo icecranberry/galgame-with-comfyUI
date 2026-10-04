@@ -2261,6 +2261,11 @@ export function deleteWorldMap(mapId) {
   return request(`/worldmap/maps/${mapId}`, { method: 'DELETE' })
 }
 
+/** 复制一张地图（整棵子树）为新地图 —— 用作「新建时套模板」 */
+export function duplicateWorldMap(mapId, name = '') {
+  return request(`/worldmap/maps/${mapId}/duplicate`, { method: 'POST', body: { name } })
+}
+
 /** ① 生成骨架（L1 大地区 + L2 子地区，1 次短 LLM） */
 export function generateWorldMapSkeleton(mapId, { brief = '', regionCount, districtPerRegion } = {}) {
   return request(`/worldmap/maps/${mapId}/generate`, {
