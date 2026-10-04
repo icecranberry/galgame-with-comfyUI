@@ -128,7 +128,10 @@
       </div>
     </Transition>
 
-    <!-- 媒体标签页（跟随分类筛选） -->
+    <!-- 媒体标签 + 批量操作条：**同一行**显示。
+         标签靠左（可横向滚动），批量操作整条**靠右**，与「全部 / 网络热门」等标签平齐 ——
+         此前它单独占一行且左对齐，夹在板块栏下面显得很突兀。 -->
+    <div class="outlet-row">
     <div class="outlet-bar">
       <!-- 《传统报纸》分类：只有《邻舍日报》。它有自己的整版排版（报头/三栏/期号切换），
            不按帖子流展示，所以做成一个入口按钮，点开就是原来的报纸界面。 -->
@@ -171,6 +174,40 @@
           <span class="outlet-num">{{ o.post_count }}</span>
         </button>
       </template>
+    </div>
+
+      <!-- 批量模式的操作条：与媒体标签**同一行、整条靠右**。
+           入口按钮在右上角「媒体设置」旁；未进入批量模式时这块完全不渲染。
+           （不用 spacer 做两端分布 —— 用户要的是整条贴右，与上方标签行右端对齐。） -->
+      <div v-if="activeCategory !== 'traditional' && batchMode" class="list-toolbar">
+        <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
+        <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
+          {{ allVisibleSelected ? '取消全选' : '全选本页' }}
+        </button>
+        <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
+        <button
+          type="button" class="batch-btn"
+          :disabled="batchBusy || !selectedPostIds.size"
+          title="把这些内容的旧配图清掉并重新排队生成"
+          @click="batchRegenerate"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
+          </svg>
+          重新生图
+        </button>
+        <button
+          type="button" class="batch-btn is-danger"
+          :disabled="batchBusy || !selectedPostIds.size"
+          @click="batchDelete"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
+        </button>
+      </div>
     </div>
 
     <!-- 传统报纸：只有一个《邻舍日报》，内容是整版报纸不在帖子流里 —— 给张入口卡 -->
@@ -262,42 +299,6 @@
           </linshe-button>
         </div>
       </div>
-    </div>
-
-    <!-- 工具条：左上角「批量操作」。平时只一个小按钮，不占视觉；进入批量模式后
-         整行变成「已选 N 项 + 全选/取消 + 批量重新生图 + 批量删除」。
-         传统报纸分类没有帖子流，不显示。 -->
-    <!-- 批量模式的操作条：只在进入批量模式后出现（入口按钮已在右上角「媒体设置」旁）。
-         未进入批量模式时整块不渲染，不再占一行。 -->
-    <div v-if="activeCategory !== 'traditional' && batchMode" class="list-toolbar">
-      <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
-      <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
-        {{ allVisibleSelected ? '取消全选' : '全选本页' }}
-      </button>
-      <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
-      <span class="batch-spacer"></span>
-      <button
-        type="button" class="batch-btn"
-        :disabled="batchBusy || !selectedPostIds.size"
-        title="把这些内容的旧配图清掉并重新排队生成"
-        @click="batchRegenerate"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-        </svg>
-        重新生图
-      </button>
-      <button
-        type="button" class="batch-btn is-danger"
-        :disabled="batchBusy || !selectedPostIds.size"
-        @click="batchDelete"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="3 6 5 6 21 6"/>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-        </svg>
-        删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
-      </button>
     </div>
 
     <!-- ── 帖子流：瀑布流 ── -->
@@ -1238,13 +1239,24 @@ onUnmounted(() => {
 .np-entry-hint { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.7; color: var(--text-secondary); opacity: 0.8; }
 
 /* ── 媒体标签页 ── */
+/* 媒体标签行 + 批量操作条：同一行。
+   标签侧 flex:1 + min-width:0（必须）—— 否则它的 overflow-x:auto 不会收缩，
+   会把右侧的批量操作条挤出可视区。 */
+.outlet-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 20px;
+  flex-shrink: 0;
+}
 .outlet-bar {
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 12px 20px 10px;
+  padding: 12px 0 10px 20px;
   scrollbar-width: none;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 .outlet-bar::-webkit-scrollbar { display: none; }
 .outlet-tab {
@@ -1438,14 +1450,16 @@ onUnmounted(() => {
 /* ── 批量模式操作条 ──
    只在进入批量模式后渲染（入口按钮在右上角「媒体设置」旁），所以这里不再需要上下留白
    去撑一行空白 —— 之前它常驻时顶部会多出一条空行，和分类/板块栏叠在一起显得挤。 */
+/* 批量模式操作条 —— 与媒体标签同一行，**整条靠右**（justify-content: flex-end）。
+   不再用 spacer 做两端分布：用户要的是贴右、与上方标签行右端对齐。
+   padding 与 .outlet-bar 的上下留白一致，靠 .outlet-row 的 align-items:center 垂直居中。 */
 .list-toolbar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  padding: 0 20px 10px;
   flex-shrink: 0;
 }
-.batch-spacer { flex: 1; }
 .batch-btn {
   /* ★ 必须显式 padding —— 全局 button 有 padding:7px 14px，小按钮会被撑变形 */
   display: inline-flex; align-items: center; gap: 5px;
@@ -1630,7 +1644,10 @@ onUnmounted(() => {
   .cat-tab { padding: 7px 9px; font-size: 12px; gap: 4px; }
   .cat-icon { display: none; }
   .cat-num { padding: 1px 5px; font-size: 10px; }
-  .outlet-bar { padding: 10px 14px 8px; }
+  /* 移动端：标签行左侧留白收窄；批量操作条仍与它同一行（窄屏下标签会横向滚动） */
+  .outlet-row { padding-right: 14px; gap: 6px; }
+  .outlet-bar { padding: 10px 0 8px 14px; }
+  .list-toolbar { gap: 6px; }
   .np-entry-wrap { padding: 12px 14px; }
   .np-entry { padding: 16px; gap: 12px; }
   .np-entry-icon { font-size: 26px; }
