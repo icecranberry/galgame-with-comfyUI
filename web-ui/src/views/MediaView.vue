@@ -63,6 +63,24 @@
             <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
           </svg>媒体设置
         </linshe-button>
+
+        <!-- 批量操作：原先单独占一行（在分类/板块栏下面），和「媒体设置」挤成两处、
+             顶部显得很乱。现在并进右上角按钮区，紧挨「媒体设置」——
+             未进入批量模式时只是一个同尺寸的按钮，不再多占一行。
+             用 linshe-button 而不是裸 button，保证与旁边的「媒体设置」尺寸皮肤完全一致。 -->
+        <linshe-button
+          v-if="activeCategory !== 'traditional' && !batchMode"
+          variant="secondary"
+          :disabled="!posts.length"
+          :title="posts.length ? '勾选多条内容后批量重新生图或删除' : '当前没有可操作的内容'"
+          @click="enterBatchMode"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-1px">
+            <rect x="3" y="4" width="4" height="4" rx="1"/><path d="M11 6h10"/>
+            <rect x="3" y="14" width="4" height="4" rx="1"/><path d="M11 16h10"/>
+          </svg>
+          批量操作
+        </linshe-button>
         <linshe-button
           v-if="activeCategory !== 'traditional'"
           class="btn-refresh" variant="primary" :loading="refreshing" @click="onRefresh"
@@ -249,53 +267,37 @@
     <!-- 工具条：左上角「批量操作」。平时只一个小按钮，不占视觉；进入批量模式后
          整行变成「已选 N 项 + 全选/取消 + 批量重新生图 + 批量删除」。
          传统报纸分类没有帖子流，不显示。 -->
-    <div v-if="activeCategory !== 'traditional'" class="list-toolbar">
-      <template v-if="!batchMode">
-        <button
-          type="button"
-          class="batch-enter"
-          :disabled="!posts.length"
-          :title="posts.length ? '勾选多条内容后批量重新生图或删除' : '当前没有可操作的内容'"
-          @click="enterBatchMode"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="4" height="4" rx="1"/><path d="M11 6h10"/>
-            <rect x="3" y="14" width="4" height="4" rx="1"/><path d="M11 16h10"/>
-          </svg>
-          批量操作
-        </button>
-      </template>
-
-      <template v-else>
-        <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
-        <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
-          {{ allVisibleSelected ? '取消全选' : '全选本页' }}
-        </button>
-        <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
-        <span class="batch-spacer"></span>
-        <button
-          type="button" class="batch-btn"
-          :disabled="batchBusy || !selectedPostIds.size"
-          title="把这些内容的旧配图清掉并重新排队生成"
-          @click="batchRegenerate"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-          </svg>
-          重新生图
-        </button>
-        <button
-          type="button" class="batch-btn is-danger"
-          :disabled="batchBusy || !selectedPostIds.size"
-          @click="batchDelete"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          </svg>
-          删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
-        </button>
-      </template>
+    <!-- 批量模式的操作条：只在进入批量模式后出现（入口按钮已在右上角「媒体设置」旁）。
+         未进入批量模式时整块不渲染，不再占一行。 -->
+    <div v-if="activeCategory !== 'traditional' && batchMode" class="list-toolbar">
+      <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
+      <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
+        {{ allVisibleSelected ? '取消全选' : '全选本页' }}
+      </button>
+      <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
+      <span class="batch-spacer"></span>
+      <button
+        type="button" class="batch-btn"
+        :disabled="batchBusy || !selectedPostIds.size"
+        title="把这些内容的旧配图清掉并重新排队生成"
+        @click="batchRegenerate"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
+        </svg>
+        重新生图
+      </button>
+      <button
+        type="button" class="batch-btn is-danger"
+        :disabled="batchBusy || !selectedPostIds.size"
+        @click="batchDelete"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+        删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
+      </button>
     </div>
 
     <!-- ── 帖子流：瀑布流 ── -->
@@ -1433,16 +1435,17 @@ onUnmounted(() => {
 .cover-op:disabled { opacity: 0.45; cursor: default; }
 
 /* ── 工具条：左上角「批量操作」 ── */
+/* ── 批量模式操作条 ──
+   只在进入批量模式后渲染（入口按钮在右上角「媒体设置」旁），所以这里不再需要上下留白
+   去撑一行空白 —— 之前它常驻时顶部会多出一条空行，和分类/板块栏叠在一起显得挤。 */
 .list-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 20px 10px;
   flex-shrink: 0;
-  min-height: 30px;
 }
 .batch-spacer { flex: 1; }
-.batch-enter,
 .batch-btn {
   /* ★ 必须显式 padding —— 全局 button 有 padding:7px 14px，小按钮会被撑变形 */
   display: inline-flex; align-items: center; gap: 5px;
@@ -1459,9 +1462,7 @@ onUnmounted(() => {
   transition: color 0.15s, border-color 0.15s, background 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
-.batch-enter:hover:not(:disabled),
 .batch-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
-.batch-enter:disabled,
 .batch-btn:disabled { opacity: 0.4; cursor: default; }
 .batch-btn.is-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 .batch-btn.is-danger:hover:not(:disabled) { color: #fff; background: var(--danger); border-color: var(--danger); }
