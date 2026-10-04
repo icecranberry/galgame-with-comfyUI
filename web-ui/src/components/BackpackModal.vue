@@ -11,15 +11,17 @@
                 <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z"/>
                 <path d="M10 13h4"/>
               </svg>
-              <div>
+              <div class="header-titles">
                 <h3>背包</h3>
                 <p class="header-subtitle">宝箱与道具</p>
               </div>
+              <!-- 背包 / 橱窗 视图切换：宝箱开箱演出仍是共用入口，这里只切右侧内容。
+                   ★ 放在标题旁而不是右上角 —— 右上角留给关闭按钮独占：
+                   两者挨在一起时，想点「橱窗」很容易手滑点到 ✕ 直接把弹窗关掉。 -->
+              <linshe-tabs v-model="view" :options="VIEW_OPTIONS" size="sm" class="header-tabs" aria-label="背包视图切换" />
             </div>
             <div class="header-actions">
-              <!-- 背包 / 橱窗 视图切换：宝箱开箱演出仍是共用入口，这里只切右侧内容 -->
-              <linshe-tabs v-model="view" :options="VIEW_OPTIONS" size="sm" aria-label="背包视图切换" />
-              <linshe-button variant="icon" @click="close" title="关闭">&times;</linshe-button>
+              <linshe-button variant="icon" @click="close" title="关闭" aria-label="关闭">&times;</linshe-button>
             </div>
           </div>
 
@@ -358,13 +360,27 @@ function close() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 18px 22px;
   border-bottom: 1px solid var(--glass-border);
 }
-.header-left { display: flex; align-items: center; gap: 12px; color: var(--text-primary); }
-.header-svg { color: var(--accent); }
+.header-left { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-primary); }
+.header-svg { color: var(--accent); flex-shrink: 0; }
+/* 标题块：允许被压缩（min-width:0），动画/长文案时不会把切换器顶出去 */
+.header-titles { min-width: 0; }
 .header-left h3 { margin: 0; font-size: 18px; }
 .header-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--text-secondary); }
+/* 视图切换：紧邻标题、与右侧关闭按钮拉开距离（避免误点 ✕ 关掉弹窗） */
+.header-tabs { margin-left: 6px; flex-shrink: 0; }
+/* ★ 这个类原先没有任何样式定义 —— 容器不是 flex，标签页与 ✕ 只是行内流动，
+   窄一点就换行错位（截图里的上下两行就是这么来的）。这里补上并锁死不换行。 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
 
 /* ── Body：白色衬里，与面板暖底分层 ── */
 .backpack-body {
@@ -876,6 +892,10 @@ function close() {
 
 @media (max-width: 460px) {
   .backpack-header { padding: 14px 16px; }
+  /* 窄屏放不下「图标 + 标题 + 切换器 + 关闭」一行 → 让切换器整行换到第二行，
+     而不是让 ✕ 和被压扁的切换器挤在一起。关闭按钮始终留在右上角原位。 */
+  .header-left { flex-wrap: wrap; row-gap: 10px; }
+  .header-tabs { order: 1; flex: 1 1 100%; margin-left: 0; }
   .backpack-body {
     margin: 12px;
     padding: 12px;
