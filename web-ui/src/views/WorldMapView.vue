@@ -158,6 +158,19 @@
             </linshe-button>
           </div>
 
+          <!-- 子地区**自己**的生活地点：有些地方本身就是一条街/一个市集（如「喜悲街」），
+               没有下级场景，店直接挂在这一层 —— 这里也要能显示出来。 -->
+          <div v-if="selected.pois?.length" class="wd-own-pois">
+            <p class="wd-own-title">这里的生活地点</p>
+            <div class="wpois">
+              <div v-for="(p, i) in selected.pois" :key="i" class="wpoi">
+                <span class="wpoi-type" :class="`t-${poiClass(p.type)}`">{{ p.type }}</span>
+                <span class="wpoi-name">{{ p.name }}</span>
+                <span v-if="p.blurb" class="wpoi-blurb">{{ p.blurb }}</span>
+              </div>
+            </div>
+          </div>
+
           <div v-if="!selected.children.length" class="wd-cta">
             <p>这块地方还没展开。让 AI 按你的世界观补出它的场景与生活地点。</p>
             <linshe-button variant="primary" :loading="busy" @click="onExpand(selected)">
@@ -602,6 +615,11 @@ async function onExport() {
 .wd-cta { padding: 30px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
 .wd-cta > p { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); max-width: 400px; line-height: 1.8; }
 .wd-cta-hint { font-size: var(--fs-xs) !important; }
+
+/* 子地区自有的生活地点（该地本身是条街/市集，没有下级场景） */
+.wd-own-pois { margin-top: 12px; padding: 11px 13px; border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--card-bg, #fff); }
+.wd-own-title { margin: 0 0 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.wd-own-pois .wpois { margin-top: 0; padding-top: 0; border-top: none; }
 
 .wd-scenes-bar { display: flex; align-items: center; gap: 10px; padding: 12px 0 8px; }
 .wd-scenes-count { flex: 1; font-size: var(--fs-xs); color: var(--text-secondary); }
