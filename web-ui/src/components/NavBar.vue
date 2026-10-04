@@ -1,8 +1,46 @@
 <template>
   <nav class="nav-bar">
     <div class="nav-top" ref="navTopEl">
-      <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色 -->
+      <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色。
+           指示器按 data-nav 查元素取 offsetTop，所以**导航项顺序可自由调整**，不用改这里。 -->
       <div class="nav-indicator" :style="indicatorStyle" aria-hidden="true"></div>
+
+      <!-- 顺序（2026-10-04 按用户要求重排）：
+           世界 → 奇遇 → 网络 → 聊天 → 朋友圈 → 日程 → 相册 → 酒馆
+           世界与奇遇是「沉浸玩法」入口，提到最前；聊天/朋友圈是日常高频，居中。 -->
+      <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+          </svg>
+        </div>
+        <span class="nav-label">世界(内测)</span>
+      </router-link>
+
+      <div class="nav-item" data-nav="events" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+          </svg>
+          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
+        </div>
+        <span class="nav-label">奇遇</span>
+      </div>
+
+      <!-- 「网络」= 原「传媒」（2026-10-04 改名；路由与 data-nav 仍为 media，避免破坏深链与前端逻辑） -->
+      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="网络">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
+            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
+          </svg>
+        </div>
+        <span class="nav-label">网络</span>
+      </router-link>
+
       <router-link to="/chat" data-nav="chat" class="nav-item" :class="{ active: $route.path.startsWith('/chat') }" title="聊天">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -22,28 +60,6 @@
         </div>
         <span class="nav-label">朋友圈</span>
       </div>
-
-      <div class="nav-item" data-nav="events" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
-          </svg>
-          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
-        </div>
-        <span class="nav-label">奇遇</span>
-      </div>
-
-      <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="2" y1="12" x2="22" y2="12" />
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-          </svg>
-        </div>
-        <span class="nav-label">世界(内测)</span>
-      </router-link>
 
       <div class="nav-item" data-nav="schedule" :class="{ active: $route.path.startsWith('/schedule') }" title="日程" @click="handleScheduleClick">
         <div class="nav-icon-wrap">
@@ -66,16 +82,6 @@
           <path stroke="currentColor" stroke-width="35" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z"/>
         </svg>
         <span class="nav-label">相册</span>
-      </router-link>
-
-      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="传媒">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
-            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
-          </svg>
-        </div>
-        <span class="nav-label">传媒</span>
       </router-link>
 
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
