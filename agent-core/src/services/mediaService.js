@@ -255,7 +255,8 @@ export function listPosts({ outletId = null, boardId = null, category = null, li
   if (outletId) { where.push('p.outlet_id = ?'); params.push(outletId); }
   if (boardId) { where.push('p.board_id = ?'); params.push(boardId); }
   if (category === 'digital') {
-    where.push(`o.layout IN ('weekly','poster')`);
+    // 门户是周刊/海报的升级形态（两层生成），同样属于「数字报刊」
+    where.push(`o.layout IN ('weekly','poster','portal')`);
   } else if (category === 'social') {
     // 注意：layout 有 DEFAULT 'feed'，但老库可能为 NULL，一并当 feed 处理
     where.push(`(o.layout IS NULL OR o.layout = 'feed')`);
@@ -287,10 +288,14 @@ export function listPosts({ outletId = null, boardId = null, category = null, li
 
 /** 待补配图的帖子（供后台补印） */
 export function listPostsNeedingImage(limit = 8) {
+  // ⚠ 必须排除门户：门户由 fillPortalImages 负责逐块补图，而门户帖的 image_prompt 存的是
+  //   「第一块的头图提示词」，被这里捞到会**额外多生一张重复的主图**（正是两层设计要避免的浪费）。
   return getDb().prepare(`
-    SELECT id, image_prompt, character_id FROM media_posts
-    WHERE image_status = 'pending' AND image_prompt IS NOT NULL AND image_prompt != ''
-    ORDER BY id DESC LIMIT ?
+    SELECT p.id, p.image_prompt, p.character_id FROM media_posts p
+    LEFT JOIN media_outlets o ON o.id = p.outlet_id
+    WHERE p.image_status = 'pending' AND p.image_prompt IS NOT NULL AND p.image_prompt != ''
+      AND COALESCE(o.layout, 'feed') != 'portal'
+    ORDER BY p.id DESC LIMIT ?
   `).all(limit);
 }
 
@@ -777,8 +782,350 @@ export function normalizePosterDraft(raw, prevNo = 0) {
   };
 }
 
-export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true } = {}) {
-  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
+// ═══════════════════════════════════════════════════════════
+// 门户（portal）——数字报刊的「两层生成」
+// ═══════════════════════════════════════════════════════════
+/**
+ * 为什么要分两层（设计动机，改之前先读）：
+ *
+ * 周刊/海报是「一次长 LLM + N 张图」全量产出 —— 周刊的 JSON 有 5600 字符，
+ * 出刊要等十几秒到几十秒，配图还要再等；而且横版铺在 1920 屏上两侧各空 520px
+ * （`.special-list` 是 max-width:880px 居中单列）。
+ *
+ * 门户把这个峰拆开：
+ *   第 1 层  出刊：1 次**短** LLM，只产骨架（板块名 + 一句导语 + 每板块的生图提示词），
+ *           **文字先落库 → 刷新立刻有东西可看**，不必干等配图。
+ *   第 1.5 层 图：后台**串行**逐张补，补一张卡片亮一张；负载曲线是平的。
+ *           ★ 这批图同时就是板块详情的配图 —— 一图两用，不重复生成。
+ *   第 2 层  阅读：点某个板块才开始生成它的正文，落库缓存，二次点开秒开。
+ *
+ * 「外壳统一、里子各自保持个性」：门户只是个壳，各刊的人设/语气仍由 outlet.prompt 决定；
+ * 板块正文用**通用块数组**承载，周刊的 outlet.prompt 会自然产出 qa/rank/replies 块，
+ * 狸狸八卦会产出 caption 块 —— 不用为每个刊物各写一套版式。
+ */
+
+/** 门户的门户层格式（骨架，故意写得短，产出控制在一千多字符） */
+function buildPortalFormatPrompt() {
+  const imageRules = String(getGlobalRule('image_prompt')?.rule_content || '').trim();
+  return `本期请**只输出门户骨架**（不要写正文内容），严格按以下 JSON 格式，不要输出任何解释或 JSON 以外的文字：
+
+{
+  "issue": 数字（本期编号，比上一期大 1；我会告诉你上一期是几号）,
+  "title": "本期总标题（震撼体，把本期最劲爆的那件事写进去，≤40字）",
+  "lead": "一句话导语（勾人，≤60字）",
+  "sections": [
+    {
+      "key": "板块的英文短标识（如 headline / gossip / column1 / ranking，全小写无空格）",
+      "name": "板块名（4~12字，是这一块的小标题）",
+      "lead": "这一块的导语（一句话剧透这块讲什么，≤45字）",
+      "image_prompt": "英文：这一块的头图画什么（用于配图，也用作点开后的详情配图）"
+    }
+  ],
+  "credits": { "reporter": "记者/撰稿名", "editor": "编辑名" }
+}
+
+字段要求：
+- "sections"：**4~6 个**，彼此主题明显不同，合起来覆盖本期所有看点。
+- 每块的 "lead" 要具体、有信息量，让人想点开看 —— 不要写「详见内文」这类空话。
+- 每块的 "image_prompt" 必须独立可画：写清主体、动作、环境、光线；各块画面不要重复。
+- 所有中文文字字段用中文；image_prompt 用英文。
+- 内容必须符合 <world_setting>。
+- **本期必须是全新的**，不得重复往期的标题与看点。${imageRules ? `\n\n生图规则（image_prompt 必须遵守）：\n${imageRules}` : ''}`;
+}
+
+/** 板块正文的块格式（第 2 层，点开某块时才生成） */
+function buildSectionBodyPrompt(sectionName, sectionLead) {
+  return `现在只写「${sectionName}」这**一个**板块的正文（前面已经给读者看过它的导语：${sectionLead || '（无）'}）。
+
+请严格按以下 JSON 格式输出，不要输出任何解释或 JSON 以外的文字：
+
+{
+  "blocks": [
+    { "type": "p", "text": "一个自然段" },
+    { "type": "qa", "asker": "提问人的网名", "q": "问题", "answers": [ { "speaker": "说话人", "text": "这一句" } ] },
+    { "type": "rank", "title": "榜单标题", "notice": "可空字符串", "rows": [ { "rank": "第一名", "mask": "面具名", "change": "▲0", "bearer": "持有者" } ] },
+    { "type": "replies", "title": "跟帖区标题", "stat": "🤍 数字 💬 数字", "replies": [ { "author": "网名", "text": "跟帖内容" } ] },
+    { "type": "caption", "lines": ["短促的一句", "短促的一句"] }
+  ]
+}
+
+字段要求：
+- 按这个板块的**性质**挑块类型用，不要五种全上：
+  · 访谈/问答性质 → 多用 "qa"（asker/q/answers 必填，answers 2~5 个嘉宾分段作答，要互相吐槽、接梗、歪楼）
+  · 榜单性质 → 用 "rank"（rows 5~8 行）
+  · 需要网友反应 → 用 "replies"（replies 5~10 条，有队形刷屏、有人破坏队形、有官方号插话）
+  · 八卦/事件叙述 → 用 "caption"（lines 3~5 行，每行短促有力）
+  · 交代背景 / 承上启下 → 用 "p"
+- **块数 3~8 个**，内容要扎实、具体、有梗，是「值得点开看」的量。
+- 沿用你本刊一贯的人称、语气、口癖与署名风格。
+- 所有文字用中文。至少含一个 "qa" 或 "caption" 块（保证有可读的对话感）。
+- 内容必须符合 <world_setting>，且不得与本期其它板块重复。`;
+}
+
+/**
+ * 规范化门户骨架（纯函数，便于单测）。
+ * 与 normalizeWeeklyDraft / normalizePosterDraft 同口径：容错 + 截断 + 兜底。
+ */
+export function normalizePortalDraft(raw, prevIssue = 0) {
+  if (!raw || typeof raw !== 'object') throw new Error('门户草稿不是对象');
+
+  const title = clampText(raw.title, 80);
+  if (!title) throw new Error('门户缺少总标题');
+
+  const seen = new Set();
+  const sections = (Array.isArray(raw.sections) ? raw.sections : [])
+    .map((s, i) => {
+      const name = clampText(s?.name, 24);
+      // key 只留字母数字下划线；缺失/重复就按序号兜底，保证前端 v-for 有稳定 key
+      let key = String(s?.key || '').toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24);
+      if (!key || seen.has(key)) key = `s${i + 1}`;
+      seen.add(key);
+      return {
+        key,
+        name,
+        lead: clampText(s?.lead, 120),
+        image_prompt: clampText(s?.image_prompt, 1200),
+        image: null,
+        body: null,       // 第 2 层：点开时才填
+        body_at: null,
+      };
+    })
+    .filter(s => s.name)
+    .slice(0, 8);
+
+  if (!sections.length) throw new Error('门户一个板块都没有，模型返回异常');
+
+  const noRaw = Number(raw.issue);
+  const issue = Number.isFinite(noRaw) && noRaw > 0 ? Math.floor(noRaw) : (prevIssue + 1);
+
+  return {
+    portal: true,       // 前端据此认出这是门户（比按 layout 判断更可靠：老帖的 layout 取自 outlet）
+    issue,
+    title,
+    lead: clampText(raw.lead, 160),
+    sections,
+    credits: {
+      reporter: clampText(raw.credits?.reporter, 24),
+      editor: clampText(raw.credits?.editor, 24),
+    },
+    views: randInt(5000, 40000),
+  };
+}
+
+/** 该 post 的 payload 是否门户结构 */
+function isPortalPayload(payload) {
+  return Boolean(payload?.portal) && Array.isArray(payload.sections);
+}
+
+/**
+ * 生成一期门户（第 1 层）。落库后**立即返回**，配图由 fillPortalImages 在后台串行补。
+ * 返回落库的行；正文/配图状态通过 SSE 与轮询带回前端。
+ */
+async function generatePortalIssue(outlet) {
+  const db = getDb();
+  const worldSetting = getWorldSetting();
+
+  const prev = db.prepare(`
+    SELECT payload_json FROM media_posts
+    WHERE outlet_id = ? AND payload_json IS NOT NULL
+    ORDER BY id DESC LIMIT 1
+  `).get(outlet.id);
+  const prevIssue = Number(safeParse(prev?.payload_json, null)?.issue) || 0;
+
+  const msgs = [
+    { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
+    { role: 'system', content: outlet.prompt },
+    { role: 'system', content: buildPortalFormatPrompt() },
+    { role: 'user', content: `请出《${outlet.name}》新的一期。上一期是第 ${prevIssue || '（尚无，本期为第 1 期）'} 期，本期编号用 ${prevIssue + 1}。\n\n只出骨架，不要写正文。必须是全新一期。` },
+  ];
+
+  const raw = await chatSync(msgs, {
+    // 只产骨架 → max_tokens 压到海报同档，出刊速度是本设计的核心收益，别给大预算
+    temperature: 0.9, max_tokens: 2500,
+    response_format: { type: 'json_object' }, label: `media:${outlet.name}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  if (!jsonStr) throw new Error('LLM 未返回 JSON');
+  const p = normalizePortalDraft(JSON.parse(repairJson(jsonStr)), prevIssue);
+
+  // content 存一份纯文本（列表摘要 / 搜索用），结构存 payload
+  const plain = [
+    `第${p.issue}期 ${p.title}`,
+    p.lead,
+    ...p.sections.map(s => `${s.name}｜${s.lead}`),
+  ].filter(Boolean).join('\n').slice(0, 4000);
+
+  const batchId = `mp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const r = db.prepare(`
+    INSERT INTO media_posts (outlet_id, board_id, batch_id, title, content, tags_json,
+      author_type, author_name, likes, views, comments_json, image_prompt, payload_json, image_status)
+    VALUES (?, NULL, ?, ?, ?, ?, 'anonymous', ?, ?, ?, ?, ?, ?, 'pending')
+  `).run(
+    outlet.id, batchId, p.title, plain, JSON.stringify(p.sections.map(s => s.name)),
+    outlet.name, randInt(20, 600), p.views, '[]',
+    p.sections[0]?.image_prompt || '',
+    JSON.stringify(p),
+  );
+  const postId = Number(r.lastInsertRowid);
+  console.log(`[media] ${outlet.name} 第${p.issue}期门户已出刊（post #${postId}，${p.sections.length} 个板块），配图后台补印`);
+
+  // ★ 出刊即开始补图（用户口径）。**不 await** —— 出刊要立刻返回，这正是两层设计的意义。
+  setTimeout(() => {
+    fillPortalImages(p.sections.length + 1)
+      .catch(err => console.error('[media] 门户补图失败:', err.message));
+  }, 0);
+
+  return db.prepare('SELECT * FROM media_posts WHERE id = ?').get(postId);
+}
+
+/**
+ * 给门户逐张补图（第 1.5 层）。
+ *
+ * 与 fillPosterPanelImages 的差别：**每补一张就写回一次库**，而不是攒到整期补完再写。
+ * 这是刻意的 —— 前端卡片要「补一张亮一张」，攒着写就看不到渐进效果，
+ * 而且中途失败会丢掉已经生成好的那几张（那些图的文件已经在磁盘上了，成为孤儿）。
+ */
+export async function fillPortalImages(limit = 6) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT p.id, p.payload_json FROM media_posts p
+    JOIN media_outlets o ON o.id = p.outlet_id
+    WHERE o.layout = 'portal' AND p.payload_json IS NOT NULL
+    ORDER BY p.id DESC LIMIT 12
+  `).all();
+
+  let filled = 0;
+  for (const row of rows) {
+    if (filled >= limit) break;
+    const payload = safeParse(row.payload_json, null);
+    if (!isPortalPayload(payload)) continue;
+
+    for (const section of payload.sections) {
+      if (filled >= limit) break;
+      if (section.image || !section.image_prompt) continue;
+      try {
+        const result = await generateMediaImage(section.image_prompt, null);
+        if (!result) continue;
+        // 重新读一次 payload：生成期间可能有别的写入（如用户点了某块生成正文）
+        const fresh = safeParse(db.prepare('SELECT payload_json FROM media_posts WHERE id = ?').get(row.id)?.payload_json, null);
+        const target = isPortalPayload(fresh) ? fresh.sections.find(s => s.key === section.key) : null;
+        if (!target || target.image) continue;   // 已被填过就跳过，避免覆盖
+        target.image = result.url;
+        db.prepare('UPDATE media_posts SET payload_json = ? WHERE id = ?').run(JSON.stringify(fresh), row.id);
+        filled++;
+        recordCompletedImageTask({
+          conversationId: 'media_portal_section',
+          promptOriginal: section.image_prompt,
+          promptRefined: result.refinedPrompt,
+          outputPaths: [result.url],
+          style: result.artist,
+          resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
+          workflowTemplate: result.wfMode,
+          db,
+        });
+        broadcast('media_image_ready', { postId: row.id, image: result.url, sectionKey: section.key });
+        console.log(`[media] 门户配图 #${row.id}/${section.key} 已补（${filled}/${limit}）`);
+      } catch (err) {
+        console.error(`[media] 门户配图失败 #${row.id}/${section.key}:`, err.message);
+      }
+    }
+
+    // 全部板块都有图 → 整期标记 done，前端停止轮询
+    const now = safeParse(db.prepare('SELECT payload_json FROM media_posts WHERE id = ?').get(row.id)?.payload_json, null);
+    if (isPortalPayload(now) && now.sections.every(s => s.image || !s.image_prompt)) {
+      db.prepare(`UPDATE media_posts SET image_status = 'done', image_error = NULL WHERE id = ? AND image_status != 'done'`).run(row.id);
+      // 门户的「封面」取第一块的头图，便于瀑布流/列表复用同一套渲染
+      const cover = now.sections.find(s => s.image)?.image;
+      if (cover) db.prepare('UPDATE media_posts SET image = ? WHERE id = ? AND (image IS NULL OR image = \'\')').run(cover, row.id);
+      broadcast('media_portal_ready', { postId: row.id });
+    }
+  }
+  return filled;
+}
+
+/**
+ * 生成某个板块的正文（第 2 层）。按需触发、落库缓存 —— 生成过就直接返回缓存。
+ * @returns {{ ok: boolean, cached?: boolean, section?: object, error?: string }}
+ */
+export async function generatePortalSection(postId, sectionKey) {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM media_posts WHERE id = ?').get(postId);
+  if (!row) return { ok: false, error: '内容不存在' };
+  const payload = safeParse(row.payload_json, null);
+  if (!isPortalPayload(payload)) return { ok: false, error: '这条内容不是门户结构' };
+
+  const section = payload.sections.find(s => s.key === sectionKey);
+  if (!section) return { ok: false, error: '找不到这个板块' };
+  // 已生成过 → 直接给缓存（这就是「二次点开秒开」）
+  if (section.body) return { ok: true, cached: true, section };
+
+  const outlet = db.prepare('SELECT * FROM media_outlets WHERE id = ?').get(row.outlet_id);
+  const worldSetting = getWorldSetting();
+
+  const raw = await chatSync([
+    { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
+    { role: 'system', content: outlet?.prompt || '' },
+    { role: 'system', content: buildSectionBodyPrompt(section.name, section.lead) },
+    { role: 'user', content: `本期的总标题是「${payload.title}」。现在请写「${section.name}」这一块的正文。` },
+  ], {
+    temperature: 0.9, max_tokens: 4000,
+    response_format: { type: 'json_object' }, label: `media:${outlet?.name || '门户'}·板块`,
+  });
+
+  const jsonStr = extractFirstJson(raw);
+  if (!jsonStr) throw new Error('LLM 未返回 JSON');
+  const body = normalizeSectionBlocks(JSON.parse(repairJson(jsonStr)));
+
+  // 重新读 payload 再写：生成期间可能刚补进了图，直接写旧对象会把图弄丢
+  const fresh = safeParse(db.prepare('SELECT payload_json FROM media_posts WHERE id = ?').get(postId)?.payload_json, null);
+  const target = isPortalPayload(fresh) ? fresh.sections.find(s => s.key === sectionKey) : null;
+  if (!target) return { ok: false, error: '板块在生成期间被移除了，请刷新' };
+  target.body = body;
+  target.body_at = new Date().toISOString();
+  db.prepare('UPDATE media_posts SET payload_json = ? WHERE id = ?').run(JSON.stringify(fresh), postId);
+
+  console.log(`[media] 门户板块正文 #${postId}/${sectionKey} 已生成（${body.length} 块）`);
+  return { ok: true, cached: false, section: target };
+}
+
+/** 板块正文的块数组规范化：只认已知块类型，其余丢弃（不做兜底猜测，避免前端拿到怪结构） */
+export function normalizeSectionBlocks(raw) {
+  const list = Array.isArray(raw?.blocks) ? raw.blocks : [];
+  const out = [];
+  for (const b of list) {
+    const type = String(b?.type || '').toLowerCase();
+    if (type === 'p') {
+      const text = clampText(b.text, 2000);
+      if (text) out.push({ type: 'p', text });
+    } else if (type === 'qa') {
+      const q = clampText(b.q, 300);
+      const answers = (Array.isArray(b.answers) ? b.answers : [])
+        .map(a => ({ speaker: clampText(a?.speaker, 30), text: clampText(a?.text, 600) }))
+        .filter(a => a.text).slice(0, 6);
+      if (q) out.push({ type: 'qa', asker: clampText(b.asker, 30), q, answers });
+    } else if (type === 'rank') {
+      const rows = (Array.isArray(b.rows) ? b.rows : [])
+        .map(r => ({
+          rank: clampText(r?.rank, 16), mask: clampText(r?.mask, 30),
+          change: clampText(r?.change, 10), bearer: clampText(r?.bearer, 30),
+        }))
+        .filter(r => r.rank || r.bearer).slice(0, 12);
+      if (rows.length) out.push({ type: 'rank', title: clampText(b.title, 40), notice: clampText(b.notice, 200), rows });
+    } else if (type === 'replies') {
+      const replies = (Array.isArray(b.replies) ? b.replies : [])
+        .map(r => ({ author: clampText(r?.author, 30), text: clampText(r?.text, 600) }))
+        .filter(r => r.text).slice(0, 14);
+      if (replies.length) out.push({ type: 'replies', title: clampText(b.title, 40), stat: clampText(b.stat, 40), replies });
+    } else if (type === 'caption') {
+      const lines = (Array.isArray(b.lines) ? b.lines : []).map(l => clampText(l, 300)).filter(Boolean).slice(0, 8);
+      if (lines.length) out.push({ type: 'caption', lines });
+    }
+  }
+  if (!out.length) throw new Error('模型没产出可用的正文块，请重试');
+  return out;
+}
+
+export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true } = {}) {  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
   generating = (async () => {
     const db = getDb();
     const n = Math.max(1, Math.min(MAX_BATCH_SIZE, Number(count) || DEFAULT_BATCH_SIZE));
@@ -790,7 +1137,8 @@ export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATC
     }
     if (!outlet) throw new Error('没有可用的媒体（请先在媒体设置里添加）');
 
-    // 按形态分派：周刊一次出一期、海报一次出一张，都不是「一批帖子」
+    // 按形态分派：周刊/海报/门户一次出一期（刊），都不是「一批帖子」
+    if (outlet.layout === 'portal') return await generatePortalIssue(outlet);
     if (outlet.layout === 'weekly') return await generateWeeklyIssue(outlet);
     if (outlet.layout === 'poster') return await generatePosterIssue(outlet);
 
@@ -1015,8 +1363,9 @@ async function fillPosterPanelImages(limit = 3) {
 /** 这条内容是否有生图提示词（可重新生图） */
 export function canRegenerateImage(post) {
   if (!post) return false;
-  if (String(post.image_prompt || '').trim()) return true;
   const payload = safeParse(post.payload_json, null);
+  if (isPortalPayload(payload)) return payload.sections.some(s => String(s?.image_prompt || '').trim());
+  if (String(post.image_prompt || '').trim()) return true;
   const panels = Array.isArray(payload?.panels) ? payload.panels : [];
   return panels.some(p => String(p?.image_prompt || '').trim());
 }
@@ -1041,13 +1390,23 @@ export function regeneratePostImage(postId) {
 
   let cleared = 0;
   const payload = safeParse(post.payload_json, null);
+  const isPortal = isPortalPayload(payload);
 
   const tx = db.transaction(() => {
     // 主图清空并置回 pending —— CAS 抢占（claimPostForImage）只认 pending
     db.prepare(`UPDATE media_posts SET image = NULL, image_status = 'pending', image_error = NULL WHERE id = ?`).run(postId);
     cleared++;
 
-    if (payload && Array.isArray(payload.panels)) {
+    if (isPortal) {
+      // 门户：清空**每个板块**的头图（正文 body 是文字、不动，重生成图片不该把已生成的正文丢掉）
+      let touched = false;
+      for (const s of payload.sections) {
+        if (s?.image) { s.image = null; cleared++; touched = true; }
+      }
+      if (touched) {
+        db.prepare('UPDATE media_posts SET payload_json = ? WHERE id = ?').run(JSON.stringify(payload), postId);
+      }
+    } else if (payload && Array.isArray(payload.panels)) {
       let touched = false;
       for (const panel of payload.panels) {
         if (panel?.image) { panel.image = null; cleared++; touched = true; }
@@ -1060,8 +1419,14 @@ export function regeneratePostImage(postId) {
   tx();
 
   // 立刻排队（不 await：接口要快速返回；图会通过 SSE 到位）
-  fillPendingImages(1 + (payload?.panels?.length || 0))
-    .catch(err => console.error('[media] 重新生图失败:', err.message));
+  if (isPortal) {
+    // 门户走自己的补图通道（主图通道已被 listPostsNeedingImage 排除）
+    fillPortalImages(1 + payload.sections.length)
+      .catch(err => console.error('[media] 门户重新生图失败:', err.message));
+  } else {
+    fillPendingImages(1 + (payload?.panels?.length || 0))
+      .catch(err => console.error('[media] 重新生图失败:', err.message));
+  }
 
   console.log(`[media] 帖子 #${postId} 重新生图：清空 ${cleared} 张`);
   const fresh = db.prepare('SELECT * FROM media_posts WHERE id = ?').get(postId);
@@ -1069,11 +1434,9 @@ export function regeneratePostImage(postId) {
 }
 
 /**
- * 删除一条内容（含其全部配图文件）。
- * 周刊/海报的小图存在 payload 里，**要一并清理**，否则会留下孤儿文件。
- */
-/**
- * 删除一条内容（含配图文件）。
+ * 删除一条内容（含全部配图文件）。
+ * 周刊/海报的小图存在 payload.panels、门户的头图存在 payload.sections —— **都要一并清理**，
+ * 否则会留下没人引用的孤儿文件。
  * @param {number} postId
  * @param {{ silent?: boolean }} [opts] silent=true 时**不**失效相册缓存、**不**广播
  *   —— 批量删除用：逐条做这两件事会重复 N 次，由批量入口统一收尾。
@@ -1089,6 +1452,10 @@ export function deletePost(postId, { silent = false } = {}) {
   const payload = safeParse(post.payload_json, null);
   if (Array.isArray(payload?.panels)) {
     for (const p of payload.panels) if (p?.image) urls.push(p.image);
+  }
+  // 门户的图存在 sections[].image（不是 panels），漏了会留下孤儿文件
+  if (Array.isArray(payload?.sections)) {
+    for (const s of payload.sections) if (s?.image) urls.push(s.image);
   }
 
   db.prepare('DELETE FROM media_posts WHERE id = ?').run(postId);

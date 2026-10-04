@@ -15,7 +15,7 @@ export const DEFAULT_MEDIA_OUTLETS = [
     name: '狸狸通讯社',
     tagline: '二相乐园唯一持牌刊社 · 快问快答Time，冲冲冲！',
     icon: '📰',
-    layout: 'weekly',
+    layout: 'portal',
     boards: ['特急刊', '常规刊', '号外', '增刊'],
     prompt: `你是《狸狸周刊》的编辑部。每期出一份完整的**周刊**，版式固定为：
 刊头 → 开场白 → 若干「访谈栏目」（每个栏目下是编号 Q&A）→ 尾部板块 → 落款。
@@ -65,7 +65,7 @@ export const DEFAULT_MEDIA_OUTLETS = [
     name: '狸狸八卦',
     tagline: '誓把星娱传媒干倒闭！每期一张，专扒大瓜',
     icon: '📸',
-    layout: 'poster',
+    layout: 'portal',
     boards: ['独家', '热点速报', '翻车现场', '塌房预警'],
     prompt: `你是《狸狸八卦》编辑部——一本专扒名流八卦的**街边小报**，口号是「誓把星娱传媒干倒闭！」。
 每期出**一张海报**（不是文章），一张只讲一个瓜，版式固定为：

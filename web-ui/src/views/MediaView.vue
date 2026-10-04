@@ -189,7 +189,7 @@
       <div
         v-for="p in specialPosts" :key="p.id"
         class="special-wrap"
-        :class="{ 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }"
+        :class="[`is-${postKind(p)}`, { 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }]"
       >
         <!-- 批量模式：整幅版式外左侧一个勾选行（版式本身不适合在图上贴勾选框） -->
         <button
@@ -204,12 +204,14 @@
               <polyline points="20 6 9 17 4 12"/>
             </svg>
           </span>
-          <span class="special-pick-title">{{ p.title || (p.layout === 'poster' ? '海报' : '周刊') }}</span>
+          <span class="special-pick-title">{{ p.title || kindLabel(p) }}</span>
         </button>
         <component
-          :is="p.layout === 'poster' ? MediaPoster : MediaWeekly"
+          :is="componentFor(p)"
           :post="p"
           @zoom="zoomSrc = $event"
+          @section-loaded="onSectionLoaded"
+          @section-error="onSectionError"
         />
         <!-- 周刊/海报是整幅版式，不适合在图上贴按钮 → 操作放在版式下方 -->
         <div class="special-ops">
@@ -437,15 +439,17 @@
           </linshe-button>
         </div>
 
-        <!-- ★ 周刊 / 海报：直接渲染版式本体，而不是把结构化内容摊成纯文本。
-             这样「小图组」才会显示成图片 + 图注（同《邻舍日报》的详情排版口径）。
+        <!-- ★ 版式本体渲染（门户 / 周刊 / 海报），而不是把结构化内容摊成纯文本。
+             按 payload 形态分派 —— 迁移后 layout 对老帖不再可靠（见 postKind 注释）。
              图片可点击放大。 -->
-        <template v-if="detailPost.layout === 'weekly' && detailPost.payload">
-          <MediaWeekly :post="detailPost" @zoom="zoomSrc = $event" />
-        </template>
-        <template v-else-if="detailPost.layout === 'poster' && detailPost.payload">
-          <MediaPoster :post="detailPost" @zoom="zoomSrc = $event" />
-        </template>
+        <component
+          v-if="postKind(detailPost) !== 'feed'"
+          :is="componentFor(detailPost)"
+          :post="detailPost"
+          @zoom="zoomSrc = $event"
+          @section-loaded="onSectionLoaded"
+          @section-error="onSectionError"
+        />
 
         <template v-else>
           <div class="detail-meta">
@@ -507,6 +511,7 @@ import MediaSettingsModal from '../components/MediaSettingsModal.vue'
 import NewspaperModal from '../components/NewspaperModal.vue'
 import MediaWeekly from '../components/media/MediaWeekly.vue'
 import MediaPoster from '../components/media/MediaPoster.vue'
+import MediaPortal from '../components/media/MediaPortal.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 import { onEvent } from '../stores/unifiedStream.js'
@@ -706,22 +711,55 @@ const boardChips = computed(() => {
 const hasMore = computed(() => posts.value.length < total.value)
 
 /**
- * 按形态分组：
- *   feedPosts    = 帖子流（走瀑布流卡片）
- *   specialPosts = 周刊 / 海报（走全宽版式组件）
- * 之所以拆开渲染：周刊与海报是全宽版式，塞进多列瀑布流会排版崩坏。
+ * 帖子版式类型 —— **按 payload 形态判定，不看 outlet.layout**。
  *
- * ⚠️ **必须同时要求 payload 存在**：早期版本（layout 还没引入时）生成的狸狸八卦帖子
- * 只有 title/content 而没有 payload_json。若只按 layout 判定，版式组件会因为
- * `v-if="data"` 不通过而渲染成**空白**。带上 payload 判定后，这类旧数据会退回
- * 卡片渲染，正常显示标题与正文。
+ * ★ 为什么必须这样：`layout` 来自 outlet（listPosts 里 `o.layout AS layout`）。
+ *   狸狸通讯社/八卦从 weekly/poster 迁成 portal 之后，**它们已有的老帖也会被标成 portal**，
+ *   按 layout 分派就会把老周刊丢给门户组件渲染 → `payload.sections` 不存在 → 一片**空白**。
+ *   按 payload 形态判定天然兼容：有 sections 才是门户。
+ *
+ * ⚠️ 同时要求 payload 存在：早期版本（layout 还没引入时）生成的狸狸八卦帖子只有
+ *   title/content、没有 payload_json。若只看 outlet.layout，版式组件会因 `v-if="data"`
+ *   不通过而渲染成空白；这里退回 feed 卡片，正常显示标题与正文。
  */
+function postKind(p) {
+  const pl = p?.payload
+  if (!pl) return 'feed'
+  if (pl.portal && Array.isArray(pl.sections)) return 'portal'
+  if (Array.isArray(pl.columns)) return 'weekly'
+  if (Array.isArray(pl.panels)) return 'poster'
+  return 'feed'
+}
+/** 整幅版式（不是瀑布流卡片）：周刊 / 海报 / 门户 */
 function isSpecialPost(p) {
-  const layout = p.layout || 'feed'
-  return layout !== 'feed' && !!p.payload
+  return postKind(p) !== 'feed'
 }
 const feedPosts = computed(() => posts.value.filter(p => !isSpecialPost(p)))
 const specialPosts = computed(() => posts.value.filter(isSpecialPost))
+
+/** 版式组件：按 payload 形态挑 */
+const KIND_COMPONENT = { portal: MediaPortal, weekly: MediaWeekly, poster: MediaPoster }
+function componentFor(p) {
+  return KIND_COMPONENT[postKind(p)] || MediaWeekly
+}
+/** 批量勾选行上的类型标签 */
+function kindLabel(p) {
+  return { portal: '报刊', weekly: '周刊', poster: '海报' }[postKind(p)] || '内容'
+}
+
+// ── 门户：板块正文取回后同步回本地列表 ──
+// 门户组件内部已经用本地缓存显示，这里再把结果写回 posts 数组，
+// 这样**关掉详情/刷新列表前**都不会丢；下次进来也少一次请求（payload 已落库）。
+function onSectionLoaded({ postId, section }) {
+  const target = posts.value.find(p => p.id === postId)
+  if (!target?.payload?.sections) return
+  const hit = target.payload.sections.find(s => s.key === section.key)
+  if (hit) hit.body = section.body
+}
+
+function onSectionError({ sectionKey, error }) {
+  toastFn?.(`「${sectionKey}」正文生成失败：${error}`, 'error')
+}
 
 function formatNum(n) {
   const v = Number(n) || 0
@@ -1257,8 +1295,9 @@ onUnmounted(() => {
 .special-list {
   display: flex; flex-direction: column; gap: 18px;
   padding: 0 20px;
-  max-width: 880px;
-  margin: 0 auto;
+  /* ★ 容器放开到整宽。原来这里是 max-width:880px 居中，门户的横版卡片网格被卡在
+     880px 里只能排 2 列，1920 屏两侧各空 520px —— 正是这次改造要解决的问题。
+     旧版式（周刊/海报）的窄栏改由 .special-wrap.is-weekly/.is-poster 自己守。 */
   width: 100%;
   box-sizing: border-box;
 }
@@ -1463,6 +1502,16 @@ onUnmounted(() => {
 
 /* ── 周刊/海报：整幅版式 + 下方操作条 ── */
 .special-wrap { display: flex; flex-direction: column; gap: 8px; }
+/* 旧版式（周刊/海报）保持原来的窄栏居中——它们按 880px 宽度设计的排版，
+   拉满宽屏会显得空；门户则吃满宽度（见下）。 */
+.special-wrap.is-weekly,
+.special-wrap.is-poster {
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+/* 门户：横版卡片网格吃满宽屏 */
+.special-wrap.is-portal { max-width: none; }
 .special-ops {
   display: flex; align-items: center; gap: 10px;
   padding: 0 2px;

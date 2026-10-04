@@ -11,10 +11,11 @@ import { Router } from 'express';
 import {
   listOutlets, getOutlet, createOutlet, updateOutlet, deleteOutlet,
   listBoards, createBoard, updateBoard, deleteBoard,
-  listPosts, generateMediaBatch, fillPendingImages, getAutoState,
+  listPosts, generateMediaBatch, fillPendingImages, fillPortalImages, getAutoState,
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
+  generatePortalSection,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
 import { config, updateMediaAutoMinutes } from '../config.js';
@@ -113,6 +114,18 @@ router.get('/posts', (req, res) => {
 
 // POST /api/media/posts/:id/regenerate-image — 为这条内容重新生成配图
 // （周刊/海报会连同 payload 里的小图一起清空重出）
+// ── 门户（数字报刊·两层生成）──
+
+// POST /api/media/posts/:id/sections/:key — 生成/读取某个板块的正文（第 2 层）
+// 已生成过直接返回缓存（二次点开秒开）；首次要调 LLM，所以是同步等待（前端显骨架屏）。
+router.post('/posts/:id/sections/:key', async (req, res) => {
+  try {
+    const r = await generatePortalSection(Number(req.params.id), String(req.params.key || ''));
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
+
 // ── 批量操作 ──
 // ⚠ 顺序要紧：`batch` 系列必须注册在参数路由 `/posts/:id...` **之前**，
 //   否则 Express 会先把 "batch" 当成 :id 匹配走（数字化成 NaN → 报「内容不存在」）。
@@ -211,9 +224,14 @@ router.post('/cleanup-images', (req, res) => {
 router.post('/fill-images', (req, res) => {
   try {
     const limit = req.body?.limit ? Number(req.body.limit) : 6;
-    fillPendingImages(Math.min(Math.max(1, limit), 20))
-      .then(n => console.log(`[media] 手动补图完成 ${n} 张`))
+    const n = Math.min(Math.max(1, limit), 20);
+    // 两条通道都要跑：主图/海报小图，与门户的板块头图（后者被 listPostsNeedingImage 排除在外）
+    fillPendingImages(n)
+      .then(c => console.log(`[media] 手动补图完成 ${c} 张`))
       .catch(err => console.error('[media] 手动补图失败:', err.message));
+    fillPortalImages(n)
+      .then(c => c && console.log(`[media] 手动补图（门户）完成 ${c} 张`))
+      .catch(err => console.error('[media] 手动补图（门户）失败:', err.message));
     res.json({ started: true });
   } catch (err) { fail(res, err); }
 });

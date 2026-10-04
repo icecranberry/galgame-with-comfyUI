@@ -2199,3 +2199,11 @@ export function deleteMediaPosts(ids) {
 export function regenerateMediaPostImages(ids) {
   return request('/media/posts/batch/regenerate-image', { method: 'POST', body: { ids } })
 }
+
+/**
+ * 门户：生成（或读取缓存的）某个板块的正文。
+ * 已生成过后端直接返回缓存（二次点开秒开）；首次要调 LLM，所以是同步等待。
+ */
+export function generateMediaSection(postId, sectionKey) {
+  return request(`/media/posts/${postId}/sections/${encodeURIComponent(sectionKey)}`, { method: 'POST' })
+}

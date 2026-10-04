@@ -2830,8 +2830,10 @@ function migrateMediaSchema(db) {
     // ── 结构升级（独立于种子开关，老库也要加上）──
     // layout：媒体形态，决定前端用哪套版式渲染
     //   'feed'   = 帖子瀑布流（网络热门 / 公司脉脉 / 幻月暗所…）
-    //   'weekly' = 周刊版式（狸狸通讯社：刊头/开场白/多栏目 Q&A/榜单/跟帖）
-    //   'poster' = 海报版式（狸狸八卦：热点条/大标题/主图/气泡/小图组）
+    //   'portal' = 门户（数字报刊·两层生成）：横版卡片网格 + 点开板块才生成正文。
+    //              出刊只跑一次短 LLM（立刻可读），配图与正文都按需补。
+    //   'weekly' = 周刊版式（**旧形态**：狸狸通讯社原样，已被 portal 取代，保留以渲染老帖）
+    //   'poster' = 海报版式（**旧形态**：狸狸八卦原样，同上）
     const oCols = db.prepare(`PRAGMA table_info(media_outlets)`).all();
     if (!oCols.find(c => c.name === 'layout')) {
       db.exec(`ALTER TABLE media_outlets ADD COLUMN layout TEXT NOT NULL DEFAULT 'feed'`);
@@ -2844,9 +2846,15 @@ function migrateMediaSchema(db) {
       console.log('[db] Added media_posts.payload_json column');
     }
 
-    // ── 形态回填（幂等，每次启动都跑：老库里狸狸通讯社还是 feed，要升级成 weekly）──
+    // ── 形态回填（幂等，每次启动都跑）──
     try {
-      db.prepare(`UPDATE media_outlets SET layout = 'weekly' WHERE name = '狸狸通讯社' AND layout != 'weekly'`).run();
+      // 两个报刊升级为「门户」：原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
+      // 在电脑宽屏上还只是 880px 居中单列、两侧各空 520px。门户把它拆成两层
+      //（出刊只出骨架 → 立即可读；图后台串行补；正文点开才生成）。
+      // 老帖仍按 payload 形态渲染（MediaWeekly / MediaPoster 保留），不会白丢内容。
+      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name IN ('狸狸通讯社','狸狸八卦') AND layout != 'portal'`).run();
+      // 老库里可能残留「还是 feed」的狸狸通讯社（很早的版本）：一并升级
+      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout = 'feed'`).run();
     } catch { /* ignore */ }
 
     const seeded = db.prepare(
