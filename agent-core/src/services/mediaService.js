@@ -128,20 +128,33 @@ export function getOutlet(id) {
 }
 
 /**
- * 媒体的两种**产物形态**（差别很大，不能混同）：
+ * 媒体的**产物形态**（差别很大，不能混同）：
  *   · `feed`   —— 社交平台：一批独立帖子（瀑布流），一次生成多条
  *   · `portal` —— 数字报刊：按「期」出刊。门户版只跑 1 次短 LLM，正文点开板块才按需生成
- * `weekly` / `poster` 是 portal 之前的旧形态，渲染分支仍兼容，但新建时不再提供。
+ *   · `poster` —— 海报：一张只讲一个瓜。热点速报条 → 大标题 → 主图 → 爆点气泡 → 短文案 → 小图组
+ *                 （《狸狸八卦》就是这种：它的提示词明确写「每期出一张海报（不是文章）」，
+ *                  一度被错设成 portal 而做成了门户网，现已归位）
+ * `weekly` 是 portal 之前的旧形态，渲染分支仍兼容（老数据），但新建时不再提供。
+ *
+ * 与前端分类的对应：feed →「社交平台」；portal →「数字报刊」；poster/weekly →「报纸物料」。
  */
 export const OUTLET_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
   { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
+  { key: 'poster', label: '海报', hint: '一张只讲一个瓜：热点速报条 → 大标题 → 主图 → 爆点气泡 → 短文案 → 小图组' },
 ];
 const OUTLET_LAYOUT_KEYS = OUTLET_LAYOUTS.map(l => l.key);
+/** 老形态：仍是有效的 layout（渲染分支兼容），只是新建时不提供 */
+const LEGACY_LAYOUT_KEYS = ['weekly'];
 /** 规范化形态：非法或缺失时回落 `feed`（历史默认值，保证兼容旧调用方） */
 function normalizeLayout(v) {
   const s = String(v || '').trim();
-  return OUTLET_LAYOUT_KEYS.includes(s) ? s : 'feed';
+  return (OUTLET_LAYOUT_KEYS.includes(s) || LEGACY_LAYOUT_KEYS.includes(s)) ? s : 'feed';
+}
+
+/** 是不是「按期出刊」的形态（门户 / 海报 / 旧周刊）—— 出刊与期号导航都适用于它们 */
+export function isPeriodicalLayout(layout) {
+  return ['portal', 'poster', 'weekly'].includes(String(layout || ''));
 }
 
 export function createOutlet({ name, tagline = '', prompt = '', icon = '', layout = 'feed' }) {
@@ -275,6 +288,10 @@ export function listPosts({ outletId = null, boardId = null, category = null, li
   if (category === 'digital') {
     // 门户是周刊/海报的升级形态（两层生成），同样属于「数字报刊」
     where.push(`o.layout IN ('weekly','poster','portal')`);
+  } else if (category === 'print') {
+    // 「报纸物料」：印刷/实体形态的刊物 —— 海报（以及历史形态 weekly）。
+    // 注意 portal 不在这里：它属于「数字报刊」（可点开板块的数字刊物）。
+    where.push(`o.layout IN ('weekly','poster')`);
   } else if (category === 'social') {
     // 注意：layout 有 DEFAULT 'feed'，但老库可能为 NULL，一并当 feed 处理
     where.push(`(o.layout IS NULL OR o.layout = 'feed')`);
@@ -1180,11 +1197,30 @@ function lastIssueNo(outletId) {
  *   force=true：就算今天出过也再出一期（读者点「再出一期」加刊）
  * @returns {Promise<{existed: boolean, post: object, issue: number}>}
  */
-export async function publishPortalIssue(outletId, { force = false } = {}) {
+/**
+ * 从 payload 里读期号。
+ * 三种形态各用各的字段名（门户 `issue` / 海报 `issueNo` / 旧周刊 `volume`）—— 这里统一。
+ */
+export function issueNoOf(payload) {
+  const p = payload || {};
+  const n = Number(p.issue ?? p.issueNo ?? p.volume);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/**
+ * 出一刊 —— 适用于**所有「按期出刊」的形态**：门户（数字报刊）/ 海报（报纸物料）/ 旧周刊。
+ *
+ * @param {number} outletId
+ * @param {{ force?: boolean }} [opts]
+ *   force=false（默认）：**当天已出过就返回那一期**，不重复出（省 token，与《邻舍日报》的 /generate 同口径）
+ *   force=true：就算今天出过也再出一期（读者点「再出一期」加刊）
+ * @returns {Promise<{existed: boolean, post: object, issue: number}>}
+ */
+export async function publishIssue(outletId, { force = false } = {}) {
   const outlet = getOutlet(outletId);
   if (!outlet) throw Object.assign(new Error('媒体不存在'), { statusCode: 404 });
-  if (outlet.layout !== 'portal') {
-    throw Object.assign(new Error('这个媒体不是「数字报刊」形态，不能出刊'), { statusCode: 400 });
+  if (!isPeriodicalLayout(outlet.layout)) {
+    throw Object.assign(new Error('这个媒体不是「按期出刊」的形态（数字报刊 / 海报），不能出刊'), { statusCode: 400 });
   }
 
   // 当天已出且不强制 → 直接把那一期还回去
@@ -1196,17 +1232,21 @@ export async function publishPortalIssue(outletId, { force = false } = {}) {
         AND DATE(created_at, 'localtime') = DATE('now', 'localtime')
       ORDER BY id DESC LIMIT 1
     `).get(outletId);
-    return { existed: true, post, issue: Number(safeParse(post?.payload_json, null)?.issue) || 0 };
+    return { existed: true, post, issue: issueNoOf(safeParse(post?.payload_json, null)) };
   }
 
-  const post = await generatePortalIssue(outlet);
-  return { existed: false, post, issue: Number(safeParse(post?.payload_json, null)?.issue) || 0 };
+  // 按形态分派生成器
+  const post = outlet.layout === 'poster' ? await generatePosterIssue(outlet)
+    : outlet.layout === 'weekly' ? await generateWeeklyIssue(outlet)
+      : await generatePortalIssue(outlet);
+  return { existed: false, post, issue: issueNoOf(safeParse(post?.payload_json, null)) };
 }
 
 /**
  * 期简目（往期导航用）：最新在前。只取渲染与切期需要的字段，不带正文。
+ * 兼容三种形态（期号字段名不同，统一走 `issueNoOf`）。
  */
-export function listPortalIssues(outletId) {
+export function listIssues(outletId) {
   const rows = getDb().prepare(`
     SELECT id, title, created_at, payload_json FROM media_posts
     WHERE outlet_id = ? AND payload_json IS NOT NULL
@@ -1214,15 +1254,17 @@ export function listPortalIssues(outletId) {
   `).all(outletId);
   return rows.map(r => {
     const p = safeParse(r.payload_json, null);
+    // 门户有 sections（按块计正文进度）；海报没有块概念，用 1/1 表示"整张已出"
     const sections = Array.isArray(p?.sections) ? p.sections : [];
+    const isPoster = !sections.length && Boolean(p?.bigTitle);
     return {
       post_id: r.id,
-      issue: Number(p?.issue) || 0,
+      issue: issueNoOf(p),
       title: r.title,
       created_at: r.created_at,
-      section_count: sections.length,
+      section_count: isPoster ? 1 : sections.length,
       // 有多少块正文已经写过 —— 期号导航上标个进度，一眼看出哪期是完整的
-      written: sections.filter(s => s?.body).length,
+      written: isPoster ? 1 : sections.filter(s => s?.body).length,
     };
   }).filter(x => x.issue > 0);
 }
@@ -1232,30 +1274,30 @@ let portalIssueInFlight = false;
 
 /**
  * 每日一刊（挂在调度 tick 里，与《邻舍日报》同一套机制）。
+ * 覆盖**所有按期出刊的形态**（数字报刊 + 报纸物料：海报/周刊）。
  *
  * 自带的克制设计：
- *  · **每个 tick 最多出一个刊** —— 有多个数字报刊时不会在同一分钟里并发几次 LLM；
+ *  · **每个 tick 最多出一个刊** —— 有多个刊物时不会在同一分钟里并发几次 LLM；
  *    下一个 tick 自然轮到下一个还没出的刊。
  *  · 当天已出的刊会被跳过（`hasIssueToday`），所以它只是"每天补一次"，重复调用无副作用。
  *  · 全流程 try/catch —— 出刊失败不能影响调度。
  *
  * @returns {Promise<{published: string|null, reason: string}>}
  */
-export async function maybeGenerateDailyPortalIssues() {
+export async function maybeGenerateDailyIssues() {
   if (portalIssueInFlight) return { published: null, reason: 'in-flight' };
-  let outlet = null;
   try {
     const db = getDb();
     const candidates = db.prepare(`
-      SELECT * FROM media_outlets WHERE layout = 'portal' AND enabled = 1 ORDER BY sort_order, id
+      SELECT * FROM media_outlets WHERE enabled = 1 AND layout IN ('portal','poster','weekly')
+      ORDER BY sort_order, id
     `).all();
-    outlet = candidates.find(o => !hasIssueToday(o.id)) || null;
+    const outlet = candidates.find(o => !hasIssueToday(o.id)) || null;
     if (!outlet) return { published: null, reason: 'all-done' };
 
     portalIssueInFlight = true;
-    const post = await generatePortalIssue(outlet);
-    const issue = Number(safeParse(post?.payload_json, null)?.issue) || 0;
-    console.log(`[media] 每日出刊：${outlet.name} 第${issue}期`);
+    const r = await publishIssue(outlet.id, { force: false });
+    console.log(`[media] 每日出刊：${outlet.name} 第${r.issue}期`);
     return { published: outlet.name, reason: 'published' };
   } catch (err) {
     console.error('[media] 每日出刊失败:', err.message);
@@ -1264,6 +1306,7 @@ export async function maybeGenerateDailyPortalIssues() {
     portalIssueInFlight = false;
   }
 }
+
 export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true } = {}) {  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
   generating = (async () => {
     const db = getDb();

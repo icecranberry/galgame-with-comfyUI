@@ -24,8 +24,8 @@ import {
   NUDE_DESCRIPTION,
 } from '../src/services/outfitScene.js';
 import {
-  OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
-  publishPortalIssue, listPortalIssues, hasIssueToday,
+  OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets, isPeriodicalLayout,
+  publishIssue, listIssues, hasIssueToday,
 } from '../src/services/mediaService.js';
 import { getLocalDateKey, shiftDateKey } from '../src/utils/localDate.js';
 
@@ -236,12 +236,18 @@ test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
 // 网络（媒体）页：产物形态
 // ─────────────────────────────────────────────────────────
 
-test('媒体形态：只提供 社交平台(feed) / 数字报刊(portal) 两种，且各有说明', () => {
-  assert.equal(OUTLET_LAYOUTS.length, 2);
-  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'portal']);
+test('媒体形态：社交平台(feed) / 数字报刊(portal) / 海报(poster)，且各有说明', () => {
+  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'portal', 'poster']);
   for (const l of OUTLET_LAYOUTS) {
     assert.ok(l.label && l.hint, `${l.key} 应有 label 与 hint`);
   }
+  // weekly 是历史形态：仍可写入（老数据），但不作为新建选项
+  assert.ok(!OUTLET_LAYOUTS.some(l => l.key === 'weekly'));
+});
+
+test('isPeriodicalLayout：门户/海报/旧周刊都是「按期出刊」', () => {
+  for (const k of ['portal', 'poster', 'weekly']) assert.equal(isPeriodicalLayout(k), true, k);
+  for (const k of ['feed', '', null, undefined, 'x']) assert.equal(isPeriodicalLayout(k), false, String(k));
 });
 
 test('媒体形态：新建时可指定；未指定/非法都回落 feed（兼容旧调用方）', () => {
@@ -293,18 +299,18 @@ test('出刊：非「数字报刊」形态拒绝出刊，不静默什么都不�
   try {
     const o = createOutlet({ name: '__zz_issue_feed', prompt: '测试提示词', layout: 'feed' });
     id = o.id;
-    await assert.rejects(() => publishPortalIssue(id), /不是「数字报刊」形态/);
+    await assert.rejects(() => publishIssue(id), /不是「按期出刊」的形态/);
   } finally {
     if (id) { try { deleteOutlet(id); } catch { } }
   }
 });
 
 test('出刊：媒体不存在时报 404 语义，而不是崩掉', async () => {
-  await assert.rejects(() => publishPortalIssue(99999999), /媒体不存在/);
+  await assert.rejects(() => publishIssue(99999999), /媒体不存在/);
 });
 
 test('期简目：只包含有期号的门户帖，且最新在前', () => {
-  // 直接用 SQL 造两条门户帖与一条普通帖，核对 listPortalIssues 的过滤与排序
+  // 直接用 SQL 造两条门户帖与一条普通帖，核对 listIssues 的过滤与排序
   const db = getDb();
   const outlet = createOutlet({ name: '__zz_issue_list', prompt: '测试提示词', layout: 'portal' });
   const mk = (issue, title, written) => db.prepare(`
@@ -329,7 +335,7 @@ test('期简目：只包含有期号的门户帖，且最新在前', () => {
       VALUES (?, 'b', '无期号', '', '[]', 'anonymous', 'x', 0, 0, '[]', ?, 'done')
     `).run(outlet.id, JSON.stringify({ portal: true, title: 'x', sections: [] }));
 
-    const list = listPortalIssues(outlet.id);
+    const list = listIssues(outlet.id);
     assert.equal(list.length, 2, '只列出有期号的那两条');
     assert.deepEqual(list.map(x => x.issue), [2, 1], '最新在前');
     assert.equal(list[0].written, 0, '第二期一块正文都没写');
@@ -344,7 +350,7 @@ test('期简目：只包含有期号的门户帖，且最新在前', () => {
 
 test('每日一刊的去重键：当天已出过就判定为「无需出刊」', () => {
   /**
-   * 这里**刻意不调 maybeGenerateDailyPortalIssues()** —— 那个函数在"今天还没出"时
+   * 这里**刻意不调 maybeGenerateDailyIssues()** —— 那个函数在"今天还没出"时
    * 会真的出一刊（调 LLM + 写库），测试不该有这种副作用。
    * 改为直接验它的判据 `hasIssueToday`：这就是"每日一刊"不重复出刊的全部依据。
    */

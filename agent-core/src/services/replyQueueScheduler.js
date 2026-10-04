@@ -27,7 +27,7 @@ import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { maybeGenerateDailyNewspaper } from './newspaperService.js';
-import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, cleanupOrphanMediaImages, maybeGenerateDailyPortalIssues } from './mediaService.js';
+import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, cleanupOrphanMediaImages, maybeGenerateDailyIssues } from './mediaService.js';
 import { resetStaleGenerating } from './lootService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
@@ -82,7 +82,7 @@ async function tick() {
     // 0.2 数字报刊〔每日一刊〕：每个启用的刊物每天补出一期。
     //     与《邻舍日报》同一套机制（调度 tick 触发 + 内部去重）。刻意**每个 tick 最多出一个刊**
     //     —— 有多个刊物时不会在同一分钟并发几次 LLM，下一个 tick 自然轮到下一个。
-    maybeGenerateDailyPortalIssues().catch(err => console.error('[media] 每日出刊异常:', err.message));
+    maybeGenerateDailyIssues().catch(err => console.error('[media] 每日出刊异常:', err.message));
 
     // 0.5 媒体内容页：到点补一批新帖；每轮顺带补几张缺封面（同为 fire-and-forget，
     //     内部自带节流与并发守卫，不阻塞下面的调度）

@@ -39,11 +39,11 @@
       </div>
 
       <div class="header-right">
-        <span class="media-count" v-if="activeCategory !== 'traditional' && total > 0">共 {{ total }} 帖</span>
+        <span class="media-count" v-if="total > 0">共 {{ total }} 帖</span>
         <!-- 自动抓帖频率：常显当前档位，点开就地调（不塞进设置页，传媒自己管自己的节奏）
              传统报纸分类下隐藏 —— 《邻舍日报》由镇口公告站零点自动印发，没有"抓帖"一说 -->
         <button
-          v-if="activeCategory !== 'traditional'"
+          v-if="activeCategory !== 'print'"
           type="button"
           class="auto-chip"
           :class="{ active: freqOpen, off: auto.minutes === 0 }"
@@ -69,7 +69,7 @@
              未进入批量模式时只是一个同尺寸的按钮，不再多占一行。
              用 linshe-button 而不是裸 button，保证与旁边的「媒体设置」尺寸皮肤完全一致。 -->
         <linshe-button
-          v-if="activeCategory !== 'traditional' && !batchMode"
+          v-if="!batchMode"
           variant="secondary"
           :disabled="!posts.length"
           :title="posts.length ? '勾选多条内容后批量重新生图或删除' : '当前没有可操作的内容'"
@@ -89,7 +89,7 @@
              对期刊型媒体来说"刷新一批帖子"没有意义，真正要做的是「出一刊」。
              当天已出过不会重复出（后端直接返回那一期），会提示并允许再加刊。 -->
         <linshe-button
-          v-if="activeCategory !== 'traditional' && activeIsPortal"
+          v-if="activeIsPeriodical"
           class="btn-refresh" variant="primary" :loading="publishing"
           :title="`出一刊：《${outletNameOf(activeOutlet)}》`"
           @click="onPublish"
@@ -99,7 +99,7 @@
           </svg>{{ publishing ? '出刊中…' : '出刊' }}
         </linshe-button>
 
-        <div v-if="activeCategory !== 'traditional' && !activeIsPortal" class="refresh-group">
+        <div v-if="!activeIsPeriodical" class="refresh-group">
           <linshe-button
             class="btn-refresh" variant="primary" :loading="refreshing"
             :title="refreshScopeHint"
@@ -197,53 +197,52 @@
          此前它单独占一行且左对齐，夹在板块栏下面显得很突兀。 -->
     <div class="outlet-row">
     <div class="outlet-bar">
-      <!-- 《传统报纸》分类：只有《邻舍日报》。它有自己的整版排版（报头/三栏/期号切换），
-           不按帖子流展示，所以做成一个入口按钮，点开就是原来的报纸界面。 -->
-      <template v-if="activeCategory === 'traditional'">
-        <button
-          type="button"
-          class="outlet-tab is-newspaper"
-          title="《邻舍日报》· 每天零点印发"
-          @click="showNewspaper = true"
-        >
-          <span class="outlet-icon">📰</span>邻舍日报
-          <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
-        </button>
-      </template>
+      <!-- 「报纸物料」分类**额外多**一张《邻舍日报》入口卡：
+           日报不存 media_outlets（有自己独立的整版排版：报头/三栏/期号切换），
+           所以只能做成入口按钮，点开就是原来的报纸界面。
+           ★ 注意这里是"额外多一张"，不是"只显示这一张" —— 该分类下还有海报类媒体
+             （如《狸狸八卦》），它们要照常出现在下面的媒体标签里。 -->
+      <button
+        v-if="isPrintCategory"
+        type="button"
+        class="outlet-tab is-newspaper"
+        title="《邻舍日报》· 每天零点印发"
+        @click="showNewspaper = true"
+      >
+        <span class="outlet-icon">📰</span>邻舍日报
+        <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
+      </button>
 
-      <template v-else>
-        <button
-          type="button"
-          class="outlet-tab"
-          :class="{ active: activeOutlet === null }"
-          @click="onOutletChange(null)"
-        >全部<span class="outlet-num">{{ categoryTotal }}</span></button>
-        <button
-          v-for="o in filteredOutlets"
-          :key="o.id"
-          type="button"
-          class="outlet-tab"
-          :class="{ active: activeOutlet === o.id }"
-          :title="o.tagline || o.name"
-          @click="onOutletChange(o.id)"
-        >
-          <span v-if="o.icon" class="outlet-icon">{{ o.icon }}</span>{{ o.name }}
-          <!-- 形态标记：这一类不是帖子流，而是按「期」出刊。
-               portal 是周刊/海报升级后的统一形态（两个刊都在用），统一标「刊」。 -->
-          <span
-            v-if="isDigitalOutlet(o)"
-            class="outlet-kind"
-            :class="o.layout === 'poster' ? 'is-poster' : 'is-weekly'"
-          >{{ o.layout === 'poster' ? '报' : '刊' }}</span>
-          <span class="outlet-num">{{ o.post_count }}</span>
-        </button>
-      </template>
+      <button
+        type="button"
+        class="outlet-tab"
+        :class="{ active: activeOutlet === null }"
+        @click="onOutletChange(null)"
+      >全部<span class="outlet-num">{{ categoryTotal }}</span></button>
+      <button
+        v-for="o in filteredOutlets"
+        :key="o.id"
+        type="button"
+        class="outlet-tab"
+        :class="{ active: activeOutlet === o.id }"
+        :title="o.tagline || o.name"
+        @click="onOutletChange(o.id)"
+      >
+        <span v-if="o.icon" class="outlet-icon">{{ o.icon }}</span>{{ o.name }}
+        <!-- 形态标记：按期出刊的形态标出来（门户=刊 / 海报=报），一眼区分产物 -->
+        <span
+          v-if="isDigitalOutlet(o) || isPrintOutlet(o)"
+          class="outlet-kind"
+          :class="isPrintOutlet(o) ? 'is-poster' : 'is-weekly'"
+        >{{ isPrintOutlet(o) ? '报' : '刊' }}</span>
+        <span class="outlet-num">{{ o.post_count }}</span>
+      </button>
     </div>
 
       <!-- 批量模式的操作条：与媒体标签**同一行、整条靠右**。
            入口按钮在右上角「媒体设置」旁；未进入批量模式时这块完全不渲染。
            （不用 spacer 做两端分布 —— 用户要的是整条贴右，与上方标签行右端对齐。） -->
-      <div v-if="activeCategory !== 'traditional' && batchMode" class="list-toolbar">
+      <div v-if="batchMode" class="list-toolbar">
         <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
         <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
           {{ allVisibleSelected ? '取消全选' : '全选本页' }}
@@ -275,7 +274,7 @@
     </div>
 
     <!-- 传统报纸：只有一个《邻舍日报》，内容是整版报纸不在帖子流里 —— 给张入口卡 -->
-    <div v-if="activeCategory === 'traditional'" class="np-entry-wrap">
+    <div v-if="isPrintCategory" class="np-entry-wrap">
       <button type="button" class="np-entry" @click="showNewspaper = true">
         <span class="np-entry-icon">📰</span>
         <span class="np-entry-main">
@@ -293,7 +292,7 @@
     </div>
 
     <!-- 板块筛选（选中某个媒体后才出现） -->
-    <div v-if="activeCategory !== 'traditional' && boards.length && !activeIsPortal" class="board-bar">
+    <div v-if="boards.length && !activeIsPeriodical" class="board-bar">
       <linshe-button
         v-for="b in boardChips"
         :key="b.id ?? 'all'"
@@ -308,7 +307,7 @@
 
     <!-- 期号导航（数字报刊专用）—— 与《邻舍日报》的期号切换同口径：
          最新在前，点某期只看那一期；括号里是「已写块数/总块数」，一眼看出哪期是完整的。 -->
-    <div v-if="activeCategory !== 'traditional' && activeIsPortal && issues.length" class="issue-bar">
+    <div v-if="activeIsPeriodical && issues.length" class="issue-bar">
       <linshe-button variant="chip" :active="!activeIssueId" @click="activeIssueId = null">
         最新<span class="board-count">{{ issues.length }} 期</span>
       </linshe-button>
@@ -324,7 +323,7 @@
 
     <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
          （选中这类媒体时 feedPosts 为空，页面上就只有下面这一块） -->
-    <div v-if="activeCategory !== 'traditional' && specialPosts.length" class="special-list">
+    <div v-if="specialPosts.length" class="special-list">
       <div
         v-for="p in specialPosts" :key="p.id"
         class="special-wrap"
@@ -382,7 +381,7 @@
     </div>
 
     <!-- ── 帖子流：瀑布流 ── -->
-    <div v-if="activeCategory !== 'traditional' && feedPosts.length" class="masonry">
+    <div v-if="feedPosts.length" class="masonry">
       <article
         v-for="p in feedPosts"
         :key="p.id"
@@ -468,7 +467,7 @@
     <!-- 空状态：注意要基于 posts（而非 feedPosts）——
          选中的是周刊/海报时 feedPosts 本就为空，不能因此误报"没有内容"；
          传统报纸分类也不适用（内容在整版报纸里） -->
-    <div v-if="activeCategory !== 'traditional' && !posts.length && !loading" class="media-empty">
+    <div v-if="!posts.length && !loading" class="media-empty">
       <!-- ★ 加载失败必须与"真的没有内容"区分开。
            踩过的坑：后端 listPosts 的 COUNT 查询缺 JOIN → 接口报错 → catch 里静默置空 posts
            → 页面显示「还没有任何帖子」，看起来像"内容被清空了"，实际是请求挂了。 -->
@@ -647,11 +646,26 @@ const activeBoard = ref(null)
 // 周刊/海报是按期出刊，三者形态完全不同，混在一个流里既乱又难找。
 // 分类由 layout 推导（weekly/poster → 数字报刊；feed → 社交平台），加新媒体时自动归类。
 const CATEGORIES = [
-  { key: 'traditional', label: '传统报纸', icon: '📰', hint: '《邻舍日报》—— 整版报纸，每天零点印发' },
-  { key: 'digital', label: '数字报刊', icon: '📸', hint: '周刊 / 海报 —— 按期出刊的数字刊物' },
+  /**
+   * 三档按**产物形态**归类（与后端 listPosts 的 category 一一对应）：
+   *   print  → 「报纸物料」：印刷/实体形态的刊物 —— 海报（poster）、旧周刊（weekly）。
+   *            注意 `portal`（门户网）**不在**这里，它属于下面的「数字报刊」。
+   *   digital→ 「数字报刊」：可点开板块的数字刊物（门户）。
+   *   social → 「社交平台」：帖子流。
+   *
+   * 早先这一档叫「传统报纸」并且**只放《邻舍日报》一张硬编码卡**，
+   * 其它 UI 全部 `v-if="!== 'traditional'"` 排除掉 —— 于是这一档既列不出别的物料、
+   * 也没法添加新媒体。现在它就是一个**普通分类**，只是额外多一张日报入口卡
+   * （日报不存 media_outlets，是独立整版排版）。
+   */
+  { key: 'print', label: '报纸物料', icon: '📰', hint: '报纸 / 海报 —— 印刷形态的物料，按期出刊' },
+  { key: 'digital', label: '数字报刊', icon: '📸', hint: '数字刊物 —— 门户网，可点开各板块看正文' },
   { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
 ]
 const activeCategory = ref('social')   // 默认落在内容最多的社交平台
+
+/** 是不是「传统报纸」那一档（只有它要额外渲染《邻舍日报》入口卡） */
+const isPrintCategory = computed(() => activeCategory.value === 'print')
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -666,32 +680,47 @@ const activeCategory = ref('social')   // 默认落在内容最多的社交平�
  *    在后端分类里属「数字报刊」，前端标签栏却把它们判定成"非数字"→ 归进社交平台。
  *    新增 layout 形态时，**后端 listPosts 与这里必须一起改**。
  */
+/**
+ * 「数字报刊」= 门户形态（可点开板块的数字刊物）。
+ * 早先这里把 poster/weekly 也算了进来 —— 那时它们都做成了门户；
+ * 现在海报有自己的分类（报纸物料），必须拆开，否则狸狸八卦会同时出现在两档里。
+ */
 function isDigitalOutlet(o) {
-  const layout = o.layout || 'feed'
-  return layout === 'weekly' || layout === 'poster' || layout === 'portal'
+  return (o.layout || 'feed') === 'portal'
 }
 
-const filteredOutlets = computed(() => {
-  if (activeCategory.value === 'traditional') return []
-  const wantDigital = activeCategory.value === 'digital'
-  return outlets.value.filter(o => isDigitalOutlet(o) === wantDigital)
-})
+/** 「报纸物料」= 印刷/实体形态：海报（poster）与旧周刊（weekly） */
+function isPrintOutlet(o) {
+  const layout = o.layout || 'feed'
+  return layout === 'poster' || layout === 'weekly'
+}
+
+/** 当前分类下的媒体（按形态归类，加新媒体时自动归位，不用手动维护） */
+const filteredOutlets = computed(() => (
+  activeCategory.value === 'print' ? outlets.value.filter(isPrintOutlet)
+    : activeCategory.value === 'digital' ? outlets.value.filter(isDigitalOutlet)
+      : outlets.value.filter(o => !isPrintOutlet(o) && !isDigitalOutlet(o))
+))
 
 /** 「全部」标签上的数字：当前分类下所有媒体的帖子数之和 */
 const categoryTotal = computed(() => filteredOutlets.value.reduce((s, o) => s + (o.post_count || 0), 0))
 
-/** 分类分页上的数字 */
+/**
+ * 分类分页上的数字。
+ * 「报纸物料」要把**日报的未读**也算进来（日报不存 media_outlets，
+ * 否则这一档的数字只统计海报、会漏掉天天出的日报）。
+ */
 function categoryCount(key) {
-  if (key === 'traditional') return newspaperStore.unread ? 1 : 0   // 只表示"有未读"
-  const wantDigital = key === 'digital'
-  return outlets.value
-    .filter(o => isDigitalOutlet(o) === wantDigital)
+  const picker = key === 'print' ? isPrintOutlet : key === 'digital' ? isDigitalOutlet : null
+  const n = outlets.value
+    .filter(o => (picker ? picker(o) : (!isPrintOutlet(o) && !isDigitalOutlet(o))))
     .reduce((s, o) => s + (o.post_count || 0), 0)
+  return key === 'print' ? n + (newspaperStore.unread ? 1 : 0) : n
 }
 
 async function onCategoryChange(key) {
   if (activeCategory.value === key) return
-  // 换分类 = 整批内容都换了 → 退出批量模式（传统报纸没有帖子流，批量也不适用）
+  // 换分类 = 整批内容都换了 → 退出批量模式
   if (batchMode.value) exitBatchMode()
   activeCategory.value = key
   activeOutlet.value = null
@@ -701,7 +730,9 @@ async function onCategoryChange(key) {
   issues.value = []
   activeIssueId.value = null
   loadError.value = ''
-  if (key === 'traditional') { posts.value = []; total.value = 0; return }
+  // 注意：以前这里有 `if (key === 'traditional') { 清空并 return }` ——
+  // 那时该档只有一张硬编码的日报卡、没有帖子流。现在「报纸物料」是普通分类（有海报列表），
+  // 必须照常加载，否则点进去永远是空的。
   await loadPage(0)
 }
 
@@ -848,9 +879,9 @@ const specialPosts = computed(() => {
 /* ── 数字报刊：出刊 + 期号导航 ── */
 
 /** 当前选中的是不是「数字报刊」形态（决定顶栏显示「刷新」还是「出刊」） */
-const activeIsPortal = computed(() => {
+const activeIsPeriodical = computed(() => {
   const o = outlets.value.find(x => x.id === activeOutlet.value)
-  return o?.layout === 'portal'
+  return o ? (isDigitalOutlet(o) || isPrintOutlet(o)) : false
 })
 
 /** 该刊的期简目（最新在前）—— 往期导航用 */
@@ -1182,8 +1213,8 @@ const refreshScopeHint = computed(() => {
 /** 媒体形态的中文名（面板里每个媒体标一下，两种形态产物差别很大） */
 function outletLayoutLabel(o) {
   if (o?.layout === 'portal') return '数字报刊 · 按「期」出刊'
+  if (o?.layout === 'poster') return '海报 · 一张只讲一个瓜'
   if (o?.layout === 'weekly') return '周刊（旧形态）'
-  if (o?.layout === 'poster') return '海报（旧形态）'
   return '社交平台 · 一批帖子'
 }
 

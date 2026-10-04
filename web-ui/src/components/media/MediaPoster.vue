@@ -1,5 +1,5 @@
 <template>
-  <!-- 狸狸八卦 · 海报版式
+  <!-- 海报版式（「报纸物料」分类下的 poster 形态通用组件）
        还原街边小报海报的视觉语言：热点速报条 → 编号大标题 → 主图 + 爆炸气泡
        → 旁白短句 → 小图组 → 署名。
        纯 CSS 排版（不用 AI 生整张图），所以文字可读、可选中、可随数据变。 -->
@@ -10,10 +10,11 @@
       <span class="po-hotbar-text">{{ data.hotline || '本期瓜已上桌' }}</span>
     </header>
 
-    <!-- 刊头：编号 + 大标题 + 刊徽 -->
+    <!-- 刊头：刊名 + 编号 + 大标题 + 刊徽 -->
     <div class="po-head">
       <div class="po-issue">
-        <span class="po-issue-brand">狸狸八卦</span>
+        <!-- 刊名取自媒体本身，别硬编码 —— 否则新建的海报媒体会顶着别人的刊名出刊 -->
+        <span class="po-issue-brand">{{ post.outlet_name || '报纸物料' }}</span>
         <span class="po-issue-no">{{ issueNo }}</span>
       </div>
       <h1 class="po-title">{{ data.bigTitle }}</h1>

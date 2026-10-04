@@ -2892,15 +2892,34 @@ function migrateMediaSchema(db) {
       console.log('[db] Added media_posts.payload_json column');
     }
 
-    // ── 形态回填（幂等，每次启动都跑）──
+    // ── 形态回填 ──
     try {
-      // 两个报刊升级为「门户」：原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
+      // 狸狸通讯社：周刊 → 门户。原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
       // 在电脑宽屏上还只是 880px 居中单列、两侧各空 520px。门户把它拆成两层
       //（出刊只出骨架 → 立即可读；图后台串行补；正文点开才生成）。
       // 老帖仍按 payload 形态渲染（MediaWeekly / MediaPoster 保留），不会白丢内容。
-      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name IN ('狸狸通讯社','狸狸八卦') AND layout != 'portal'`).run();
-      // 老库里可能残留「还是 feed」的狸狸通讯社（很早的版本）：一并升级
-      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout = 'feed'`).run();
+      // 这个升级是**单向**的、用户不会想改回去，所以保留"每次都校正"。
+      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout != 'portal'`).run();
+
+      /**
+       * ⚠ 《狸狸八卦》**不再**在这里被强制成 portal。
+       *
+       * 它的提示词明确写着「每期出**一张海报**（不是文章），版式固定为
+       * 热点速报条 → 大标题 → 主图 → 2~3 个爆点气泡 → 短文案 → 小图组 → 落款」——
+       * 它本来就该是 `poster`。早先这条语句把两个刊一起升级成 portal，造成两个问题：
+       *   ① 它出的是门户网而不是海报（与自己的提示词相矛盾）；
+       *   ② **每次启动都把它改回 portal** —— 手动改成 poster 也会被下一次启动覆盖。
+       *
+       * 现在改成**一次性**归位（用 setting 标记只跑一次），之后完全尊重用户/后续迁移的选择。
+       */
+      const baguaFixed = db.prepare(
+        `SELECT setting_value FROM system_settings WHERE setting_key = 'media_bagua_layout_fixed'`
+      ).get();
+      if (baguaFixed?.setting_value !== '1') {
+        db.prepare(`UPDATE media_outlets SET layout = 'poster' WHERE name = '狸狸八卦'`).run();
+        db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('media_bagua_layout_fixed', '1')`).run();
+        console.log('[db] 《狸狸八卦》layout 一次性归位为 poster（它的提示词要求出海报）');
+      }
     } catch { /* ignore */ }
 
     const seeded = db.prepare(

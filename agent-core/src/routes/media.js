@@ -15,7 +15,7 @@ import {
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
-  publishPortalIssue, listPortalIssues,
+  publishIssue, listIssues,
   generatePortalSection,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
@@ -83,11 +83,12 @@ router.get('/outlets/:id/boards', (req, res) => {
 });
 
 // GET /api/media/outlets/:id/issues — 该刊的期简目（往期导航用，最新在前）
+// 适用于所有按期出刊的形态：数字报刊（门户）/ 报纸物料（海报、旧周刊）
 router.get('/outlets/:id/issues', (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!getOutlet(id)) return res.status(404).json({ error: '媒体不存在' });
-    res.json({ issues: listPortalIssues(id) });
+    res.json({ issues: listIssues(id) });
   } catch (err) { fail(res, err); }
 });
 
@@ -99,7 +100,7 @@ router.get('/outlets/:id/issues', (req, res) => {
  */
 router.post('/outlets/:id/issue', async (req, res) => {
   try {
-    const r = await publishPortalIssue(Number(req.params.id), { force: req.body?.force === true });
+    const r = await publishIssue(Number(req.params.id), { force: req.body?.force === true });
     res.json(r);
   } catch (err) { fail(res, err); }
 });
