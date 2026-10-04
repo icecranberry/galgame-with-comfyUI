@@ -491,6 +491,13 @@ function normalizePois(list) {
  * 导出为 Markdown（给用户贴回知识库用）。
  * 纯格式化，不调 LLM。
  */
+/**
+ * 导出整张地图为 Markdown。
+ *
+ * ⚠ 必须**递归**：层级不限深，早先这里是硬编码三层循环（`rg → d → s`），
+ * 结果 ① 子地区自己带的 POI 不导出（如「喜悲街」这种本身就是一条街的节点）、
+ * ② 第 4 层及以后整个丢失。树的渲染、展开都已支持任意深度，导出不能落后。
+ */
 export function exportMarkdown(mapId) {
   const map = getMap(mapId);
   if (!map) return null;
@@ -498,24 +505,22 @@ export function exportMarkdown(mapId) {
   L.push(`# ${map.name}`);
   if (map.note) L.push('', `> ${map.note}`);
   L.push('', `共 ${map.stats.region} 大地区 / ${map.stats.district} 子地区 / ${map.stats.scene} 场景 / ${map.stats.poi} 生活地点`, '');
-  for (const rg of map.tree) {
-    const rgEn = rg.name_en ? ` · ${rg.name_en}` : '';
-    L.push(`## ${rg.name}${rgEn}${rg.kind ? `　*${rg.kind}*` : ''}`);
-    if (rg.summary) L.push('', rg.summary);
-    for (const d of rg.children) {
-      const dEn = d.name_en ? ` · ${d.name_en}` : '';
-      L.push('', `### ${d.name}${dEn}${d.kind ? `　*${d.kind}*` : ''}`);
-      if (d.summary) L.push('', d.summary);
-      for (const s of d.children) {
-        const sEn = s.name_en ? ` · ${s.name_en}` : '';
-        L.push('', `#### ${s.name}${sEn}${s.kind ? `　*${s.kind}*` : ''}`);
-        if (s.summary) L.push('', s.summary);
-        if (s.pois.length) {
-          L.push('', '| 生活地点 | 类型 | 气息 |', '|:--|:--|:--|');
-          for (const p of s.pois) L.push(`| ${p.name} | ${p.type} | ${p.blurb} |`);
-        }
-      }
+
+  // Markdown 只到 ######（6 级）；再深就用加粗 + 缩进，避免溢出成纯文本
+  const heading = (depth, text) => depth <= 5 ? `${'#'.repeat(depth + 1)} ${text}` : `${'  '.repeat(depth - 5)}- **${text}**`;
+
+  const walk = (node, depth) => {
+    const en = node.name_en ? ` · ${node.name_en}` : '';
+    const kind = node.kind ? `　*${node.kind}*` : '';
+    L.push('', heading(depth, `${node.name}${en}${kind}`));
+    if (node.summary) L.push('', node.summary);
+    // 生活地点挂在**任意层级**上（该节点本身是条街/市集时就没有下级）
+    if (node.pois?.length) {
+      L.push('', '| 生活地点 | 类型 | 气息 |', '|:--|:--|:--|');
+      for (const p of node.pois) L.push(`| ${p.name} | ${p.type} | ${p.blurb || ''} |`);
     }
-  }
+    for (const c of node.children || []) walk(c, depth + 1);
+  };
+  for (const rg of map.tree) walk(rg, 1);
   return L.join('\n');
 }
