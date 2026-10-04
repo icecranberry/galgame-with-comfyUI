@@ -186,7 +186,26 @@
     <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
          （选中这类媒体时 feedPosts 为空，页面上就只有下面这一块） -->
     <div v-if="activeCategory !== 'traditional' && specialPosts.length" class="special-list">
-      <div v-for="p in specialPosts" :key="p.id" class="special-wrap">
+      <div
+        v-for="p in specialPosts" :key="p.id"
+        class="special-wrap"
+        :class="{ 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }"
+      >
+        <!-- 批量模式：整幅版式外左侧一个勾选行（版式本身不适合在图上贴勾选框） -->
+        <button
+          v-if="batchMode"
+          type="button"
+          class="special-pick"
+          :class="{ on: selectedPostIds.has(p.id) }"
+          @click="togglePick(p.id)"
+        >
+          <span class="pick-box" :class="{ on: selectedPostIds.has(p.id) }" aria-hidden="true">
+            <svg v-if="selectedPostIds.has(p.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </span>
+          <span class="special-pick-title">{{ p.title || (p.layout === 'poster' ? '海报' : '周刊') }}</span>
+        </button>
         <component
           :is="p.layout === 'poster' ? MediaPoster : MediaWeekly"
           :post="p"
@@ -221,15 +240,74 @@
       </div>
     </div>
 
+    <!-- 工具条：左上角「批量操作」。平时只一个小按钮，不占视觉；进入批量模式后
+         整行变成「已选 N 项 + 全选/取消 + 批量重新生图 + 批量删除」。
+         传统报纸分类没有帖子流，不显示。 -->
+    <div v-if="activeCategory !== 'traditional'" class="list-toolbar">
+      <template v-if="!batchMode">
+        <button
+          type="button"
+          class="batch-enter"
+          :disabled="!posts.length"
+          :title="posts.length ? '勾选多条内容后批量重新生图或删除' : '当前没有可操作的内容'"
+          @click="enterBatchMode"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="4" height="4" rx="1"/><path d="M11 6h10"/>
+            <rect x="3" y="14" width="4" height="4" rx="1"/><path d="M11 16h10"/>
+          </svg>
+          批量操作
+        </button>
+      </template>
+
+      <template v-else>
+        <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
+        <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
+          {{ allVisibleSelected ? '取消全选' : '全选本页' }}
+        </button>
+        <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
+        <span class="batch-spacer"></span>
+        <button
+          type="button" class="batch-btn"
+          :disabled="batchBusy || !selectedPostIds.size"
+          title="把这些内容的旧配图清掉并重新排队生成"
+          @click="batchRegenerate"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
+          </svg>
+          重新生图
+        </button>
+        <button
+          type="button" class="batch-btn is-danger"
+          :disabled="batchBusy || !selectedPostIds.size"
+          @click="batchDelete"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+          </svg>
+          删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
+        </button>
+      </template>
+    </div>
+
     <!-- ── 帖子流：瀑布流 ── -->
     <div v-if="activeCategory !== 'traditional' && feedPosts.length" class="masonry">
       <article
         v-for="p in feedPosts"
         :key="p.id"
         class="post-card"
-        :class="{ 'is-char': p.author_type === 'character' }"
-        @click="openPost(p)"
+        :class="{ 'is-char': p.author_type === 'character', 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }"
+        @click="onCardClick(p)"
       >
+        <!-- 批量模式：卡片左上角勾选框。整卡可点（拿不到鼠标的触屏也好用），
+             所以这里只做视觉，不单独绑事件。 -->
+        <span v-if="batchMode" class="pick-box" :class="{ on: selectedPostIds.has(p.id) }" aria-hidden="true">
+          <svg v-if="selectedPostIds.has(p.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+        </span>
         <!-- 封面：有图用图，没图用渐变占位（配图由后台补印） -->
         <div class="post-cover">
           <img v-if="p.image" :src="bustUrlIfOverwritten(p.image)" loading="lazy" decoding="async" alt="" />
@@ -507,6 +585,8 @@ function categoryCount(key) {
 
 async function onCategoryChange(key) {
   if (activeCategory.value === key) return
+  // 换分类 = 整批内容都换了 → 退出批量模式（传统报纸没有帖子流，批量也不适用）
+  if (batchMode.value) exitBatchMode()
   activeCategory.value = key
   activeOutlet.value = null
   activeBoard.value = null
@@ -653,6 +733,96 @@ function openPost(p) {
   detailPost.value = p
 }
 
+// ── 批量操作 ──
+// selectedPostIds 存帖子 id。注意：**每次修改都替换成新的 Set** ——
+// ref 包 Set 时直接 .add() 不会触发视图更新（与相册的 selected 同一处理）。
+const batchMode = ref(false)
+const batchBusy = ref(false)
+const selectedPostIds = ref(new Set())
+
+/** 当前页（含周刊/海报）可见的全部帖子 —— 「全选本页」的作用域 */
+const visiblePosts = computed(() => posts.value)
+
+const allVisibleSelected = computed(() =>
+  visiblePosts.value.length > 0 && visiblePosts.value.every(p => selectedPostIds.value.has(p.id)))
+
+function enterBatchMode() {
+  if (!posts.value.length) return
+  batchMode.value = true
+  selectedPostIds.value = new Set()
+}
+
+function exitBatchMode() {
+  batchMode.value = false
+  selectedPostIds.value = new Set()
+}
+
+function togglePick(id) {
+  const next = new Set(selectedPostIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedPostIds.value = next
+}
+
+function selectAllVisible() {
+  selectedPostIds.value = allVisibleSelected.value
+    ? new Set()
+    : new Set(visiblePosts.value.map(p => p.id))
+}
+
+/** 批量模式下点卡片 = 切换勾选；否则照旧打开详情 */
+function onCardClick(p) {
+  if (batchMode.value) togglePick(p.id)
+  else openPost(p)
+}
+
+async function batchDelete() {
+  const ids = [...selectedPostIds.value]
+  if (!ids.length || batchBusy.value) return
+  const ok = window.confirm(
+    `确定删除选中的 ${ids.length} 条内容吗？\n其中的文章与配图会一并删除，且不可恢复。`
+  )
+  if (!ok) return
+  batchBusy.value = true
+  try {
+    const r = await api.deleteMediaPosts(ids)
+    if (r?.failed) {
+      toastFn?.(`已删除 ${r.deleted} 条，${r.failed} 条失败`, 'warning')
+    } else {
+      toastFn?.(`已删除 ${r?.deleted ?? ids.length} 条`, 'success')
+    }
+    exitBatchMode()
+    // 必须重载：本地移除会让 loadMore 的 offset 基准失真（与相册同因）
+    await reloadAll()
+  } catch (err) {
+    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
+    toastFn?.('批量删除失败' + hint + '：' + (err?.message || ''), 'error')
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+async function batchRegenerate() {
+  const ids = [...selectedPostIds.value]
+  if (!ids.length || batchBusy.value) return
+  batchBusy.value = true
+  try {
+    const r = await api.regenerateMediaPostImages(ids)
+    if (r?.failed) {
+      toastFn?.(`已排队 ${r.queued} 条，${r.failed} 条失败`, 'warning')
+    } else {
+      toastFn?.(`已排队重新生图 ${r?.queued ?? ids.length} 条，稍候…`, 'success')
+    }
+    exitBatchMode()
+    await loadPage(0)
+  } catch (err) {
+    const hint = /404/.test(err?.message || '') ? '（后端未重启，新接口还没生效）' : ''
+    toastFn?.('批量重新生图失败' + hint + '：' + (err?.message || ''), 'error')
+  } finally {
+    batchBusy.value = false
+  }
+}
+
 /**
  * 重新生图：清掉这条内容已有的图、重新排队生成。
  * 周刊/海报会连同小图一起重出（后端按 payload 结构一并清空）。
@@ -765,6 +935,8 @@ async function loadMore() {
 
 async function onOutletChange(id) {
   if (activeOutlet.value === id) return
+  // 换了媒体，之前勾选的内容已经不在列表里 → 退出批量模式，避免残留 id 指向不存在的内容
+  if (batchMode.value) exitBatchMode()
   activeOutlet.value = id
   activeBoard.value = null
   await reloadBoards()
@@ -773,6 +945,7 @@ async function onOutletChange(id) {
 
 async function onBoardChange(id) {
   if (activeBoard.value === id) return
+  if (batchMode.value) exitBatchMode()
   activeBoard.value = id
   await loadPage(0)
 }
@@ -1201,6 +1374,92 @@ onUnmounted(() => {
 .cover-op:hover:not(:disabled) { background: rgba(0, 0, 0, 0.8); transform: scale(1.08); }
 .cover-op.is-danger:hover:not(:disabled) { background: rgba(198, 52, 52, 0.95); }
 .cover-op:disabled { opacity: 0.45; cursor: default; }
+
+/* ── 工具条：左上角「批量操作」 ── */
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 10px;
+  flex-shrink: 0;
+  min-height: 30px;
+}
+.batch-spacer { flex: 1; }
+.batch-enter,
+.batch-btn {
+  /* ★ 必须显式 padding —— 全局 button 有 padding:7px 14px，小按钮会被撑变形 */
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.batch-enter:hover:not(:disabled),
+.batch-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
+.batch-enter:disabled,
+.batch-btn:disabled { opacity: 0.4; cursor: default; }
+.batch-btn.is-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+.batch-btn.is-danger:hover:not(:disabled) { color: #fff; background: var(--danger); border-color: var(--danger); }
+.batch-count { font-size: 12px; color: var(--text-secondary); }
+.batch-count b { color: var(--accent); font-weight: 600; }
+
+/* ── 卡片勾选框（批量模式） ── */
+.pick-box {
+  width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  backdrop-filter: blur(3px);
+  transition: background 0.15s, border-color 0.15s;
+}
+.pick-box.on { background: var(--accent); border-color: var(--accent); }
+.post-card .pick-box {
+  position: absolute;
+  top: 8px; left: 8px;
+  z-index: 3;
+}
+/* 批量模式下卡片右上角的单条操作藏起来，避免与批量操作混淆 */
+.post-card.is-selecting .cover-ops { display: none; }
+.post-card.is-selecting { cursor: pointer; }
+.post-card.is-picked { outline: 2px solid var(--accent); outline-offset: -2px; }
+.post-card.is-picked .post-cover { opacity: 0.82; }
+
+/* ── 周刊/海报的勾选行（整幅版式不适合在图上贴勾选框） ── */
+.special-pick {
+  display: inline-flex; align-items: center; gap: 8px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 5px 11px;
+  border: 1px solid var(--glass-border);
+  border-radius: 9px;
+  background: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.special-pick:hover { color: var(--accent); border-color: var(--accent); }
+.special-pick.on { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+/* 这里的勾选框在浅色卡片外，用主题描边而不是白色描边 */
+.special-pick .pick-box { background: none; border-color: var(--glass-border); color: var(--accent); }
+.special-pick .pick-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.special-pick-title {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.special-wrap.is-picked { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 14px; }
 
 /* ── 周刊/海报：整幅版式 + 下方操作条 ── */
 .special-wrap { display: flex; flex-direction: column; gap: 8px; }

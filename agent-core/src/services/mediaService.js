@@ -1072,7 +1072,13 @@ export function regeneratePostImage(postId) {
  * 删除一条内容（含其全部配图文件）。
  * 周刊/海报的小图存在 payload 里，**要一并清理**，否则会留下孤儿文件。
  */
-export function deletePost(postId) {
+/**
+ * 删除一条内容（含配图文件）。
+ * @param {number} postId
+ * @param {{ silent?: boolean }} [opts] silent=true 时**不**失效相册缓存、**不**广播
+ *   —— 批量删除用：逐条做这两件事会重复 N 次，由批量入口统一收尾。
+ */
+export function deletePost(postId, { silent = false } = {}) {
   const db = getDb();
   const post = db.prepare('SELECT * FROM media_posts WHERE id = ?').get(postId);
   if (!post) return { ok: false, error: '内容不存在' };
@@ -1092,15 +1098,87 @@ export function deletePost(postId) {
   for (const u of urls) {
     try { if (deleteImageFileByUrl(u)) removed++; } catch { /* 可能已被清 */ }
   }
-  try { invalidateGalleryCache(); } catch { /* ignore */ }
+  if (!silent) {
+    try { invalidateGalleryCache(); } catch { /* ignore */ }
+    broadcast('media_post_deleted', { postId });
+  }
 
-  broadcast('media_post_deleted', { postId });
   console.log(`[media] 删除内容 #${postId}（清理图片 ${removed}/${urls.length}）`);
   return { ok: true, removedImages: removed };
 }
 
-export function maybeAutoGenerate(now = Date.now()) {
-  // ⚠️ 这里**不再**每轮扫描补图。
+// ── 批量操作（列表页「批量操作」用） ─────────────────────────
+
+/** 一次最多处理多少条 —— 防止误点「全选」把整库送进来跑很久 */
+export const MAX_BATCH_POSTS = 500;
+
+function normalizePostIds(ids) {
+  const arr = Array.isArray(ids) ? ids : [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of arr) {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/**
+ * 批量删除。
+ *
+ * 逐条复用 `deletePost`（它已负责：收集主图 + payload.panels 小图、删记录、删文件、广播），
+ * 但**撤掉它内部的缓存失效与广播**会重复 N 次 —— 这里由调用方统一收尾。
+ * 返回每一张的结果，前端据此提示「成功 N 张，失败 M 张」而不是笼统报错。
+ */
+export function deletePosts(ids) {
+  const list = normalizePostIds(ids);
+  if (!list.length) return { ok: false, error: '没有选中任何内容' };
+  if (list.length > MAX_BATCH_POSTS) return { ok: false, error: `一次最多处理 ${MAX_BATCH_POSTS} 条` };
+
+  let deleted = 0;
+  let removedImages = 0;
+  const failedItems = [];
+  for (const id of list) {
+    // silent：逐条失效缓存/广播会重复 N 次，这里统一在下面收尾一次
+    const r = deletePost(id, { silent: true });
+    if (r.ok) { deleted++; removedImages += r.removedImages || 0; }
+    else failedItems.push({ id, error: r.error });
+  }
+  if (deleted > 0) {
+    try { invalidateGalleryCache(); } catch { /* ignore */ }
+  }
+  console.log(`[media] 批量删除：请求 ${list.length} 条，成功 ${deleted}，失败 ${failedItems.length}，清理图片 ${removedImages} 张`);
+  return { ok: true, requested: list.length, deleted, removedImages, failed: failedItems.length, failedItems: failedItems.slice(0, 20) };
+}
+
+/**
+ * 批量重新生图。
+ *
+ * 逐条复用 `regeneratePostImage`（清空 image + payload.panels[].image 并置回 pending）。
+ * 注意它内部每条都会调一次 `fillPendingImages` —— 批量时会排队 N 次，
+ * 但 `fillPendingImages` 自带单飞守卫（`fillingImages`），重复调用会直接返回 0，不会重复生图。
+ * 所以这里照常逐条调用，最后不再补一次，避免与守卫打架。
+ */
+export function regeneratePostImages(ids) {
+  const list = normalizePostIds(ids);
+  if (!list.length) return { ok: false, error: '没有选中任何内容' };
+  if (list.length > MAX_BATCH_POSTS) return { ok: false, error: `一次最多处理 ${MAX_BATCH_POSTS} 条` };
+
+  let queued = 0;
+  let clearedImages = 0;
+  const failedItems = [];
+  for (const id of list) {
+    const r = regeneratePostImage(id);
+    if (r.ok) { queued++; clearedImages += r.cleared || 0; }
+    else failedItems.push({ id, error: r.error });
+  }
+  console.log(`[media] 批量重新生图：请求 ${list.length} 条，已排队 ${queued}，失败 ${failedItems.length}`);
+  return { ok: true, requested: list.length, queued, clearedImages, failed: failedItems.length, failedItems: failedItems.slice(0, 20) };
+}
+
+export function maybeAutoGenerate(now = Date.now()) {  // ⚠️ 这里**不再**每轮扫描补图。
   //
   // 原来每次 tick（1 分钟）都无条件调 `fillPendingImages(8)`，配合已被移除的橱窗预生成，
   // 会让 ComfyUI 持续满负载（实测 30 分钟被派单 46 次）。

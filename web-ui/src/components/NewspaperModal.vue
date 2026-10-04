@@ -613,6 +613,13 @@ async function resyncAfterDelete({ deletedDate }) {
   closeDetail()
 }
 
+/** 删除/清除失败的统一提示：404 几乎总是「后端还没重启，新接口没生效」，直接说清楚 */
+function deleteErrorText(action, err) {
+  const msg = err?.message || '未知错误'
+  if (/404/.test(msg)) return `${action}失败：后端服务还是旧代码，请先在启动器里重启服务再试。`
+  return `${action}失败：${msg}`
+}
+
 async function deleteCurrent() {
   const p = paper.value
   if (!p || busy.value) return
@@ -628,7 +635,7 @@ async function deleteCurrent() {
     await resyncAfterDelete({ deletedDate: p.publish_date })
   } catch (err) {
     console.error('[NewspaperModal] delete edition failed:', err)
-    window.alert(`删除失败：${err?.message || '未知错误'}`)
+    window.alert(deleteErrorText('删除', err))
   } finally {
     busy.value = false
   }
@@ -646,7 +653,7 @@ async function clearPast() {
     await resyncAfterDelete({ deletedDate: viewDate.value })
   } catch (err) {
     console.error('[NewspaperModal] clear past editions failed:', err)
-    window.alert(`清除失败：${err?.message || '未知错误'}`)
+    window.alert(deleteErrorText('清除', err))
   } finally {
     busy.value = false
   }

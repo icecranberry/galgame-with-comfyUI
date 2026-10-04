@@ -14,6 +14,7 @@ import {
   listPosts, generateMediaBatch, fillPendingImages, getAutoState,
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
+  deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
 import { config, updateMediaAutoMinutes } from '../config.js';
@@ -112,6 +113,28 @@ router.get('/posts', (req, res) => {
 
 // POST /api/media/posts/:id/regenerate-image — 为这条内容重新生成配图
 // （周刊/海报会连同 payload 里的小图一起清空重出）
+// ── 批量操作 ──
+// ⚠ 顺序要紧：`batch` 系列必须注册在参数路由 `/posts/:id...` **之前**，
+//   否则 Express 会先把 "batch" 当成 :id 匹配走（数字化成 NaN → 报「内容不存在」）。
+
+// DELETE /api/media/posts/batch — 批量删除。Body: { ids: number[] }
+router.delete('/posts/batch', (req, res) => {
+  try {
+    const r = deletePosts(req.body?.ids);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
+
+// POST /api/media/posts/batch/regenerate-image — 批量重新生图。Body: { ids: number[] }
+router.post('/posts/batch/regenerate-image', (req, res) => {
+  try {
+    const r = regeneratePostImages(req.body?.ids);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
+
 router.post('/posts/:id/regenerate-image', (req, res) => {
   try {
     const r = regeneratePostImage(Number(req.params.id));

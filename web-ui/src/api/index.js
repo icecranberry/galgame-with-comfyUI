@@ -2189,3 +2189,13 @@ export function regenerateMediaPostImage(postId) {
 export function deleteMediaPost(postId) {
   return request(`/media/posts/${postId}`, { method: 'DELETE' })
 }
+
+/** 批量删除媒体内容。ids 为帖子 id 数组，返回逐条结果（成功数 / 失败明细） */
+export function deleteMediaPosts(ids) {
+  return request('/media/posts/batch', { method: 'DELETE', body: { ids } })
+}
+
+/** 批量重新生图（清空旧图并置回待生成队列） */
+export function regenerateMediaPostImages(ids) {
+  return request('/media/posts/batch/regenerate-image', { method: 'POST', body: { ids } })
+}
