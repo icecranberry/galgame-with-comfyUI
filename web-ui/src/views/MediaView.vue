@@ -250,7 +250,7 @@
               :disabled="busyPostId !== null"
               @click.stop="regenerateImage(p)"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
               </svg>
             </button>
@@ -259,9 +259,10 @@
               :disabled="busyPostId !== null"
               @click.stop="removePost(p)"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
               </svg>
             </button>
           </div>
@@ -1178,18 +1179,27 @@ onUnmounted(() => {
   .cover-ops { opacity: 1; transform: none; }
 }
 .cover-op {
-  width: 26px; height: 26px;
+  width: 30px; height: 30px;
+  /* ★ 必须显式清掉全局 `button { padding: 7px 14px }`（styles/base.css）。
+     配合 `* { box-sizing: border-box }`，26px 宽的按钮减去左右各 14px 内边距后
+     内容宽度正好是 0 —— 图标会被压成 0 宽彻底看不见，只剩一个空白方块。 */
+  padding: 0;
   display: flex; align-items: center; justify-content: center;
-  border: none; border-radius: 8px;
-  background: rgba(0, 0, 0, 0.55);
+  border: none; border-radius: 9px;
+  background: rgba(0, 0, 0, 0.6);
   color: #fff;
   cursor: pointer;
   backdrop-filter: blur(4px);
   transition: background 0.15s, transform 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
-.cover-op:hover:not(:disabled) { background: rgba(0, 0, 0, 0.75); transform: scale(1.08); }
-.cover-op.is-danger:hover:not(:disabled) { background: rgba(190, 50, 50, 0.9); }
+/* 图标给足尺寸并禁止收缩：flex 容器里 svg 默认 flex-shrink:1，容器一紧就被压扁 */
+.cover-op svg {
+  width: 17px; height: 17px;
+  flex: none;
+}
+.cover-op:hover:not(:disabled) { background: rgba(0, 0, 0, 0.8); transform: scale(1.08); }
+.cover-op.is-danger:hover:not(:disabled) { background: rgba(198, 52, 52, 0.95); }
 .cover-op:disabled { opacity: 0.45; cursor: default; }
 
 /* ── 周刊/海报：整幅版式 + 下方操作条 ── */
