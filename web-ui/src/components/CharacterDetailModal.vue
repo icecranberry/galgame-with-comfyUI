@@ -607,6 +607,7 @@ const detail = reactive({
   appearanceTail: '',     // 外观段之后的内容（罕见；保留以免重组时丢段）
   originalAppearance: '', // 打开时的原外观段：工装被误清空时用它兜底，避免生图链路失去外观
   body: '',               // 身体描述（五套共用，单一真源）—— 发色/发型/瞳色/肤色/体型…
+  bodyLoaded: '',         // 打开时从库里读到的 body（用于区分"用户主动清空"与"没读到"，避免误清库）
   sceneOutfits: [],       // 五套场景外观 [{ scene, sceneLabel, name, description }]，description 只存"衣服"
   sceneTab: 0,            // 外观服装当前编辑第几套（标签页）
   relOpen: false,         // 角色关系列表是否展开（折叠后把人设编辑区让出来）
@@ -701,13 +702,16 @@ function scenePlaceholder(scene) {
 }
 
 async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
-  if (!characterId) { detail.sceneOutfits = []; detail.body = ''; return }
+  if (!characterId) { detail.sceneOutfits = []; detail.body = ''; detail.bodyLoaded = ''; return }
   try {
     const d = await api.listSceneOutfits(characterId)
     const scenes = d.scenes || []
     const exist = d.outfits || []
-    // 身体：五套共用同一份，取任意一条即可（后端写入时会同步到所有行）
-    detail.body = String(exist.find(o => o.body)?.body || '')
+    // 身体：五套共用同一份，取任意一条即可（后端写入时会同步到所有行）。
+    // 若后端是旧代码（不返回 body 字段）这里会拿到空 —— 保存时靠 bodyLoaded 兜住，不会误清库。
+    const loadedBody = String(exist.find(o => o.body)?.body || '')
+    detail.body = loadedBody
+    detail.bodyLoaded = loadedBody
     detail.sceneOutfits = scenes.map(s => {
       const hit = exist.find(o => o.scene === s.key)
       /**
@@ -970,8 +974,21 @@ async function saveCharDetail() {
     }))
   if (payload.length) {
     try {
-      // body 一并提交：后端会把它同步写进该角色的全部服装行（单一真源）
-      await api.saveSceneOutfits(c.id, payload, detail.body)
+      /**
+       * body 单独判断，别无条件提交。
+       *
+       * ⚠ 无条件传 `detail.body` 有个数据安全隐患：若**后端是旧代码**（`/outfits/scene`
+       *   不返回 body 字段），加载后 `detail.body` 就是空字符串，一保存就会把
+       *   该角色**所有行的 body 清空**（后端 setCharacterBody 会照写）。
+       *   所以只在两种情况下提交：
+       *     ① 当前非空（用户确实填了内容）；
+       *     ② 加载时本来有值、现在被清空（用户**主动**删掉的）。
+       *   其余情况（加载失败/旧后端没返回）一律不碰，保持库里原值。
+       */
+      const nowBody = String(detail.body || '').trim()
+      const loaded = String(detail.bodyLoaded || '').trim()
+      const sendBody = nowBody || (loaded && !nowBody) ? nowBody : undefined
+      await api.saveSceneOutfits(c.id, payload, sendBody)
     } catch (err) {
       console.error('saveSceneOutfits failed:', err)
       toastFn('人设已保存，但外观服装保存失败：' + (err?.message || ''), 'error')
@@ -1335,10 +1352,24 @@ const showPersonaRefineModal = ref(false)
 const refineSceneIdx = ref(0)
 const refineSceneOutfit = computed(() => detail.sceneOutfits[refineSceneIdx.value] || null)
 const refineSceneLabel = computed(() => refineSceneOutfit.value?.sceneLabel || '外观')
+/**
+ * 交给「修正外观」弹窗的整卡。
+ *
+ * ⚠ 外观段**必须自包含（身体 + 这套的衣服）**。
+ *   只传 `description`（服装）会让模型以为这个角色没有身体描述 → 它产出的也就没有身体
+ *   → 应用时 `splitBodyGarment` 拆不出 body → 「身体」框不被填。
+ *   （2026-10-04 用户实测踩到：点「拆分为 身体+工装」后只有工装变了。）
+ *
+ * 裸体那套本身就是身体，不要再拼上「completely nude…」那句声明去让模型改写。
+ */
 const refineBasePrompt = computed(() => {
-  const desc = String(refineSceneOutfit.value?.description || '').trim()
-  if (!desc) return fullPrompt.value
-  return composePersona(detail.editPersona, desc, detail.appearanceTail)
+  const o = refineSceneOutfit.value
+  if (!o) return fullPrompt.value
+  const text = o.scene === 'nude'
+    ? String(detail.body || '').trim()
+    : composeOutfitText(detail.body, o.description)
+  if (!text) return fullPrompt.value
+  return composePersona(detail.editPersona, text, detail.appearanceTail)
 })
 
 function openRefineModal() {
@@ -1397,6 +1428,8 @@ async function onAppearanceRefined({ basePrompt }) {
   const split = splitPersona(basePrompt)
   const target = detail.sceneOutfits[refineSceneIdx.value]
   const appearance = String(split.appearance || '').trim()
+  let refinedGotBody = false
+  let refinedGotGarment = false
 
   if (target) {
     if (target.scene === 'nude') {
@@ -1414,18 +1447,27 @@ async function onAppearanceRefined({ basePrompt }) {
       if (target.scene !== 'work' && !String(target.name || '').trim() && target.description) {
         target.name = target.sceneLabel
       }
+      // 记下这次到底改了什么，好在提示里说实话（否则用户以为身体也更新了）
+      refinedGotBody = Boolean(body)
+      refinedGotGarment = Boolean(garment)
     }
   }
   detail.dirty = true
   // 复用详情卡的保存链路（PUT /:id 会同步重裁 short_prompt、标记日程重生成）
   try {
     await saveCharDetail()
-    toastFn(
-      target?.scene === 'nude'
-        ? '已按参考图更新「身体」并保存'
-        : `「${refineSceneLabel.value}」已修正并保存（身体回填到五套共用字段）`,
-      'success',
-    )
+    let msg
+    if (target?.scene === 'nude') {
+      msg = refinedGotBody ? '已按参考图更新「身体」并保存' : '参考图里没读出身体特征，「身体」未改动'
+    } else if (refinedGotBody && refinedGotGarment) {
+      msg = `「${refineSceneLabel.value}」已修正并保存（同时更新了「身体」，五套共用）`
+    } else if (refinedGotGarment) {
+      // ★ 说实话：模型这次没产身体（常见于外观段本身就没有身体时）
+      msg = `只更新了「${refineSceneLabel.value}」的服装 —— 这次没读出身体特征，「身体」框未变`
+    } else {
+      msg = '这次没读出可用的身体/服装内容，未做改动'
+    }
+    toastFn(msg, refinedGotGarment || refinedGotBody ? 'success' : 'warning')
   } catch (err) {
     console.error('onAppearanceRefined save failed:', err)
     toastFn('外观已修正，但自动保存失败，请手动点击「保存」', 'error')
