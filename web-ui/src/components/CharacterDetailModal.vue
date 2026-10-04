@@ -750,21 +750,39 @@ async function generateOtherSceneOutfits() {
   const c = props.character
   if (!c || outfitGenerating.value) return
 
-  // 反推锚点 = 已经填了内容的那些（服装或身体任一非空）
+  /**
+   * 锚点（seeds）= **真正填了内容**的那几套。
+   *
+   * ⚠ 不能把「身体非空」也算成「这一套已填」。身体是五套共用的一层，
+   *   而 seeds 的语义是"已填好的分项" —— 后端会把这些 scene **从待生成目标里剔除**。
+   *   若身体非空就把五套全当种子，目标会被剔空、后端直接返回空数组，表现为"点了没反应"
+   *   （2026-10-04 实测踩到：填了身体 + 常服 + 私服，点反推 → 居家/睡衣/裸体 一个都没填）。
+   *
+   * 身体另有通道：通过下面的 `baseAppearance` 传给后端（后端 pickBody 会用），
+   * 所以即使一套都没填、只填了身体，也能正常反推。
+   */
   const seeds = detail.sceneOutfits
-    .filter(o => String(o.description || '').trim() || String(detail.body || '').trim())
-    .map(o => ({ scene: o.scene, name: o.name, body: detail.body, description: o.description }))
+    .filter(o => String(o.description || '').trim())
+    .map(o => ({
+      scene: o.scene,
+      name: o.name,
+      body: String(detail.body || '').trim(),
+      description: String(o.description || '').trim(),
+    }))
   const targets = detail.sceneOutfits
     .filter(o => !String(o.description || '').trim())
     .map(o => o.scene)
 
   if (!targets.length) { toastFn('五套都已经填好了，没有需要反推的', 'info'); return }
-  if (!seeds.length) { toastFn('先填任意一套（或先填「身体」），才能据此反推其余', 'warning'); return }
+  // 既没有已填的套、也没有身体 → 真的没有可依据的东西
+  if (!seeds.length && !String(detail.body || '').trim()) {
+    toastFn('先填任意一套、或先填「身体」，才能据此反推其余', 'warning'); return
+  }
 
   outfitGenerating.value = true
   try {
     // 只出草稿不落库：用户核对/修改后再点「保存」
-    const d = await api.generateSceneOutfits(c.id, false, { seeds, scenes: targets, baseAppearance: detail.body })
+    const d = await api.generateSceneOutfits(c.id, false, { seeds, scenes: targets, baseAppearance: String(detail.body || '').trim() })
     const byScene = new Map((d.outfits || []).map(o => [o.scene, o]))
     detail.sceneOutfits = detail.sceneOutfits.map(o => {
       const hit = byScene.get(o.scene)
@@ -775,7 +793,12 @@ async function generateOtherSceneOutfits() {
     const newBody = String(d.outfits?.[0]?.body || '').trim()
     if (newBody && !String(detail.body || '').trim()) detail.body = newBody
     detail.dirty = true
-    toastFn(`已反推 ${targets.length} 套，核对后点「保存」生效`, 'success')
+
+    // ★ 提示说实话：按**实际填进去的条数**报，别按请求的套数报
+    //   （后端可能返回空或部分，若还说"已反推 N 套"就是误导）
+    const filled = detail.sceneOutfits.filter(o => targets.includes(o.scene) && String(o.description || '').trim()).length
+    if (filled) toastFn(`已反推 ${filled} 套，核对后点「保存」生效`, 'success')
+    else toastFn('这次没有反推出内容 —— 可能是模型返回为空，请重试一次', 'warning')
   } catch (err) {
     console.error('generateOtherSceneOutfits failed:', err)
     toastFn('反推失败：' + (err?.message || ''), 'error')

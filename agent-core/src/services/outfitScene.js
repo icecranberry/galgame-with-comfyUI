@@ -217,6 +217,31 @@ ${bodySource}
 }
 
 /**
+ * 纯函数：算出本次要生成/反推**哪几套**。
+ *
+ * ── 一个容易踩的坑（2026-10-04 实测踩到）──────────────────
+ * 「已填好的分项」必须**只看 `description`**，**不能把"带了 body"也算成这一套已填**：
+ * 身体是**五套共用的一层**（由 baseAppearance / pickBody 单独处理），
+ * 而这里的结果会用来**从待生成目标里剔除**已填项 ——
+ * 若把"带 body"当已填，调用方只要顺手给每一条都附上 body，目标就会被**全部剔空**，
+ * 上层静默拿到空数组，表现为"点了反推没反应"。
+ *
+ * 抽成独立函数是为了**能在不调 LLM 的前提下单测**这条语义。
+ *
+ * @param {Array<{scene:string, body?:string, description?:string}>} seeds 已填好的分项
+ * @param {string[]} [wanted] 调用方指定的目标；留空 = 全部还没填的
+ */
+export function planOutfitTargets(seeds, wanted = []) {
+  const rows = (Array.isArray(seeds) ? seeds : [])
+    .filter(s => SCENE_KEYS.includes(s?.scene) && (s.body || s.description));
+  const filled = new Set(
+    rows.filter(s => String(s.description || '').trim()).map(s => s.scene),
+  );
+  const want = (Array.isArray(wanted) ? wanted : []).filter(s => SCENE_KEYS.includes(s));
+  return (want.length ? want : SCENE_KEYS).filter(s => !filled.has(s));
+}
+
+/**
  * 用 LLM 为角色生成/补全场景外观（不落库，由调用方决定保存）。
  *
  * @param {object} character
@@ -239,11 +264,9 @@ export async function generateSceneOutfits(character, opts = {}) {
       body: String(s.body || '').trim(),
       description: String(s.description || '').trim(),
     }));
-  const seedScenes = new Set(seeds.map(s => s.scene));
 
   // 未指定就补「所有还没有的」
-  const wanted = Array.isArray(opts.scenes) ? opts.scenes.filter(s => SCENE_KEYS.includes(s)) : [];
-  const targetScenes = (wanted.length ? wanted : SCENE_KEYS).filter(s => !seedScenes.has(s));
+  const targetScenes = planOutfitTargets(seeds, opts.scenes);
   if (!targetScenes.length) return [];
 
   const baseAppearance = String(opts.baseAppearance || '').trim();

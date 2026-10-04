@@ -20,7 +20,7 @@ import {
 } from '../src/services/worldMapService.js';
 import {
   composeOutfitText, listSceneOutfits, upsertSceneOutfits,
-  getSceneOutfitForNow, ensureOutfitAnnotations, PRIVATE_SCENE, OUTFIT_SCENES,
+  getSceneOutfitForNow, ensureOutfitAnnotations, planOutfitTargets, PRIVATE_SCENE, OUTFIT_SCENES,
 } from '../src/services/outfitScene.js';
 import {
   OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
@@ -123,6 +123,40 @@ test('换装点充足时直接放行 —— 不触发修复（否则每次生成
   assert.equal(r.reason, 'ok');
   assert.equal(r.schedule.length, good.length, '放行时不应改动原数组');
   cleanup();
+});
+
+// ─────────────────────────────────────────────────────────
+// 反推目标的计算（纯函数，不需 LLM）
+// ─────────────────────────────────────────────────────────
+
+test('planOutfitTargets：只有「有服装描述」的才算已填，带了 body 不算', () => {
+  const B = 'long wavy crimson red hair, red eyes, slender figure';
+  // 旧前端会把 body 附在每一条上；若把"带 body"当已填，目标会被剔空 → 点了没反应
+  const loose = [
+    { scene: 'nude', body: B, description: '' },
+    { scene: 'work', body: B, description: 'black blazer' },
+    { scene: 'casual', body: B, description: 'hoodie' },
+    { scene: 'home', body: B, description: '' },
+    { scene: 'sleep', body: B, description: '' },
+  ];
+  assert.deepEqual(
+    planOutfitTargets(loose, ['nude', 'home', 'sleep']),
+    ['nude', 'home', 'sleep'],
+    '带 body 的空套必须仍算作待生成目标（否则反推静默返回空）',
+  );
+});
+
+test('planOutfitTargets：已填的那些会被排除；全空则返回全部五套', () => {
+  assert.deepEqual(planOutfitTargets([{ scene: 'work', description: 'x' }], ['work', 'home']), ['home']);
+  // 一套都没填（只给了身体，走 baseAppearance）→ 五套全生成
+  assert.deepEqual(planOutfitTargets([], []), ['nude', 'work', 'casual', 'home', 'sleep']);
+  assert.deepEqual(planOutfitTargets([{ scene: 'work', body: 'b', description: '' }], []), ['nude', 'work', 'casual', 'home', 'sleep']);
+});
+
+test('planOutfitTargets：忽略非法场景名，且全部已填时返回空', () => {
+  assert.deepEqual(planOutfitTargets([], ['不存在的场景', 'home']), ['home']);
+  const allFilled = ['nude', 'work', 'casual', 'home', 'sleep'].map(s => ({ scene: s, description: 'x' }));
+  assert.deepEqual(planOutfitTargets(allFilled, []), []);
 });
 
 // ─────────────────────────────────────────────────────────
