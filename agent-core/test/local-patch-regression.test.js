@@ -12,6 +12,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { getDb } from '../src/db/index.js';
 import { adaptWorldText } from '../src/db/worldRepository.js';
@@ -24,10 +27,38 @@ import {
   NUDE_DESCRIPTION,
 } from '../src/services/outfitScene.js';
 import {
-  OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets, isPeriodicalLayout,
-  publishIssue, listIssues, hasIssueToday,
+  OUTLET_LAYOUTS, ALL_LAYOUT_KEYS, MEDIA_CATEGORIES, CATEGORY_LAYOUTS,
+  createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
+  isPeriodicalLayout, publishIssue, listIssues, listPosts, hasIssueToday, generateMediaBatch,
 } from '../src/services/mediaService.js';
 import { getLocalDateKey, shiftDateKey } from '../src/utils/localDate.js';
+
+/** 仓库内两个源码根：后端 agent-core/src、前端 web-ui/src（静态卫生检查用） */
+const SRC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
+const WEB_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web-ui/src');
+
+/** 递归列出某目录下全部源码文件（跳过 node_modules / 构建产物） */
+function walkSrc(dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walkSrc(p, out);
+    else if (/\.(js|vue)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * 去掉源码里的注释（行注释、块注释、HTML 注释）。
+ * 静态卫生检查必须只看**代码**：注释里正当地提到旧标识符名字（解释"这里改错过"）
+ * 不该被判成违规 —— 否则要么误报、要么逼着大家不敢在注释里记教训。
+ */
+function stripComments(s) {
+  return s
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+}
 
 const db = getDb();
 const CID = 99901;   // 专用测试角色，避免与真实数据相撞
@@ -375,6 +406,149 @@ test('每日一刊的去重键：当天已出过就判定为「无需出刊」',
     db.prepare('DELETE FROM media_posts WHERE outlet_id = ?').run(outlet.id);
     try { deleteOutlet(outlet.id); } catch { }
   }
+});
+
+// ─────────────────────────────────────────────────────────
+// 分类过滤：三档互不串味（print / digital / social）
+// ─────────────────────────────────────────────────────────
+
+test('分类过滤：门户归「数字报刊」、海报/旧周刊归「官方传媒」、feed 归「社交平台」', () => {
+  /**
+   * ★ 这条测试守的是一个**真实踩过的坑**：
+   *   `routes/media.js` 里分类白名单曾硬编码 `=== 'digital' || === 'social'`，
+   *   新增的 `print` 落进 else → category 变成 null → **变成"不过滤"**，
+   *   于是《狸狸通讯社》的门户帖整批混进了「官方传媒」那一档。
+   *   白名单改为读 `MEDIA_CATEGORIES` 后修复；这里再从行为上钉一遍：
+   *   每个分类只返回属于自己形态的刊物，且 category 为 null（「全部」标签）才不过滤。
+   */
+  const db = getDb();
+  const mkPost = (outletId, title) => db.prepare(`
+    INSERT INTO media_posts (outlet_id, batch_id, title, content, tags_json,
+      author_type, author_name, likes, views, comments_json, image_status)
+    VALUES (?, 'b', ?, '', '[]', 'anonymous', 'x', 0, 0, '[]', 'done')
+  `).run(outletId, title).lastInsertRowid;
+
+  const made = [];
+  try {
+    const portal = createOutlet({ name: '__zz_cat_portal', prompt: '测试提示词', layout: 'portal' });
+    const poster = createOutlet({ name: '__zz_cat_poster', prompt: '测试提示词', layout: 'poster' });
+    const feed = createOutlet({ name: '__zz_cat_feed', prompt: '测试提示词', layout: 'feed' });
+    const weekly = createOutlet({ name: '__zz_cat_weekly', prompt: '测试提示词', layout: 'feed' });
+    made.push(portal.id, poster.id, feed.id, weekly.id);
+    // weekly 是历史形态：新建时不再提供，这里直接把库里的值改成它，模拟老数据
+    db.prepare(`UPDATE media_outlets SET layout = 'weekly' WHERE id = ?`).run(weekly.id);
+
+    const ids = {
+      portal: Number(mkPost(portal.id, '门户')),
+      poster: Number(mkPost(poster.id, '海报')),
+      feed: Number(mkPost(feed.id, '帖子')),
+      weekly: Number(mkPost(weekly.id, '旧周刊')),
+    };
+    // 只关心"我们自己造的这几条在不在结果里"，不受真实库里已有帖子的干扰
+    const hits = (category) => {
+      const set = new Set(listPosts({ category, limit: 100 }).posts.map(p => Number(p.id)));
+      return Object.fromEntries(Object.keys(ids).map(k => [k, set.has(ids[k])]));
+    };
+
+    assert.deepEqual(hits('digital'), { portal: true, poster: false, feed: false, weekly: false }, 'digital');
+    assert.deepEqual(hits('print'), { portal: false, poster: true, feed: false, weekly: true }, 'print');
+    assert.deepEqual(hits('social'), { portal: false, poster: false, feed: true, weekly: false }, 'social');
+
+    // 不传分类 = 「全部」标签 → 不过滤；未知分类同样回落"不过滤"（由路由白名单先行挡住）
+    for (const cat of [null, undefined, '不存在的分类']) {
+      const set = new Set(listPosts({ category: cat, limit: 100 }).posts.map(p => Number(p.id)));
+      for (const id of Object.values(ids)) assert.ok(set.has(id), `category=${cat} 不应过滤掉任何形态`);
+    }
+  } finally {
+    for (const id of made) {
+      db.prepare('DELETE FROM media_posts WHERE outlet_id = ?').run(id);
+      try { deleteOutlet(id); } catch { }
+    }
+  }
+});
+
+test('分类白名单与 service 同源：路由里不得再硬编码分类字面量', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'routes/media.js'), 'utf8');
+  assert.match(s, /MEDIA_CATEGORIES/, '分类白名单必须来自 services/mediaService.js');
+  assert.match(s, /MEDIA_CATEGORIES\.includes\(/, '应按 MEDIA_CATEGORIES 判定，而不是逐个字面量比较');
+  // 三档分类是前后端共用的契约，缺一档就会整档不过滤
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'print', 'social']);
+});
+
+// ─────────────────────────────────────────────────────────
+// 前端源码卫生：改名漏改会产生 ReferenceError，整块 UI 静默消失
+// ─────────────────────────────────────────────────────────
+
+test('MediaView：用到的 activeIs* 计算属性都必须有定义', () => {
+  /**
+   * ★ 踩过的坑（正是本次"出刊与期号导航没有真实出现"的根因）：
+   *   `activeIsPortal` 改名成 `activeIsPeriodical` 时漏改了 `reloadIssues()` 里的一处。
+   *   它不是"条件恒假"那么温和 —— 引用一个**不存在的标识符会抛 ReferenceError**，
+   *   而抛出点又在 try 之外 → 期简目永远取不到（期号导航整块不渲染），
+   *   且 onMounted 里 `await reloadIssues()` 之后的 loading=false / 补图 / SSE 订阅全被跳过。
+   *   这类错误编译器/打包器都不会报，只能靠这种静态检查拦住。
+   */
+  const file = path.join(WEB_SRC, 'views/MediaView.vue');
+  const s = stripComments(fs.readFileSync(file, 'utf8'));
+  const used = new Set([...s.matchAll(/\bactiveIs[A-Z][A-Za-z0-9]*/g)].map(m => m[0]));
+  assert.ok(used.size > 0, '应当至少有一个 activeIs* 计算属性（否则说明这个检查本身失效了）');
+  const missing = [...used].filter(n => !new RegExp(`const\\s+${n}\\s*=`).test(s));
+  assert.deepEqual(missing, [], `MediaView.vue 引用了未定义的标识符：${missing.join('、')}`);
+});
+
+test('前端媒体系：不再出现已改名的旧标识符与旧分类名', () => {
+  // activeIsPortal 是 activeIsPeriodical 的旧名；改名后残留一处就会抛 ReferenceError。
+  // 「报纸物料」是「官方传媒」的旧文案 —— 界面文案必须只有一种，否则用户会以为是两个分类。
+  const bad = [];
+  for (const f of walkSrc(WEB_SRC)) {
+    const s = stripComments(fs.readFileSync(f, 'utf8'));
+    if (/\bactiveIsPortal\b/.test(s)) bad.push(`${path.relative(WEB_SRC, f)}: activeIsPortal`);
+  }
+  assert.deepEqual(bad, []);
+
+  const vu = fs.readFileSync(path.join(WEB_SRC, 'views/MediaView.vue'), 'utf8');
+  assert.match(vu, /官方传媒/, '分类文案应为「官方传媒」');
+  assert.ok(!/报纸物料/.test(vu), '不应再出现旧分类名「报纸物料」');
+});
+
+test('「全部」刷新只在当前分类内抽媒体（否则会抽到别的分类，白烧 token 且看不到结果）', async (t) => {
+  /**
+   * 老代码在 `generateMediaBatch` 里是全局 `ORDER BY RANDOM() LIMIT 1` ——
+   * 站在「数字报刊」点刷新，可能抽到社交平台的媒体：生成的帖子不出现在当前分类里，
+   * 用户看到的就是"点了刷新毫无反应"。
+   *
+   * 这里用**没有媒体的分类**来判定：若分类过滤真的生效，函数会在调 LLM 之前就抛错，
+   * 所以这条测试既确定了行为、又不会真的去生成内容。
+   * （本库若已有「官方传媒」媒体则跳过 —— 那种情况下这个请求会真的去出刊。）
+   */
+  const n = getDb().prepare(
+    `SELECT COUNT(*) AS n FROM media_outlets WHERE enabled = 1 AND COALESCE(layout,'feed') IN ('poster','weekly')`
+  ).get().n;
+  if (n > 0) return t.skip('本库已有「官方传媒」媒体，跳过（以免真的调 LLM 出刊）');
+  await assert.rejects(
+    () => generateMediaBatch({ category: 'print', count: 1 }),
+    /这个分类下还没有可用的媒体/,
+    '分类内没有媒体时应当直接拒绝，而不是全库随机抽一个',
+  );
+  // 与它对照：分类过滤生效了，`print` 档确实一条都取不到
+  assert.equal(listPosts({ category: 'print', limit: 1 }).total, 0);
+});
+
+test('每个形态都恰好归属一个分类（新增形态却忘记归类时，这条会失败）', () => {
+  const owners = (layout) => MEDIA_CATEGORIES.filter(c => CATEGORY_LAYOUTS[c].some(l => (l || 'feed') === layout));
+  for (const k of ALL_LAYOUT_KEYS) {
+    assert.equal(owners(k).length, 1, `形态 ${k} 应恰好属于一个分类，实际属于：${owners(k).join('、') || '（无）'}`);
+  }
+  // 分区本身也要与前端标签一一对上（前端 MediaView 的 CATEGORIES 就是这三档）
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'print', 'social']);
+  assert.deepEqual(CATEGORY_LAYOUTS.print, ['poster', 'weekly']);
+  assert.deepEqual(CATEGORY_LAYOUTS.digital, ['portal'], '海报/周刊必须从「数字报刊」摘出去，否则同刊会同时在两档出现');
+});
+
+test('前端分类口径与后端布局表同步：新增形态必须在前端归类', () => {
+  const s = fs.readFileSync(path.join(WEB_SRC, 'views/MediaView.vue'), 'utf8');
+  const missing = ALL_LAYOUT_KEYS.filter(k => !s.includes(`'${k}'`));
+  assert.deepEqual(missing, [], `MediaView.vue 未归类的形态：${missing.join('、')}`);
 });
 
 // ─────────────────────────────────────────────────────────

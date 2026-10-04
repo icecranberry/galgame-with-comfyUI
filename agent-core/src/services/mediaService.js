@@ -128,6 +128,55 @@ export function getOutlet(id) {
 }
 
 /**
+ * 分类的**唯一真源**（前端三档 ↔ 后端过滤）。
+ *
+ * 与前端 `MediaView.vue` 的 CATEGORIES 一一对应：
+ *   print   →「官方传媒」：官方/印刷形态的物料 —— 海报(poster) 与旧周刊(weekly)
+ *             （这一档原叫「报纸物料」，2026-10-05 改名为「官方传媒」；key 未变）
+ *   digital →「数字报刊」：门户(portal)，可点开各板块看正文
+ *   social  →「社交平台」：帖子流(feed)
+ *
+ * ⚠ 这张表也被 `routes/media.js` 用来做入参白名单 ——
+ *   **别再在路由里硬编码分类字面量**（曾经因此漏掉 print，导致该分类不过滤、返回全部帖子）。
+ */
+export const MEDIA_CATEGORIES = ['print', 'digital', 'social'];
+
+/**
+ * 分类 → 形态 的映射（**单一真源**）。
+ *
+ * 分类不是独立字段，是由 `media_outlets.layout` 推导出来的 —— 加新媒体时按形态自动归类，
+ * 不用手动维护。但**推导规则必须只有一份**：曾经前端（MediaView 的 isDigitalOutlet/
+ * isPrintOutlet）与后端（listPosts 的 if/else）各自硬编码，结果门户从 weekly 迁移成 portal 时
+ * 只改了后端，两个刊在前端被算成"非数字"而掉进社交平台；后来 `digital` 又漏了把 poster
+ * 摘出去，于是同一张海报**同时**出现在「数字报刊」和「官方传媒」两档里。
+ *
+ * `null` 表示"老库里 layout 为 NULL 的行"（与 `feed` 同义）—— SQL 侧统一写成
+ * `COALESCE(o.layout,'feed')`，所以这里把 NULL 归到 social 即可。
+ */
+export const CATEGORY_LAYOUTS = {
+  print: ['poster', 'weekly'],   // 官方传媒：印刷/实体形态的物料
+  digital: ['portal'],           // 数字报刊：可点开板块的数字刊物
+  social: [null],                // 社交平台：帖子流（NULL 与 feed 同义）
+};
+
+/**
+ * 分类过滤的 SQL 条件（计数与列表**共用**同一份）。
+ * @param {string} category 分类 key
+ * @param {string} [alias] layout 所在表的别名（默认 `o`，与 listPosts 的 JOIN 对齐）
+ * @returns {{sql: string, params: string[]}|null} 未知/空分类返回 null = 不过滤
+ */
+function categoryFilter(category, alias = 'o') {
+  const layouts = CATEGORY_LAYOUTS[category];
+  if (!layouts) return null;
+  const list = layouts.map(l => l || 'feed');
+  return {
+    // COALESCE 是必须的：老库可能有 layout IS NULL 的行，直接 `layout = 'feed'` 会漏掉它们
+    sql: `COALESCE(${alias}.layout, 'feed') IN (${list.map(() => '?').join(', ')})`,
+    params: list,
+  };
+}
+
+/**
  * 媒体的**产物形态**（差别很大，不能混同）：
  *   · `feed`   —— 社交平台：一批独立帖子（瀑布流），一次生成多条
  *   · `portal` —— 数字报刊：按「期」出刊。门户版只跑 1 次短 LLM，正文点开板块才按需生成
@@ -136,7 +185,7 @@ export function getOutlet(id) {
  *                  一度被错设成 portal 而做成了门户网，现已归位）
  * `weekly` 是 portal 之前的旧形态，渲染分支仍兼容（老数据），但新建时不再提供。
  *
- * 与前端分类的对应：feed →「社交平台」；portal →「数字报刊」；poster/weekly →「报纸物料」。
+ * 与前端分类的对应：feed →「社交平台」；portal →「数字报刊」；poster/weekly →「官方传媒」。
  */
 export const OUTLET_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
@@ -146,6 +195,12 @@ export const OUTLET_LAYOUTS = [
 const OUTLET_LAYOUT_KEYS = OUTLET_LAYOUTS.map(l => l.key);
 /** 老形态：仍是有效的 layout（渲染分支兼容），只是新建时不提供 */
 const LEGACY_LAYOUT_KEYS = ['weekly'];
+/**
+ * 全部合法 layout（含老形态）。
+ * 导出是给回归测试用的：**每个形态都必须恰好归属一个分类**，
+ * 将来新增形态却忘了归类时，测试会失败（而不是"这个形态的帖子在三个分类里都找不到"）。
+ */
+export const ALL_LAYOUT_KEYS = [...OUTLET_LAYOUT_KEYS, ...LEGACY_LAYOUT_KEYS];
 /** 规范化形态：非法或缺失时回落 `feed`（历史默认值，保证兼容旧调用方） */
 function normalizeLayout(v) {
   const s = String(v || '').trim();
@@ -274,10 +329,10 @@ function mapPostRow(r) {
 /**
  * 分页取帖子。
  * @param {object} opts
- * @param {'digital'|'social'|null} [opts.category] - 分类过滤：
- *   `digital` = 数字报刊（layout 为 weekly/poster）；`social` = 社交平台（layout 为 feed）。
- *   分类由 layout 推导，不额外存字段 —— 加新媒体时按形态自动归类，不用手动维护。
- *   注意「传统报纸」不走这里（《邻舍日报》是独立的整版报纸，不存 media_posts）。
+ * @param {'print'|'digital'|'social'|null} [opts.category] - 分类过滤，取值与映射见 `CATEGORY_LAYOUTS`：
+ *   `print` = 官方传媒（poster/weekly）；`digital` = 数字报刊（portal）；`social` = 社交平台（feed/NULL）。
+ *   传 null 或未知值 = **不过滤**（「全部」标签）。
+ *   注意《邻舍日报》不走这里（它是独立的整版报纸，不存 media_posts）。
  */
 export function listPosts({ outletId = null, boardId = null, category = null, limit = 40, offset = 0 } = {}) {
   const db = getDb();
@@ -285,17 +340,10 @@ export function listPosts({ outletId = null, boardId = null, category = null, li
   const params = [];
   if (outletId) { where.push('p.outlet_id = ?'); params.push(outletId); }
   if (boardId) { where.push('p.board_id = ?'); params.push(boardId); }
-  if (category === 'digital') {
-    // 门户是周刊/海报的升级形态（两层生成），同样属于「数字报刊」
-    where.push(`o.layout IN ('weekly','poster','portal')`);
-  } else if (category === 'print') {
-    // 「报纸物料」：印刷/实体形态的刊物 —— 海报（以及历史形态 weekly）。
-    // 注意 portal 不在这里：它属于「数字报刊」（可点开板块的数字刊物）。
-    where.push(`o.layout IN ('weekly','poster')`);
-  } else if (category === 'social') {
-    // 注意：layout 有 DEFAULT 'feed'，但老库可能为 NULL，一并当 feed 处理
-    where.push(`(o.layout IS NULL OR o.layout = 'feed')`);
-  }
+  // 分类过滤走**唯一一张映射表**（CATEGORY_LAYOUTS），
+  // 别再在这里写 if/else 硬编码形态名 —— 那正是「digital 漏摘 poster」的成因。
+  const cf = categoryFilter(category);
+  if (cf) { where.push(cf.sql); params.push(...cf.params); }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   // ★ 分类过滤引用 o.layout，所以**计数查询也必须带上同一套 JOIN**。
@@ -1208,7 +1256,7 @@ export function issueNoOf(payload) {
 }
 
 /**
- * 出一刊 —— 适用于**所有「按期出刊」的形态**：门户（数字报刊）/ 海报（报纸物料）/ 旧周刊。
+ * 出一刊 —— 适用于**所有「按期出刊」的形态**：门户（数字报刊）/ 海报（官方传媒）/ 旧周刊。
  *
  * @param {number} outletId
  * @param {{ force?: boolean }} [opts]
@@ -1280,7 +1328,7 @@ let portalIssueInFlight = false;
 
 /**
  * 每日一刊（挂在调度 tick 里，与《邻舍日报》同一套机制）。
- * 覆盖**所有按期出刊的形态**（数字报刊 + 报纸物料：海报/周刊）。
+ * 覆盖**所有按期出刊的形态**（数字报刊 + 官方传媒：海报/周刊）。
  *
  * 自带的克制设计：
  *  · **每个 tick 最多出一个刊** —— 有多个刊物时不会在同一分钟里并发几次 LLM；
@@ -1313,17 +1361,34 @@ export async function maybeGenerateDailyIssues() {
   }
 }
 
-export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true } = {}) {  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
+/**
+ * 抓一批内容（社交平台 = 一批帖子；门户/周刊/海报 = 出一期）。
+ *
+ * @param {object} opts
+ * @param {string?} [opts.category] - `outletId` 缺省（前端在「全部」档点刷新）时，
+ *   **只在当前分类内**随机抽一个媒体。不传 = 全库随机（老调用方语义）。
+ */
+export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true, category = null } = {}) {
+  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
   generating = (async () => {
     const db = getDb();
     const n = Math.max(1, Math.min(MAX_BATCH_SIZE, Number(count) || DEFAULT_BATCH_SIZE));
 
     // 选媒体
     let outlet = outletId ? getOutlet(outletId) : null;
+    // ★ 「全部」时随机抽一个 —— 必须**限定在当前分类内**。
+    //   踩过的坑：老代码是全局 `ORDER BY RANDOM() LIMIT 1`，于是站在「数字报刊」点刷新
+    //   可能抽到社交平台的媒体，生成出来的帖子根本不出现在当前分类里 ——
+    //   用户看到的是"点了刷新毫无反应"，而 token 已经烧掉了。
+    const cf = outlet ? null : categoryFilter(category, 'media_outlets');
     if (!outlet) {
-      outlet = db.prepare('SELECT * FROM media_outlets WHERE enabled = 1 ORDER BY RANDOM() LIMIT 1').get() || null;
+      outlet = db.prepare(
+        `SELECT * FROM media_outlets WHERE enabled = 1${cf ? ` AND ${cf.sql}` : ''} ORDER BY RANDOM() LIMIT 1`
+      ).get(...(cf ? cf.params : [])) || null;
     }
-    if (!outlet) throw new Error('没有可用的媒体（请先在媒体设置里添加）');
+    if (!outlet) {
+      throw new Error(cf ? '这个分类下还没有可用的媒体（请先在媒体设置里添加）' : '没有可用的媒体（请先在媒体设置里添加）');
+    }
 
     // 按形态分派：周刊/海报/门户一次出一期（刊），都不是「一批帖子」
     if (outlet.layout === 'portal') return await generatePortalIssue(outlet);

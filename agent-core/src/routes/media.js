@@ -15,7 +15,7 @@ import {
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
-  publishIssue, listIssues,
+  publishIssue, listIssues, MEDIA_CATEGORIES,
   generatePortalSection,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
@@ -83,7 +83,7 @@ router.get('/outlets/:id/boards', (req, res) => {
 });
 
 // GET /api/media/outlets/:id/issues — 该刊的期简目（往期导航用，最新在前）
-// 适用于所有按期出刊的形态：数字报刊（门户）/ 报纸物料（海报、旧周刊）
+// 适用于所有按期出刊的形态：数字报刊（门户）/ 官方传媒（海报、旧周刊）
 router.get('/outlets/:id/issues', (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -131,12 +131,22 @@ router.delete('/boards/:boardId', (req, res) => {
 
 // ── 帖子 ──
 
-// GET /api/media/posts?outlet=&board=&limit=&offset=
+// GET /api/media/posts?outlet=&board=&category=&limit=&offset=
 router.get('/posts', (req, res) => {
   try {
     const outletId = req.query.outlet ? Number(req.query.outlet) : null;
     const boardId = req.query.board ? Number(req.query.board) : null;
-    const category = req.query.category === 'digital' || req.query.category === 'social' ? req.query.category : null;
+    /**
+     * 分类白名单**从 service 取**，不在这里硬编码。
+     *
+     * ⚠ 这里原本写的是 `=== 'digital' || === 'social'` 两个字面量：
+     *   新增 print 分类（现名「官方传媒」）时改了 service、**漏改这里** →
+     *   前端传 `print` 被转成 `null` → `listPosts` **不过滤** → 返回全部帖子，
+     *   于是《狸狸通讯社》的门户帖混进了这一档。
+     *   改成读 `MEDIA_CATEGORIES` 后，再加分类不会再漏这一处。
+     */
+    const raw = String(req.query.category || '');
+    const category = MEDIA_CATEGORIES.includes(raw) ? raw : null;
     const limit = req.query.limit ? Number(req.query.limit) : 40;
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const data = listPosts({ outletId, boardId, category, limit, offset });
@@ -201,20 +211,26 @@ router.delete('/posts/:id', (req, res) => {
 
 /**
  * POST /api/media/refresh — 抓一批新帖。
- * Body: { outletId?, count? }
+ * Body: { outletId?, count?, category? }
  * **异步**：立刻返回 { started: true }，生成在后台跑；
  * 前端靠 SSE 的 `media_new_posts` 事件或轮询 /status 得知完成。
+ *
+ * `category`：没指定 `outletId`（前端在「全部」档点刷新）时，只在**该分类内**随机抽一个媒体。
+ * 不传 = 全库随机。少了它就会出现「在数字报刊点刷新、结果抽到社交平台的媒体」——
+ * 生成的内容不出现在当前页，用户看到的是"没反应"。
  */
 router.post('/refresh', (req, res) => {
   try {
     const outletId = req.body?.outletId ? Number(req.body.outletId) : null;
     const count = req.body?.count ? Number(req.body.count) : DEFAULT_BATCH_SIZE;
+    const raw = String(req.body?.category || '');
+    const category = MEDIA_CATEGORIES.includes(raw) ? raw : null;
     if (outletId && !getOutlet(outletId)) return res.status(404).json({ error: '媒体不存在' });
     // 不 await：LLM 生成要几十秒，占着请求会让前端转圈超时
-    generateMediaBatch({ outletId, count: Math.min(count, MAX_BATCH_SIZE) })
+    generateMediaBatch({ outletId, count: Math.min(count, MAX_BATCH_SIZE), category })
       .then(r => console.log(`[media] refresh done: +${r.inserted}`))
       .catch(err => console.error('[media] refresh failed:', err.message));
-    res.json({ started: true, outletId, count });
+    res.json({ started: true, outletId, category, count });
   } catch (err) { fail(res, err); }
 });
 

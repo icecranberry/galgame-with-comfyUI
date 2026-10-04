@@ -102,6 +102,7 @@
         <div v-if="!activeIsPeriodical" class="refresh-group">
           <linshe-button
             class="btn-refresh" variant="primary" :loading="refreshing"
+            :disabled="noOutletInScope"
             :title="refreshScopeHint"
             @click="onRefresh"
           >
@@ -133,8 +134,8 @@
           <button type="button" class="rp-item" :disabled="refreshing" @click="onRefreshOutlet(null)">
             <span class="rp-icon">🎲</span>
             <span class="rp-main">
-              <span class="rp-name">全部媒体</span>
-              <span class="rp-hint">随机抽一个抓一批</span>
+              <span class="rp-name">当前分类随机</span>
+              <span class="rp-hint">在「{{ activeCategoryLabel }}」里抽一个抓一批</span>
             </span>
           </button>
           <button
@@ -197,11 +198,11 @@
          此前它单独占一行且左对齐，夹在板块栏下面显得很突兀。 -->
     <div class="outlet-row">
     <div class="outlet-bar">
-      <!-- 「报纸物料」分类**额外多**一张《邻舍日报》入口卡：
+      <!-- 「官方传媒」分类**额外多**一张《邻舍日报》入口卡：
            日报不存 media_outlets（有自己独立的整版排版：报头/三栏/期号切换），
            所以只能做成入口按钮，点开就是原来的报纸界面。
-           ★ 注意这里是"额外多一张"，不是"只显示这一张" —— 该分类下还有海报类媒体
-             （如《狸狸八卦》），它们要照常出现在下面的媒体标签里。 -->
+           ★ 注意这里是"额外多一张"，不是"只显示这一张" —— 该分类下还可能有海报类媒体，
+             它们要照常出现在下面的媒体标签里。 -->
       <button
         v-if="isPrintCategory"
         type="button"
@@ -477,8 +478,8 @@
         <linshe-button variant="secondary" size="sm" class="empty-retry" @click="reloadAll()">重试</linshe-button>
       </template>
       <template v-else>
-        <p class="empty-title">{{ activeOutlet === null ? '还没有任何帖子' : '这个媒体还没有内容' }}</p>
-        <p class="empty-hint">点右上角「刷新」抓一批新帖；内容由该媒体的提示词 + 世界观生成，活跃角色会随机出现在帖子里。</p>
+        <p class="empty-title">{{ emptyTitle }}</p>
+        <p class="empty-hint">{{ emptyHint }}</p>
       </template>
     </div>
 
@@ -648,8 +649,9 @@ const activeBoard = ref(null)
 const CATEGORIES = [
   /**
    * 三档按**产物形态**归类（与后端 listPosts 的 category 一一对应）：
-   *   print  → 「报纸物料」：印刷/实体形态的刊物 —— 海报（poster）、旧周刊（weekly）。
+   *   print  → 「官方传媒」：官方/印刷形态的物料 —— 海报（poster）、旧周刊（weekly）。
    *            注意 `portal`（门户网）**不在**这里，它属于下面的「数字报刊」。
+   *            （key 仍是 `print` —— 后端过滤与前端共用它，改 key 要前后端一起动，不划算。）
    *   digital→ 「数字报刊」：可点开板块的数字刊物（门户）。
    *   social → 「社交平台」：帖子流。
    *
@@ -658,7 +660,7 @@ const CATEGORIES = [
    * 也没法添加新媒体。现在它就是一个**普通分类**，只是额外多一张日报入口卡
    * （日报不存 media_outlets，是独立整版排版）。
    */
-  { key: 'print', label: '报纸物料', icon: '📰', hint: '报纸 / 海报 —— 印刷形态的物料，按期出刊' },
+  { key: 'print', label: '官方传媒', icon: '📰', hint: '报纸 / 海报 —— 官方印刷物料，按期出刊' },
   { key: 'digital', label: '数字报刊', icon: '📸', hint: '数字刊物 —— 门户网，可点开各板块看正文' },
   { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
 ]
@@ -667,29 +669,35 @@ const activeCategory = ref('social')   // 默认落在内容最多的社交平�
 /** 是不是「传统报纸」那一档（只有它要额外渲染《邻舍日报》入口卡） */
 const isPrintCategory = computed(() => activeCategory.value === 'print')
 
+/** 当前分类的中文名（刷新面板里说清「在哪个档里随机抽」） */
+const activeCategoryLabel = computed(
+  () => CATEGORIES.find(c => c.key === activeCategory.value)?.label || '当前分类')
+
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
  * 媒体是否属于「数字报刊」。
  *
- * ★ 必须与后端 `listPosts` 的分类口径**逐字对齐**（`services/mediaService.js`）：
- *     digital → `o.layout IN ('weekly','poster','portal')`
- *     social  → `o.layout IS NULL OR o.layout = 'feed'`
+ * ★ 必须与后端 `CATEGORY_LAYOUTS`（`services/mediaService.js`）**逐字对齐**：
+ *     print   → poster / weekly
+ *     digital → portal
+ *     social  → feed（老库 layout 为 NULL 的也算）
  *
- * ⚠️ 这两处曾经各自硬编码 `layout === 'weekly' || layout === 'poster'`。
- *    portal 迁移（周刊/海报 → 门户）时只改了后端、**漏了前端**，结果两个刊
- *    在后端分类里属「数字报刊」，前端标签栏却把它们判定成"非数字"→ 归进社交平台。
- *    新增 layout 形态时，**后端 listPosts 与这里必须一起改**。
+ * ⚠️ 这三处曾经各自硬编码，踩过两次：
+ *    ① portal 迁移时只改了后端 → 两个刊在后端属「数字报刊」、在前端却被判成"非数字"而掉进社交平台；
+ *    ② `digital` 漏摘 poster/weekly → 同一张海报同时在「数字报刊」和「官方传媒」两档出现。
+ *    新增 layout 形态时，**后端 CATEGORY_LAYOUTS 与这里必须一起改**
+ *    （回归测试会检查每个形态都被前端归了类）。
  */
 /**
  * 「数字报刊」= 门户形态（可点开板块的数字刊物）。
- * 早先这里把 poster/weekly 也算了进来 —— 那时它们都做成了门户；
- * 现在海报有自己的分类（报纸物料），必须拆开，否则狸狸八卦会同时出现在两档里。
+ * 海报/周刊**不在**这里 —— 它们有自己的分类（官方传媒），必须拆开，
+ * 否则同一刊会同时出现在两档里。
  */
 function isDigitalOutlet(o) {
   return (o.layout || 'feed') === 'portal'
 }
 
-/** 「报纸物料」= 印刷/实体形态：海报（poster）与旧周刊（weekly） */
+/** 「官方传媒」= 官方/印刷形态：海报（poster）与旧周刊（weekly） */
 function isPrintOutlet(o) {
   const layout = o.layout || 'feed'
   return layout === 'poster' || layout === 'weekly'
@@ -707,7 +715,7 @@ const categoryTotal = computed(() => filteredOutlets.value.reduce((s, o) => s + 
 
 /**
  * 分类分页上的数字。
- * 「报纸物料」要把**日报的未读**也算进来（日报不存 media_outlets，
+ * 「官方传媒」要把**日报的未读**也算进来（日报不存 media_outlets，
  * 否则这一档的数字只统计海报、会漏掉天天出的日报）。
  */
 function categoryCount(key) {
@@ -731,7 +739,7 @@ async function onCategoryChange(key) {
   activeIssueId.value = null
   loadError.value = ''
   // 注意：以前这里有 `if (key === 'traditional') { 清空并 return }` ——
-  // 那时该档只有一张硬编码的日报卡、没有帖子流。现在「报纸物料」是普通分类（有海报列表），
+  // 那时该档只有一张硬编码的日报卡、没有帖子流。现在「官方传媒」是普通分类（有物料列表），
   // 必须照常加载，否则点进去永远是空的。
   await loadPage(0)
 }
@@ -890,13 +898,20 @@ const issues = ref([])
 const activeIssueId = ref(null)
 
 async function reloadIssues() {
-  if (!activeOutlet.value || !activeIsPortal.value) { issues.value = []; activeIssueId.value = null; return }
+  // ★ 这里必须是 activeIsPeriodical（门户+海报+旧周刊），不能写错名字。
+  //   踩过的坑：改名时漏改了这一处，留下一个**不存在的标识符**（activeIsPortal）——
+  //   它不是「条件恒假」，而是抛 ReferenceError；而抛出点又在 try 之外，
+  //   于是 reloadIssues() 每次都以 rejected 结束：期简目恒为空 →「期号导航」永不出现，
+  //   且 onMounted 里 `await reloadIssues()` 后面的 loading=false / 补图 / SSE 订阅**全部被跳过**。
+  if (!activeOutlet.value || !activeIsPeriodical.value) { issues.value = []; activeIssueId.value = null; return }
   try {
     const d = await api.listMediaIssues(activeOutlet.value)
     issues.value = d.issues || []
     // 选中那一期若已不在列表（换刊/删帖）→ 回到「最新」
     if (activeIssueId.value && !issues.value.some(i => i.post_id === activeIssueId.value)) activeIssueId.value = null
-  } catch {
+  } catch (err) {
+    // 期简目取不到不该拖垮整页（出刊按钮仍然可用），但要留下痕迹便于排查
+    console.warn('[media] 读取期简目失败:', err?.message || err)
     issues.value = []
   }
 }
@@ -1154,7 +1169,9 @@ async function loadPage(offset = 0) {
     const d = await api.listMediaPosts({
       outlet: activeOutlet.value,
       board: activeBoard.value,
-      category: activeOutlet.value ? null : (activeCategory.value === 'traditional' ? null : activeCategory.value),
+      // 选中具体媒体 → 不需要分类过滤；否则按当前分类过滤。
+      // （原先这里还有一层 `=== 'traditional' ? null` —— 那个分类已改名 print，是死分支，清掉。）
+      category: activeOutlet.value ? null : activeCategory.value,
       limit: PAGE_SIZE,
       offset,
     })
@@ -1204,10 +1221,37 @@ let refreshTimer = null
 /** 刷新目标面板是否展开 */
 const refreshOpen = ref(false)
 
+/** 「全部」+ 当前分类下没有任何媒体 —— 刷新会空转（见 refreshScopeHint） */
+const noOutletInScope = computed(() => activeOutlet.value === null && !filteredOutlets.value.length)
+
 /** 主按钮到底会刷什么 —— 写进 title，避免"点了才发现刷错源" */
 const refreshScopeHint = computed(() => {
+  // 「全部」+ 这个分类下没有任何媒体：后端会**随机抽一个媒体**（可能是别的分类的），
+  // 生成出来的内容还不会出现在当前分类里 —— 纯烧 token 且看不到结果，直接禁掉并说清原因。
+  if (noOutletInScope.value) return '这个分类下还没有媒体，先去右上角「媒体设置」新建一个'
   const o = outlets.value.find(x => x.id === activeOutlet.value)
   return o ? `刷新「${o.name}」` : '刷新全部媒体（随机抽一个）'
+})
+
+/**
+ * 空状态文案：必须区分三种"空"，否则用户会以为是同一件事。
+ *   ① 这一档根本没有媒体（如「官方传媒」一个海报媒体都没有）→ 该去加媒体，不是去刷新；
+ *   ② 有媒体但还没内容 → 该点刷新；
+ *   ③ 选中某个媒体但它没内容 → 同上。
+ */
+const emptyTitle = computed(() => {
+  if (noOutletInScope.value) {
+    return isPrintCategory.value ? '还没有官方传媒物料' : '这个分类下还没有媒体'
+  }
+  return activeOutlet.value === null ? '还没有任何帖子' : '这个媒体还没有内容'
+})
+const emptyHint = computed(() => {
+  if (noOutletInScope.value) {
+    return isPrintCategory.value
+      ? '《邻舍日报》是独立整版报纸，在下面的入口里阅读；要给这一档加海报类物料，点右上角「媒体设置」新建一个、形态选「海报」。'
+      : '点右上角「媒体设置」新建一个媒体，选好形态后就会有对应的内容版式。'
+  }
+  return '点右上角「刷新」抓一批新帖；内容由该媒体的提示词 + 世界观生成，活跃角色会随机出现在帖子里。'
 })
 
 /** 媒体形态的中文名（面板里每个媒体标一下，两种形态产物差别很大） */
@@ -1229,7 +1273,12 @@ async function onRefreshOutlet(outletId) {
   refreshOpen.value = false
   refreshing.value = true
   try {
-    await api.refreshMediaPosts({ outletId, count: 6 })
+    await api.refreshMediaPosts({
+      outletId,
+      // 传 null = 「当前分类随机」，必须带上分类；否则会抽到别的分类的媒体
+      category: outletId ? null : activeCategory.value,
+      count: 6,
+    })
     const o = outlets.value.find(x => x.id === outletId)
     toastFn?.(o ? `正在刷新「${o.name}」，稍候…` : '正在抓取新帖，稍候…', 'success')
     // 兜底轮询：即使 SSE 没连上，也能在 60s 内看到结果
@@ -1246,7 +1295,13 @@ async function onRefresh() {
   if (refreshing.value) return
   refreshing.value = true
   try {
-    await api.refreshMediaPosts({ outletId: activeOutlet.value, count: 6 })
+    // 「全部」档必须把当前分类带上 —— 否则后端会全库随机抽一个媒体，
+    // 生成出的内容不出现在当前分类里（看着像"没反应"，token 却已经烧了）
+    await api.refreshMediaPosts({
+      outletId: activeOutlet.value,
+      category: activeOutlet.value ? null : activeCategory.value,
+      count: 6,
+    })
     toastFn?.('正在抓取新帖，稍候…', 'success')
     // 兜底轮询：即使 SSE 没连上，也能在 60s 内看到结果
     clearTimeout(refreshTimer)
@@ -1271,8 +1326,12 @@ onMounted(async () => {
   newspaperStore.startPolling()
   await Promise.all([reloadOutlets(), loadAuto()])
   await loadPage(0)
-  await reloadIssues()
+  // ★ loading 必须在**加载数据的最后一步之后、任何"附加步骤"之前**收尾。
+  //   踩过的坑：原先它排在 `await reloadIssues()` 后面，而 reloadIssues 里有个未定义标识符
+  //   → 抛 ReferenceError → 这一行永远执行不到 → 页面永远显示「加载中…」、
+  //   且后面的补图与 SSE 订阅也全部没挂上。附加步骤再出问题，也不该影响首屏可用。
   loading.value = false
+  await reloadIssues()
 
   // 兜底补图：把上次没出图的帖子补上（生成失败 / 当时 ComfyUI 没开）。
   // **只在打开页面时补一次**，不做后台定时扫描 —— 否则会持续占用 ComfyUI。

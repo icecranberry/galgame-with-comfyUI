@@ -2892,34 +2892,21 @@ function migrateMediaSchema(db) {
       console.log('[db] Added media_posts.payload_json column');
     }
 
-    // ── 形态回填 ──
+    // ── 形态回填（幂等，每次启动都跑）──
     try {
-      // 狸狸通讯社：周刊 → 门户。原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
+      // 两个刊都是**门户**（数字报刊）：原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
       // 在电脑宽屏上还只是 880px 居中单列、两侧各空 520px。门户把它拆成两层
       //（出刊只出骨架 → 立即可读；图后台串行补；正文点开才生成）。
       // 老帖仍按 payload 形态渲染（MediaWeekly / MediaPoster 保留），不会白丢内容。
-      // 这个升级是**单向**的、用户不会想改回去，所以保留"每次都校正"。
-      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout != 'portal'`).run();
+      //
+      // ★ 这两个刊**是官方传媒的固定成员**，由本条校正保证它们稳定停在「数字报刊」：
+      //   曾试过把《狸狸八卦》改成「海报」(poster) 并改本条为一次性迁移，
+      //   但实测观感/维护成本都不划算，用户决定**回到数字报刊** —— 故恢复为每次校正。
+      //   （`poster` 形态本身保留，新建媒体时仍可选。）
+      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name IN ('狸狸通讯社','狸狸八卦') AND layout != 'portal'`).run();
 
-      /**
-       * ⚠ 《狸狸八卦》**不再**在这里被强制成 portal。
-       *
-       * 它的提示词明确写着「每期出**一张海报**（不是文章），版式固定为
-       * 热点速报条 → 大标题 → 主图 → 2~3 个爆点气泡 → 短文案 → 小图组 → 落款」——
-       * 它本来就该是 `poster`。早先这条语句把两个刊一起升级成 portal，造成两个问题：
-       *   ① 它出的是门户网而不是海报（与自己的提示词相矛盾）；
-       *   ② **每次启动都把它改回 portal** —— 手动改成 poster 也会被下一次启动覆盖。
-       *
-       * 现在改成**一次性**归位（用 setting 标记只跑一次），之后完全尊重用户/后续迁移的选择。
-       */
-      const baguaFixed = db.prepare(
-        `SELECT setting_value FROM system_settings WHERE setting_key = 'media_bagua_layout_fixed'`
-      ).get();
-      if (baguaFixed?.setting_value !== '1') {
-        db.prepare(`UPDATE media_outlets SET layout = 'poster' WHERE name = '狸狸八卦'`).run();
-        db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('media_bagua_layout_fixed', '1')`).run();
-        console.log('[db] 《狸狸八卦》layout 一次性归位为 poster（它的提示词要求出海报）');
-      }
+      // 清理之前那次实验打的一次性标记（已不再使用）
+      db.prepare(`DELETE FROM system_settings WHERE setting_key = 'media_bagua_layout_fixed'`).run();
     } catch { /* ignore */ }
 
     const seeded = db.prepare(

@@ -208,13 +208,30 @@ async function goSection(key) {
  * 滚动联动左栏高亮：取「已越过视口顶部」的最后一章。
  * 用「离顶部最近」而不是 IntersectionObserver —— 章节高度差异大，
  * 观察器在多章同时可见时给出的"当前章"经常不符合直觉。
+ *
+ * ★ 必须单独处理「已滚到底」这一种情形。
+ *   纯 offsetTop 判定有个固有盲区：某章要被点亮，得满足
+ *   `章节顶边在内容里的位置 <= 当前 scrollTop`；滚到底时 scrollTop = 内容高 - 视口高，
+ *   于是**只有当该章比视口还高**时才可能被点亮。而末尾章节往往恰恰是最短的
+ *   （榜单/短评/落款前那一块）—— 用户一路滚到最下端，滑块却卡在倒数第二章不动，
+ *   看起来就是"动效滑块不跟着走"。滚到底本身就代表"看到最后一块了"，直接点亮最后一章。
  */
 function onScroll() {
   const host = readEl.value
   if (!host) return
+  const list = sections.value
+  if (!list.length) return
+
+  // 已到底（留 2px 容差：某些设备/缩放比下 scrollTop 取不到严格的整数值）
+  if (host.scrollTop + host.clientHeight >= host.scrollHeight - 2) {
+    const lastKey = list[list.length - 1].key
+    if (lastKey !== activeKey.value) activeKey.value = lastKey
+    return
+  }
+
   const top = host.scrollTop + host.offsetTop + 8
-  let cur = sections.value[0]?.key || ''
-  for (const s of sections.value) {
+  let cur = list[0].key
+  for (const s of list) {
     const el = host.querySelector(`.po-sec[data-key="${s.key}"]`)
     if (el && el.offsetTop <= top) cur = s.key
   }
@@ -262,8 +279,10 @@ nextTick(() => { activeKey.value = sections.value[0]?.key || '' })
 
 /* 左：深色竖排章节条（游戏原设） */
 .po-nav {
-  flex: 0 0 208px;
-  display: flex; flex-direction: column; gap: 4px;
+  /* 栏宽同步放大：字号从 12.5 → 14.5 后，208px 会把多数章节名挤成两行小字，
+     反倒更显局促；加宽到 238px 后中文标题基本一行放得下，排面才立得住。 */
+  flex: 0 0 238px;
+  display: flex; flex-direction: column; gap: 5px;
   padding: 16px 10px 16px 14px;
   background: #3b3a3a;
   overflow-y: auto;
@@ -272,15 +291,16 @@ nextTick(() => { activeKey.value = sections.value[0]?.key || '' })
 }
 .po-nav-item {
   position: relative;
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 9px;
   /* 右侧刻意留出 -10px：当前项要"浮"出深色条，贴着正文区（游戏原设的 popover 感） */
   margin-right: -10px;
-  padding: 9px 12px;
+  padding: 10px 13px;
   border: none; border-radius: 8px;
   background: none;
   color: #e6e2de;
-  font: inherit; font-size: 12.5px; font-weight: 600;
-  line-height: 1.45; text-align: left;
+  /* 字号 12.5 → 14.5、行高放宽：原先在深色底上又小又挤，像"缩略标签"而不像目录 */
+  font: inherit; font-size: 14.5px; font-weight: 600;
+  line-height: 1.5; text-align: left;
   cursor: pointer;
   transition: background 0.16s, color 0.16s, transform 0.16s;
   -webkit-tap-highlight-color: transparent;
@@ -459,6 +479,8 @@ nextTick(() => { activeKey.value = sections.value[0]?.key || '' })
   .po-nav-item {
     margin-right: 0; flex-shrink: 0; max-width: 46vw;
     background: rgba(255, 255, 255, 0.08);
+    /* 横排后栏宽不再受限，字号可以回收到 13.5 —— 一行放得下，不必再吃满 14.5 */
+    font-size: 13.5px; padding: 8px 12px;
   }
   .po-nav-item.active { transform: none; }
   .po-nav-name { -webkit-line-clamp: 1; white-space: nowrap; }
