@@ -1331,13 +1331,15 @@ const MOMENT_FREQ_STEPS = [
   { value: 0,    label: '关闭',    hint: '关闭自动发帖（仍可手动发）。' },
   { value: 0.25, label: '8 小时',  hint: '每个角色约 8~32 小时一条。' },
   { value: 0.5,  label: '4 小时',  hint: '每个角色约 4~16 小时一条。' },
-  { value: 1,    label: '2 小时',  hint: '每个角色约 2~8 小时一条（默认节奏）。' },
+  { value: 1,    label: '2 小时',  hint: '每个角色约 2~8 小时一条。' },
   { value: 2,    label: '1 小时',  hint: '每个角色约 1~4 小时一条。' },
   { value: 4,    label: '30 分钟', hint: '每个角色约 30 分钟~2 小时一条。' },
   { value: 8,    label: '15 分钟', hint: '每个角色约 15~60 分钟一条。' },
   { value: 24,   label: '5 分钟',  hint: '每个角色约 5~20 分钟一条，LLM 与生图消耗很高。' },
 ]
-const DEFAULT_MOMENT_STEP = 3   // 对应 value=1（2 小时）
+// 默认档位 = 关闭（value 0），与后端 config.features.momentFreq 的默认值保持一致 ——
+// 否则「库里还没有这个键」的新装用户，界面会显示「2 小时」而后台实际是关闭，对不上。
+const DEFAULT_MOMENT_STEP = 0   // 对应 value=0（关闭）
 const momentFreqStepIdx = ref(DEFAULT_MOMENT_STEP)
 const momentFreqHint = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.hint || '')
 const momentFreqLabel = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.label || '')
