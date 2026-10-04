@@ -2970,6 +2970,20 @@ function migrateCharacterOutfitScene(db) {
       db.exec(`ALTER TABLE character_outfits ADD COLUMN scene TEXT`);
       console.log('[db] Added character_outfits.scene column');
     }
+    /**
+     * body：这个角色的**身体描述**（英文生图 tag 风格：发色/发型/瞳色/肤色/体型/显著特征）。
+     *
+     * ★ 为什么单独立一列（2026-10-04）：服装描述原先把身体和衣服混在一起写，导致
+     *   · 同一部位在「外观段 / work / casual」三处互相矛盾（银狼的发型有三个版本）；
+     *   · 裸体场景没有可用的身体真源（外观段里也只有头发和瞳色）。
+     *   现在 body 是**该角色 5 套共用的一份身体描述**，description 只写**衣服**
+     *   （`nude` 那套的 description 为空），注入时由 composeOutfitText() 拼成自包含文本。
+     *   这样身体只存一份、不会在各套之间漂移。
+     */
+    if (!cols.find(c => c.name === 'body')) {
+      db.exec(`ALTER TABLE character_outfits ADD COLUMN body TEXT`);
+      console.log('[db] Added character_outfits.body column');
+    }
   } catch (err) {
     console.log('[db] migrateCharacterOutfitScene error:', err.message);
   }

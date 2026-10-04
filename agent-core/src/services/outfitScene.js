@@ -35,11 +35,19 @@ import { config } from '../config.js';
  * `getSceneOutfitForNow` 也按名称回查。所以留一组稳定的默认名，界面自动写入、用户不用管。
  */
 export const OUTFIT_SCENES = [
-  { key: 'work', label: '工装', defaultName: '日常装', desc: '上班、出勤、执行职务时穿（角色的招牌/常态形象）' },
+  { key: 'nude', label: '裸体', defaultName: '裸体', desc: '不穿任何衣物。**只用于私密场景**：洗浴、泡澡，以及在自己家里/酒店客房等私密空间里的性场景。**睡眠时段不用它**（睡觉一律穿睡衣）' },
+  { key: 'work', label: '常服', defaultName: '日常装', desc: '上班、出勤、执行职务时穿（角色的招牌/常态形象）' },
   { key: 'casual', label: '私服', defaultName: '便装', desc: '上街、社交、休闲外出时穿的便装' },
   { key: 'home', label: '居家', defaultName: '居家服', desc: '在家中休息、做家务时穿的宽松舒适衣物' },
   { key: 'sleep', label: '睡衣', defaultName: '睡衣', desc: '睡觉时穿的睡衣或内衣，**赤脚、不穿鞋袜**。**睡眠时段强制使用这一套**' },
 ];
+
+/**
+ * 只用于私密场景的那一套（裸体）。
+ * `getSceneOutfitForNow` 的兜底必须跳过它 —— 否则日程里没有 `outfit` 标注时，
+ * 角色会在街上「兜底成裸体」。洗浴/私密性场景必须由日程**显式标注**才会用到。
+ */
+export const PRIVATE_SCENE = 'nude';
 
 /** 场景 key → 默认服装名（界面保存时自动写入，用户看不到这个字段） */
 export const DEFAULT_NAME_BY_SCENE = Object.fromEntries(OUTFIT_SCENES.map(s => [s.key, s.defaultName]));
@@ -47,25 +55,62 @@ export const DEFAULT_NAME_BY_SCENE = Object.fromEntries(OUTFIT_SCENES.map(s => [
 const SCENE_KEYS = OUTFIT_SCENES.map(s => s.key);
 const LABEL_BY_KEY = Object.fromEntries(OUTFIT_SCENES.map(s => [s.key, s.label]));
 
+/**
+ * 拼出「注入用的自包含外观文本」= 身体 + 该套服装。
+ *
+ * ── 为什么这样拆（2026-10-04）──────────────────────────────
+ * 原先 description 把身体和衣服混写，于是同一部位在「角色外观段 / work / casual」
+ * 三处互相矛盾（银狼的发型有三个版本），且裸体场景没有身体真源。
+ * 现在：`body` 一列存**该角色 5 套共用的身体描述**，`description` 只存**衣服**；
+ * 注入时才拼成自包含文本 —— 身体只存一份，不会在各套之间漂移。
+ *
+ * `nude` 那套的 garment 为空/`no clothing`，拼出来就是纯身体描述，
+ * 正好满足「洗浴/私密场景只用身体」。
+ */
+export function composeOutfitText(body, garment) {
+  const b = String(body || '').trim().replace(/[,\s]+$/, '');
+  const g = String(garment || '').trim().replace(/[,\s]+$/, '');
+  if (b && g) return `${b}, ${g}`;
+  return b || g;
+}
+
 /** 该角色的全部场景服装（按场景顺序，便于界面展示与匹配） */
 export function listSceneOutfits(characterId) {
   if (!characterId) return [];
   const rows = getDb().prepare(
-    `SELECT id, name, description, scene FROM character_outfits
+    `SELECT id, name, description, scene, body FROM character_outfits
      WHERE character_id = ? AND scene IS NOT NULL AND scene != ''
-     ORDER BY CASE scene WHEN 'work' THEN 0 WHEN 'casual' THEN 1 WHEN 'home' THEN 2 WHEN 'sleep' THEN 3 ELSE 9 END, id ASC`
+     ORDER BY CASE scene WHEN 'nude' THEN 0 WHEN 'work' THEN 1 WHEN 'casual' THEN 2 WHEN 'home' THEN 3 WHEN 'sleep' THEN 4 ELSE 9 END, id ASC`
   ).all(characterId);
-  return rows.map(r => ({ ...r, sceneLabel: LABEL_BY_KEY[r.scene] || r.scene }));
+  return rows.map(r => ({
+    ...r,
+    sceneLabel: LABEL_BY_KEY[r.scene] || r.scene,
+    // 注入用文本（自包含：身体 + 服装）
+    text: composeOutfitText(r.body, r.description),
+  }));
+}
+
+/**
+ * 写角色的「身体描述」，**同步到该角色全部服装行**。
+ *
+ * 这是"单一真源"的落点：界面只让用户编辑一个身体字段，保存时写进每一行，
+ * 既避免重复维护，也保证 5 套之间不会漂移。
+ */
+export function setCharacterBody(characterId, body) {
+  const clean = String(body || '').trim().slice(0, 2000);
+  const r = getDb().prepare('UPDATE character_outfits SET body = ? WHERE character_id = ?')
+    .run(clean, characterId);
+  return { ok: true, updated: r.changes };
 }
 
 /** 批量写入场景服装（供「一键生成」用）。同名同场景则更新描述，避免重复堆叠 */
 export function upsertSceneOutfits(characterId, outfits) {
   const db = getDb();
   const ins = db.prepare(
-    `INSERT INTO character_outfits (character_id, name, description, scene) VALUES (?, ?, ?, ?)`
+    `INSERT INTO character_outfits (character_id, name, description, scene, body) VALUES (?, ?, ?, ?, ?)`
   );
   const upd = db.prepare(
-    `UPDATE character_outfits SET name = ?, description = ? WHERE id = ?`
+    `UPDATE character_outfits SET name = ?, description = ?, body = COALESCE(?, body) WHERE id = ?`
   );
   const find = db.prepare(
     `SELECT id FROM character_outfits WHERE character_id = ? AND scene = ? LIMIT 1`
@@ -73,10 +118,12 @@ export function upsertSceneOutfits(characterId, outfits) {
   let added = 0, updated = 0;
   const tx = db.transaction(() => {
     for (const o of outfits) {
-      if (!o?.scene || !SCENE_KEYS.includes(o.scene) || !o.name || !o.description) continue;
+      // `nude` 那套允许 description 为空（纯身体），所以这里只卡 scene/name
+      if (!o?.scene || !SCENE_KEYS.includes(o.scene) || !o.name) continue;
+      const body = o.body != null ? String(o.body).trim().slice(0, 2000) : null;
       const exist = find.get(characterId, o.scene);
-      if (exist) { upd.run(o.name, o.description, exist.id); updated++; }
-      else { ins.run(characterId, o.name, o.description, o.scene); added++; }
+      if (exist) { upd.run(o.name, String(o.description || '').trim().slice(0, 1200), body, exist.id); updated++; }
+      else { ins.run(characterId, o.name, String(o.description || '').trim().slice(0, 1200), o.scene, body || ''); added++; }
     }
   });
   tx();
@@ -93,77 +140,130 @@ function cropPersona(basePrompt) {
   return body.trim().slice(0, 2000);
 }
 
-const GEN_SYSTEM_PROMPT = `你是角色服装设计助手。用户会给你一个角色的人设，请为 ta 设计四套**日常场景服装**，用于决定这个角色在不同场合穿什么。
+const GEN_SYSTEM_PROMPT = `你是角色外观设计助手。你为角色设计**自包含的外观描述**：一套 = 身体 + 服装。
 
-【四套场景定义（scene 字段照抄英文 key；本次具体要哪几套以用户消息为准，别多给）】
-- work（工装）：这个角色在**其职业/身份场合**日常穿的那身。制式职业（警察、护士、学生等）就是对应制服；自由职业者则是工作时常穿的那身。描述里要能被生图模型直接画出来。
+【身体与服装分开输出】
+每个 scene 都要输出两个字段：
+- \`body\`：这个角色的**身体特征**（全身）：发色、发型、瞳色、肤色、体型/身高等。
+  **同一角色的所有 scene，body 必须完全一致**（是同一个人）。
+- \`description\`：**只写这一套的服装**（衣服、鞋袜、配饰），不要重复身体特征。
+
+【输出语言】
+一律用**英文生图提示词风格**（逗号分隔的短语），因为这两个字段最终会直接喂给生图模型。
+不要中文、不要完整句子、不要「她穿着一件」这类叙述。
+
+【五套场景定义（scene 字段照抄英文 key；本次具体要哪几套以用户消息为准，别多给）】
+- nude（裸体）：**不穿任何衣物**的私密状态（洗浴、在自己家里/酒店客房这类私密空间里的性场景）。
+  这一套的 \`description\` 固定写 \`completely nude, wearing no clothing, bare skin\`；
+  \`body\` 要写得比平时**更完整**（既然是裸体，身体就是画面主体）：
+  除发型瞳色外，补上肤色、体型、胸/腰/腿的形态、以及显著身体特征（痣、伤痕、纹身、兽耳兽尾等）。
+- work（常服）：这个角色在**其职业/身份场合**日常穿的那身。制式职业（警察、护士、学生等）
+  就是对应制服；自由职业者则是工作时常穿的那身。
 - casual（私服）：休息日上街、见朋友、逛街时穿的便装。
 - home（居家）：在家里做家务、放松、看书时穿的宽松舒适衣物。
-- sleep（睡衣）：**睡觉时穿的睡衣或内衣**（睡裙 / 睡衣睡裤 / 吊带内衣 + 短裤 / 内裤等）。这一套是最贴身的，不要设计成能穿出门的服装。
-  **★ 必须赤脚**：人睡觉时鞋子袜子早就脱了，所以这一套的 description 里**必须明确写出 barefoot（赤足）**。
-  **画面里不要出现任何鞋类物体** —— 鞋、靴、拖鞋、袜、丝袜、短袜一律不写（shoes / boots / slippers / heels / sandals / socks / stockings / pantyhose / tights），
-  **连「床边摆着一双没穿的拖鞋」这种也不要写**（生图模型看到 slippers 就会把它画出来）。只需交代脚本身是裸的。
-
-【输出字段】
-- scene：上面四个 key 之一
-- name：服装名称，≤10 个字（如「警用制服」「白色睡裙」）
-- description：40~90 字，**自然语言与英文 tag 混合**（如「黑色的褶边女仆裙配蕾丝头饰」→ 应写成 black frilled maid dress, lace headdress, white apron…）。
-  先写整体风格与轮廓，再写材质/纹样/配饰细节。第三人称视角，**只描述服装本身**，
-  不要提到穿着者的身份、性格、动作，也不要出现「用户」「她」「他」。
+- sleep（睡衣）：**睡觉时穿的睡衣或内衣**（睡裙 / 睡衣睡裤 / 吊带内衣 + 短裤 / 内裤等），
+  不要设计成能穿出门的服装。
+  **★ 必须赤脚**：description 里必须明确写出 barefoot。
+  **画面里不要出现任何鞋类** —— shoes / boots / slippers / heels / sandals / socks / stockings /
+  pantyhose / tights 一律不写，**连「床边摆着一双没穿的拖鞋」这种也不要写**
+  （生图模型看到 slippers 就会把它画出来）。只交代脚本身是裸的。
 
 【要求】
-1. 各套必须**彼此区分明显** —— 一眼能看出是上班、出门、在家还是睡觉。
+1. 各套服装必须**彼此区分明显** —— 一眼能看出是上班、出门、在家还是睡觉。
 2. 必须**贴合这个角色的人设与世界观**：颜色、风格、职业特征要呼应 ta 的身份。
    若提供了世界观，服装要符合那个世界的技术与文化（不要直接照抄现实品牌或原作品服装名）。
 3. 只输出 JSON，不要解释、不要 Markdown 代码块。
 
 ## 输出格式
-{"outfits":[{"scene":"work","name":"...","description":"..."},{"scene":"casual",...},{"scene":"home",...},{"scene":"sleep",...}]}`;
+{"outfits":[{"scene":"nude","name":"裸体","body":"...","description":"completely nude, wearing no clothing, bare skin"},{"scene":"work","name":"...","body":"...","description":"..."}]}`;
 
 /**
- * 「以常态外观（工装）为基准」的提示层。
+ * 反推层：把「已填好的分项」交给模型，让它**据此反推未填的分项**。
  *
- * 用途：私服/居家/睡衣不该从人设凭空重画，而应**基于角色已有的招牌形象**改衣服
- * ——否则四套会各画各的（发色发型都可能漂移），看着不像同一个人。
- * 这里把基准外观喂进去，并明确「身体特征原样保留、只换服装」。
+ * ── 设计意图（2026-10-04 用户提出，替代原先固定「按工装推其余三套」）──
+ * 用户可能只填了一两项（比如手工填了常服、或从一张图反推了裸体），
+ * 其余项不该从人设凭空重画 —— 那会让「同一个人」的身体漂移。
+ * 正确做法：**以已填项为锚**，身体取自锚点、只补该套的服装。
+ *
+ * 锚点优先级 `bodySource`：**nude → work/casual → 角色卡外观段**。
+ * 优先 nude 是因为它"只有身体、没有衣服"，是身体描述最纯的来源。
  */
-function buildBaseAppearanceLayer(baseAppearance, scenes) {
-  const labels = scenes.map(s => LABEL_BY_KEY[s]).join('、');
-  // 睡衣是唯一「脚上不该有东西」的场景，单独点一句 —— 否则模型会照搬基准外观里的鞋袜
-  const sleepNote = scenes.includes('sleep')
-    ? '\n5. **睡衣那一套要赤脚**：基准外观里的鞋袜不要带过去。脚上不能有任何鞋、靴、拖鞋或袜子，' +
-      '**也不要写「床边摆着一双没穿的拖鞋」这类**（生图模型看到 slippers 就会画出来）——只交代脚是裸的。'
-    : '';
-  return `【常态外观（基准，最高优先级）】
-以下是这个角色的**常态外观**，也就是她的招牌形象：
-${baseAppearance}
+function buildDeriveLayer(seeds, bodySource, scenes) {
+  const labels = scenes.map(s => LABEL_BY_KEY[s] || s).join('、');
+  const seedText = seeds.map(s => {
+    const scene = s.scene ? `【${LABEL_BY_KEY[s.scene] || s.scene}】` : '';
+    return `${scene}${s.name ? ` ${s.name}` : ''}\n  body: ${s.body || '（无）'}\n  description: ${s.description || '（无）'}`;
+  }).join('\n');
 
-本次要设计的（${labels}）都是**同一个人**在不同场合的穿着。因此：
-1. **必须原样保持不变**：发色、发型、瞳色、五官、肤色、体型、身高等身体特征——一个字都不要改写或重新描述。
-2. **只改服装相关**：衣服、鞋袜、配饰，以及随场合变化的小物件。
-3. 设计出来的服装要和常态外观处在**同一套审美体系**里（相近的配色偏好、材质与气质），
+  const sleepNote = scenes.includes('sleep')
+    ? '\n5. **睡衣那一套要赤脚**：不要写任何鞋袜（shoes / slippers / socks 等），只交代 barefoot。'
+    : '';
+
+  return `【已确定的基准（最高优先级，必须原样沿用）】
+以下是这个角色**已经确定好**的外观，请把它们当作事实基准：
+
+${seedText}
+
+${bodySource ? `【身体描述的唯一真源 —— 逐字照抄，一个字都不要改】
+${bodySource}
+
+` : ''}本次要补的（${labels}）和上面是**同一个人**。因此：
+1. **body 字段必须逐字照抄上面的「身体真源」**（含 nude 那一套在内，五套身体必须完全一致）——
+   发色、发型、瞳色、肤色、体型、身高等一个字都不要改写、不要重新描述。
+2. **只设计 description**（这一套的服装），不要动身体。
+3. 服装要与已确定那套处在**同一套审美体系**里（相近的配色偏好、材质与气质），
    看得出是同一个人换了衣服，而不是换了一个人。
-4. 不要把上面那套衣服原样再写一遍——这几套必须和它明显不同。${sleepNote}`;
+4. 不要把已确定的那套衣服原样再写一遍 —— 新补的几套必须和它明显不同。${sleepNote}`;
 }
 
 /**
- * 用 LLM 为角色生成场景服装（不落库，由调用方决定保存）。
- * @param {object} character - 至少含 display_name 与 base_prompt
- * @param {object} [opts]
- * @param {string} [opts.baseAppearance] - 常态外观（工装描述）。传了就**以它为基准**只换衣服，
- *   身体特征保持不变；不传则退回「从人设重新设计四套」的旧口径。
- * @param {string[]} [opts.scenes] - 只生成这几套（如 ['casual','home','sleep']）；不传则四套都生成
- * @returns {Promise<Array<{scene,name,description}>>}
+ * 用 LLM 为角色生成/补全场景外观（不落库，由调用方决定保存）。
+ *
+ * @param {object} character
+ * @param {{ scenes?: string[], seeds?: Array<{scene,name,body,description}>, baseAppearance?: string }} opts
+ *   scenes         本次要生成哪几套；不传 = 全部还没填的
+ *   seeds          **已填好的分项**，作为反推锚点（新口径的核心）
+ *   baseAppearance 角色卡外观段；没有任何 seed 时作为身体来源的兜底
+ * @returns {Promise<Array<{scene,name,body,description}>>}
  */
 export async function generateSceneOutfits(character, opts = {}) {
   const displayName = character?.display_name || '角色';
   const persona = cropPersona(character?.base_prompt);
-  if (!persona) throw new Error('角色人格为空，无法生成服装');
+  if (!persona) throw new Error('角色人格为空，无法生成外观');
 
-  // 只生成指定场景；非法值过滤掉，全非法/未传则回落四套
+  const seeds = (Array.isArray(opts.seeds) ? opts.seeds : [])
+    .filter(s => SCENE_KEYS.includes(s?.scene) && (s.body || s.description))
+    .map(s => ({
+      scene: s.scene,
+      name: String(s.name || '').trim(),
+      body: String(s.body || '').trim(),
+      description: String(s.description || '').trim(),
+    }));
+  const seedScenes = new Set(seeds.map(s => s.scene));
+
+  // 未指定就补「所有还没有的」
   const wanted = Array.isArray(opts.scenes) ? opts.scenes.filter(s => SCENE_KEYS.includes(s)) : [];
-  const targetScenes = wanted.length ? wanted : SCENE_KEYS;
+  const targetScenes = (wanted.length ? wanted : SCENE_KEYS).filter(s => !seedScenes.has(s));
+  if (!targetScenes.length) return [];
+
   const baseAppearance = String(opts.baseAppearance || '').trim();
+
+  /**
+   * 身体真源的选择（决定整组的一致性）：
+   *   ① 锚点里有 nude → 用它（纯身体，最干净）
+   *   ② 否则锚点里的 work/casual → 用其 body（这两套区分度最大、信息最全）
+   *   ③ 都没有 → 用角色卡外观段（首次生成走这条）
+   * 刻意**不用 sleep 当锚** —— 它的 description 常常极短（如"一件宽松的白T恤"），信息量不够。
+   */
+  const pickBody = () => {
+    const byScene = new Map(seeds.map(s => [s.scene, s]));
+    for (const k of [PRIVATE_SCENE, 'work', 'casual']) {
+      const b = byScene.get(k)?.body;
+      if (b) return b;
+    }
+    return seeds.find(s => s.body)?.body || baseAppearance || '';
+  };
+  const bodySource = pickBody();
 
   const worldSetting = getWorldSetting();
   const msgs = [
@@ -171,17 +271,23 @@ export async function generateSceneOutfits(character, opts = {}) {
     { role: 'system', content: GEN_SYSTEM_PROMPT },
   ];
   if (worldSetting) msgs.push({ role: 'system', content: worldSetting });
-  // 基准外观层放在人设之后、user 之前：它是本次生成的锚点，权重比人设更直接
-  if (baseAppearance) msgs.push({ role: 'system', content: buildBaseAppearanceLayer(baseAppearance, targetScenes) });
+  // 反推层放在人设之后、user 之前：它是本次生成的锚点，权重比人设更直接
+  if (seeds.length || bodySource) {
+    msgs.push({ role: 'system', content: buildDeriveLayer(seeds, bodySource, targetScenes) });
+  }
   msgs.push({
     role: 'user',
     content: `角色名：${displayName}\n\n以下是 ta 的人设：\n${persona}\n\n`
       + `本次只需要设计这 ${targetScenes.length} 套：${targetScenes.map(s => `${s}（${LABEL_BY_KEY[s]}）`).join('、')}。`
-      + `\n请为 ${displayName} 输出这几套服装，outfits 数组里只放这几套，不要多给。`,
+      + `\n请为 ${displayName} 输出这几套，outfits 数组里只放这几套，不要多给。`
+      + (bodySource ? '\n\n⚠ 每套的 body 字段都必须逐字照抄「身体描述的唯一真源」，不得改写。' : ''),
   });
 
   const model = config.llm.model || 'deepseek-chat';
-  const raw = await chatSync(msgs, { model, temperature: 0.8, max_tokens: 2048, response_format: { type: 'json_object' }, label: '场景服装生成' });
+  const raw = await chatSync(msgs, {
+    model, temperature: 0.8, max_tokens: 3072,
+    response_format: { type: 'json_object' }, label: '场景服装生成',
+  });
 
   let parsed;
   try { parsed = JSON.parse(raw); } catch {
@@ -191,22 +297,35 @@ export async function generateSceneOutfits(character, opts = {}) {
   const list = Array.isArray(parsed?.outfits) ? parsed.outfits : null;
   if (!list) throw new Error('模型返回格式无法解析');
 
-  // 规范化 + 只保留本次要求的场景；缺失的补兜底，保证调用方拿到的套数齐全
+  // 规范化 + 只保留本次要求的场景
   const out = [];
   for (const scene of targetScenes) {
     const hit = list.find(o => o?.scene === scene);
-    const description = String(hit?.description || '').trim().slice(0, 300);
-    if (description) {
-      out.push({ scene, name: String(hit?.name || '').trim().slice(0, 20) || DEFAULT_NAME_BY_SCENE[scene], description });
-    } else {
-      out.push({ scene, ...FALLBACK_OUTFITS[scene] });
+    // 身体一律以真源为准（模型可能仍自作主张改写），保证五套完全一致
+    const body = bodySource || String(hit?.body || '').trim().slice(0, 2000);
+    let description = String(hit?.description || '').trim().slice(0, 1200);
+    // nude 那套必须显式声明裸体，否则生图模型会沿用基础外观里的默认服装
+    if (scene === PRIVATE_SCENE && !/nude|no clothing|bare skin/i.test(description)) {
+      description = FALLBACK_OUTFITS[PRIVATE_SCENE].description;
     }
+    // 非裸体套缺服装描述才兜底；裸体套允许 description 就是那串 nude 声明
+    if (!description && scene !== PRIVATE_SCENE) {
+      out.push({ scene, ...FALLBACK_OUTFITS[scene], body });
+      continue;
+    }
+    out.push({
+      scene,
+      name: String(hit?.name || '').trim().slice(0, 20) || DEFAULT_NAME_BY_SCENE[scene],
+      description,
+      body,
+    });
   }
   return out;
 }
 
 /** 模型漏给某场景时的兜底（尽量中性，避免画不出来） */
 const FALLBACK_OUTFITS = {
+  nude: { name: '裸体', description: 'completely nude, wearing no clothing at all, bare skin visible' },
   work: { name: '工作装', description: 'a simple practical work outfit, neat and comfortable, suitable for daily work' },
   casual: { name: '便装', description: 'casual everyday clothes, a simple top with matching bottoms, relaxed style' },
   home: { name: '居家服', description: 'comfortable loose loungewear, soft fabric, relaxed fit for staying at home' },
@@ -261,10 +380,13 @@ function findCurrentIndex(activities, minutes) {
  *
  * 判定顺序：
  *  1. 角色没有场景服装 → null（调用方回落原外观）
- *  2. 当前时段是睡眠（replyDelay=-1）→ **强制** sleep 那套
+ *  2. 当前时段是睡眠（replyDelay=-1）→ **强制** sleep 那套（硬规则，优先于任何标注）
  *  3. 否则从当前时段**向前回溯**，找最近一个有 outfit 标注的时段 → 按名字匹配
  *     （日程只在「换装的那一刻」标注 outfit，其余留空，这样换装次数天然被限制）
- *  4. 都没匹配上 → 回到该角色的第一套非睡眠服装（兜底，避免没衣服穿）
+ *  4. 都没匹配上 → 回到该角色的第一套**日常**服装（兜底，避免没衣服穿）
+ *
+ * ⚠ **兜底绝不能落到 `nude`** —— 那是"只用于私密场景"的一套，
+ *   若成了兜底，日程里没写 outfit 的角色会在大街上裸体。见 PRIVATE_SCENE。
  *
  * @returns {{outfit: object, scene: string, source: string}|null}
  *          source 便于排查：'sleep' | 'schedule' | 'fallback'
@@ -274,13 +396,14 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
   if (!outfits.length) return null;
 
   const sleepOutfit = outfits.find(o => o.scene === 'sleep') || null;
-  const dayOutfits = outfits.filter(o => o.scene !== 'sleep');
+  // 「白天可兜底」的服装：排除睡眠、也排除私密裸体
+  const dayOutfits = outfits.filter(o => o.scene !== 'sleep' && o.scene !== PRIVATE_SCENE);
   const byName = new Map(outfits.map(o => [o.name, o]));
   const byId = new Map(outfits.map(o => [String(o.id), o]));
 
   const acts = todayActivities(characterId, date);
   if (!acts.length) {
-    // 没有日程：用第一套非睡眠服装兜底（夜里则用睡衣）
+    // 没有日程：用第一套白天服装兜底（实在没有才退睡衣；**绝不用裸体**）
     const fallback = dayOutfits[0] || sleepOutfit;
     return fallback ? { outfit: fallback, scene: fallback.scene, source: 'fallback' } : null;
   }
@@ -288,7 +411,7 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
   const idx = findCurrentIndex(acts, nowMinutes(date));
   const cur = acts[idx] || {};
 
-  // ② 睡眠：硬规则，优先于任何标注
+  // ② 睡眠：硬规则，优先于任何标注（**包括日程显式标的 nude** —— 睡觉一律穿睡衣）
   if (Number(cur.replyDelay) === -1 && sleepOutfit) {
     return { outfit: sleepOutfit, scene: 'sleep', source: 'sleep' };
   }
@@ -305,7 +428,7 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
     // 标注了但匹配不到（LLM 编了个名字）→ 继续往前找，别停在一个无效值上
   }
 
-  // ④ 兜底
+  // ④ 兜底（同样排除 nude）
   const fallback = dayOutfits[0] || sleepOutfit;
   return fallback ? { outfit: fallback, scene: fallback.scene, source: 'fallback' } : null;
 }
@@ -313,7 +436,11 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
 /** 把当前场景服装包成 characterPersona 认的 outfits 结构（走 limited 通道） */
 export function asPersonaOutfits(sceneOutfit) {
   if (!sceneOutfit?.outfit) return null;
-  return { limited: [{ name: sceneOutfit.outfit.name, description: sceneOutfit.outfit.description }], exclusive: null };
+  const o = sceneOutfit.outfit;
+  // ⚠ 注入的是**组合后**的文本（身体 + 服装）—— `o.description` 现在只存衣服，
+  //   直接用它会丢掉身体特征。listSceneOutfits 已算好 `text`；这里的对象可能来自别处，故兜底现算。
+  const text = o.text || composeOutfitText(o.body, o.description);
+  return { limited: [{ name: o.name, description: text }], exclusive: null };
 }
 
 // ── 日程生成时的服装标注层 ──────────────────────────────────
@@ -327,17 +454,39 @@ export function buildOutfitAnnotateLayer(characterId) {
   const outfits = listSceneOutfits(characterId);
   if (outfits.length < 2) return null;   // 只有一套就没什么可分配的
 
-  const list = outfits.map(o => `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）：${o.description.slice(0, 60)}`).join('\n');
+  // 清单里给的是「组合后的自包含文本」—— 模型要照着这个判断"哪一套像什么场合"，
+  // 也给模型一个身体描述可抄（反推时照抄这一份，五套才一致）
+  const list = outfits.map(o =>
+    `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）：${(o.text || composeOutfitText(o.body, o.description)).slice(0, 90)}`
+  ).join('\n');
   const hasSleep = outfits.some(o => o.scene === 'sleep');
   const sleepName = outfits.find(o => o.scene === 'sleep')?.name;
+  const nudeName = outfits.find(o => o.scene === PRIVATE_SCENE)?.name;
   const workName = outfits.find(o => o.scene === 'work')?.name;
   const casualName = outfits.find(o => o.scene === 'casual')?.name;
   const homeName = outfits.find(o => o.scene === 'home')?.name;
-  const dayNames = outfits.filter(o => o.scene !== 'sleep').map(o => `"${o.name}"`).join(' / ') || '（无）';
+  // 「白天的服装」要排除睡眠与裸体 —— 把裸体列进这里等于教模型"白天可以光着"
+  const dayNames = outfits.filter(o => o.scene !== 'sleep' && o.scene !== PRIVATE_SCENE)
+    .map(o => `"${o.name}"`).join(' / ') || '（无）';
 
   // 示例用角色真实拥有的服装名，避免出现"示例里写了 A、可选清单里没有 A"的自相矛盾
   const exOut = workName || casualName || outfits[0].name;
   const exHome = homeName || outfits[0].name;
+
+  // 裸体那一段只在角色真的配了「裸体」时才讲 —— 没配的角色别被提示词带偏
+  const nudeBlock = nudeName ? `
+
+### 二点五、「裸体」什么时候才用（严格）
+"${nudeName}"**只用于私密场景**，一天里通常只有 1~2 段：
+- **洗浴类**：洗澡、泡澡、冲凉、泡温泉。
+- **私密性场景**：在自己家里、酒店客房这类**私密空间**里做爱。
+
+判定要点：
+- **地点必须在私密空间**（自己家 / 酒店客房 / 浴室）。在**外面**（街上、酒馆、车站、广场、
+  公园、河岸）做爱**不标裸体** —— 那种场合角色仍穿着衣服或不整，标对应的外出服。
+- **睡眠时段绝不标裸体**（睡觉一律穿"${sleepName || '睡衣'}"，硬规则，哪怕裸睡）。
+- 洗完澡接着过日常时，别忘了**从浴室出来那一段重新标上衣服**（居家或外出）。
+- 用不到就完全不出现这个值 —— 不要为了"丰富"而给角色安排裸体时段。` : '';
 
   return `## 着装标注（额外要求）
 这个角色在一天中会换衣服。可选服装如下：
@@ -355,8 +504,8 @@ ${list}
 ### 二、以下 4 个时点**必须**标 outfit，一个都不能漏
 1. **入睡** → 标"${sleepName || '睡衣'}"（睡眠时段的 outfit 必须是它）。
 2. **睡醒起床** → 标一套白天的衣服。
-3. **从住所出门**（去任何"住所外"的地方）→ 标一套**外出**的（工装或私服）。
-4. **从外面回到住所** → 标"${exHome}"。
+3. **从住所出门**（去任何"住所外"的地方）→ 标一套**外出**的（常服或私服）。
+4. **从外面回到住所** → 标"${exHome}"。${nudeBlock}
 
 ### 三、写完自检（逐时段过，发现矛盾就补标）
 - 某个"住所外"的时段，穿的却是**居家服或睡衣** → ✗ 错。在这一段补标一套外出服。

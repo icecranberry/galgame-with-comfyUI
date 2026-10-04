@@ -125,25 +125,43 @@
               </div>
               <linshe-input v-model="detail.editPersona" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
 
-              <!-- 外观服装：四套造型，与人格分离。工装 = 角色的常态外观（= 原「## 你的外观」段） -->
+              <!-- 外观：身体 + 五套场景服装。
+                   身体是**单一真源**（发色/发型/瞳色/肤色/体型…），五套共用；
+                   每套只填"衣服"，生图时由后端拼成「身体 + 该套服装」。
+                   洗浴/私密性场景用「裸体」那套 —— 它只有身体、没有衣服。 -->
               <div class="scene-block">
                 <div class="scene-block-head">
                   <span class="fl">外观服装</span>
-                  <span class="scene-block-hint">由日程决定此刻穿哪套 · <b>工装 = 常态外观</b></span>
+                  <span class="scene-block-hint">由日程决定此刻穿哪套 · <b>身体五套共用</b></span>
                   <div class="scene-block-fill"></div>
                   <linshe-button
                     v-if="detail.sceneOutfits.length > 1"
                     variant="secondary"
                     size="sm"
                     class="scene-gen-btn"
-                    :disabled="outfitGenerating || !workOutfitText"
+                    :disabled="outfitGenerating"
                     :loading="outfitGenerating"
-                    :title="workOutfitText
-                      ? '以工装（常态外观）为基准，只换衣服、保留发色发型瞳色，生成其余几套'
-                      : '先填写工装（常态外观），才能以它为基准生成'"
+                    :title="'按已经填好的分项反推还没填的那些（身体取自已填项，只补衣服）'"
                     @click="generateOtherSceneOutfits"
-                  >✨ 按工装生成其余三套</linshe-button>
+                  >✨ 反推未填的分项</linshe-button>
                 </div>
+
+                <!-- 身体：五套共用。字体与服装描述同款，但视觉上单独成块、明确它不属于任何一套 -->
+                <div class="scene-body-field">
+                  <label class="scene-body-label">
+                    身体
+                    <span class="scene-body-hint">五套共用 · 发色/发型/瞳色/肤色/体型/显著特征</span>
+                  </label>
+                  <linshe-input
+                    v-model="detail.body"
+                    type="textarea"
+                    class="fi scene-edit-desc"
+                    rows="3"
+                    placeholder="long silver hair with blue gradient tips, high ponytail, purple eyes, pale skin, slim build"
+                    @input="detail.dirty = true"
+                  />
+                </div>
+
                 <div class="scene-tabs" role="tablist">
                   <button
                     v-for="(o, i) in detail.sceneOutfits"
@@ -152,25 +170,27 @@
                     role="tab"
                     :aria-selected="i === detail.sceneTab"
                     class="scene-tab"
-                    :class="{ active: i === detail.sceneTab, filled: !!o.description.trim() }"
+                    :class="{ active: i === detail.sceneTab, filled: !!String(o.description || '').trim() }"
                     @click="detail.sceneTab = i"
                   >
                     {{ o.sceneLabel }}
                     <span v-if="o.scene === 'sleep'" class="scene-tab-tag">强制</span>
+                    <span v-else-if="o.scene === 'nude'" class="scene-tab-tag is-nude">私密</span>
                   </button>
                 </div>
                 <div v-if="activeSceneOutfit" class="scene-edit">
-                  <!-- 只有描述 —— 这段文字会原样交给 ComfyUI 出图，服装名对生图没有意义，故不设名称输入 -->
+                  <!-- 只填「这一套的衣服」。身体在上面统一填，这里不重复 -->
                   <linshe-input
                     v-model="activeSceneOutfit.description"
                     type="textarea"
                     class="fi scene-edit-desc"
                     rows="6"
-                    :placeholder="activeSceneOutfit.scene === 'work'
-                      ? '常态外观描述（中英混合），生图时作为基础外观'
-                      : '这套的外观描述（中英混合），如 black tactical suit with cyan accents'"
+                    :placeholder="scenePlaceholder(activeSceneOutfit.scene)"
                     @input="detail.dirty = true"
                   />
+                  <p v-if="activeSceneOutfit.scene === 'nude'" class="scene-edit-note">
+                    裸体只用于洗浴与私密性场景。这里保持「completely nude…」不动即可，画面主体由上面的身体描述决定。
+                  </p>
                 </div>
                 <div v-else class="scene-edit-empty">加载中…</div>
               </div>
@@ -584,7 +604,8 @@ const detail = reactive({
   editPersona: '',        // 人设（= base_prompt 去掉「## 你的外观」段）
   appearanceTail: '',     // 外观段之后的内容（罕见；保留以免重组时丢段）
   originalAppearance: '', // 打开时的原外观段：工装被误清空时用它兜底，避免生图链路失去外观
-  sceneOutfits: [],       // 四套场景服装 [{ scene, sceneLabel, name, description }]
+  body: '',               // 身体描述（五套共用，单一真源）—— 发色/发型/瞳色/肤色/体型…
+  sceneOutfits: [],       // 五套场景外观 [{ scene, sceneLabel, name, description }]，description 只存"衣服"
   sceneTab: 0,            // 外观服装当前编辑第几套（标签页）
   relOpen: false,         // 角色关系列表是否展开（折叠后把人设编辑区让出来）
   relationships: [],
@@ -630,7 +651,19 @@ function composePersona(persona, appearanceBody, tail = '') {
   return `${head}\n\n## 你的外观\n${body}${t}`
 }
 
-/** 工装描述 —— 它就是整卡的「## 你的外观」段，双向绑定 */
+/**
+ * 拼出「身体 + 服装」的自包含文本。
+ * ⚠ 必须与后端 outfitScene.composeOutfitText 保持一致 —— 后端注入用的就是同一个口径，
+ *   这里只是为了让「角色卡外观段」看到与生图一致的完整文本。
+ */
+function composeOutfitText(body, garment) {
+  const b = String(body || '').trim().replace(/[,\s]+$/, '')
+  const g = String(garment || '').trim().replace(/[,\s]+$/, '')
+  if (b && g) return `${b}, ${g}`
+  return b || g
+}
+
+/** 工装那一套的**衣服**描述（不含身体 —— 身体在 detail.body 里） */
 function workOutfitDesc() {
   return detail.sceneOutfits.find(o => o.scene === 'work')?.description || ''
 }
@@ -639,30 +672,50 @@ function workOutfitDesc() {
  *  所以 v-model 直接写它的字段即可回写原数组。 */
 const activeSceneOutfit = computed(() => detail.sceneOutfits[detail.sceneTab] || null)
 
-/** 实际生效的外观正文：工装被清空时回退到打开时的原外观，避免角色突然失去外观描述 */
+/**
+ * 实际生效的外观正文 = 身体 + 工装那套衣服。
+ *
+ * ★ 关键：工装被清空时也要带上身体 —— 否则保存会把角色卡外观段写成一具"没有身体只有衣服"
+ *   的文本，角色会一次性失去发色/瞳色/体型。
+ */
 function effectiveAppearance() {
-  return String(workOutfitDesc() || '').trim() || detail.originalAppearance
+  const composed = composeOutfitText(detail.body, workOutfitDesc())
+  return String(composed || '').trim() || detail.originalAppearance
 }
 
 /** 当前编辑中的整卡（供「修正外观 / 人设润色」弹窗读取，口径与保存完全一致） */
 const fullPrompt = computed(() => composePersona(detail.editPersona, effectiveAppearance(), detail.appearanceTail))
 
-/** 工装（常态外观）当前文本：作「按工装生成其余三套」的基准，也用于判断按钮是否可用 */
+/** 工装（常态外观）当前文本：用于判断"以它为基准"的按钮是否可用 */
 const workOutfitText = computed(() => effectiveAppearance())
 
+/** 各套的输入提示语 */
+function scenePlaceholder(scene) {
+  if (scene === 'work') return '这套上班/职务场合穿的衣服（英文 tag），如 black hoodie, denim shorts, sneakers'
+  if (scene === 'nude') return 'completely nude, wearing no clothing at all, bare skin visible'
+  if (scene === 'sleep') return '睡衣（英文 tag）——记得写 barefoot，且不要出现任何鞋袜'
+  if (scene === 'home') return '居家时穿的衣服（英文 tag）'
+  return '这套的衣服（英文 tag）'
+}
+
 async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
-  if (!characterId) { detail.sceneOutfits = []; return }
+  if (!characterId) { detail.sceneOutfits = []; detail.body = ''; return }
   try {
     const d = await api.listSceneOutfits(characterId)
     const scenes = d.scenes || []
     const exist = d.outfits || []
+    // 身体：五套共用同一份，取任意一条即可（后端写入时会同步到所有行）
+    detail.body = String(exist.find(o => o.body)?.body || '')
     detail.sceneOutfits = scenes.map(s => {
       const hit = exist.find(o => o.scene === s.key)
-      const isWork = s.key === 'work'
-      // 工装的外观看 base_prompt 原外观段（那是角色的常态外观）；其余场景看已存的服装
-      const desc = isWork
-        ? (String(fallbackWorkDesc || '').trim() || hit?.description || '')
-        : (hit?.description || '')
+      /**
+       * 各套都只取库里的 **衣服** 描述。
+       * 唯一例外：**工装还没建行时**（老数据），用角色卡原外观段兜底 ——
+       * 那段是"身体+衣服"的混合文本，先原样放进来让用户看到，用户拆分后保存即可。
+       */
+      const desc = hit
+        ? String(hit.description || '')
+        : (s.key === 'work' ? String(fallbackWorkDesc || '').trim() : '')
       return {
         scene: s.key,
         sceneLabel: s.label,
@@ -679,34 +732,47 @@ async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
   }
 }
 
-// ── 按工装（常态外观）为基准生成其余几套 ──
-// 为什么这么设计：四套若各自从人设凭空设计，发色发型都可能漂移，看着不像同一个人。
-// 以工装为锚，只让模型换衣服，身体特征保持不变。
+// ── 按「已填好的分项」反推「还没填的分项」 ──
+// 为什么这么设计（2026-10-04 用户口径）：
+//   身体与服装分层后，**已填的任一（优先裸体，其次常服/私服）都能作为身体真源**；
+//   未填的那些只需补"这一套的衣服"。这样同一个人不会因为各套各自从人设凭空设计而漂移。
+//   原先固定"按工装推其余三套"——工装没填就完全用不了，现在任一已填项即可驱动。
 // 注意变量名别与立绘的 sceneGenerating 撞（那是「生成某场景立绘」用的）。
 const outfitGenerating = ref(false)
 
 async function generateOtherSceneOutfits() {
   const c = props.character
   if (!c || outfitGenerating.value) return
-  const base = workOutfitText.value
-  if (!base) { toastFn('先填写工装（常态外观），才能以它为基准生成', 'warning'); return }
-  const targets = detail.sceneOutfits.filter(o => o.scene !== 'work').map(o => o.scene)
-  if (!targets.length) return
+
+  // 反推锚点 = 已经填了内容的那些（服装或身体任一非空）
+  const seeds = detail.sceneOutfits
+    .filter(o => String(o.description || '').trim() || String(detail.body || '').trim())
+    .map(o => ({ scene: o.scene, name: o.name, body: detail.body, description: o.description }))
+  const targets = detail.sceneOutfits
+    .filter(o => !String(o.description || '').trim())
+    .map(o => o.scene)
+
+  if (!targets.length) { toastFn('五套都已经填好了，没有需要反推的', 'info'); return }
+  if (!seeds.length) { toastFn('先填任意一套（或先填「身体」），才能据此反推其余', 'warning'); return }
+
   outfitGenerating.value = true
   try {
     // 只出草稿不落库：用户核对/修改后再点「保存」
-    const d = await api.generateSceneOutfits(c.id, false, { baseAppearance: base, scenes: targets })
+    const d = await api.generateSceneOutfits(c.id, false, { seeds, scenes: targets, baseAppearance: detail.body })
     const byScene = new Map((d.outfits || []).map(o => [o.scene, o]))
     detail.sceneOutfits = detail.sceneOutfits.map(o => {
       const hit = byScene.get(o.scene)
       if (!hit) return o
       return { ...o, name: hit.name || o.name, description: hit.description || o.description }
     })
+    // 模型可能补出更完整的身体描述 —— 以它为准（回填到共用字段，五套仍一致）
+    const newBody = String(d.outfits?.[0]?.body || '').trim()
+    if (newBody && !String(detail.body || '').trim()) detail.body = newBody
     detail.dirty = true
-    toastFn(`已按工装生成 ${targets.length} 套，核对后点「保存」生效`, 'success')
+    toastFn(`已反推 ${targets.length} 套，核对后点「保存」生效`, 'success')
   } catch (err) {
     console.error('generateOtherSceneOutfits failed:', err)
-    toastFn('生成失败：' + (err?.message || ''), 'error')
+    toastFn('反推失败：' + (err?.message || ''), 'error')
   } finally {
     outfitGenerating.value = false
   }
@@ -892,15 +958,18 @@ async function saveCharDetail() {
   // 四套场景服装一并保存（只提交填了描述的；工装内容与 base_prompt 外观段一致）。
   // 名称由前端自动补（沿用已有 / 场景默认名）—— 界面不暴露该字段，它只服务日程标注的匹配。
   const payload = detail.sceneOutfits
-    .filter(o => (o.description || '').trim())
+    // ⚠ 不再要求 description 非空 —— 「裸体」那套允许只留默认声明，
+    //   而且用户可能先保存其他套。只要场景名有了就提交，后端会 upsert。
+    .filter(o => o.scene)
     .map(o => ({
       scene: o.scene,
       name: (o.name || '').trim() || o.defaultName || o.sceneLabel || o.scene,
-      description: o.description.trim(),
+      description: String(o.description || '').trim(),
     }))
   if (payload.length) {
     try {
-      await api.saveSceneOutfits(c.id, payload)
+      // body 一并提交：后端会把它同步写进该角色的全部服装行（单一真源）
+      await api.saveSceneOutfits(c.id, payload, detail.body)
     } catch (err) {
       console.error('saveSceneOutfits failed:', err)
       toastFn('人设已保存，但外观服装保存失败：' + (err?.message || ''), 'error')
@@ -1913,6 +1982,23 @@ const standingPanel = reactive({
   color: var(--accent);
 }
 .scene-tab.active .scene-tab-tag { background: rgba(var(--accent-rgb), 0.22); }
+/* 裸体那套是"私密场景专用"，标签用中性色区分，别和"强制"的睡眠混同一种强调 */
+.scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
+.scene-tab.active .scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
+
+/* 身体字段：五套共用，视觉上单独成块并与下面的服装标签拉开距离 */
+.scene-body-field {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-bottom: 10px; padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  border: 1px dashed var(--glass-border);
+}
+.scene-body-label {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+}
+.scene-body-hint { font-size: 10.5px; font-weight: 400; color: var(--text-secondary); }
 
 .scene-edit {
   display: flex; flex-direction: column; gap: 7px;
@@ -1920,6 +2006,10 @@ const standingPanel = reactive({
   border-radius: 10px;
   background: var(--bg-tertiary);
   border: 1px solid var(--glass-border);
+}
+.scene-edit-note {
+  margin: 0; font-size: 11px; line-height: 1.6;
+  color: var(--text-secondary);
 }
 .scene-edit-empty { font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
 

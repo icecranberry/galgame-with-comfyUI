@@ -23,7 +23,7 @@ import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '.
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
-import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, OUTFIT_SCENES } from '../services/outfitScene.js';
+import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, setCharacterBody, OUTFIT_SCENES } from '../services/outfitScene.js';
 import { listSceneStandings, upsertSceneStanding, deleteSceneStanding, getSceneStandingRow, STANDING_SCENE_KEYS, STANDING_SCENE_LABELS } from '../services/characterStanding.js';
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
@@ -1378,7 +1378,11 @@ function buildStandingMessages(char, requirement, mode = 'normal', scene = null)
   if (scene) {
     sceneLabel = STANDING_SCENE_LABELS[scene] || scene;
     const hit = listSceneOutfits(char.id).find(o => o.scene === scene);
-    outfits = hit ? { limited: [{ name: hit.name, description: hit.description }], exclusive: null } : null;
+    // ⚠ 用 `hit.text`（身体 + 服装的组合文本），不要用裸 `description` ——
+    //   description 现在只存衣服，直接用会让立绘丢掉身体特征。
+    outfits = hit
+      ? { limited: [{ name: hit.name, description: hit.text || hit.description }], exclusive: null }
+      : null;
   }
   const personaText = buildCharacterPersona(char, { variant: 'short', person: char.display_name, outfits });
   msgs.push({
@@ -2099,18 +2103,18 @@ router.get('/:id/outfit-now', (req, res) => {
   res.json({ character_id: char.id, ...(getSceneOutfitForNow(char.id) || { outfit: null, scene: null, source: 'none' }) });
 });
 
-// POST /api/characters/:id/outfits/generate — 用 LLM 生成四套基础场景服装
-// Body: { save?: boolean }  save=true 时直接写入（同场景已存在则更新描述）
+// POST /api/characters/:id/outfits/generate — 用 LLM 生成/补全场景外观
+// Body: { save?: boolean, scenes?: string[], seeds?: [{scene,name,body,description}], baseAppearance?: string }
+//   seeds = **已填好的分项**，作为反推锚点：本次只补未填的（新口径，替代固定「按工装推其余」）
 router.post('/:id/outfits/generate', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
   try {
-    // baseAppearance：以常态外观（工装）为基准生成，只换衣服不换人；
-    // scenes：只生成指定的几套（如按工装 roll 私服/居家/睡衣），不传则四套都出
     const outfits = await generateSceneOutfits(char, {
       baseAppearance: req.body?.baseAppearance,
       scenes: req.body?.scenes,
+      seeds: req.body?.seeds,
     });
     const saved = req.body?.save === true ? upsertSceneOutfits(char.id, outfits) : null;
     res.json({ ok: true, outfits, saved });
@@ -2120,19 +2124,33 @@ router.post('/:id/outfits/generate', async (req, res) => {
   }
 });
 
-// PUT /api/characters/:id/outfits/scene — 批量保存场景服装（一次覆盖四套，供界面"编辑后保存"）
-// Body: { outfits: [{ scene, name, description }] }
+// PUT /api/characters/:id/outfits/scene — 批量保存场景外观（供界面"编辑后保存"）
+// Body: { body?: string, outfits: [{ scene, name, description }] }
+//   body = 该角色的身体描述（单一真源，写入时同步到全部行）
 router.put('/:id/outfits/scene', (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
   const list = Array.isArray(req.body?.outfits) ? req.body.outfits : null;
   if (!list) return res.status(400).json({ error: 'outfits 必须是数组' });
+
+  // 身体按钮（若前端带了 body 字段就整体写一遍，保证各套一致）
+  const body = req.body?.body != null ? String(req.body.body).trim().slice(0, 2000) : null;
+
+  // ⚠ 不再强制 description 非空 —— `nude` 之外也可能有"这套暂时没写衣服"的中间态；
+  //   只要求 scene 合法 + name 非空（upsertSceneOutfits 内部还会按 SCENE_KEYS 过滤）
   const clean = list
-    .map(o => ({ scene: String(o?.scene || '').trim(), name: String(o?.name || '').trim().slice(0, 60), description: String(o?.description || '').trim().slice(0, 2000) }))
-    .filter(o => o.scene && o.name && o.description);
+    .map(o => ({
+      scene: String(o?.scene || '').trim(),
+      name: String(o?.name || '').trim().slice(0, 60),
+      description: String(o?.description || '').trim().slice(0, 2000),
+      ...(body != null ? { body } : (o?.body != null ? { body: String(o.body).trim().slice(0, 2000) } : {})),
+    }))
+    .filter(o => o.scene && o.name);
   if (!clean.length) return res.status(400).json({ error: '没有有效的服装条目' });
+
   const saved = upsertSceneOutfits(char.id, clean);
+  if (body != null) setCharacterBody(char.id, body);
   res.json({ ok: true, saved, outfits: listSceneOutfits(char.id) });
 });
 

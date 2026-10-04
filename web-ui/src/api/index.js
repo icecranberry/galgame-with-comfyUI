@@ -162,18 +162,27 @@ export function getCurrentSceneOutfit(characterId) {
 }
 
 /**
- * 用 LLM 生成场景服装；save=true 时直接落库。
+ * 用 LLM 生成/补全场景外观；save=true 时直接落库。
  * @param {object} [extra]
- * @param {string} [extra.baseAppearance] 常态外观（工装描述）：传了就**以它为基准**只换衣服，身体特征不变
- * @param {string[]} [extra.scenes] 只生成这几套（如 ['casual','home','sleep']）；不传则四套都出
+ * @param {Array<{scene,name,body,description}>} [extra.seeds] **已填好的分项**，作为反推锚点；
+ *   本次只补未填的那些（身体取自锚点，只生成该套衣服）
+ * @param {string[]} [extra.scenes] 只补这几套；不传则由后端挑未填的
+ * @param {string} [extra.baseAppearance] 没有任何 seed 时的身体来源兜底（如角色卡外观段）
  */
 export function generateSceneOutfits(characterId, save = false, extra = {}) {
   return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save, ...extra } })
 }
 
-/** 批量保存四套场景服装（同场景已存在则更新描述） */
-export function saveSceneOutfits(characterId, outfits) {
-  return request(`/characters/${characterId}/outfits/scene`, { method: 'PUT', body: { outfits } })
+/**
+ * 批量保存五套场景外观（同场景已存在则更新）。
+ * @param {Array<{scene,name,description}>} outfits description 只填"这一套的衣服"
+ * @param {string} [body] 身体描述 —— 单一真源，后端会同步写进该角色全部服装行
+ */
+export function saveSceneOutfits(characterId, outfits, body) {
+  return request(`/characters/${characterId}/outfits/scene`, {
+    method: 'PUT',
+    body: body != null ? { outfits, body } : { outfits },
+  })
 }
 
 // ── 场景立绘（工装/私服/居家/睡衣四套形象，详情页左右切换）──
