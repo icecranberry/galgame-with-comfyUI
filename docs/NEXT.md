@@ -23,9 +23,9 @@
 ```json
 {
   "schema": "tavernweave/progress-state/v1",
-  "revision": 2,
+  "revision": 3,
   "projectId": "linshe-local-patch",
-  "designRevision": 0,
+  "designRevision": 1,
   "baselineId": "scope-1",
   "handoff": {
     "currentStep": "已完成 automated 检查与 browser 浏览器验收两轮，结果已回写看板",
@@ -370,7 +370,8 @@
                 "docs/验证记录/截图/地图页-缩进树与详情.png",
                 "docs/验证记录/截图/外观分层-身体与五态.png",
                 "docs/验证记录/截图/网络页-分类与批量操作.png",
-                "docs/验证记录/截图/归档-日程页分类栏.png"
+                "docs/验证记录/截图/归档-日程页分类栏.png",
+                "docs/验证记录/截图/网络页-批量操作靠右.png"
               ]
             },
             {

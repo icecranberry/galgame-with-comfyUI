@@ -1,0 +1,175 @@
+/**
+ * 本地补丁回归测试
+ *
+ * 这几条是**看板引用为验收证据**的判据，必须能反复跑（不能只留一次性脚本）。
+ * 只放**确定性、无 LLM、无网络**的部分 —— 需要真实模型或真实出刊的检查
+ * （如换装标注的"专注修复"、门户出刊）留在 `docs/验证记录/` 的一次性记录里。
+ *
+ * 对应看板事项：
+ *   · 地图页 / 导出（任意层级与任意层的生活地点）
+ *   · 外观分层（身体唯一真源 / 兜底不落裸体 / 睡眠硬规则）
+ *   · 提示词质量（世界观例句段裁剪）
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { getDb } from '../src/db/index.js';
+import { adaptWorldText } from '../src/db/worldRepository.js';
+import {
+  createMap, addPlace, upsertPlace, deletePlace, deleteMap, exportMarkdown,
+} from '../src/services/worldMapService.js';
+import {
+  composeOutfitText, listSceneOutfits, upsertSceneOutfits,
+  getSceneOutfitForNow, ensureOutfitAnnotations, PRIVATE_SCENE, OUTFIT_SCENES,
+} from '../src/services/outfitScene.js';
+
+const db = getDb();
+const CID = 99901;   // 专用测试角色，避免与真实数据相撞
+
+function cleanup() {
+  db.prepare('DELETE FROM character_outfits WHERE character_id = ?').run(CID);
+  db.prepare('DELETE FROM daily_schedules WHERE character_id = ?').run(CID);
+  try { db.prepare('DELETE FROM characters WHERE id = ?').run(CID); } catch { }
+}
+function makeChar() {
+  cleanup();
+  db.prepare('INSERT INTO characters (id, name, display_name, base_prompt) VALUES (?,?,?,?)')
+    .run(CID, '__zz_regress', '__zz_regress', '## 人设\n回归测试\n\n## 你的外观\nlong black hair, red eyes, wearing a white shirt');
+  const BODY = 'long black hair, red eyes, fair skin';
+  upsertSceneOutfits(CID, [
+    { scene: 'nude', name: '裸体', description: 'completely nude, wearing no clothing at all, bare skin visible', body: BODY },
+    { scene: 'work', name: '工作装', description: 'black blazer, white shirt', body: BODY },
+    { scene: 'casual', name: '便装', description: 'hoodie, jeans', body: BODY },
+    { scene: 'home', name: '居家服', description: 'grey tee, shorts', body: BODY },
+    { scene: 'sleep', name: '睡衣', description: 'white camisole, barefoot', body: BODY },
+  ]);
+  return BODY;
+}
+const atHour = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return getSceneOutfitForNow(CID, d); };
+
+// ─────────────────────────────────────────────────────────
+// 外观分层
+// ─────────────────────────────────────────────────────────
+
+test('外观五态：枚举含裸体，且 work 已改名为「常服」', () => {
+  assert.equal(OUTFIT_SCENES.length, 5);
+  assert.ok(OUTFIT_SCENES.some(s => s.key === PRIVATE_SCENE));
+  assert.equal(OUTFIT_SCENES.find(s => s.key === 'work').label, '常服');
+});
+
+test('composeOutfitText：身体 + 服装；裸体那套只留身体', () => {
+  assert.equal(composeOutfitText('long black hair', 'a red coat'), 'long black hair, a red coat');
+  // 裸体套的 description 是「没穿衣服」的声明，拼出来仍以身体为主
+  assert.equal(
+    composeOutfitText('long black hair', 'completely nude, wearing no clothing'),
+    'long black hair, completely nude, wearing no clothing',
+  );
+  // 只有一边时不产生多余逗号
+  assert.equal(composeOutfitText('long black hair', ''), 'long black hair');
+  assert.equal(composeOutfitText('', 'a red coat'), 'a red coat');
+});
+
+test('身体是五套共用的单一真源（注入文本各自以同一段身体开头）', () => {
+  const BODY = makeChar();
+  const list = listSceneOutfits(CID);
+  assert.equal(new Set(list.map(o => String(o.body).trim())).size, 1, 'body 应只有一份');
+  for (const o of list) assert.ok(o.text.startsWith(BODY), `${o.scene} 的注入文本应以身体开头`);
+  cleanup();
+});
+
+test('睡眠硬规则优先于日程标注的裸体；裸体只在被标注的时段生效', () => {
+  makeChar();
+  const sched = [
+    { startTime: '00:00', endTime: '07:00', activity: '睡觉', location: '自家卧室', replyDelay: -1, outfit: '裸体' },
+    { startTime: '07:00', endTime: '08:00', activity: '淋浴', location: '自家浴室', replyDelay: 0, outfit: '裸体' },
+    { startTime: '08:00', endTime: '09:00', activity: '在家', location: '自家客厅', replyDelay: 0, outfit: '居家服' },
+    { startTime: '09:00', endTime: '18:00', activity: '上班', location: '公司', replyDelay: 0, outfit: '工作装' },
+  ];
+  db.prepare(`INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
+    VALUES (?, date('now','localtime'), ?)`).run(CID, JSON.stringify(sched));
+
+  // 睡眠段即使日程标了裸体，也必须穿睡衣（硬规则）
+  assert.equal(atHour(2)?.scene, 'sleep', '02:00 应被睡眠硬规则覆盖为睡衣');
+  assert.equal(atHour(7)?.scene, PRIVATE_SCENE, '07:00 淋浴应为裸体');
+  assert.equal(atHour(8)?.scene, 'home', '08:00 洗完后应为居家');
+  assert.equal(atHour(12)?.scene, 'work', '12:00 上班应为常服');
+  cleanup();
+});
+
+test('无日程时兜底不落裸体（否则角色会上街裸体）', () => {
+  makeChar();
+  db.prepare('DELETE FROM daily_schedules WHERE character_id = ?').run(CID);
+  const fb = getSceneOutfitForNow(CID, new Date());
+  assert.ok(fb, '应有兜底结果');
+  assert.notEqual(fb.scene, PRIVATE_SCENE, '兜底不得落到裸体');
+  cleanup();
+});
+
+test('换装点充足时直接放行 —— 不触发修复（否则每次生成都白跑一次 LLM）', async () => {
+  makeChar();
+  const good = [
+    { startTime: '00:00', endTime: '07:00', activity: '睡觉', location: '自家卧室', replyDelay: -1, outfit: '睡衣' },
+    { startTime: '07:00', endTime: '08:00', activity: '起床', location: '自家浴室', replyDelay: 0, outfit: '居家服' },
+    { startTime: '08:00', endTime: '12:00', activity: '上班', location: '公司', replyDelay: 0, outfit: '工作装' },
+    { startTime: '12:00', endTime: '13:00', activity: '回家午饭', location: '自家客厅', replyDelay: 0, outfit: '居家服' },
+    { startTime: '13:00', endTime: '18:00', activity: '再出门', location: '公司', replyDelay: 0, outfit: '工作装' },
+    { startTime: '19:00', endTime: '22:00', activity: '回家', location: '自家客厅', replyDelay: 0, outfit: '居家服' },
+  ];
+  const r = await ensureOutfitAnnotations(good, CID);
+  assert.equal(r.repaired, false);
+  assert.equal(r.reason, 'ok');
+  assert.equal(r.schedule.length, good.length, '放行时不应改动原数组');
+  cleanup();
+});
+
+// ─────────────────────────────────────────────────────────
+// 提示词质量：世界观例句段裁剪
+// ─────────────────────────────────────────────────────────
+
+test('adaptWorldText：裁掉「## 人们的行为」整段，保留规则性章节', () => {
+  const src = [
+    '# 世界', '',
+    '## 深层逻辑', '这条规则必须保留。', '',
+    '## 人们的行为', '锅比我会撑，你比我敢写。', '报数报到三十七了。', '',
+    '## 社会基调', '这条也要保留。',
+  ].join('\n');
+  const out = adaptWorldText(src);
+  assert.ok(!out.includes('锅比我会撑'), '例句段应被裁掉');
+  assert.ok(!out.includes('报数报到'), '例句段应被裁掉');
+  assert.ok(out.includes('这条规则必须保留'), '规则章节应保留');
+  assert.ok(out.includes('这条也要保留'), '社会基调应保留');
+});
+
+test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
+  const src = '# 世界\n\n## 深层逻辑\n只这一节。\n';
+  assert.equal(adaptWorldText(src), src);
+});
+
+// ─────────────────────────────────────────────────────────
+// 地图页：导出必须递归（任意层级 + 任意层的生活地点）
+// ─────────────────────────────────────────────────────────
+
+test('exportMarkdown：支持任意层级，且导出非叶节点自己带的生活地点', () => {
+  const mid = createMap({ name: '__zz_regress_map', note: '回归测试' }).id;
+  try {
+    const l1 = addPlace(mid, { name: '一级' });
+    const l2 = addPlace(mid, { parentId: l1.place.id, name: '二级' });
+    const l3 = addPlace(mid, { parentId: l2.place.id, name: '三级' });
+    const l4 = addPlace(mid, { parentId: l3.place.id, name: '四级' });
+    addPlace(mid, { parentId: l4.place.id, name: '五级' });
+    // 生活地点挂在**子地区**上（该节点本身是条街/市集，没有下级）——
+    // 这正是原先硬编码三层循环时会被丢掉的情形
+    upsertPlace(l2.place.id, { pois: [{ name: '续命一刻', type: '餐饮', blurb: '早八咖啡' }] });
+
+    const md = exportMarkdown(mid);
+    assert.ok(md.includes('一级') && md.includes('二级') && md.includes('三级'), '前三层应导出');
+    assert.ok(md.includes('四级') && md.includes('五级'), '第 4、5 层也应导出（原为硬编码三层，会丢）');
+    assert.ok(md.includes('续命一刻'), '子地区自己的生活地点应导出（原会丢）');
+
+    // 删除父节点应级联删掉整棵子树
+    deletePlace(l1.place.id);
+    assert.equal(getDb().prepare('SELECT COUNT(*) n FROM world_map_places WHERE map_id = ?').get(mid).n, 0);
+  } finally {
+    deleteMap(mid);
+  }
+});
