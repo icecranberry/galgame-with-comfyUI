@@ -85,7 +85,21 @@
              主按钮 = 刷新**当前范围**（选中某个媒体就只刷它，选「全部」则随机抽一个）；
              右侧箭头 = 展开面板，**直接指定要刷新的那个媒体**。
              两种形态的产物格式差别很大，所以面板里逐个媒体列出，避免刷错源头。 -->
-        <div v-if="activeCategory !== 'traditional'" class="refresh-group">
+        <!-- 数字报刊形态：顶栏换成「出刊」——
+             对期刊型媒体来说"刷新一批帖子"没有意义，真正要做的是「出一刊」。
+             当天已出过不会重复出（后端直接返回那一期），会提示并允许再加刊。 -->
+        <linshe-button
+          v-if="activeCategory !== 'traditional' && activeIsPortal"
+          class="btn-refresh" variant="primary" :loading="publishing"
+          :title="`出一刊：《${outletNameOf(activeOutlet)}》`"
+          @click="onPublish"
+        >
+          <svg v-if="!publishing" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
+            <path d="M4 19V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v14"/><path d="M4 19h16"/><path d="M8 7h6M8 11h6"/>
+          </svg>{{ publishing ? '出刊中…' : '出刊' }}
+        </linshe-button>
+
+        <div v-if="activeCategory !== 'traditional' && !activeIsPortal" class="refresh-group">
           <linshe-button
             class="btn-refresh" variant="primary" :loading="refreshing"
             :title="refreshScopeHint"
@@ -279,7 +293,7 @@
     </div>
 
     <!-- 板块筛选（选中某个媒体后才出现） -->
-    <div v-if="activeCategory !== 'traditional' && boards.length" class="board-bar">
+    <div v-if="activeCategory !== 'traditional' && boards.length && !activeIsPortal" class="board-bar">
       <linshe-button
         v-for="b in boardChips"
         :key="b.id ?? 'all'"
@@ -290,6 +304,22 @@
         <span class="board-label">{{ b.name }}</span>
         <span class="board-count">{{ b.post_count }}</span>
       </linshe-button>
+    </div>
+
+    <!-- 期号导航（数字报刊专用）—— 与《邻舍日报》的期号切换同口径：
+         最新在前，点某期只看那一期；括号里是「已写块数/总块数」，一眼看出哪期是完整的。 -->
+    <div v-if="activeCategory !== 'traditional' && activeIsPortal && issues.length" class="issue-bar">
+      <linshe-button variant="chip" :active="!activeIssueId" @click="activeIssueId = null">
+        最新<span class="board-count">{{ issues.length }} 期</span>
+      </linshe-button>
+      <linshe-button
+        v-for="it in issues"
+        :key="it.post_id"
+        variant="chip"
+        :active="activeIssueId === it.post_id"
+        :title="it.title"
+        @click="activeIssueId = activeIssueId === it.post_id ? null : it.post_id"
+      >{{ issueChipLabel(it) }}</linshe-button>
     </div>
 
     <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
@@ -667,6 +697,9 @@ async function onCategoryChange(key) {
   activeOutlet.value = null
   activeBoard.value = null
   boards.value = []
+  // 换分类 → 期号筛选与简目一并清掉（否则会带着上一刊的期号去筛）
+  issues.value = []
+  activeIssueId.value = null
   loadError.value = ''
   if (key === 'traditional') { posts.value = []; total.value = 0; return }
   await loadPage(0)
@@ -805,7 +838,81 @@ function isSpecialPost(p) {
   return postKind(p) !== 'feed'
 }
 const feedPosts = computed(() => posts.value.filter(p => !isSpecialPost(p)))
-const specialPosts = computed(() => posts.value.filter(isSpecialPost))
+const specialPosts = computed(() => {
+  const list = posts.value.filter(isSpecialPost)
+  // 期号导航：选了某一期就只看那一期（其余仍在列表里，取消筛选即可回来）
+  if (!activeIssueId.value) return list
+  return list.filter(p => p.id === activeIssueId.value)
+})
+
+/* ── 数字报刊：出刊 + 期号导航 ── */
+
+/** 当前选中的是不是「数字报刊」形态（决定顶栏显示「刷新」还是「出刊」） */
+const activeIsPortal = computed(() => {
+  const o = outlets.value.find(x => x.id === activeOutlet.value)
+  return o?.layout === 'portal'
+})
+
+/** 该刊的期简目（最新在前）—— 往期导航用 */
+const issues = ref([])
+/** 期号导航当前选中的期（null = 全部/最新） */
+const activeIssueId = ref(null)
+
+async function reloadIssues() {
+  if (!activeOutlet.value || !activeIsPortal.value) { issues.value = []; activeIssueId.value = null; return }
+  try {
+    const d = await api.listMediaIssues(activeOutlet.value)
+    issues.value = d.issues || []
+    // 选中那一期若已不在列表（换刊/删帖）→ 回到「最新」
+    if (activeIssueId.value && !issues.value.some(i => i.post_id === activeIssueId.value)) activeIssueId.value = null
+  } catch {
+    issues.value = []
+  }
+}
+
+/**
+ * 出一刊。
+ *
+ * 当天已出过时**不重复出**（后端直接返回那一期）——这里据此提示读者，
+ * 并允许再点一次以「加刊」（force）。两次点击的语义清晰，不会误烧 token。
+ */
+const publishing = ref(false)
+async function onPublish() {
+  if (publishing.value || !activeOutlet.value) return
+  publishing.value = true
+  try {
+    const first = await api.publishMediaIssue(activeOutlet.value, false)
+    if (first.existed) {
+      const ok = window.confirm(
+        `《${outletNameOf(activeOutlet.value)}》今天已经出过第 ${first.issue} 期了。\n\n要再出一期吗？（加刊）`
+      )
+      if (!ok) { toastFn?.(`今天已出第 ${first.issue} 期`, 'info'); return }
+      publishing.value = true
+      const again = await api.publishMediaIssue(activeOutlet.value, true)
+      toastFn?.(`已加刊：第 ${again.issue} 期`, 'success')
+    } else {
+      toastFn?.(`已出刊：第 ${first.issue} 期`, 'success')
+    }
+    // 出刊是同步返回的（正文与配图后台补），立刻重取列表与期简目
+    await reloadAll()
+    await reloadIssues()
+  } catch (err) {
+    console.error('[media] 出刊失败:', err)
+    toastFn?.('出刊失败：' + (err?.message || ''), 'error')
+  } finally {
+    publishing.value = false
+  }
+}
+
+function outletNameOf(id) {
+  return outlets.value.find(o => o.id === id)?.name || '本刊'
+}
+
+/** 期号 chip 的文案：期号 + 已写块数（看得出哪期是完整的） */
+function issueChipLabel(it) {
+  const done = it.written >= it.section_count && it.section_count > 0
+  return `第 ${it.issue} 期${done ? '' : `（${it.written}/${it.section_count}）`}`
+}
 
 /** 版式组件：按 payload 形态挑 */
 const KIND_COMPONENT = { portal: MediaPortal, weekly: MediaWeekly, poster: MediaPoster }
@@ -1048,8 +1155,10 @@ async function onOutletChange(id) {
   if (batchMode.value) exitBatchMode()
   activeOutlet.value = id
   activeBoard.value = null
+  // 换刊 → 期号筛选必须清掉（否则会带着上一刊的期号去筛，列表直接空）
   await reloadBoards()
   await loadPage(0)
+  await reloadIssues()
 }
 
 async function onBoardChange(id) {
@@ -1120,6 +1229,7 @@ async function onRefresh() {
 
 async function reloadAll() {
   await Promise.all([reloadOutlets(), loadPage(0)])
+  await reloadIssues()
 }
 
 // ── SSE ──
@@ -1130,6 +1240,7 @@ onMounted(async () => {
   newspaperStore.startPolling()
   await Promise.all([reloadOutlets(), loadAuto()])
   await loadPage(0)
+  await reloadIssues()
   loading.value = false
 
   // 兜底补图：把上次没出图的帖子补上（生成失败 / 当时 ComfyUI 没开）。
@@ -1456,8 +1567,16 @@ onUnmounted(() => {
   padding: 0 20px 12px;
   flex-shrink: 0;
 }
+/* 期号导航：与板块栏同一位置与节奏（数字报刊用它替代板块栏） */
+.issue-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 20px 12px;
+  flex-shrink: 0;
+}
 .board-label { font-weight: 500; }
-.board-count { font-size: 11px; opacity: 0.7; }
+.board-count { font-size: 11px; opacity: 0.7; margin-left: 5px; }
 
 /* ── 周刊 / 海报：全宽版式列表 ──
    限宽居中 —— 这两类版式是"印刷品"排版，铺满 1920px 会极难读 */

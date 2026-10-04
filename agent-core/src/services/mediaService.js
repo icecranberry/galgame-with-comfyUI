@@ -1143,6 +1143,127 @@ export function normalizeSectionBlocks(raw) {
   return out;
 }
 
+// ── 数字报刊的「出刊」：每日一刊 + 手动出刊 + 期号导航 ─────────────────
+
+/**
+ * 今天这个刊出过了吗（本地日期口径）。
+ *
+ * `media_posts.created_at` 由 SQLite 的 `CURRENT_TIMESTAMP` 写入（**UTC**），
+ * 所以要比"本地今天"就必须两边都用 SQL 的 localtime 换算 —— 保持**同一套基准**。
+ * （踩过：JS 的日期键与 SQL 的 `now` 是两套时间源，跨零点会不一致。）
+ */
+export function hasIssueToday(outletId) {
+  return Boolean(getDb().prepare(`
+    SELECT 1 FROM media_posts
+    WHERE outlet_id = ? AND payload_json IS NOT NULL
+      AND DATE(created_at, 'localtime') = DATE('now', 'localtime')
+    LIMIT 1
+  `).get(outletId));
+}
+
+/** 该刊最新一期的期号（没有则 0） */
+function lastIssueNo(outletId) {
+  const row = getDb().prepare(`
+    SELECT payload_json FROM media_posts
+    WHERE outlet_id = ? AND payload_json IS NOT NULL
+    ORDER BY id DESC LIMIT 1
+  `).get(outletId);
+  return Number(safeParse(row?.payload_json, null)?.issue) || 0;
+}
+
+/**
+ * 出一刊（数字报刊形态专用）。
+ *
+ * @param {number} outletId
+ * @param {{ force?: boolean }} [opts]
+ *   force=false（默认）：**当天已出过就返回那一期**，不重复出（省 token，与《邻舍日报》的 /generate 同口径）
+ *   force=true：就算今天出过也再出一期（读者点「再出一期」加刊）
+ * @returns {Promise<{existed: boolean, post: object, issue: number}>}
+ */
+export async function publishPortalIssue(outletId, { force = false } = {}) {
+  const outlet = getOutlet(outletId);
+  if (!outlet) throw Object.assign(new Error('媒体不存在'), { statusCode: 404 });
+  if (outlet.layout !== 'portal') {
+    throw Object.assign(new Error('这个媒体不是「数字报刊」形态，不能出刊'), { statusCode: 400 });
+  }
+
+  // 当天已出且不强制 → 直接把那一期还回去
+  if (!force && hasIssueToday(outletId)) {
+    const db = getDb();
+    const post = db.prepare(`
+      SELECT * FROM media_posts
+      WHERE outlet_id = ? AND payload_json IS NOT NULL
+        AND DATE(created_at, 'localtime') = DATE('now', 'localtime')
+      ORDER BY id DESC LIMIT 1
+    `).get(outletId);
+    return { existed: true, post, issue: Number(safeParse(post?.payload_json, null)?.issue) || 0 };
+  }
+
+  const post = await generatePortalIssue(outlet);
+  return { existed: false, post, issue: Number(safeParse(post?.payload_json, null)?.issue) || 0 };
+}
+
+/**
+ * 期简目（往期导航用）：最新在前。只取渲染与切期需要的字段，不带正文。
+ */
+export function listPortalIssues(outletId) {
+  const rows = getDb().prepare(`
+    SELECT id, title, created_at, payload_json FROM media_posts
+    WHERE outlet_id = ? AND payload_json IS NOT NULL
+    ORDER BY id DESC LIMIT 200
+  `).all(outletId);
+  return rows.map(r => {
+    const p = safeParse(r.payload_json, null);
+    const sections = Array.isArray(p?.sections) ? p.sections : [];
+    return {
+      post_id: r.id,
+      issue: Number(p?.issue) || 0,
+      title: r.title,
+      created_at: r.created_at,
+      section_count: sections.length,
+      // 有多少块正文已经写过 —— 期号导航上标个进度，一眼看出哪期是完整的
+      written: sections.filter(s => s?.body).length,
+    };
+  }).filter(x => x.issue > 0);
+}
+
+/** 每日出刊的在途守卫（避免同一分钟内被重复触发） */
+let portalIssueInFlight = false;
+
+/**
+ * 每日一刊（挂在调度 tick 里，与《邻舍日报》同一套机制）。
+ *
+ * 自带的克制设计：
+ *  · **每个 tick 最多出一个刊** —— 有多个数字报刊时不会在同一分钟里并发几次 LLM；
+ *    下一个 tick 自然轮到下一个还没出的刊。
+ *  · 当天已出的刊会被跳过（`hasIssueToday`），所以它只是"每天补一次"，重复调用无副作用。
+ *  · 全流程 try/catch —— 出刊失败不能影响调度。
+ *
+ * @returns {Promise<{published: string|null, reason: string}>}
+ */
+export async function maybeGenerateDailyPortalIssues() {
+  if (portalIssueInFlight) return { published: null, reason: 'in-flight' };
+  let outlet = null;
+  try {
+    const db = getDb();
+    const candidates = db.prepare(`
+      SELECT * FROM media_outlets WHERE layout = 'portal' AND enabled = 1 ORDER BY sort_order, id
+    `).all();
+    outlet = candidates.find(o => !hasIssueToday(o.id)) || null;
+    if (!outlet) return { published: null, reason: 'all-done' };
+
+    portalIssueInFlight = true;
+    const post = await generatePortalIssue(outlet);
+    const issue = Number(safeParse(post?.payload_json, null)?.issue) || 0;
+    console.log(`[media] 每日出刊：${outlet.name} 第${issue}期`);
+    return { published: outlet.name, reason: 'published' };
+  } catch (err) {
+    console.error('[media] 每日出刊失败:', err.message);
+    return { published: null, reason: 'error' };
+  } finally {
+    portalIssueInFlight = false;
+  }
+}
 export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATCH_SIZE, withCharacters = true } = {}) {  if (generating) return generating;   // 同一时间只跑一批，避免并发刷爆 LLM
   generating = (async () => {
     const db = getDb();

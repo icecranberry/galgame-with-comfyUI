@@ -2122,6 +2122,19 @@ export function listMediaLayouts() {
   return request('/media/layouts')
 }
 
+/** 某刊的期简目（往期导航用，最新在前） */
+export function listMediaIssues(outletId) {
+  return request(`/media/outlets/${outletId}/issues`)
+}
+
+/**
+ * 出一刊（数字报刊形态专用）。
+ * @param {boolean} [force] false 时「当天已出过」会直接返回那一期；true 则强制再出一期（加刊）
+ */
+export function publishMediaIssue(outletId, force = false) {
+  return request(`/media/outlets/${outletId}/issue`, { method: 'POST', body: { force } })
+}
+
 export function createMediaOutlet(body) {
   return request('/media/outlets', { method: 'POST', body })
 }

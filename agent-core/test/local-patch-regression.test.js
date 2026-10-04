@@ -25,6 +25,7 @@ import {
 } from '../src/services/outfitScene.js';
 import {
   OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
+  publishPortalIssue, listPortalIssues, hasIssueToday,
 } from '../src/services/mediaService.js';
 import { getLocalDateKey, shiftDateKey } from '../src/utils/localDate.js';
 
@@ -280,6 +281,93 @@ test('媒体形态：可改，且列表接口带回 layout（前端据此选渲�
     assert.equal(row.layout, 'portal');
   } finally {
     if (id) { try { deleteOutlet(id); } catch { } }
+  }
+});
+
+// ─────────────────────────────────────────────────────────
+// 数字报刊：出刊 / 每日一刊 / 期简目
+// ─────────────────────────────────────────────────────────
+
+test('出刊：非「数字报刊」形态拒绝出刊，不静默什么都不做', async () => {
+  let id = null;
+  try {
+    const o = createOutlet({ name: '__zz_issue_feed', prompt: '测试提示词', layout: 'feed' });
+    id = o.id;
+    await assert.rejects(() => publishPortalIssue(id), /不是「数字报刊」形态/);
+  } finally {
+    if (id) { try { deleteOutlet(id); } catch { } }
+  }
+});
+
+test('出刊：媒体不存在时报 404 语义，而不是崩掉', async () => {
+  await assert.rejects(() => publishPortalIssue(99999999), /媒体不存在/);
+});
+
+test('期简目：只包含有期号的门户帖，且最新在前', () => {
+  // 直接用 SQL 造两条门户帖与一条普通帖，核对 listPortalIssues 的过滤与排序
+  const db = getDb();
+  const outlet = createOutlet({ name: '__zz_issue_list', prompt: '测试提示词', layout: 'portal' });
+  const mk = (issue, title, written) => db.prepare(`
+    INSERT INTO media_posts (outlet_id, batch_id, title, content, tags_json,
+      author_type, author_name, likes, views, comments_json, payload_json, image_status)
+    VALUES (?, 'b', ?, '', '[]', 'anonymous', 'x', 0, 0, '[]', ?, 'done')
+  `).run(outlet.id, title, JSON.stringify({
+    portal: true, issue, title, lead: '', views: 1,
+    sections: [
+      { key: 'a', name: 'A', lead: '', image: null, body: written ? [{ type: 'p', text: 'x' }] : null },
+      { key: 'b', name: 'B', lead: '', image: null, body: null },
+    ],
+    credits: {},
+  }));
+  try {
+    mk(1, '第一期', true);
+    mk(2, '第二期', false);
+    // 一条没有期号的（不该被列进来）
+    db.prepare(`
+      INSERT INTO media_posts (outlet_id, batch_id, title, content, tags_json,
+        author_type, author_name, likes, views, comments_json, payload_json, image_status)
+      VALUES (?, 'b', '无期号', '', '[]', 'anonymous', 'x', 0, 0, '[]', ?, 'done')
+    `).run(outlet.id, JSON.stringify({ portal: true, title: 'x', sections: [] }));
+
+    const list = listPortalIssues(outlet.id);
+    assert.equal(list.length, 2, '只列出有期号的那两条');
+    assert.deepEqual(list.map(x => x.issue), [2, 1], '最新在前');
+    assert.equal(list[0].written, 0, '第二期一块正文都没写');
+    assert.equal(list[1].written, 1, '第一期写了 1 块');
+    assert.equal(list[0].section_count, 2);
+    assert.ok(list[0].post_id > list[1].post_id);
+  } finally {
+    db.prepare('DELETE FROM media_posts WHERE outlet_id = ?').run(outlet.id);
+    try { deleteOutlet(outlet.id); } catch { }
+  }
+});
+
+test('每日一刊的去重键：当天已出过就判定为「无需出刊」', () => {
+  /**
+   * 这里**刻意不调 maybeGenerateDailyPortalIssues()** —— 那个函数在"今天还没出"时
+   * 会真的出一刊（调 LLM + 写库），测试不该有这种副作用。
+   * 改为直接验它的判据 `hasIssueToday`：这就是"每日一刊"不重复出刊的全部依据。
+   */
+  const db = getDb();
+  const outlet = createOutlet({ name: '__zz_daily_issue', prompt: '测试提示词', layout: 'portal' });
+  try {
+    assert.equal(hasIssueToday(outlet.id), false, '还没出过 → 该出刊');
+
+    // created_at 走 SQLite 的 CURRENT_TIMESTAMP（UTC），判定里两边都用 localtime 换算 → 算作今天
+    db.prepare(`
+      INSERT INTO media_posts (outlet_id, batch_id, title, content, tags_json,
+        author_type, author_name, likes, views, comments_json, payload_json, image_status)
+      VALUES (?, 'b', '第1期', '', '[]', 'anonymous', 'x', 0, 0, '[]', ?, 'done')
+    `).run(outlet.id, JSON.stringify({ portal: true, issue: 1, title: '第1期', sections: [] }));
+
+    assert.equal(hasIssueToday(outlet.id), true, '今天已出过 → 不再出刊（这就是"每日一刊"的去重）');
+
+    // 把日期改到前天 → 又该出刊了（跨天恢复）
+    db.prepare(`UPDATE media_posts SET created_at = DATETIME('now', '-2 days') WHERE outlet_id = ?`).run(outlet.id);
+    assert.equal(hasIssueToday(outlet.id), false, '到了新的一天 → 重新可出刊');
+  } finally {
+    db.prepare('DELETE FROM media_posts WHERE outlet_id = ?').run(outlet.id);
+    try { deleteOutlet(outlet.id); } catch { }
   }
 });
 

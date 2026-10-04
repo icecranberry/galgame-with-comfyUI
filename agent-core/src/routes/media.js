@@ -15,6 +15,7 @@ import {
   cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
+  publishPortalIssue, listPortalIssues,
   generatePortalSection,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
@@ -78,6 +79,28 @@ router.get('/outlets/:id/boards', (req, res) => {
     const id = Number(req.params.id);
     if (!getOutlet(id)) return res.status(404).json({ error: '媒体不存在' });
     res.json({ boards: listBoards(id) });
+  } catch (err) { fail(res, err); }
+});
+
+// GET /api/media/outlets/:id/issues — 该刊的期简目（往期导航用，最新在前）
+router.get('/outlets/:id/issues', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!getOutlet(id)) return res.status(404).json({ error: '媒体不存在' });
+    res.json({ issues: listPortalIssues(id) });
+  } catch (err) { fail(res, err); }
+});
+
+/**
+ * POST /api/media/outlets/:id/issue — 出一刊（数字报刊形态专用）
+ * Body: { force?: boolean }
+ *   不带 force：当天已出过就直接返回那一期（省 token，与《邻舍日报》同口径）
+ *   force=true：今天出过也再出一期（读者点「再出一期」加刊）
+ */
+router.post('/outlets/:id/issue', async (req, res) => {
+  try {
+    const r = await publishPortalIssue(Number(req.params.id), { force: req.body?.force === true });
+    res.json(r);
   } catch (err) { fail(res, err); }
 });
 
