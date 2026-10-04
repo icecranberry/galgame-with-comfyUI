@@ -23,17 +23,17 @@
 ```json
 {
   "schema": "tavernweave/progress-state/v1",
-  "revision": 0,
+  "revision": 2,
   "projectId": "linshe-local-patch",
   "designRevision": 0,
   "baselineId": "scope-1",
   "handoff": {
-    "currentStep": "看板已建立，等待驾驶员确认首版范围",
-    "nextGate": "驾驶员确认范围（baseline.confirmed 置 true 并登记依据）",
+    "currentStep": "已完成 automated 检查与 browser 浏览器验收两轮，结果已回写看板",
+    "nextGate": "驾驶员验收（driver）：确认这些功能是否符合预期",
     "openRisks": [
       "邻舍-local 工具箱未跟踪且未进 .gitignore：更新流程不覆盖它，但也不会进快照",
-      "新功能的浏览器验收与驾驶员验收尚未系统登记，多数验收门仍为 pending",
-      "二相乐园示例地图已导入，但「珠星集团总部大楼」等原有嵌套尚未重组为多层结构"
+      "门户态帖（payload_json）此前一条都没生成过 —— 两层生成已由一次真实出刊验证，但仍需你在界面上实际出一期确认观感",
+      "二相乐园示例地图已导入，「珠星集团总部大楼」等原有嵌套尚未重组为多层结构"
     ],
     "feedbackRefs": []
   },
@@ -61,8 +61,14 @@
             },
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
@@ -83,8 +89,14 @@
           "gates": [
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
@@ -193,8 +205,10 @@
           "gates": [
             {
               "kind": "automated",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-检查记录-第2轮.md"
+              ]
             },
             {
               "kind": "driver",
@@ -213,8 +227,14 @@
           "gates": [
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
@@ -255,8 +275,10 @@
           "gates": [
             {
               "kind": "automated",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-检查记录-第2轮.md"
+              ]
             },
             {
               "kind": "driver",
@@ -295,8 +317,10 @@
           "gates": [
             {
               "kind": "automated",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-检查记录-第2轮.md"
+              ]
             },
             {
               "kind": "driver",
@@ -315,8 +339,14 @@
           "gates": [
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
@@ -334,8 +364,14 @@
           "gates": [
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
@@ -362,8 +398,10 @@
           "gates": [
             {
               "kind": "automated",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-检查记录-第2轮.md"
+              ]
             },
             {
               "kind": "driver",
@@ -382,8 +420,14 @@
           "gates": [
             {
               "kind": "browser",
-              "status": "pending",
-              "evidence": []
+              "status": "passed",
+              "evidence": [
+                "docs/验证记录/2026-10-04-本地补丁-浏览器验收-第2轮.md",
+                "docs/验证记录/截图/地图页-缩进树与详情.png",
+                "docs/验证记录/截图/外观分层-身体与五态.png",
+                "docs/验证记录/截图/网络页-分类与批量操作.png",
+                "docs/验证记录/截图/归档-日程页分类栏.png"
+              ]
             },
             {
               "kind": "driver",
