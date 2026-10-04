@@ -13,7 +13,7 @@
 import { getDb, getWorldSetting, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
-import { getLocalDateKey } from '../utils/localDate.js';
+import { getLocalDateKey, shiftDateKey } from '../utils/localDate.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
@@ -628,10 +628,15 @@ export function snapshotTodaySchedule(characterId) {
   `).run(characterId, today, template.schedule_json);
   reapplyActiveEventSchedule(characterId, db);
 
-  // 清理超过 2 天的旧快照
+  // 清理超过 2 天的旧快照。
+  // ⚠ 基准必须用**上面同一个 today**（由 getLocalDateKey 算出），
+  //   不能写 SQL 的 `DATE('now','localtime','-2 days')` —— 那是**另一套时间源**：
+  //   日期键走 JS 的 Date（测试里会被 mock），SQL 的 now 读真实时钟，
+  //   两者跨零点/被 mock 时会不一致。实测：真实日期比 JS 日期快 3 天时，
+  //   刚插入的当天快照会被判成"过期两天以上"当场删掉（eventSchedule 整组 14 项失败）。
   db.prepare(
-    `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', 'localtime', '-2 days')`
-  ).run(characterId);
+    `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < ?`
+  ).run(characterId, shiftDateKey(today, -2));
 
   return db.prepare('SELECT schedule_json FROM daily_schedules WHERE character_id = ? AND schedule_date = ?')
     .get(characterId, today).schedule_json;

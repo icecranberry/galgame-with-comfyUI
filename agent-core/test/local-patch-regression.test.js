@@ -26,6 +26,7 @@ import {
 import {
   OUTLET_LAYOUTS, createOutlet, updateOutlet, deleteOutlet, getOutlet, listOutlets,
 } from '../src/services/mediaService.js';
+import { getLocalDateKey, shiftDateKey } from '../src/utils/localDate.js';
 
 const db = getDb();
 const CID = 99901;   // 专用测试角色，避免与真实数据相撞
@@ -283,8 +284,29 @@ test('媒体形态：可改，且列表接口带回 layout（前端据此选渲�
 });
 
 // ─────────────────────────────────────────────────────────
-// 地图页：导出必须递归（任意层级 + 任意层的生活地点）
+// 日期算术：必须与 getLocalDateKey 同源（别用 SQL 的 now）
 // ─────────────────────────────────────────────────────────
+
+test('shiftDateKey：纯日历算术，跨月/跨年/闰日都正确', () => {
+  assert.equal(shiftDateKey('2026-10-05', -2), '2026-10-03');
+  assert.equal(shiftDateKey('2026-10-01', -2), '2026-09-29', '跨月');
+  assert.equal(shiftDateKey('2026-01-01', -2), '2025-12-30', '跨年');
+  assert.equal(shiftDateKey('2024-03-01', -1), '2024-02-29', '闰年 2 月');
+  assert.equal(shiftDateKey('2026-10-05', 0), '2026-10-05');
+  assert.equal(shiftDateKey('2026-10-05', 30), '2026-11-04');
+  // 非法输入原样返回，不抛错
+  assert.equal(shiftDateKey('', -2), '');
+  assert.equal(shiftDateKey('不是日期', -2), '不是日期');
+});
+
+test('shiftDateKey：不受 fake timers 影响（只用 UTC 算术，不读当前时间）', (t) => {
+  // 与 eventSchedule 那组测试同样的场景：Date 被 mock 到别的日期
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-02T03:00:00').getTime() });
+  // 若实现里读了"当前时间"或本机时区，这里就会算错
+  assert.equal(shiftDateKey('2026-10-02', -2), '2026-09-30');
+  // 且它不依赖 getLocalDateKey 的 mock 行为
+  assert.equal(getLocalDateKey(), '2026-10-02', '（对照）getLocalDateKey 确实受 mock 影响');
+});
 
 test('exportMarkdown：支持任意层级，且导出非叶节点自己带的生活地点', () => {
   const mid = createMap({ name: '__zz_regress_map', note: '回归测试' }).id;

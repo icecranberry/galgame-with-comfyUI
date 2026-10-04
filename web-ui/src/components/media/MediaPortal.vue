@@ -1,58 +1,76 @@
 <template>
-  <!-- 门户版式（数字报刊·两层生成）
-       横版卡片网格：出刊即可读（文字先落库），配图由后台串行补（补一张亮一张）。
-       点某块右下角 › 才生成该块正文 —— 用户只为真正想看的那几块付第二次 LLM。
-       纯 CSS 排版，文字可选中、可随数据变。 -->
+  <!-- 门户版式（数字报刊 · 两层生成）
+       ── 对齐游戏内原设 UI ──
+       左侧**竖排章节**（深色条 + 当前项白色浮起 pill），右侧**一整条可滚动的长正文**，
+       图片**内嵌**在正文流里（首个段落后），而不是卡片缩略图。
+
+       ── 成本设计保持不变 ──
+       出刊只跑 1 次短 LLM（标题 + 各块 name/lead），正文按块**点开才生成**；
+       配图由后台串行补（补一张亮一张）。未生成的块在正文流里显示占位 + 生成按钮，
+       所以左栏能一眼看出哪几块还没写。 -->
   <article class="portal" v-if="data">
-    <!-- 刊头 -->
+    <!-- ── 刊头 ── -->
     <header class="po-head">
-      <div class="po-head-left">
-        <span class="po-brand">{{ post.outlet_name || '数字报刊' }}</span>
+      <div class="po-head-meta">
         <span class="po-issue">第 {{ data.issue }} 期</span>
+        <span class="po-brand">{{ post.outlet_name || '数字报刊' }}</span>
       </div>
       <h1 class="po-title">{{ data.title }}</h1>
       <p v-if="data.lead" class="po-lead">{{ data.lead }}</p>
     </header>
 
-    <!-- 板块卡片网格：auto-fill 吃满宽屏（旧的 880px 居中单列在 1920 屏两侧各空 520px） -->
-    <div class="po-grid">
-      <div
-        v-for="s in data.sections"
-        :key="s.key"
-        class="po-card"
-        :class="{ 'is-open': openKey === s.key, 'is-loading': loadingKey === s.key }"
-      >
-        <div class="po-thumb" @click.stop="s.image && emit('zoom', s.image)">
-          <img
-            v-if="s.image"
-            :src="s.image"
-            alt=""
-            loading="lazy"
-            class="po-thumb-img"
-            title="点击放大"
-          />
-          <div v-else class="po-thumb-ph">
-            <span class="po-spinner"></span>
-            <span class="po-thumb-ph-text">配图中…</span>
-          </div>
-        </div>
+    <div class="po-main">
+      <!-- ── 左：竖排章节 ── -->
+      <aside class="po-nav" aria-label="章节">
+        <button
+          v-for="s in sections"
+          :key="s.key"
+          type="button"
+          class="po-nav-item"
+          :class="{ active: activeKey === s.key, done: !!bodyOf(s) }"
+          :title="s.name"
+          @click="goSection(s.key)"
+        >
+          <span class="po-nav-name">{{ s.name }}</span>
+          <span class="po-nav-dot" :class="{ on: !!bodyOf(s) }" aria-hidden="true"></span>
+        </button>
+      </aside>
 
-        <div class="po-card-body">
-          <h3 class="po-card-name">{{ s.name }}</h3>
-          <p class="po-card-lead">{{ s.lead }}</p>
+      <!-- ── 右：长滚动正文 ── -->
+      <div class="po-read" ref="readEl" @scroll.passive="onScroll">
+        <section
+          v-for="s in sections"
+          :key="s.key"
+          class="po-sec"
+          :data-key="s.key"
+        >
+          <!-- 黄色横幅章节头（游戏原设样式） -->
+          <h2 class="po-banner"><span class="po-banner-text">{{ s.name }}</span></h2>
 
-          <!-- 展开后的正文（块数组渲染） -->
-          <div v-if="openKey === s.key" class="po-blocks">
-            <template v-for="(b, i) in (s.body || [])" :key="i">
+          <p v-if="s.lead" class="po-sec-lead">{{ s.lead }}</p>
+
+          <!-- 已生成正文：按块渲染，图片内嵌在首个段落后 -->
+          <template v-if="bodyOf(s)">
+            <template v-for="(b, i) in withImage(s)" :key="i">
               <p v-if="b.type === 'p'" class="po-p">{{ b.text }}</p>
+
+              <!-- 内嵌图：独占一行、居中、圆角，点开可放大 -->
+              <figure v-else-if="b.type === '__img'" class="po-figure">
+                <img :src="b.src" alt="" loading="lazy" @click="emit('zoom', b.src)" title="点击放大" />
+              </figure>
 
               <div v-else-if="b.type === 'qa'" class="po-qa">
                 <p class="po-qa-q">
-                  <span v-if="b.asker" class="po-qa-asker">@{{ b.asker }}</span>{{ b.q }}
+                  <span class="po-qa-q-label">Q：</span>{{ b.q }}
+                  <span v-if="b.asker" class="po-qa-asker">——@{{ b.asker }}</span>
                 </p>
-                <div v-for="(a, j) in b.answers" :key="j" class="po-qa-a">
-                  <span class="po-qa-speaker">{{ a.speaker }}</span>
-                  <span class="po-qa-text">{{ a.text }}</span>
+                <div class="po-qa-body">
+                  <p class="po-qa-a-label">A：</p>
+                  <div class="po-qa-answers">
+                    <p v-for="(a, j) in b.answers" :key="j" class="po-qa-a">
+                      <span class="po-qa-speaker">@{{ a.speaker }}：</span>{{ a.text }}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -73,7 +91,7 @@
                   <span v-if="b.stat" class="po-replies-stat">{{ b.stat }}</span>
                 </p>
                 <p v-for="(r, j) in b.replies" :key="j" class="po-reply">
-                  <span class="po-reply-author">{{ r.author }}</span>{{ r.text }}
+                  <span class="po-reply-author">{{ r.author }}：</span>{{ r.text }}
                 </p>
               </div>
 
@@ -81,35 +99,42 @@
                 <p v-for="(l, j) in b.lines" :key="j">{{ l }}</p>
               </div>
             </template>
-          </div>
+          </template>
 
-          <!-- 展开 / 收起 按钮：右下角，符合「点具体板块的右下角 ›」的设计 -->
-          <button
-            type="button"
-            class="po-more"
-            :disabled="loadingKey === s.key"
-            @click.stop="toggleSection(s)"
-          >
-            <template v-if="loadingKey === s.key">
-              <span class="po-spinner"></span> 生成中…
-            </template>
-            <template v-else-if="openKey === s.key">收起 ‹</template>
-            <template v-else>{{ s.body ? '展开' : '看这块' }} ›</template>
-          </button>
-        </div>
+          <!-- 未生成正文：占位 + 生成按钮（图可能已经补好了，一并显示） -->
+          <template v-else>
+            <figure v-if="s.image" class="po-figure">
+              <img :src="s.image" alt="" loading="lazy" @click="emit('zoom', s.image)" title="点击放大" />
+            </figure>
+            <div class="po-pending">
+              <button
+                type="button"
+                class="po-gen"
+                :disabled="!!loadingKey"
+                @click="loadSection(s)"
+              >
+                <template v-if="loadingKey === s.key">
+                  <span class="po-spinner"></span>正在写这一块…
+                </template>
+                <template v-else>写这一块 ›</template>
+              </button>
+              <p class="po-pending-hint">正文按块生成，只为真正想看的那几块花这一次。</p>
+            </div>
+          </template>
+        </section>
+
+        <!-- 落款 -->
+        <footer class="po-credits">
+          <span v-if="data.credits?.reporter">记者：{{ data.credits.reporter }}</span>
+          <span v-if="data.credits?.editor">编辑：{{ data.credits.editor }}</span>
+        </footer>
       </div>
     </div>
-
-    <!-- 落款 -->
-    <footer class="po-credits">
-      <span v-if="data.credits?.reporter">记者：{{ data.credits.reporter }}</span>
-      <span v-if="data.credits?.editor">编辑：{{ data.credits.editor }}</span>
-    </footer>
   </article>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import * as api from '../../api/index.js'
 
 const props = defineProps({
@@ -117,30 +142,42 @@ const props = defineProps({
   post: { type: Object, required: true },
 })
 /** 点图片 → 交给父级开 lightbox（与《邻舍日报》详情同口径） */
-const emit = defineEmits(['zoom', 'section-loaded'])
+const emit = defineEmits(['zoom', 'section-loaded', 'section-error'])
 
 const data = computed(() => props.post?.payload || null)
-
-// 展开的是哪一块、正在加载的是哪一块
-const openKey = ref('')
-const loadingKey = ref('')
-const localBodies = ref({})   // 本次会话内已取回的正文（与 payload 合并，避免父级不刷新时看不到）
-
-/** 带本地缓存的板块列表：父级传下来的 payload 优先，其次用本地已取回的正文 */
 const sections = computed(() => data.value?.sections || [])
+
+/** 本次会话内已取回的正文（与 payload 合并，避免父级不刷新时看不到） */
+const localBodies = ref({})
+const loadingKey = ref('')
+const activeKey = ref('')
+const readEl = ref(null)
+
+/** 正文：payload 里的优先，其次用本次取回的 */
 function bodyOf(s) {
-  return s.body || localBodies.value[s.key] || null
+  return s?.body || localBodies.value[s?.key] || null
 }
 
-async function toggleSection(s) {
-  if (loadingKey.value) return
-  // 已展开 → 收起
-  if (openKey.value === s.key) { openKey.value = ''; return }
+/**
+ * 把该块的正文块排成渲染序列，并把**图片内嵌进正文流**（首个段落后）。
+ *
+ * 游戏原设里配图是夹在段落之间的，不是独立缩略图；
+ * 若这块没有段落（全是问答/榜单），就放在正文开头，保证图仍有位置。
+ */
+function withImage(s) {
+  const blocks = bodyOf(s) || []
+  const out = []
+  let placed = false
+  for (const b of blocks) {
+    out.push(b)
+    if (!placed && b.type === 'p' && s.image) { out.push({ type: '__img', src: s.image }); placed = true }
+  }
+  if (!placed && s.image) out.splice(0, 0, { type: '__img', src: s.image })
+  return out
+}
 
-  openKey.value = s.key
-  // 已有正文（payload 里的，或本次取回的）→ 直接展开，不再请求
-  if (bodyOf(s)) return
-
+async function loadSection(s) {
+  if (loadingKey.value || bodyOf(s)) return
   loadingKey.value = s.key
   try {
     const r = await api.generateMediaSection(props.post.id, s.key)
@@ -150,12 +187,42 @@ async function toggleSection(s) {
     }
   } catch (err) {
     console.error('[MediaPortal] 生成板块正文失败:', err)
-    openKey.value = ''
     emit('section-error', { postId: props.post.id, sectionKey: s.key, error: err?.message || '生成失败' })
   } finally {
     loadingKey.value = ''
   }
 }
+
+/** 左栏点击 → 右侧滚到该章（只滚动，不触发生成；生成由正文流里的按钮负责，成本可控） */
+async function goSection(key) {
+  const host = readEl.value
+  if (!host) return
+  const el = host.querySelector(`.po-sec[data-key="${key}"]`)
+  if (!el) return
+  // 相对滚动，别用 scrollIntoView —— 它会把**外层页面**也一起滚走
+  host.scrollTo({ top: el.offsetTop - host.offsetTop, behavior: 'smooth' })
+  activeKey.value = key
+}
+
+/**
+ * 滚动联动左栏高亮：取「已越过视口顶部」的最后一章。
+ * 用「离顶部最近」而不是 IntersectionObserver —— 章节高度差异大，
+ * 观察器在多章同时可见时给出的"当前章"经常不符合直觉。
+ */
+function onScroll() {
+  const host = readEl.value
+  if (!host) return
+  const top = host.scrollTop + host.offsetTop + 8
+  let cur = sections.value[0]?.key || ''
+  for (const s of sections.value) {
+    const el = host.querySelector(`.po-sec[data-key="${s.key}"]`)
+    if (el && el.offsetTop <= top) cur = s.key
+  }
+  if (cur !== activeKey.value) activeKey.value = cur
+}
+
+/** 父级刷新 payload 后，保证高亮不空 */
+nextTick(() => { activeKey.value = sections.value[0]?.key || '' })
 </script>
 
 <style scoped>
@@ -164,6 +231,8 @@ async function toggleSection(s) {
   --po-ink: #23253f;
   --po-accent: #c2452f;
   --po-line: #e2ddd6;
+  --po-amber: #ffcf3f;      /* 章节横幅黄（对齐游戏原设） */
+  --po-amber-ink: #7a4a00;
   background: #fbf8f4;
   color: var(--po-ink);
   border-radius: 14px;
@@ -172,156 +241,236 @@ async function toggleSection(s) {
 }
 
 /* ── 刊头 ── */
-.po-head {
-  padding: 18px 22px 16px;
-  border-bottom: 3px double var(--po-line);
+.po-head { padding: 18px 22px 16px; border-bottom: 3px double var(--po-line); }
+.po-head-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.po-issue {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 2px 8px; border-radius: 4px;
+  background: #efe7dc; color: #6f665f;
+  font-variant-numeric: tabular-nums;
 }
-.po-head-left { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .po-brand {
   font-size: 11.5px; font-weight: 700; letter-spacing: 1px;
   padding: 2px 9px; border-radius: 4px;
   background: var(--po-accent); color: #fff;
 }
-.po-issue { font-size: 12px; color: #7d746c; font-variant-numeric: tabular-nums; }
-.po-title {
-  margin: 0 0 6px;
-  font-size: 25px; font-weight: 800; line-height: 1.3;
-  letter-spacing: 0.3px;
-}
+.po-title { margin: 0 0 6px; font-size: 25px; font-weight: 800; line-height: 1.3; letter-spacing: 0.3px; }
 .po-lead { margin: 0; font-size: 13px; line-height: 1.7; color: #5f5851; }
 
-/* ── 卡片网格：auto-fill 吃满宽屏（旧版 880px 居中单列，1920 屏两侧各空 520px）── */
-.po-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  gap: 14px;
-  padding: 16px 22px;
-}
-.po-card {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--po-line);
-  border-radius: 12px;
-  overflow: hidden;
-  background: #fff;
-  transition: box-shadow 0.18s, border-color 0.18s;
-}
-.po-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); }
-/* ★ 展开时**就地展开**（不跨列）：
-   原先写的是 `grid-column: 1 / -1`（跨整行），结果缩略图被拉到整行宽、
-   配图占位区变成一大片空白，视觉很糟。改成就地展开，
-   正文内部用两栏排版来保证可读性（见 .po-blocks 的 column-count）。 */
-.po-card.is-open { border-color: var(--po-accent); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.10); }
-.po-card.is-loading { opacity: 0.85; }
+/* ── 两栏主体：左竖排 + 右长滚动 ── */
+.po-main { display: flex; align-items: stretch; min-height: 0; }
 
-/* ── 缩略图（出刊时为空位，后台补一张亮一张）── */
-/* 缩略图（出刊时为空位，后台补一张亮一张）
-   展开时压矮，让正文成为主角 —— 否则 16:9 的图占掉半屏，正文要滚很久才看到 */
-.po-thumb { position: relative; aspect-ratio: 16 / 9; background: #efe9e2; overflow: hidden; }
-.po-card.is-open .po-thumb { aspect-ratio: 21 / 6; }
-.po-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
-.po-thumb-ph {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
-  color: #9a9089; font-size: 11.5px;
+/* 左：深色竖排章节条（游戏原设） */
+.po-nav {
+  flex: 0 0 208px;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 16px 10px 16px 14px;
+  background: #3b3a3a;
+  overflow-y: auto;
+  /* 自身可滚（章节多时），但不抢主体的滚动 */
+  max-height: 74vh;
 }
+.po-nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: 8px;
+  /* 右侧刻意留出 -10px：当前项要"浮"出深色条，贴着正文区（游戏原设的 popover 感） */
+  margin-right: -10px;
+  padding: 9px 12px;
+  border: none; border-radius: 8px;
+  background: none;
+  color: #e6e2de;
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  line-height: 1.45; text-align: left;
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, transform 0.16s;
+  -webkit-tap-highlight-color: transparent;
+}
+.po-nav-item:hover { background: rgba(255, 255, 255, 0.08); }
+/* 当前项：白色浮起 pill + 硬阴影，且向右探出一点 */
+.po-nav-item.active {
+  background: #fff;
+  color: #2a2724;
+  transform: translateX(4px);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+  z-index: 1;
+}
+.po-nav-name {
+  flex: 1; min-width: 0;
+  /* 长标题两行截断（游戏原设里也是省略号） */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.po-nav-dot {
+  flex-shrink: 0;
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+}
+.po-nav-dot.on { background: #7ee0a6; border-color: #7ee0a6; }
+.po-nav-item.active .po-nav-dot { border-color: rgba(0, 0, 0, 0.3); }
+.po-nav-item.active .po-nav-dot.on { background: #1f9d55; border-color: #1f9d55; }
+
+/* 右：一整条长正文，自身滚动（游戏原设的弹窗内滚动） */
+.po-read {
+  flex: 1; min-width: 0;
+  max-height: 74vh;
+  overflow-y: auto;
+  padding: 20px 26px 18px;
+  background: #fff;
+  scroll-behavior: smooth;
+}
+.po-sec { padding-bottom: 6px; }
+.po-sec + .po-sec { margin-top: 22px; }
+
+/* ── 黄色横幅章节头（对齐游戏原设）── */
+.po-banner {
+  position: relative;
+  margin: 0 0 12px;
+  padding: 7px 40px;
+  background: var(--po-amber);
+  color: var(--po-amber-ink);
+  font-size: 15px; font-weight: 800; letter-spacing: 1.5px;
+  text-align: center;
+  /* 两端作出阶梯状装饰块 */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+}
+/* 两端的小方块装饰：实心 + 空心各一，模仿原设的棋盘角 */
+.po-banner::before,
+.po-banner::after {
+  content: '';
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px;
+  background:
+    linear-gradient(var(--po-amber-ink) 0 0) 0 0 / 6px 6px no-repeat,
+    linear-gradient(var(--po-amber-ink) 0 0) 8px 8px / 6px 6px no-repeat;
+  opacity: 0.75;
+}
+.po-banner::before { left: 14px; }
+.po-banner::after { right: 14px; }
+.po-banner-text { position: relative; z-index: 1; }
+.po-sec-lead {
+  margin: 0 0 12px; padding-left: 10px;
+  border-left: 3px solid var(--po-line);
+  font-size: 12.5px; line-height: 1.8; color: #6f665f;
+}
+
+/* ── 正文段落 ── */
+.po-p { margin: 0 0 11px; font-size: 13.5px; line-height: 1.95; text-align: justify; }
+
+/* ── 内嵌图 ── */
+.po-figure { margin: 14px 0 16px; text-align: center; }
+.po-figure img {
+  max-width: 100%; max-height: 320px;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+  cursor: zoom-in;
+  vertical-align: middle;
+}
+
+/* ── 问答块（Q 灰气泡 + A 逐条）── */
+.po-qa { margin: 0 0 16px; }
+.po-qa-q {
+  margin: 0 0 10px; padding: 9px 14px;
+  border-radius: 12px;
+  background: #f2efeb;
+  font-size: 13px; font-weight: 600; line-height: 1.8; color: #4a453f;
+}
+.po-qa-q-label { color: #9a9089; font-weight: 800; margin-right: 2px; }
+.po-qa-asker { display: block; margin-top: 2px; text-align: right; font-size: 12px; font-weight: 400; color: #9a9089; }
+.po-qa-body { padding-left: 4px; }
+.po-qa-a-label { margin: 0 0 6px; font-size: 13px; font-weight: 800; color: #b07a12; }
+.po-qa-answers { display: flex; flex-direction: column; gap: 7px; }
+.po-qa-a { margin: 0; font-size: 13px; line-height: 1.85; color: #3d3833; }
+.po-qa-speaker { font-weight: 700; color: #2f6fb5; }
+
+/* ── 榜单 ── */
+.po-rank { margin: 0 0 16px; }
+.po-rank-title { margin: 0 0 4px; font-size: 13.5px; font-weight: 800; }
+.po-rank-notice { margin: 0 0 8px; font-size: 11.5px; color: #7d746c; line-height: 1.7; }
+.po-rank-row {
+  display: grid; grid-template-columns: 52px 1fr 46px 1fr;
+  gap: 8px; align-items: baseline;
+  padding: 5px 0; border-bottom: 1px solid #f0ebe5; font-size: 12.5px;
+}
+.po-rank-pos { font-weight: 800; color: #b07a12; }
+.po-rank-change { color: var(--po-accent); font-variant-numeric: tabular-nums; }
+.po-rank-bearer { color: #5f5851; }
+
+/* ── 网友评论 ── */
+.po-replies { margin: 0 0 16px; }
+.po-replies-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin: 0 0 8px; font-size: 13.5px; font-weight: 800;
+}
+.po-replies-stat { font-size: 11px; font-weight: 400; color: #8d847c; }
+.po-reply { margin: 0 0 7px; font-size: 13px; line-height: 1.85; color: #3d3833; }
+.po-reply-author { font-weight: 700; color: #2f6fb5; }
+
+/* ── 图注 ── */
+.po-caption { margin: 0 0 14px; }
+.po-caption p { margin: 0 0 5px; font-size: 13px; line-height: 1.85; color: #4a453f; }
+.po-caption p:last-child { margin-bottom: 0; }
+
+/* ── 未生成正文的占位 ── */
+.po-pending {
+  display: flex; flex-direction: column; align-items: center; gap: 7px;
+  margin: 6px 0 4px; padding: 20px;
+  border: 1px dashed var(--po-line); border-radius: 12px;
+  background: #fdfbf8;
+}
+.po-gen {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 16px;
+  border: none; border-radius: 9px;
+  background: var(--po-amber); color: var(--po-amber-ink);
+  font: inherit; font-size: 13px; font-weight: 800;
+  cursor: pointer;
+  transition: filter 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.po-gen:hover:not(:disabled) { filter: brightness(1.05); }
+.po-gen:disabled { opacity: 0.7; cursor: default; }
+.po-pending-hint { margin: 0; font-size: 11.5px; color: #9a9089; }
 .po-spinner {
-  width: 15px; height: 15px; border-radius: 50%;
-  border: 2px solid rgba(194, 69, 47, 0.22); border-top-color: var(--po-accent);
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid rgba(122, 74, 0, 0.25); border-top-color: var(--po-amber-ink);
   animation: po-spin 0.7s linear infinite;
   flex-shrink: 0;
 }
 @keyframes po-spin { to { transform: rotate(360deg); } }
 
-/* ── 卡片文字 ── */
-.po-card-body { display: flex; flex-direction: column; gap: 7px; padding: 12px 14px 12px; flex: 1; }
-.po-card-name { margin: 0; font-size: 15px; font-weight: 700; }
-.po-card-lead { margin: 0; font-size: 12.5px; line-height: 1.75; color: #5f5851; }
-
-/* 展开按钮：右下角 */
-.po-more {
-  display: inline-flex; align-items: center; gap: 5px;
-  align-self: flex-end;
-  margin-top: auto;
-  padding: 4px 11px;
-  border: 1px solid var(--po-line);
-  border-radius: 8px;
-  background: none;
-  color: var(--po-accent);
-  font-family: inherit;
-  font-size: 12px; font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.po-more:hover:not(:disabled) { background: var(--po-accent); color: #fff; border-color: var(--po-accent); }
-.po-more:disabled { opacity: 0.6; cursor: default; }
-
-/* ── 正文块 ── */
-.po-blocks {
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--po-line);
-  display: flex; flex-direction: column; gap: 12px;
-  /* 展开后整行宽，正文按两栏排更接近报纸阅读节奏 */
-  column-count: 2; column-gap: 26px;
-}
-.po-p { margin: 0; font-size: 13px; line-height: 1.85; text-align: justify; break-inside: avoid; }
-
-.po-qa { break-inside: avoid; }
-.po-qa-q {
-  margin: 0 0 6px; font-size: 13px; font-weight: 600; line-height: 1.7;
-  padding-left: 9px; border-left: 3px solid var(--po-accent);
-}
-.po-qa-asker { color: var(--po-accent); margin-right: 5px; font-weight: 700; }
-.po-qa-a { margin: 0 0 5px 12px; font-size: 12.5px; line-height: 1.8; }
-.po-qa-speaker { font-weight: 700; margin-right: 6px; color: #4a453f; }
-
-.po-rank { break-inside: avoid; }
-.po-rank-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; }
-.po-rank-notice { margin: 0 0 6px; font-size: 11.5px; color: #7d746c; line-height: 1.6; }
-.po-rank-row {
-  display: grid; grid-template-columns: 54px 1fr 44px 1fr;
-  gap: 8px; align-items: baseline;
-  padding: 4px 0; border-bottom: 1px solid #f0ebe5; font-size: 12.5px;
-}
-.po-rank-pos { font-weight: 700; }
-.po-rank-change { color: var(--po-accent); font-variant-numeric: tabular-nums; }
-.po-rank-bearer { color: #5f5851; }
-
-.po-replies { break-inside: avoid; }
-.po-replies-head {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-  margin: 0 0 6px; font-size: 13px; font-weight: 700;
-}
-.po-replies-stat { font-size: 11px; font-weight: 400; color: #8d847c; }
-.po-reply { margin: 0 0 4px; font-size: 12.5px; line-height: 1.75; color: #4a453f; }
-.po-reply-author { font-weight: 700; margin-right: 6px; color: var(--po-accent); }
-
-.po-caption { break-inside: avoid; }
-.po-caption p { margin: 0 0 4px; font-size: 13px; line-height: 1.8; }
-.po-caption p:last-child { margin-bottom: 0; }
-
 /* ── 落款 ── */
 .po-credits {
   display: flex; justify-content: flex-end; gap: 18px;
-  padding: 10px 22px;
+  margin: 22px -26px 0; padding: 10px 26px;
   border-top: 1px solid var(--po-line);
-  background: #f5f0ea;
+  background: #faf7f3;
   font-size: 11.5px; color: #6f665f;
 }
 
 /* ── 响应式 ── */
-@media (max-width: 900px) {
-  .po-blocks { column-count: 1; }
+@media (max-width: 860px) {
+  /* 窄屏：左栏改为顶部横向条，右侧正文占满（不宜再并排挤成两窄列） */
+  .po-main { flex-direction: column; }
+  .po-nav {
+    flex: none; flex-direction: row; gap: 6px;
+    max-height: none; padding: 10px;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  .po-nav-item {
+    margin-right: 0; flex-shrink: 0; max-width: 46vw;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .po-nav-item.active { transform: none; }
+  .po-nav-name { -webkit-line-clamp: 1; white-space: nowrap; }
+  .po-read { max-height: 68vh; padding: 16px 16px 14px; }
+  .po-credits { margin: 18px -16px 0; padding: 9px 16px; }
 }
 @media (max-width: 767px) {
   .po-head { padding: 14px 16px 12px; }
   .po-title { font-size: 20px; }
-  .po-grid { grid-template-columns: 1fr; gap: 12px; padding: 12px 16px; }
-  .po-credits { padding: 8px 16px; }
-  /* 窄屏：卡片已展开时不占整行也无所谓（本来就是单列），去掉跨列声明即可 */
-  .po-card.is-open { grid-column: auto; }
+  .po-banner { font-size: 13.5px; padding: 6px 32px; letter-spacing: 1px; }
+  .po-banner::before, .po-banner::after { width: 10px; height: 10px; background-size: 5px 5px, 5px 5px; background-position: 0 0, 5px 5px; }
+  .po-figure img { max-height: 240px; }
+  .po-rank-row { grid-template-columns: 44px 1fr 40px 1fr; font-size: 12px; }
 }
 </style>
