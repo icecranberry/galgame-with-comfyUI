@@ -18,7 +18,7 @@ import { publishUserMoment } from '../services/momentUserPostService.js';
 import { handleUserComment } from '../services/momentCommentService.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE, adaptWorldForMoment } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
 import { startMomentBackfill, stopMomentBackfill, isMomentBackfillRunning } from '../services/momentBackfill.js';
 
@@ -769,7 +769,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   // 3. LLM 生成文案 + 配图提示词
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
+    ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('moments')
@@ -1076,7 +1076,7 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
   const userName = userNickname();
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
+    ? getSystemRulesWithWorld()
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('moments')

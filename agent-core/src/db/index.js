@@ -2559,6 +2559,7 @@ export {
   getSystemRulesWithWorld,
   getGlobalRule,
   getSystemRules,
+  adaptWorldText,
   listWorldSettings,
   getActiveWorldSetting,
   getWorldSettingById,

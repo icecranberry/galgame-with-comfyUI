@@ -193,55 +193,15 @@ export function buildMomentImagePromptNote(prompt) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 世界观裁剪（仅朋友圈/评论链路使用）
+// 世界观裁剪（已下沉到世界观层，见 db/worldRepository.js 的 adaptWorldText）
 // ═══════════════════════════════════════════════════════════
 /**
- * <world_setting> 里的「## 人们的行为」是一整列**氛围例句**（十几条非常生动的场景描写）。
+ * ⚠ 本函数已**下沉**到 `db/worldRepository.js` 的 `adaptWorldText`，并成为
+ * `getSystemRulesWithWorld()` 的**默认行为**（所有链路自动生效，不再需要逐个 opt-in）。
  *
- * 实测（A/B，2026-10-04）：把这一段原样喂给朋友圈生成时，LLM 会把它当成
- * "朋友圈该长什么样"的 few-shot 示范，**直接复读其中的措辞**（锅还开着 / 报数 / 坐到底 …）；
- * 而且复读源就是这个 section —— 即使把日程素材里的描述整段剥掉，模型照样复读。
- * 规则层（"不要照抄设定"）压不过上下文里的生动范例，所以必须在**注入层**做手脚。
+ * 这里保留同名导出只为**向后兼容**（历史调用点与旧文档仍引用这个名字）——
+ * 新代码请直接用 `getSystemRulesWithWorld()`，或从 db 导入 `adaptWorldText`。
  *
- * 注意：只处理这一段；「日常规则」「深层逻辑」「区域设定」等**规则性**章节一律保留，
- * 世界观照样生效——朋友圈需要的是"知道什么是正常的"，不需要"背例句"。
- *
- * @param {string} worldSetting 原始 <world_setting> 文本
- * @param {'strip'|'annotate'|'keep'} mode
- *   - strip    ：整段剔除（默认）
- *   - annotate ：保留内容，但在段首插一行"这是氛围不是台词"的警示
- *   - keep     ：原样返回
+ * 裁剪对象：`<world_setting>` 的「## 人们的行为」整段（十几条氛围例句）。
+ * 裁掉的理由与实测证据见 `worldRepository.adaptWorldText` 的注释。
  */
-const WORLD_BEHAVIOR_HEADING_RE = /^#{1,6}\s*人们的行为\s*$/;
-
-export function adaptWorldForMoment(worldSetting, mode = 'strip') {
-  const text = String(worldSetting || '');
-  if (!text || mode === 'keep') return text;
-
-  const lines = text.split('\n');
-  const out = [];
-  let skipping = false;
-  let found = false;
-
-  for (const line of lines) {
-    if (/^#{1,6}\s/.test(line)) {
-      const isBehavior = WORLD_BEHAVIOR_HEADING_RE.test(line.trim());
-      if (isBehavior) {
-        found = true;
-        if (mode === 'annotate') {
-          out.push(line, '');
-          out.push('> 【氛围参考，不是台词库】以下描述的是这个世界"平时是什么样"，用来理解这里的常态；**写内容时不要引用、复述或改写其中任何一句的措辞**，世界感靠"理所当然"透出来即可。');
-          skipping = false;
-        } else {
-          skipping = true; // strip：标题也不保留
-        }
-        continue;
-      }
-      skipping = false;
-    }
-    if (!skipping) out.push(line);
-  }
-
-  if (!found) return text; // 世界观里没有这一节 → 原样返回，不动
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}

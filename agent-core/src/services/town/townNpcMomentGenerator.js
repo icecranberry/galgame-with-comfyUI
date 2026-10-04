@@ -18,7 +18,7 @@ import { getTimeTag, getLightNoteWithWeather } from '../timeLight.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { townNpcPortraitUrl } from './townNpcEventGenerator.js';
-import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, adaptWorldForMoment } from '../momentForms.js';
+import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat } from '../momentForms.js';
 import { parseMomentResponse } from '../momentResponseParser.js';
 
 function toSQLite(iso) {
@@ -140,7 +140,7 @@ export async function generateTownNpcMoment(npc, opts = {}) {
 
   // 3. LLM 生成文案 + 配图提示词
   const worldSetting = getWorldSetting();
-  const permissionPrompt = worldSetting ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment }) : getSystemRules();
+  const permissionPrompt = worldSetting ? getSystemRulesWithWorld() : getSystemRules();
   const worldIntegrationNote = worldSetting ? getWorldIntegrationRule('moments') : null;
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
