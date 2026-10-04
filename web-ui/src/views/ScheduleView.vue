@@ -309,7 +309,7 @@
                 type="textarea"
                 v-model="regenerateDirection"
                 class="regenerate-textarea"
-                placeholder="例如：今天去游乐园、安排出差的一天、宅在家里打游戏..."
+                placeholder="例如：今天做一场深夜直播、去鸽川区摆摊接客、宅在宿舍打一天游戏、去幻月游戏押注..."
                 rows="3"
                 ref="regenerateTextareaRef"
                 @keydown.enter.exact="confirmRegenerateWithDirection"

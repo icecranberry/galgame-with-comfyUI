@@ -24,6 +24,7 @@ import { assignFontForNewCharacter } from '../services/handwritingFontService.js
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
 import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, OUTFIT_SCENES } from '../services/outfitScene.js';
+import { listSceneStandings, upsertSceneStanding, deleteSceneStanding, getSceneStandingRow, STANDING_SCENE_KEYS, STANDING_SCENE_LABELS } from '../services/characterStanding.js';
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
@@ -1353,8 +1354,11 @@ router.post('/:id/chat-bg', (req, res) => {
  * @param {object} char
  * @param {string} requirement - 用户额外立绘需求（可空）
  * @param {'normal'|'dynamic'} [mode='normal'] - 姿势风格档位
+ * @param {string|null} [scene=null] - 场景立绘（work/casual/home/sleep）。
+ *   传了就用**该场景的服装**当「限时服饰」注入，绕开按时间自动选装 —— 否则半夜给角色画
+ *   「私服形象」会被日程的睡眠规则强制换成睡衣。null = 默认形象（沿用 auto 选装，与旧行为一致）。
  */
-function buildStandingMessages(char, requirement, mode = 'normal') {
+function buildStandingMessages(char, requirement, mode = 'normal', scene = null) {
   const worldSetting = getWorldSetting();
   const msgs = [
     { role: 'system', content: worldSetting
@@ -1367,15 +1371,31 @@ function buildStandingMessages(char, requirement, mode = 'normal') {
   ];
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
   msgs.push({ role: 'system', content: STANDING_IMAGE_PROMPT_RULE.rule_content });
+
+  // 场景立绘：把对应那套服装显式喂给人格组装，避免按当前时间选中别的场景服装
+  let outfits = 'auto';
+  let sceneLabel = '';
+  if (scene) {
+    sceneLabel = STANDING_SCENE_LABELS[scene] || scene;
+    const hit = listSceneOutfits(char.id).find(o => o.scene === scene);
+    outfits = hit ? { limited: [{ name: hit.name, description: hit.description }], exclusive: null } : null;
+  }
+  const personaText = buildCharacterPersona(char, { variant: 'short', person: char.display_name, outfits });
   msgs.push({
     role: 'system',
-    content: `【角色外观信息】\n${buildCharacterPersona(char, { variant: 'short', person: char.display_name })}`,
+    content: scene
+      ? `【角色外观信息 · 本次绘制「${sceneLabel}」形象】\n${personaText}`
+      : `【角色外观信息】\n${personaText}`,
   });
+
+  const userBase = requirement
+    ? `特别强调：用户指定了额外需求——“${requirement}”。请在<world_setting>下，结合用户需求，以用户需求为最高优先级，其他设计都需要先满足用户需求（与纯白背景、单人立绘、1:2 竖幅这些硬性要求不冲突的前提下），设计角色立绘并且以英文prompt输出。`
+    : `请在<world_setting>下设计角色立绘并且以英文prompt输出，自由发挥立绘的姿势与镜头角度，充分展现角色的魅力。`;
   msgs.push({
     role: 'user',
-    content: requirement
-      ? `特别强调：用户指定了额外需求——“${requirement}”。请在<world_setting>下，结合用户需求，以用户需求为最高优先级，其他设计都需要先满足用户需求（与纯白背景、单人立绘、1:2 竖幅这些硬性要求不冲突的前提下），设计角色立绘并且以英文prompt输出。`
-      : `请在<world_setting>下设计角色立绘并且以英文prompt输出，自由发挥立绘的姿势与镜头角度，充分展现角色的魅力。`,
+    content: scene
+      ? `【本次要画的是该角色的「${sceneLabel}」形象，角色穿着上面指定的那套服装。】\n${userBase}`
+      : userBase,
   });
   return msgs;
 }
@@ -1644,6 +1664,133 @@ router.delete('/:id/standing', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── 场景立绘（工装/私服/居家/睡衣四套形象，详情页左右切换查看）──
+// 与上面的 standing_url 并存：standing_url 是「默认形象」（全库各处引用它，本组不碰），
+// 本组是四套场景形象，存 character_standings 表。工装槽没图时以 standing_url 兜底。
+// 路由顺序：POST /:id/standings/generate 与 DELETE /:id/standings/:scene 同为 3 段，
+// 靠 HTTP 方法区分（前者 POST、后者 DELETE），不会互吃；仍把语义路径放前面便于排查。
+
+/** 场景立绘出图：复用立绘出图口径（1:2 竖幅 / 角色 LoRA / 画师串），落 character_standings */
+async function renderSceneStandingImage(char, promptText, scene) {
+  const stageBase = path.join(getPendingDir(), `standing-${char.id}-${scene}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  fs.mkdirSync(path.dirname(stageBase), { recursive: true });
+  const staged = await runStandingGeneration(char, promptText, { stageBase });
+
+  // 该场景原本**显式**存的图（兜底的默认立绘不算 —— 那是 standing_url，不能动）
+  const oldRow = getSceneStandingRow(char.id, scene);
+
+  const filename = `standing_${char.id}_${scene}_${Date.now()}_${staged.sourceFilename || 'comfy.png'}`;
+  const destPath = path.join(getImageDir('standing'), filename);
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  fs.renameSync(path.join(getPendingDir(), staged.filename), destPath);
+  const url = buildImageUrl('standing', filename);
+
+  upsertSceneStanding(char.id, scene, { imageUrl: url, promptText });
+  if (oldRow?.image_url) { try { deleteImageFileByUrl(oldRow.image_url); } catch {} }
+  invalidateGalleryCache();
+  return url;
+}
+
+// GET /api/characters/:id/standings — 四套场景立绘（work 槽用 standing_url 兜底）
+router.get('/:id/standings', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  res.json({ scenes: OUTFIT_SCENES, standings: listSceneStandings(char.id) });
+});
+
+// POST /api/characters/:id/standings/generate — 生成指定场景立绘 Body: { scene, requirement? }
+router.post('/:id/standings/generate', async (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const scene = String(req.body?.scene || '').trim();
+  if (!STANDING_SCENE_KEYS.includes(scene)) {
+    return res.status(400).json({ error: '无效的场景，可选：' + STANDING_SCENE_KEYS.join(' / ') });
+  }
+  const requirement = typeof req.body?.requirement === 'string' ? req.body.requirement.trim().slice(0, 500) : '';
+  const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
+
+  try {
+    // 复用已有提示词（「再次 Roll 图」）：跳过 LLM，直接出图
+    let promptText = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
+    if (promptText.length < 10) {
+      const model = config.llm.model || 'deepseek-chat';
+      console.log(`[scene-standing] generating "${scene}" standing for "${char.display_name}"...`);
+      const llmResult = await chatSync(buildStandingMessages(char, requirement, mode, scene), {
+        model,
+        temperature: 0.7,
+        max_tokens: 1024,
+        label: '生成场景立绘提示词',
+      });
+      promptText = llmResult.trim()
+        .replace(/^```(?:[a-z]+)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .trim();
+      if (!promptText || promptText.length < 10) {
+        return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
+      }
+    }
+
+    const url = await renderSceneStandingImage(char, promptText, scene);
+    res.json({ ok: true, scene, image_url: url, prompt_text: promptText, standings: listSceneStandings(char.id) });
+  } catch (err) {
+    console.error('[scene-standing] error:', err.message);
+    res.status(err.statusCode || 500).json({ error: err.statusCode ? err.message : '生成失败: ' + err.message });
+  }
+});
+
+// POST /api/characters/:id/standings/upload — 上传某场景立绘 Body: { scene, base64 }
+router.post('/:id/standings/upload', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const scene = String(req.body?.scene || '').trim();
+  if (!STANDING_SCENE_KEYS.includes(scene)) {
+    return res.status(400).json({ error: '无效的场景，可选：' + STANDING_SCENE_KEYS.join(' / ') });
+  }
+  const { base64 } = req.body || {};
+  const mimeMatch = typeof base64 === 'string' && base64.match(/^data:image\/(png|jpeg|webp);base64,/i);
+  if (!mimeMatch) return res.status(400).json({ error: '请上传 PNG / JPG / WEBP 图片' });
+  if (base64.length > 8 * 1024 * 1024) {
+    return res.status(400).json({ error: '图片过大，请压缩后再上传（不超过 6MB）' });
+  }
+
+  try {
+    const oldRow = getSceneStandingRow(char.id, scene);
+    const ext = mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase();
+    const url = saveBase64Image('standing', `standing_${char.id}_${scene}_${Date.now()}_upload.${ext}`, base64);
+    upsertSceneStanding(char.id, scene, { imageUrl: url, promptText: oldRow?.prompt_text || '' });
+    if (oldRow?.image_url) { try { deleteImageFileByUrl(oldRow.image_url); } catch {} }
+    invalidateGalleryCache();
+    res.json({ ok: true, scene, image_url: url, standings: listSceneStandings(char.id) });
+  } catch (err) {
+    console.error('[scene-standing-upload] error:', err.message);
+    res.status(500).json({ error: '保存立绘失败: ' + err.message });
+  }
+});
+
+// DELETE /api/characters/:id/standings/:scene — 清掉某场景的**显式**立绘
+// 注意：work 槽若正回落到 characters.standing_url，这里只清显式记录，那张默认立绘不受影响
+// （要删默认形象走 DELETE /:id/standing）。
+router.delete('/:id/standings/:scene', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const scene = String(req.params.scene || '').trim();
+  if (!STANDING_SCENE_KEYS.includes(scene)) {
+    return res.status(400).json({ error: '无效的场景' });
+  }
+  const row = getSceneStandingRow(char.id, scene);
+  if (row?.image_url) { try { deleteImageFileByUrl(row.image_url); } catch {} }
+  deleteSceneStanding(char.id, scene);
+  invalidateGalleryCache();
+  res.json({ ok: true, scene, standings: listSceneStandings(char.id) });
+});
+
 // ── 修正外观（视觉 LLM 分析参考图 → 重写「## 你的外观」）──
 // 只做分析不改库：返回新外观段与重组后的整卡 base_prompt，由前端回填人格卡文本框走既有保存链路
 
@@ -1865,7 +2012,12 @@ router.post('/:id/outfits/generate', async (req, res) => {
   const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
   try {
-    const outfits = await generateSceneOutfits(char);
+    // baseAppearance：以常态外观（工装）为基准生成，只换衣服不换人；
+    // scenes：只生成指定的几套（如按工装 roll 私服/居家/睡衣），不传则四套都出
+    const outfits = await generateSceneOutfits(char, {
+      baseAppearance: req.body?.baseAppearance,
+      scenes: req.body?.scenes,
+    });
     const saved = req.body?.save === true ? upsertSceneOutfits(char.id, outfits) : null;
     res.json({ ok: true, outfits, saved });
   } catch (err) {

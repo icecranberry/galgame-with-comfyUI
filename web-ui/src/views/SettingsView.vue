@@ -939,6 +939,9 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
         </div>
       </div>
 
+      <!-- 数据清理：按时间清理生成的图片与内容记录 -->
+      <DataCleanupCard />
+
       <!-- 更新说明：重新查看历次更新内容（平时只在版本变化后自动弹一次） -->
       <div class="card memory-settings-card">
         <div class="memory-settings-header">
@@ -1182,6 +1185,7 @@ import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import GearIcon from '../components/GearIcon.vue'
 import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
+import DataCleanupCard from '../components/DataCleanupCard.vue'
 import UpdateTag from '../components/UpdateTag.vue'
 import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 

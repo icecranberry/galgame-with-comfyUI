@@ -16,7 +16,7 @@ import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { compressDataUriToAvif } from './imageTranscode.js';
-import { MOMENT_COMMENT_RULES, firstMomentImagePrompt } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, firstMomentImagePrompt, adaptWorldForMoment } from './momentForms.js';
 import { extractMomentImageRequest, stripMomentImageRequest } from './momentImageRequest.js';
 
 const USER_POST_MAX_IMAGES = 3;
@@ -151,7 +151,7 @@ export async function generateUserPostComment(character, post, historyComments, 
 
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
+    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('momentReply')

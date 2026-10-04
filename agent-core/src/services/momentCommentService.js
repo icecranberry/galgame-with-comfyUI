@@ -15,7 +15,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt, cropPersonalityForEmotion } from './emotionEngine.js';
-import { MOMENT_COMMENT_RULES, firstMomentImagePrompt } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, firstMomentImagePrompt, adaptWorldForMoment } from './momentForms.js';
 import { extractMomentImageRequest, stripMomentImageRequest } from './momentImageRequest.js';
 import { userNickname, loadCommentHistory, isCharacterSleeping } from './momentUserPostService.js';
 import { recallMomentMemories, formatMomentMemories } from './momentMemoryRecall.js';
@@ -132,7 +132,7 @@ export async function generateCharacterCommentReply(character, post, historyComm
   // 权限层
   const worldSettingReply = getWorldSetting();
   const permissionPrompt = worldSettingReply
-    ? getSystemRulesWithWorld()
+    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
     : getSystemRules();
   const worldIntegrationNoteReply = worldSettingReply
     ? getWorldIntegrationRule('momentReply')

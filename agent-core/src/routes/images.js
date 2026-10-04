@@ -759,12 +759,19 @@ router.post('/edit-tasks/:id/discard', (req, res) => {
   } catch (err) { sendTaskError(res, err); }
 });
 
-// DELETE /api/images/delete — 删除图片文件，不清理 DB 引用
-router.delete('/delete', async (req, res) => {
-  const { url: imageUrl } = req.body;
-  if (!imageUrl) return res.status(400).json({ error: 'url is required' });
+/**
+ * 删除单张图片文件并清理相关 DB 引用（不含相册缓存失效，由调用方统一处理）。
+ *
+ * 抽出来的原因：单删路由与批量删除共用同一套「URL 解析 + 防目录穿越 + 聊天引用清理」逻辑，
+ * 批量删除若走前端循环调单删，N 张图就会触发 N 次 invalidateGalleryCache 与 N 个 HTTP 往返。
+ *
+ * @param {string} imageUrl - 形如 /images/<folder>/<file> 或旧扁平格式 /images/<file>
+ * @returns {{ ok: boolean, error?: string, status?: number }}
+ */
+function deleteOneImage(imageUrl) {
+  if (!imageUrl) return { ok: false, error: 'url is required', status: 400 };
 
-  const cleanUrl = imageUrl.replace(/\?.*$/, '');
+  const cleanUrl = String(imageUrl).replace(/\?.*$/, '');
   const match = cleanUrl.match(/^\/images\/([^/]+)\/([^/]+)$/);
 
   let dirPath, filename, category;
@@ -776,12 +783,12 @@ router.delete('/delete', async (req, res) => {
       if (info.dir === folder) { category = cat; break; }
     }
     if (!category && folder === '') category = LEGACY_CATEGORY;
-    if (!category) return res.status(400).json({ error: `unknown folder: ${folder}` });
+    if (!category) return { ok: false, error: `unknown folder: ${folder}`, status: 400 };
     dirPath = getImageDir(category);
   } else {
     // legacy flat format: /images/xxx.png
     const legacyMatch = cleanUrl.match(/^\/images\/([^/]+)$/);
-    if (!legacyMatch) return res.status(400).json({ error: `invalid image url format: ${imageUrl}` });
+    if (!legacyMatch) return { ok: false, error: `invalid image url format: ${imageUrl}`, status: 400 };
     filename = legacyMatch[1];
     category = LEGACY_CATEGORY;
     dirPath = getImageDir(LEGACY_CATEGORY);
@@ -789,23 +796,22 @@ router.delete('/delete', async (req, res) => {
 
   // 防目录穿越：文件名不允许路径分隔符与 .. 形态，且解析后必须仍在目录内
   if (!filename || filename === '.' || filename === '..') {
-    return res.status(400).json({ error: 'invalid filename' });
+    return { ok: false, error: 'invalid filename', status: 400 };
   }
   if (path.basename(filename) !== filename) {
-    return res.status(400).json({ error: 'invalid filename' });
+    return { ok: false, error: 'invalid filename', status: 400 };
   }
   const filePath = path.join(dirPath, filename);
   if (!path.resolve(filePath).startsWith(path.resolve(dirPath) + path.sep)) {
-    return res.status(400).json({ error: 'invalid path' });
+    return { ok: false, error: 'invalid path', status: 400 };
   }
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'file not found' });
+    return { ok: false, error: 'file not found', status: 404 };
   }
 
   try {
     fs.unlinkSync(filePath);
     console.log(`[delete] removed ${filePath}`);
-    invalidateGalleryCache();
 
     // 聊天图片：清理 messages.images 和 raw_messages.prompt
     if (category === 'chat') {
@@ -847,11 +853,40 @@ router.delete('/delete', async (req, res) => {
       }
     }
 
-    res.json({ success: true });
+    return { ok: true };
   } catch (err) {
     console.error('[delete] error:', err.message);
-    res.status(500).json({ error: 'Delete failed: ' + err.message });
+    return { ok: false, error: 'Delete failed: ' + err.message, status: 500 };
   }
+}
+
+// DELETE /api/images/delete — 删除图片文件，不清理 DB 引用
+router.delete('/delete', (req, res) => {
+  const r = deleteOneImage(req.body?.url);
+  if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
+  invalidateGalleryCache();
+  res.json({ success: true });
+});
+
+// POST /api/images/delete-batch — 批量删除（相册多选后用）Body: { urls: [] }
+// 逐张复用 deleteOneImage（含聊天引用清理），成功后只失效一次相册缓存。
+router.post('/delete-batch', (req, res) => {
+  const urls = Array.isArray(req.body?.urls) ? req.body.urls : null;
+  if (!urls) return res.status(400).json({ error: 'urls must be an array' });
+  if (urls.length === 0) return res.json({ success: true, deleted: 0, failed: 0, failedItems: [] });
+  // 上限兜底：一次别删太多，避免请求长时间挂着（前端也已限制）
+  if (urls.length > 2000) return res.status(400).json({ error: '一次最多删除 2000 张' });
+
+  let deleted = 0;
+  const failedItems = [];
+  for (const u of urls) {
+    const r = deleteOneImage(u);
+    if (r.ok) deleted++;
+    else failedItems.push({ url: u, error: r.error });
+  }
+  if (deleted > 0) invalidateGalleryCache();
+  console.log(`[delete-batch] 请求 ${urls.length} 张，成功 ${deleted}，失败 ${failedItems.length}`);
+  res.json({ success: true, deleted, failed: failedItems.length, failedItems: failedItems.slice(0, 20) });
 });
 
 async function checkImageProviderConnection({ provider, url, apiKey, model, apiFormat } = {}) {

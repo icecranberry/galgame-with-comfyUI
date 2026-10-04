@@ -173,6 +173,25 @@ export function getPageStats() {
   });
 }
 
+/**
+ * 图库整体进度（前端页头显示「图片库 x/y」）。
+ *
+ * 口径说明：这里按 DB 的 image_url 统计，**不逐条 stat 磁盘**（351 次 fs 调用不值得，
+ * 且图库进度只是展示用）。真正需要"文件是否还在"的判定在 rollWindow / generateOneImage 里
+ * 才用 imageUrlExists —— 那里才是决定要不要重新生成的地方。
+ */
+export function getImageLibraryStats() {
+  const db = getDb();
+  const r = db.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN image_url IS NOT NULL AND image_url != '' THEN 1 ELSE 0 END) AS filled
+    FROM loot_catalog`).get();
+  // 玩法/状态类本就不出图，不计入分母，否则进度永远到不了 100%
+  const noImg = db.prepare(`SELECT COUNT(*) AS n FROM loot_catalog WHERE cat = 'adult_toy' AND slot = 'play'`).get().n;
+  const fail = db.prepare(`SELECT COUNT(*) AS n FROM loot_catalog WHERE image_status = 'failed'`).get().n;
+  const total = Math.max(0, (r.total || 0) - noImg);
+  return { total, filled: r.filled || 0, failed: fail, pending: Math.max(0, total - (r.filled || 0)) };
+}
+
 // ── 清单导入 ────────────────────────────────────────────────
 
 /**
@@ -237,6 +256,8 @@ function serializeCatalogItem(row) {
     cat: row.cat,
     slot: row.slot,
     page: row.page,
+    // 落地效果类型：橱窗里「使用」时要用它拼确认文案（与带走进背包后的 kind 一致）
+    kind: KIND_BY_CAT[row.cat] || 'outfit',
     imageUrl: row.image_url || null,
     // imageStatus：'none' 表示这类条目本就不生成图（玩法/状态类），
     // 前端据此**不要**为它轮询等待，否则会一直等不到图。
@@ -245,8 +266,14 @@ function serializeCatalogItem(row) {
   };
 }
 
-/** 读某页当前橱窗（按插槽顺序，空位为 null） */
-export function getWindow(page) {
+/**
+ * 读某页当前橱窗（按插槽顺序，空位为 null）。
+ * @param {object} [opts]
+ * @param {boolean} [opts.ensure] - true 时把**缺图**的格子补进生图队列。
+ *   前端打开橱窗时传 true，这样卡上显示的「生成中」是真的在生成、且一定会完成；
+ *   只读场景（轮询兜底）不要传，否则会把队列反复塞满。
+ */
+export function getWindow(page, { ensure = false } = {}) {
   const db = getDb();
   const rows = db.prepare(`
     SELECT o.slot_index, c.* FROM loot_offers o
@@ -257,6 +284,12 @@ export function getWindow(page) {
   for (const r of rows) {
     if (r.slot_index >= 0 && r.slot_index < PAGE_SIZE) slots[r.slot_index] = serializeCatalogItem(r);
   }
+  if (ensure) {
+    for (const r of rows) {
+      if (!needsImage(r)) continue;
+      if (!hasUsableImage(r)) enqueueImage(r.id);
+    }
+  }
   return { page, pageSize: PAGE_SIZE, slots };
 }
 
@@ -265,9 +298,20 @@ function currentOfferIds(db, page) {
   return new Set(db.prepare('SELECT item_id FROM loot_offers WHERE page = ?').all(page).map(r => r.item_id));
 }
 
+/** 该条目的图片是否**真的**还在磁盘上（DB 里的 image_url 可能指向已被清理的文件） */
+function hasUsableImage(row) {
+  return Boolean(row?.image_url) && imageUrlExists(row.image_url);
+}
+
 /**
- * 刷新某页：重抽 8 个，替换该页橱窗。
- * 尽量避开页内已有商品（`excludeCurrent` 默认开），否则连点刷新总是看到同样几个。
+ * 刷新某页：重抽 4 个，替换该页橱窗。
+ *
+ * **抽取是纯随机的**（只在「避开当前橱窗已有的几件」这一层做区分，
+ * 否则连点刷新总看到同样几个）。图片按单件缓存，抽到没图的就现场排队生成
+ * —— 这是最初的设计：**按需生成**，不提前铺图。
+ * （曾试过「有图优先」，但那会让有图的少数几件反复出现、没图的永远轮不到，
+ *   破坏随机性，且图少时等于把选择范围压到几件，已回退。）
+ *
  * 抽中的商品若尚未生图，异步排队生成（不阻塞返回）。
  */
 export function rollWindow(page, { excludeCurrent = true } = {}) {
@@ -276,11 +320,10 @@ export function rollWindow(page, { excludeCurrent = true } = {}) {
   if (!pools.length) return { ok: false, error: `「${page}」页还没有商品，请先导入清单` };
 
   const avoid = excludeCurrent ? currentOfferIds(db, page) : new Set();
-  // 优先从「不在当前橱窗里」的池子抽；不够 8 个再补上（不能因为排除而抽不满）
+  // 优先从「不在当前橱窗里」的池子抽；不够再补上（不能因为排除而抽不满）
   const primary = pools.filter(p => !avoid.has(p.id));
   const secondary = pools.filter(p => avoid.has(p.id));
   const need = Math.min(PAGE_SIZE, pools.length);
-  // 洗牌后取前 need 个：先 primary 后 secondary
   const pick = [];
   for (const src of [primary, secondary]) {
     const arr = [...src];
@@ -303,6 +346,23 @@ export function rollWindow(page, { excludeCurrent = true } = {}) {
     if (!needsImage(it)) continue;
     if (!it.image_url || !imageUrlExists(it.image_url)) enqueueImage(it.id);
   }
+  return { ok: true, ...getWindow(page) };
+}
+
+/**
+ * 丢弃橱窗里的某一格：只把它从橱窗移除，**不带走、不进背包**（留空位，之后可「换一批」）。
+ * 与背包的「丢弃」对齐 —— 那个是从背包删掉物品，这个是从橱窗划掉候选项。
+ * @param {string} page
+ * @param {number} slotIndex 格子下标
+ */
+export function discardSlot(page, slotIndex) {
+  const db = getDb();
+  const idx = Number(slotIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= PAGE_SIZE) {
+    return { ok: false, error: '无效的格子' };
+  }
+  const r = db.prepare('DELETE FROM loot_offers WHERE page = ? AND slot_index = ?').run(page, idx);
+  if (r.changes === 0) return { ok: false, error: '这一格本来就是空的' };
   return { ok: true, ...getWindow(page) };
 }
 
@@ -432,7 +492,10 @@ async function generateOneImage(catalogId) {
   if (!row) return;
   if (row.image_url && imageUrlExists(row.image_url)) return;   // 已有图，跳过
 
-  db.prepare(`UPDATE loot_catalog SET image_status = 'generating', image_error = NULL WHERE id = ?`).run(catalogId);
+  // 置 generating 时**同时刷新 updated_at** —— resetStaleGenerating 靠它判断
+  // 「这条卡了多久」。若这里不更新，updated_at 会停留在上次成功写图的时间，
+  // 一条此刻正在生成的旧条目就会被误判为卡死而重置（同 media 那个无限重生循环的根因）。
+  db.prepare(`UPDATE loot_catalog SET image_status = 'generating', image_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(catalogId);
   try {
     const result = await generateImageRaw(imagePromptFor(row), {
       scene: 'items', disableRAG: true, persistPreparation: false, width: 512, height: 512, artist: '@ebora',
@@ -450,15 +513,21 @@ async function generateOneImage(catalogId) {
   }
 }
 
-/** 手动补图（管理用）：给缺图的商品排队，返回排队数。传 tags 可只补指定的几件 */
+/**
+ * 手动补图（管理用）：给缺图的商品排队，返回排队数。传 tags 可只补指定的几件。
+ * 「换一批」按钮旁的「补图」就调它。
+ */
 export function repairMissingImages({ limit = 50, tags = null } = {}) {
+  // 先把卡死的 generating 放回可重试，否则手动补图也修不了它们
+  resetStaleGenerating();
   const db = getDb();
   let rows;
   if (Array.isArray(tags) && tags.length) {
     const ph = tags.map(() => '?').join(',');
-    rows = db.prepare(`SELECT id, tag, image_url FROM loot_catalog WHERE tag IN (${ph})`).all(...tags);
+    rows = db.prepare(`SELECT id, tag, image_url, image_status, cat, slot FROM loot_catalog WHERE tag IN (${ph})`).all(...tags);
   } else {
-    rows = db.prepare('SELECT id, tag, image_url FROM loot_catalog WHERE image_status != \'generating\' ORDER BY id').all();
+    rows = db.prepare(`SELECT id, tag, image_url, image_status, cat, slot FROM loot_catalog
+      WHERE COALESCE(image_status, '') != 'generating' ORDER BY id`).all();
   }
   const targets = rows
     .filter(r => needsImage(r))                     // 玩法/状态类不生成图，跳过（否则会永远排队）
@@ -472,3 +541,37 @@ export function repairMissingImages({ limit = 50, tags = null } = {}) {
 export function getImageQueueState() {
   return { pending: imageQueue.length + (imageRunning ? 1 : 0) };
 }
+
+// ── 状态自愈：把重启时遗留的 generating 放回可重试 ────────────
+
+/**
+ * 生图状态是**内存队列 + DB 状态**两段式的：队列在内存，进程一重启就没了。
+ * 于是崩溃/重启那一刻正在生成的条目会永远停在 `image_status='generating'`
+ * —— 而 `repairMissingImages` 又会跳过 generating，导致它再也修不好。
+ *
+ * 这个函数把「卡住超过 staleMs 的 generating」重置为 pending，让它重新可被排队。
+ * 在服务启动时与定时器里各调一次。
+ * @returns {number} 重置了几条
+ */
+export function resetStaleGenerating(staleMs = 10 * 60 * 1000) {
+  try {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - staleMs).toISOString().replace('T', ' ').slice(0, 19);
+    const r = db.prepare(`
+      UPDATE loot_catalog SET image_status = 'pending', image_error = '上次生成被中断，已重置'
+      WHERE image_status = 'generating'
+        AND (updated_at IS NULL OR updated_at < ?)
+    `).run(cutoff);
+    if (r.changes > 0) console.log(`[loot] 重置了 ${r.changes} 条卡住的生图状态`);
+    return r.changes;
+  } catch (err) {
+    console.error('[loot] resetStaleGenerating 失败:', err.message);
+    return 0;
+  }
+}
+
+// 注：曾实现过「空闲预生成（prewarmTick）」——后台每 35s 挑一件没图的慢慢铺满图库。
+// 已按用户要求**移除**：最初的设计是「按 TAG 随机抽取 → 抽到没图的才现场生成」（按需生成），
+// 而不是把 334 张提前全生成一遍（那要占用 ComfyUI 约 3 小时）。
+// 保留下来的是纯 bug 修复：卡死状态自愈（resetStaleGenerating）与孤儿图清理，
+// 它们不产生新图，只保证"按需生成"这条路可靠。

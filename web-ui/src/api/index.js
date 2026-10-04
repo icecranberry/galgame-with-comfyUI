@@ -144,14 +144,41 @@ export function getCurrentSceneOutfit(characterId) {
   return request(`/characters/${characterId}/outfit-now`)
 }
 
-/** 用 LLM 生成四套基础场景服装；save=true 时直接落库 */
-export function generateSceneOutfits(characterId, save = false) {
-  return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save } })
+/**
+ * 用 LLM 生成场景服装；save=true 时直接落库。
+ * @param {object} [extra]
+ * @param {string} [extra.baseAppearance] 常态外观（工装描述）：传了就**以它为基准**只换衣服，身体特征不变
+ * @param {string[]} [extra.scenes] 只生成这几套（如 ['casual','home','sleep']）；不传则四套都出
+ */
+export function generateSceneOutfits(characterId, save = false, extra = {}) {
+  return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save, ...extra } })
 }
 
 /** 批量保存四套场景服装（同场景已存在则更新描述） */
 export function saveSceneOutfits(characterId, outfits) {
   return request(`/characters/${characterId}/outfits/scene`, { method: 'PUT', body: { outfits } })
+}
+
+// ── 场景立绘（工装/私服/居家/睡衣四套形象，详情页左右切换）──
+
+/** 四套场景立绘（未生成的场景返回空图；工装槽以默认立绘兜底） */
+export function listSceneStandings(characterId) {
+  return request(`/characters/${characterId}/standings`)
+}
+
+/** 生成某场景的立绘（LLM 出提示词 → 出图 → 落库；传 prompt 则直接复用，不再请求 LLM） */
+export function generateSceneStanding(characterId, scene, requirement = '', prompt = '') {
+  return request(`/characters/${characterId}/standings/generate`, { method: 'POST', body: { scene, requirement, prompt } })
+}
+
+/** 上传本地图片作为某场景立绘（base64 data URL） */
+export function uploadSceneStanding(characterId, scene, base64) {
+  return request(`/characters/${characterId}/standings/upload`, { method: 'POST', body: { scene, base64 } })
+}
+
+/** 清掉某场景的显式立绘（工装槽会回落到默认立绘） */
+export function deleteSceneStanding(characterId, scene) {
+  return request(`/characters/${characterId}/standings/${encodeURIComponent(scene)}`, { method: 'DELETE' })
 }
 
 export async function clearMessages(characterId) {
@@ -1098,6 +1125,14 @@ export function listGalleryImages(limit = 100, offset = 0, folder = '', characte
   return request(path)
 }
 
+/**
+ * 批量删除图片（相册多选用）。后端逐张删除、只失效一次相册缓存。
+ * @returns {Promise<{success:boolean, deleted:number, failed:number, failedItems:Array}>}
+ */
+export function deleteImagesBatch(urls) {
+  return request(`/images/delete-batch`, { method: 'POST', body: { urls } })
+}
+
 /** 提交后台重新生成任务（完成后需确认才覆盖原图） */
 export function regenerateImage(imageUrl) {
   return request(`/images/regenerate`, { method: 'POST', body: { url: imageUrl } })
@@ -1629,9 +1664,18 @@ export function getLootPages() {
   return request('/loot/pages')
 }
 
-/** 某页当前橱窗（8 个格子，未刷新过时全为空位） */
-export function getLootWindow(page) {
-  return request(`/loot/window?page=${encodeURIComponent(page)}`)
+/**
+ * 某页当前橱窗（4 个格子，未刷新过时全为空位）。
+ * @param {boolean} [ensure] true 时把缺图的格子补进生图队列 —— 打开橱窗时用，
+ *   这样卡上的「生成中」是真的在生成、且一定会完成（轮询兜底不要传，避免反复塞队列）
+ */
+export function getLootWindow(page, ensure = false) {
+  return request(`/loot/window?page=${encodeURIComponent(page)}${ensure ? '&ensure=1' : ''}`)
+}
+
+/** 给缺图的商品排队补图（管理用）；传 tags 只补指定几件 */
+export function repairLootImages({ limit = 50, tags = null } = {}) {
+  return request('/loot/repair-images', { method: 'POST', body: { limit, tags } })
 }
 
 /** 刷新某页（重抽 8 个；缺图的会异步排队生成，完成后经 loot_image_ready 事件推送） */
@@ -1642,6 +1686,11 @@ export function rollLootWindow(page) {
 /** 带走选中的格子（写进背包），slots 为格子下标数组 */
 export function takeLootItems(page, slots) {
   return request('/loot/window/take', { method: 'POST', body: { page, slots } })
+}
+
+/** 丢弃橱窗里的一格（不带走、不进背包，只把候选项划掉） */
+export function discardLootSlot(page, slot) {
+  return request('/loot/window/discard', { method: 'POST', body: { page, slot } })
 }
 
 // ── AI 小镇（世界页）──
@@ -2008,3 +2057,109 @@ export const fillAllStandingTouchLines = () => request('/expression-standings/to
 export const backfillMoments = () => request('/moments/backfill', { method: 'POST' })
 
 export const stopBackfillMoments = taskId => request(`/moments/backfill/${encodeURIComponent(taskId)}/stop`, { method: 'POST' })
+
+// ── 媒体内容页（传媒 / 板块 / 帖子）──
+
+/** 全部媒体（含板块数与帖子数） */
+export function listMediaOutlets() {
+  return request('/media/outlets')
+}
+
+export function createMediaOutlet(body) {
+  return request('/media/outlets', { method: 'POST', body })
+}
+
+export function updateMediaOutlet(id, body) {
+  return request(`/media/outlets/${id}`, { method: 'PUT', body })
+}
+
+export function deleteMediaOutlet(id) {
+  return request(`/media/outlets/${id}`, { method: 'DELETE' })
+}
+
+/** 某媒体下的板块 */
+export function listMediaBoards(outletId) {
+  return request(`/media/outlets/${outletId}/boards`)
+}
+
+export function createMediaBoard(outletId, body) {
+  return request(`/media/outlets/${outletId}/boards`, { method: 'POST', body })
+}
+
+export function updateMediaBoard(boardId, body) {
+  return request(`/media/boards/${boardId}`, { method: 'PUT', body })
+}
+
+export function deleteMediaBoard(boardId) {
+  return request(`/media/boards/${boardId}`, { method: 'DELETE' })
+}
+
+/** 帖子分页（不传 outlet 则跨媒体） */
+export function listMediaPosts({ outlet = null, board = null, category = null, limit = 40, offset = 0 } = {}) {
+  let path = `/media/posts?limit=${limit}&offset=${offset}`
+  if (outlet) path += `&outlet=${encodeURIComponent(outlet)}`
+  if (board) path += `&board=${encodeURIComponent(board)}`
+  // 分类过滤：digital = 数字报刊（周刊/海报）；social = 社交平台（帖子流）
+  if (category) path += `&category=${encodeURIComponent(category)}`
+  return request(path)
+}
+
+/** 抓一批新帖（异步：返回 started 后靠 SSE media_new_posts 得知完成） */
+export function refreshMediaPosts(body = {}) {
+  return request('/media/refresh', { method: 'POST', body })
+}
+
+/** 催一次封面补印 */
+export function fillMediaImages(limit = 6) {
+  return request('/media/fill-images', { method: 'POST', body: { limit } })
+}
+
+/** 传媒自动抓帖状态（当前档位 + 距下次还有多久 + 可选档位表） */
+export function getMediaAuto() {
+  return request('/media/auto')
+}
+
+/** 改传媒自动抓帖频率；minutes=0 关闭自动（只手动刷新） */
+export function setMediaAuto(minutes) {
+  return request('/media/auto', { method: 'PUT', body: { minutes } })
+}
+
+/** 清理未被引用的孤儿配图（重复生图的历史遗留）+ 重置卡住的生成状态 */
+export function cleanupMediaImages() {
+  return request('/media/cleanup-images', { method: 'POST' })
+}
+
+// ── 数据清理（按时间清理图片与内容记录）──
+
+/** 可清理项定义（界面据此渲染分组与说明） */
+export function getCleanupTargets() {
+  return request('/cleanup/targets')
+}
+
+/** 预览：指定天数前，各项会删多少行/多少文件/多少字节（不删任何东西） */
+export function surveyCleanup(days = 7) {
+  return request(`/cleanup/survey?days=${encodeURIComponent(days)}`)
+}
+
+/**
+ * 执行清理。**必须显式传 targets**；执行前会自动备份数据库（路径随响应返回）。
+ * @param {{days:number, targets:string[]}} body
+ */
+export function purgeCleanup(body) {
+  return request('/cleanup/purge', { method: 'POST', body })
+}
+
+/** 已有的清理前备份 */
+export function listCleanupBackups() {
+  return request('/cleanup/backups')
+}
+
+/** 为某条媒体内容重新生成配图（周刊/海报会连同小图一起重出） */
+export function regenerateMediaPostImage(postId) {
+  return request(`/media/posts/${postId}/regenerate-image`, { method: 'POST' })
+}
+
+/** 删除某条媒体内容（配图文件一并删除） */
+export function deleteMediaPost(postId) {
+  return request(`/media/posts/${postId}`, { method: 'DELETE' })
+}

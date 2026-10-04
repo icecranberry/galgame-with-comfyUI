@@ -20,6 +20,7 @@ import MomentsView from './views/MomentsView.vue'
 import EventsView from './views/EventsView.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import GalleryView from './views/GalleryView.vue'
+import MediaView from './views/MediaView.vue'
 import TavernView from './views/TavernView.vue'
 import MailboxView from './views/MailboxView.vue'
 import BackpackView from './views/BackpackView.vue'
@@ -40,6 +41,7 @@ const routes = [
   { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
+  { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },
   { path: '/backpack', component: BackpackView },

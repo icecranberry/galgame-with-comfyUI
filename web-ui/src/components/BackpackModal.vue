@@ -53,7 +53,7 @@
             <!-- ── Right: 道具网格 / 橱窗 ── -->
             <div class="items-panel">
               <!-- 橱窗视图：按分类浏览商品 → 挑选 → 带走进背包 -->
-              <LootWindow v-if="view === 'loot'" @taken="onLootTaken" />
+              <LootWindow v-if="view === 'loot'" @taken="onLootTaken" @use="onLootUse" />
 
               <template v-else>
               <Transition name="effects-panel">
@@ -277,6 +277,17 @@ const SHOW_CHEST = false
 /** 从橱窗带走的商品已进背包，切回背包视图时刷新一下列表 */
 function onLootTaken() {
   try { store.fetchItems() } catch { /* 失败不阻塞，SSE 会兜底刷新 */ }
+}
+
+/**
+ * 橱窗里点「使用」：商品已由 LootWindow 带走（进背包拿了 id），
+ * 这里用最小 item 结构走**背包同一套**使用流程（选角色 → 确认 → useItem）。
+ * status 直接给 'ready'：用户是主动操作，不必等配图生成完。
+ */
+function onLootUse({ backpackId, name, kind }) {
+  if (!backpackId) return
+  try { store.fetchItems() } catch { /* ignore */ }
+  startUse({ id: backpackId, name, kind, source_type: 'loot', status: 'ready' })
 }
 
 const {

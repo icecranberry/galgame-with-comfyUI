@@ -75,10 +75,19 @@ export function getWorldSetting() {
   return null;
 }
 
-/** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用 */
+/** getSystemRules() + 世界观拼接，供需要世界设定的调用方使用。
+ *
+ * @param {object} [opts]
+ * @param {(world: string) => string} [opts.worldTransform] - 可选：注入前对世界观原文做一次变换。
+ *   朋友圈/评论链路用它裁掉「## 人们的行为」那段**氛围例句**——实测 LLM 会把那十几条生动
+ *   场景描写当成 few-shot 示范并直接复读其措辞（见 momentForms.adaptWorldForMoment）。
+ * @param {boolean} [opts.roleplay] - 透传给 getSystemRules()
+ */
 export function getSystemRulesWithWorld(opts = {}) {
-  const rules = getSystemRules(opts);
-  const world = getWorldSetting();
+  const { worldTransform, ...ruleOpts } = opts;
+  const rules = getSystemRules(ruleOpts);
+  const rawWorld = getWorldSetting();
+  const world = rawWorld && typeof worldTransform === 'function' ? worldTransform(rawWorld) : rawWorld;
   return [rules, world].filter(Boolean).join('\n\n');
 }
 

@@ -217,7 +217,7 @@ function resolveOutfits(character, outfits) {
   // 道具换装（变身卡/限时服饰）或当天报纸的世界观服饰生效中 → 直接用它。
   // 「用户主动用了换装道具」不该被自动的场景服装盖掉。
   if (active.limited.length > 0 || active.exclusive) return active;
-  // 否则按日程决定此刻穿哪套场景服装（工装/外出/居家/睡眠）
+  // 否则按日程决定此刻穿哪套场景服装（工装/私服/居家/睡衣）
   const sceneBlock = asPersonaOutfits(getSceneOutfitForNow(character?.id));
   return sceneBlock || active;
 }

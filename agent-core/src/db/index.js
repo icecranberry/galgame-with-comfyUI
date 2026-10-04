@@ -8,6 +8,7 @@ import { initWorldRepository } from './worldRepository.js';
 import { seedAll } from './seedData.js';
 import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
 import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
+import { DEFAULT_MEDIA_OUTLETS } from './seedMedia.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
 import { migrateTownSchema } from './townSchema.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
@@ -364,6 +365,82 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_character_outfits_char ON character_outfits(character_id);
+
+    -- 场景立绘（工装/私服/居家/睡衣四套形象，供角色详情页左右切换查看）。
+    -- 与 character_outfits 的「场景服装」是两回事：服装是**文字描述**（驱动生图），立绘是**已画好的图**。
+    -- 刻意分表 —— 角色可以还没配服装就先有立绘，也可以配了服装但某套还没出图，两者解耦。
+    -- scene 取值同 services/outfitScene.js 的 OUTFIT_SCENES。
+    -- 注意：characters.standing_url 仍是「角色默认形象」，被聊天/朋友圈/群聊等各处引用，本表不动它；
+    -- work 槽在读取时以 standing_url 兜底（见 services/characterStanding.js），
+    -- 这样「已有的那张立绘」天然就是工装形象，用户不会觉得立绘凭空消失。
+    CREATE TABLE IF NOT EXISTS character_standings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      scene TEXT NOT NULL,
+      image_url TEXT,
+      prompt_text TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(character_id, scene)
+    );
+    CREATE INDEX IF NOT EXISTS idx_character_standings_char ON character_standings(character_id);
+
+    -- ── 传媒 / 数字媒体（媒体内容页）──────────────────────────────
+    -- 一个「媒体」= 一个内容源（论坛 / 报纸 / 匿名职场社区 / 暗网 …），自带一份生成提示词。
+    -- 用户可自行增删改；默认种入二相乐园的 5 个媒体。
+    -- prompt 存的是该媒体的「角色设定 + 规则 + 写作要求」，生成帖子时原样作为 system 注入。
+    CREATE TABLE IF NOT EXISTS media_outlets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      tagline TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      icon TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      -- 形态：feed=帖子流 / weekly=周刊版式 / poster=海报版式（决定前端用哪套渲染）
+      layout TEXT NOT NULL DEFAULT 'feed',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 板块（媒体下的分区，如「攻略 / 八卦 / 招募」）。每个媒体可自定义自己的板块。
+    CREATE TABLE IF NOT EXISTS media_boards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      outlet_id INTEGER NOT NULL REFERENCES media_outlets(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      desc TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(outlet_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_boards_outlet ON media_boards(outlet_id);
+
+    -- 帖子。作者可能是**活跃角色**（author_type='character'，带角色 id 与头像）或匿名 NPC。
+    -- 配图沿用《邻舍日报》的做法：文字先落库，image_status='pending' 由后台逐张补。
+    CREATE TABLE IF NOT EXISTS media_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      outlet_id INTEGER NOT NULL REFERENCES media_outlets(id) ON DELETE CASCADE,
+      board_id INTEGER REFERENCES media_boards(id) ON DELETE SET NULL,
+      batch_id TEXT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tags_json TEXT,
+      author_type TEXT NOT NULL DEFAULT 'anonymous',
+      character_id INTEGER,
+      author_name TEXT NOT NULL DEFAULT '',
+      author_avatar TEXT,
+      likes INTEGER NOT NULL DEFAULT 0,
+      views INTEGER NOT NULL DEFAULT 0,
+      comments_json TEXT,
+      image_prompt TEXT,
+      image TEXT,
+      image_status TEXT NOT NULL DEFAULT 'pending',
+      image_error TEXT,
+      -- 周刊/海报的结构化正文（feed 形态不用，正文仍在 content）
+      payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_posts_outlet ON media_posts(outlet_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_media_posts_board ON media_posts(board_id);
+    CREATE INDEX IF NOT EXISTS idx_media_posts_img ON media_posts(image_status);
 
     -- 通用限时服饰（如一套女仆装的 tag 组合）。character_id 为空 = 全员可见的全局服饰；
     -- 指定角色 = 道具系统写入的该角色专属限时服饰。expires_at 为过期时间（空 = 永久生效），
@@ -1087,6 +1164,9 @@ function initSchema(db) {
 
   // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
   migrateCharacterOutfitScene(db);
+
+  // 迁移 + 种子: 媒体内容页（传媒 / 板块 / 帖子）
+  migrateMediaSchema(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
@@ -2734,6 +2814,88 @@ function migrateLootCatalogSchema(db) {
     console.log('[db] loot catalog schema ready');
   } catch (err) {
     console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 媒体内容页 —— media_outlets / media_boards / media_posts 建表 + 默认媒体种子
+ *
+ * 表本身在启动建表块里 CREATE IF NOT EXISTS；这里只负责**种入默认媒体与板块**。
+ * 用 INSERT OR IGNORE：用户改过的媒体/板块不会被后续启动覆盖；
+ * 用户删掉的默认媒体也不会被"复活"（因为按 name 判重，用户删了就再插一次？——
+ * 会复活。所以额外记一个 system_settings 标记，播过一次就不再播）。
+ */
+function migrateMediaSchema(db) {
+  try {
+    // ── 结构升级（独立于种子开关，老库也要加上）──
+    // layout：媒体形态，决定前端用哪套版式渲染
+    //   'feed'   = 帖子瀑布流（网络热门 / 公司脉脉 / 幻月暗所…）
+    //   'weekly' = 周刊版式（狸狸通讯社：刊头/开场白/多栏目 Q&A/榜单/跟帖）
+    //   'poster' = 海报版式（狸狸八卦：热点条/大标题/主图/气泡/小图组）
+    const oCols = db.prepare(`PRAGMA table_info(media_outlets)`).all();
+    if (!oCols.find(c => c.name === 'layout')) {
+      db.exec(`ALTER TABLE media_outlets ADD COLUMN layout TEXT NOT NULL DEFAULT 'feed'`);
+      console.log('[db] Added media_outlets.layout column');
+    }
+    // payload_json：周刊/海报的结构化正文（feed 形态不用，内容仍在 content）
+    const pCols = db.prepare(`PRAGMA table_info(media_posts)`).all();
+    if (!pCols.find(c => c.name === 'payload_json')) {
+      db.exec(`ALTER TABLE media_posts ADD COLUMN payload_json TEXT`);
+      console.log('[db] Added media_posts.payload_json column');
+    }
+
+    // ── 形态回填（幂等，每次启动都跑：老库里狸狸通讯社还是 feed，要升级成 weekly）──
+    try {
+      db.prepare(`UPDATE media_outlets SET layout = 'weekly' WHERE name = '狸狸通讯社' AND layout != 'weekly'`).run();
+    } catch { /* ignore */ }
+
+    const seeded = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'media_outlets_seeded'`
+    ).get();
+    if (seeded?.setting_value === '1') {
+      // 种子已播过，但可能还没有「狸狸八卦」（本次新增）—— 单独补种
+      try {
+        const has = db.prepare(`SELECT id FROM media_outlets WHERE name = '狸狸八卦'`).get();
+        if (!has) {
+          const ins = db.prepare(`INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+            VALUES (?, ?, ?, ?, ?, 1, ?)`);
+          const ghost = DEFAULT_MEDIA_OUTLETS.find(o => o.name === '狸狸八卦');
+          if (ghost) {
+            const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM media_outlets').get().m;
+            ins.run(ghost.name, ghost.tagline || '', ghost.prompt || '', ghost.icon || '', maxOrder + 1, 'poster');
+            console.log('[db] media seed: 补种「狸狸八卦」');
+          }
+        }
+      } catch { /* ignore */ }
+      return;
+    }
+
+    const insOutlet = db.prepare(`
+      INSERT OR IGNORE INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+      VALUES (?, ?, ?, ?, ?, 1, ?)
+    `);
+    const insBoard = db.prepare(`
+      INSERT OR IGNORE INTO media_boards (outlet_id, name, desc, sort_order) VALUES (?, ?, '', ?)
+    `);
+    let outlets = 0, boards = 0;
+    const tx = db.transaction(() => {
+      DEFAULT_MEDIA_OUTLETS.forEach((o, i) => {
+        const r = insOutlet.run(o.name, o.tagline || '', o.prompt || '', o.icon || '', i, o.layout || 'feed');
+        if (r.changes > 0) outlets++;
+        const row = db.prepare('SELECT id FROM media_outlets WHERE name = ?').get(o.name);
+        if (!row) return;
+        (o.boards || []).forEach((b, bi) => {
+          if (insBoard.run(row.id, b, bi).changes > 0) boards++;
+        });
+      });
+    });
+    tx();
+
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+      VALUES ('media_outlets_seeded', '1')`).run();
+    if (outlets || boards) console.log(`[db] media seed: ${outlets} outlets / ${boards} boards`);
+  } catch (err) {
+    console.log('[db] migrateMediaSchema error:', err.message);
   }
 }
 

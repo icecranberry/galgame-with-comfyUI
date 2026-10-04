@@ -112,6 +112,14 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     // 朋友圈发帖频率 0~24：1=默认（角色 2~8 小时一条），越大越快，24=最快（5~20 分钟），0=关闭
     // （与 eventFreq 同口径：env 里写 0 会被兜成 1，运行时通过设置页设为 0 并存进 DB 才生效）
     momentFreq: parseFloat(process.env.MOMENT_FREQ) || 1,
+    // 传媒内容页自动抓帖间隔（分钟）。
+    // **默认 0 = 关闭**：传媒属于「用户想看时才看」的内容，
+    // 默认自动抓帖会在后台持续调 LLM，与"按需生成"的取向不符。
+    // 想要自动补内容可在传媒页的「自动」档位里开启。
+    mediaAutoMinutes: (() => {
+      const v = parseInt(process.env.MEDIA_AUTO_MINUTES, 10);
+      return Number.isFinite(v) ? v : 0;
+    })(),
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
     scheduleRefreshDays: Math.max(1, Math.min(3, parseInt(process.env.SCHEDULE_REFRESH_DAYS, 10) || 1)), // 日程刷新周期（天），1~3
@@ -584,6 +592,24 @@ export function updateMomentFreq(value) {
   config.features.momentFreq = f;
   persistSettingSync('feature_momentFreq', String(f));
   console.log(`[config] momentFreq = ${f}`);
+}
+
+/**
+ * 更新传媒内容页的自动抓帖间隔（分钟）。
+ * 0 = 关闭自动（只手动刷新）；非 0 时夹在 5 分钟 ~ 12 小时之间
+ * —— 比 5 分钟更快没有意义（一次生成要调 LLM，实际也跑不过来），
+ * 超过 12 小时则近乎等于关闭。
+ * @param {number|string} value
+ * @returns {number} 实际生效的分钟数
+ */
+export function updateMediaAutoMinutes(value) {
+  const raw = parseInt(value, 10);
+  let n = Number.isFinite(raw) ? raw : 20;
+  if (n !== 0) n = Math.max(5, Math.min(720, n));
+  config.features.mediaAutoMinutes = n;
+  persistSettingSync('feature_mediaAutoMinutes', String(n));
+  console.log(`[config] mediaAutoMinutes = ${n}${n === 0 ? '（已关闭自动）' : ''}`);
+  return n;
 }
 
 /**

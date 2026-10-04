@@ -55,6 +55,7 @@ import * as api from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheTabs from './ui/LinsheTabs.vue'
+import LinsheModal from './ui/LinsheModal.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

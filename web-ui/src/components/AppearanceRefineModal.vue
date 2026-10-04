@@ -2,10 +2,10 @@
   <!-- ── 修正外观弹窗：上传 / 粘贴 / 拖拽参考图，邻舍分析后重写「## 你的外观」──
        整卡文本由 basePrompt prop 传入（可以是待确认的草稿卡，不要求角色已入库）；
        应用结果通过 @applied 回传重组后的整卡，落库/回填由父级决定。 -->
-  <linshe-modal v-model="visibleModel" :title="`修正外观 — ${displayName || ''}`" wide>
+  <linshe-modal v-model="visibleModel" :title="sceneLabel ? `修正「${sceneLabel}」外观 — ${displayName || ''}` : `修正外观 — ${displayName || ''}`" wide>
     <div class="refine-body" :class="{ 'is-dragging': refineDragging }" @dragover.prevent="refineDragging = true" @dragleave="onRefineDragLeave" @drop.prevent="onRefineDrop">
       <p class="refine-intro">
-        提供一张该角色的参考图，邻舍会观察图片并重写人格卡里的「## 你的外观」，
+        提供一张该角色的参考图，邻舍会观察图片并重写<b v-if="sceneLabel">「{{ sceneLabel }}」</b><template v-else>人格卡里的「## 你的外观」</template>的外观描述，
         生成「名字 + 五官 + 衣着」的生图描述。支持点击上传、Ctrl+V 粘贴、拖拽到窗口<template v-if="characterId">，或从最近图片中挑选并截取</template>。
       </p>
 
@@ -92,6 +92,8 @@ const props = defineProps({
   displayName: { type: String, default: '' },
   /** 当前整卡文本（待重写「## 你的外观」的草稿/编辑中人格卡） */
   basePrompt: { type: String, default: '' },
+  /** 目标场景名（工装/私服/居家/睡衣）；留空＝旧口径（改人格卡的外观段）。仅用于标题与说明文案 */
+  sceneLabel: { type: String, default: '' },
   /** 应用按钮文案 / 底部提示（草稿卡场景父级可改写） */
   applyText: { type: String, default: '应用并保存' },
   applyHint: { type: String, default: '应用到人格卡后会自动保存' },

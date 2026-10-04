@@ -76,8 +76,24 @@
               <span v-if="slotLabel(cell)" class="loot-kind">{{ slotLabel(cell) }}</span>
             </div>
             <div class="loot-meaning" :title="cell.meaning">{{ cell.meaning || cell.tag }}</div>
+            <!-- 与背包对齐：每件都能「丢弃」或直接「使用」
+                 @click.stop 阻止冒泡，避免连带触发卡片的勾选 -->
+            <div class="loot-actions">
+              <linshe-button
+                size="sm" variant="ghost" tone="danger"
+                :disabled="busy || usingSlot !== null"
+                @click.stop="discardCell(idx)"
+              >丢弃</linshe-button>
+              <linshe-button
+                size="sm" variant="primary"
+                :loading="usingSlot === idx"
+                :disabled="busy || usingSlot !== null"
+                @click.stop="useCell(idx)"
+              >使用</linshe-button>
+            </div>
           </template>
-          <div v-else class="loot-card-empty">已拿走</div>
+          <!-- 空位可能是「带走」也可能是「丢弃」留下的，故用中性说法 -->
+          <div v-else class="loot-card-empty">空位</div>
         </div>
       </TransitionGroup>
     </template>
@@ -90,7 +106,7 @@ import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import LinsheButton from './ui/LinsheButton.vue'
 
-const emit = defineEmits(['taken'])
+const emit = defineEmits(['taken', 'use'])
 const toastFn = inject('toast', null)
 const toast = (m, t) => { if (toastFn) toastFn(m, t) }
 
@@ -99,6 +115,9 @@ const activePage = ref('')
 const slots = ref([])
 const selectedSlots = ref([])
 const rolling = ref(false)
+/** 「使用」进行中的格子下标（取走 + 交给父级走使用流程） */
+const usingSlot = ref(null)
+const busy = computed(() => rolling.value || taking.value || usingSlot.value !== null)
 const taking = ref(false)
 const queuePending = ref(0)
 
@@ -149,7 +168,9 @@ async function loadPages() {
 
 async function loadWindow(page) {
   try {
-    const d = await api.getLootWindow(page)
+    // ensure=1：把这一页缺图的格子补进生图队列。
+    // 橱窗状态与已生成的图都是持久化的，所以这里通常只会补少量「还没轮到」的。
+    const d = await api.getLootWindow(page, true)
     slots.value = d.slots || []
     queuePending.value = d.queue?.pending || 0
     if (slots.value.some(c => c && c.needsImage !== false && !c.imageUrl)) startPoll()
@@ -195,6 +216,57 @@ const SLOT_LABELS = { toy: '玩具', play: '玩法' }
 function slotLabel(cell) {
   if (!cell) return ''
   return SLOT_LABELS[cell.slot] || ''
+}
+
+/** 丢弃一格：只从橱窗划掉这个候选项（不带走、不进背包），留空位 */
+async function discardCell(idx) {
+  if (busy.value) return
+  const cell = slots.value[idx]
+  if (!cell) return
+  try {
+    const d = await api.discardLootSlot(activePage.value, idx)
+    const next = [...slots.value]
+    next[idx] = null
+    slots.value = next
+    selectedSlots.value = selectedSlots.value.filter(i => i !== idx)
+    queuePending.value = d.queue?.pending || queuePending.value
+    toast(`已丢弃「${cell.name}」`, 'success')
+  } catch (err) {
+    toast('丢弃失败: ' + (err?.message || ''), 'error')
+  }
+}
+
+/**
+ * 直接使用一格：先带走（进背包拿 id），再交给父级走「选角色 → 确认 → 使用」流程。
+ * 复用背包那一套，不另写一份使用逻辑。
+ */
+async function useCell(idx) {
+  if (busy.value) return
+  const cell = slots.value[idx]
+  if (!cell) return
+  usingSlot.value = idx
+  try {
+    const d = await api.takeLootItems(activePage.value, [idx])
+    const taken = (d.taken || [])[0]
+    if (!taken) throw new Error('带走失败')
+    // 本地同步：该格已空
+    const next = [...slots.value]
+    next[idx] = null
+    slots.value = next
+    selectedSlots.value = selectedSlots.value.filter(i => i !== idx)
+    emit('taken', d.taken || [])
+    // 交给父级（BackpackModal）弹出角色选择器并完成使用
+    emit('use', {
+      backpackId: taken.backpackId,
+      name: taken.name,
+      kind: cell.kind,
+      cat: cell.cat,
+    })
+  } catch (err) {
+    toast('使用失败: ' + (err?.message || ''), 'error')
+  } finally {
+    usingSlot.value = null
+  }
 }
 
 async function takeSelected() {
@@ -263,6 +335,9 @@ onUnmounted(() => {
 .loot-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .loot-refresh:disabled { opacity: 0.55; cursor: default; }
 .loot-count { font-size: 12px; color: var(--text-secondary); }
+.loot-count b { color: var(--accent); font-weight: 600; }
+/* 图库铺满后转成「已完成」的绿，一眼看出以后刷新不用再等 */
+.loot-count b.is-full { color: var(--success); }
 
 /* 每页 4 格：宽屏一行排开，窄屏 2×2（不要 3 列，那会变成 3+1 的别扭布局） */
 .loot-grid {
@@ -332,6 +407,13 @@ onUnmounted(() => {
   display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden;
 }
+/* 卡片操作行：与背包卡片同款「左丢弃 / 右使用」 */
+.loot-actions {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+}
+.loot-actions > * { flex: 1; min-width: 0; }
+
 .loot-card-empty {
   display: flex; align-items: center; justify-content: center;
   min-height: 120px; font-size: 12px; color: var(--text-secondary);

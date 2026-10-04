@@ -109,23 +109,10 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         今日报纸 / 用户关系图入口卡片（同一行，各占一半）
+         入口卡片行：我的关系图 / 世界观设置（各占一半）
+         《邻舍日报》已并入「传媒」页（见 NavBar 的传媒标签）
          ═══════════════════════════════════════════ -->
     <div class="relation-entry-row">
-      <div class="relation-entry card" @click="openNewspaper">
-        <div class="relation-entry-icon newspaper-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 22h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
-            <path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>
-          </svg>
-        </div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">邻舍日报<span v-if="newspaperUnread" class="newspaper-dot cel-jelly" title="今天的报纸还没读"></span></span>
-          <span class="relation-entry-hint">{{ newspaperHint }}</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-
       <div class="relation-entry card" @click="showUserRelationGraph = true">
         <div class="relation-entry-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -136,6 +123,22 @@
         <div class="relation-entry-text">
           <span class="relation-entry-title">我的关系图</span>
           <span class="relation-entry-hint">查看和管理你与所有角色的关系</span>
+        </div>
+        <span class="relation-entry-arrow">›</span>
+      </div>
+
+      <div class="relation-entry card" @click="openWorldSetting">
+        <div class="relation-entry-icon world-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <ellipse cx="12" cy="12" rx="4" ry="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <line x1="12" y1="2" x2="12" y2="22"/>
+          </svg>
+        </div>
+        <div class="relation-entry-text">
+          <span class="relation-entry-title">世界观设置</span>
+          <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
         </div>
         <span class="relation-entry-arrow">›</span>
       </div>
@@ -192,25 +195,6 @@
       </div>
     </div>
     
-    <!-- ═══════════════════════════════════════════
-         世界观设置入口卡片
-         ═══════════════════════════════════════════ -->
-    <div class="relation-entry card" @click="openWorldSetting">
-      <div class="relation-entry-icon world-icon">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <ellipse cx="12" cy="12" rx="4" ry="10"/>
-          <line x1="2" y1="12" x2="22" y2="12"/>
-          <line x1="12" y1="2" x2="12" y2="22"/>
-        </svg>
-      </div>
-      <div class="relation-entry-text">
-        <span class="relation-entry-title">世界观设置</span>
-        <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
-      </div>
-      <span class="relation-entry-arrow">›</span>
-    </div>
-
     <!-- ═══════════════════════════════════════════
          文件夹筛选栏（单层分类：全部 / 未分类 / 各文件夹）
          ═══════════════════════════════════════════ -->
@@ -821,10 +805,7 @@
          ═══════════════════════════════════════════ -->
     <BackpackModal :visible="showBackpack" :characters="sortedCharacters" @close="showBackpack = false" />
 
-    <!-- ═══════════════════════════════════════════
-         《邻舍日报》报纸阅读窗
-         ═══════════════════════════════════════════ -->
-    <NewspaperModal v-model="showNewspaper" @read="onNewspaperRead" />
+    <!-- 《邻舍日报》的阅读窗已随入口一起迁到「传媒」页（MediaView 里挂载） -->
 
       <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
       <StandingManagerModal :open="showStandingManager" :characters="sortedCharacters" @close="showStandingManager = false" />
@@ -913,7 +894,6 @@ import RelationshipDeductionModal from '../components/RelationshipDeductionModal
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
 import BackpackModal from '../components/BackpackModal.vue'
-import NewspaperModal from '../components/NewspaperModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import StandingManagerModal from '../components/StandingManagerModal.vue'
 import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
@@ -940,23 +920,9 @@ const showStandingManager = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
 const backpackChestReady = computed(() => backpackStore.chestReady)
 
-// 《邻舍日报》：未读状态由 newspaper store 统一持有（NavBar 酒馆项红点同源）
-const showNewspaper = ref(false)
-const todayPaper = computed(() => newspaperStore.todayPaper)
-const newspaperUnread = computed(() => newspaperStore.unread)
-const newspaperHint = computed(() => todayPaper.value
-  ? `第${todayPaper.value.edition}期已印好 · 今日事，早知道`
-  : '清晨 5 点后印出 · 今日事，早知道')
-
-function openNewspaper() {
-  showNewspaper.value = true
-}
-
-// 打开看过即消红点（今天之内不再提醒）
-function onNewspaperRead(paper) {
-  newspaperStore.markRead(paper)
-}
-
+// 《邻舍日报》入口已迁到「传媒」页（MediaView）。
+// 这里只剩「让当天报纸先拉一次」—— NavBar 的酒馆项红点与它同源，
+// 而 NavBar 本身也会轮询，所以这个调用只是让首屏更快拿到状态。
 function loadTodayPaper() {
   newspaperStore.fetchToday()
 }
