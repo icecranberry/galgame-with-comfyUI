@@ -1518,6 +1518,23 @@ export async function dismissNewspaperWorldState(dismissed) {
   return request(`/newspaper/dismiss-world`, { method: 'POST', body: { dismissed } })
 }
 
+// 删除某一期（连同它的配图文件）
+export async function deleteNewspaperEdition(date) {
+  return request(`/newspaper/editions/${date}`, { method: 'DELETE' })
+}
+
+/**
+ * 批量清除往期。
+ * @param {{ keep?: 'today'|'none', before?: string|null }} opts
+ *   keep='today'（默认）只清往期、保留今天；'none' 连今天一起清空
+ *   before='YYYY-MM-DD' 只清该日期之前（不含）的期
+ */
+export async function clearNewspaperEditions({ keep = 'today', before = null } = {}) {
+  let path = `/newspaper/editions?keep=${encodeURIComponent(keep)}`
+  if (before) path += `&before=${encodeURIComponent(before)}`
+  return request(path, { method: 'DELETE' })
+}
+
 
 // ── 事件库管理（奇遇事件类型 / 朋友圈话题）──
 
