@@ -1323,6 +1323,12 @@ export async function generateNewspaper() {
   return request(`/newspaper/generate`, { method: 'POST' })
 }
 
+// 手动补印一张缺失的报纸配图（slot: lead=特稿 / world=今日异闻 / item=普通新闻，index 为新闻下标；
+// date 省略 = 今天，带日期可给历史期补图）
+export async function regenerateNewspaperImage({ slot, index, date } = {}) {
+  return request(`/newspaper/regenerate-image`, { method: 'POST', body: { slot, index, date } })
+}
+
 // 消除/恢复今天的世界影响（异闻不再/重新注入角色提示词）
 export async function dismissNewspaperWorldState(dismissed) {
   return request(`/newspaper/dismiss-world`, { method: 'POST', body: { dismissed } })

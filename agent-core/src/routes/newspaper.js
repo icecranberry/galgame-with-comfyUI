@@ -5,6 +5,7 @@ import {
   setWorldStateDismissed,
   listNewspaperEditions,
   getNewspaperByDate,
+  regenerateNewspaperImage,
 } from '../services/newspaperService.js';
 
 const router = Router();
@@ -37,6 +38,25 @@ router.post('/generate', async (req, res) => {
     return;
   }
   res.json({ started: true });
+});
+
+// POST /api/newspaper/regenerate-image — 手动补印一张缺失的配图（前端「重新生成配图」按钮）
+// body: { slot: 'lead'|'world'|'item', index?: number, date?: 'YYYY-MM-DD' }
+// date 省略 = 今天的报纸；带 date 可给历史期补图。不受自动补印的 15 分钟冷却限制
+router.post('/regenerate-image', async (req, res) => {
+  const date = typeof req.body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
+    ? req.body.date
+    : undefined;
+  const result = await regenerateNewspaperImage({
+    date,
+    slot: req.body?.slot,
+    index: req.body?.index,
+  });
+  if (!result.ok) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  res.json({ ok: true, newspaper: result.newspaper });
 });
 
 // POST /api/newspaper/dismiss-world — 消除/恢复今天的世界影响

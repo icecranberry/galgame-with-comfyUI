@@ -1,9 +1,8 @@
 // 版面正文压裁（《邻舍日报》头版用）。
 //
-// CSS 的多行省略（-webkit-line-clamp）要求 display:-webkit-box，正文就不会再绕着
-// 浮动配图排版；而报纸的侧栏正文正是靠 float 让文字半包围配图的。两者不可兼得，
-// 于是这里在排版完成后量一遍真实行盒，把「装不下的那半行」截断并补上省略号，
-// 浮环绕与省略号都能保住（全文照旧进详情页）。
+// 配图优先口径由 CSS 兜底（图块浮动环绕 + 图框 height/contain 等比收缩，正文 min-height 保底一行），
+// 这里只负责正文：排版完成后量一遍真实行盒，把「装不下的那半行」截断并补上省略号
+// （全文照旧进详情页）。
 import { getCurrentInstance, nextTick, onBeforeUnmount, onUpdated, watch } from 'vue'
 
 const ELLIPSIS = '…'
@@ -20,6 +19,15 @@ function ensureProbe() {
   style.visibility = 'hidden'
   style.pointerEvents = 'none'
   return measureProbe
+}
+
+// 剪裁边界：向上找第一个 overflow:hidden/clip 的祖先（通常是 .np-article / .np-world）
+function findClipBoundary(startEl) {
+  for (let node = startEl; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY
+    if (overflowY === 'hidden' || overflowY === 'clip') return node
+  }
+  return null
 }
 
 /**
@@ -40,11 +48,7 @@ export function trimArticleText(el) {
   if (!elRect.height || !host.getBoundingClientRect().height) return false
 
   // 剪裁边界：通常是 overflow:hidden 的 .np-article，正文最多排到它（减掉内边距）的底边
-  let boundary = null
-  for (let node = host; node; node = node.parentElement) {
-    const overflowY = getComputedStyle(node).overflowY
-    if (overflowY === 'hidden' || overflowY === 'clip') { boundary = node; break }
-  }
+  const boundary = findClipBoundary(host)
   const boundaryEl = boundary || host
   const boundaryLimit = () => boundaryEl.getBoundingClientRect().bottom
     - (parseFloat(getComputedStyle(boundaryEl).paddingBottom) || 0)
@@ -138,11 +142,14 @@ export function useArticleClip({ root, active, sources = [] } = {}) {
     if (!host || typeof host.querySelectorAll !== 'function') return
     if (active && !active.value) return
     if (!host.getBoundingClientRect().height) return
+    // 版面确认就绪后把 ResizeObserver 补挂到位：watch 里的 observe() 赶在模板 ref
+    // 赋值之前跑，读到的 root 还是 null，窗口缩放就永远量不到
+    observe()
     host.querySelectorAll('[data-np-clip]').forEach(el => { trimArticleText(el) })
     watchImages(host)
   }
 
-  // 配图落位会改变浮框高度、进而改变正文可排的行数，图一加载完就重量一遍
+  // 配图落位会改变版面可排的行数，图一加载完就重量一遍
   function watchImages(host) {
     host.querySelectorAll('img').forEach(img => {
       if (img.complete || watchedImages.has(img)) return
@@ -161,10 +168,17 @@ export function useArticleClip({ root, active, sources = [] } = {}) {
     })
   }
 
+  // 观察版面根节点的尺寸变化（窗口缩放）。root 晚就绪（loading 骨架 / 关窗期间为 null）
+  // 时不能把 observer 锁死在空观察上，就绪后要补挂——所以每次 clip（版面确认就绪后）都补挂一次
+  let observedEl = null
   function observe() {
-    if (observer || typeof ResizeObserver !== 'function') return
-    observer = new ResizeObserver(schedule)
-    if (root?.value) observer.observe(root.value)
+    if (typeof ResizeObserver !== 'function') return
+    const el = root?.value
+    if (!el) return
+    if (observer && observedEl === el) return
+    if (!observer) observer = new ResizeObserver(schedule)
+    observer.observe(el)
+    observedEl = el
   }
 
   function teardown() {
@@ -172,6 +186,7 @@ export function useArticleClip({ root, active, sources = [] } = {}) {
     frame = 0
     if (observer) observer.disconnect()
     observer = null
+    observedEl = null
   }
 
   // 组件外调用（单测等）没有实例可挂生命周期钩子，跳过即可

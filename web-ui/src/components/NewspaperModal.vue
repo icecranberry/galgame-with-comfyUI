@@ -1,50 +1,40 @@
 <template>
-  <linshe-modal
-    v-model="visible"
-    full
-    title="邻舍日报"
-    panel-class="np-panel"
-    body-class="np-body"
-    @close="emit('close')"
-  >
-    <template #header-extra>
-      <span v-if="editions.length" class="np-edition-nav">
-        <linshe-button
-          variant="icon"
-          size="sm"
-          title="上一期（更早）"
-          :disabled="!canNavOlder || navLoading"
-          @click="navEdition(1)"
-        >‹</linshe-button>
-        <span class="np-header-meta">{{ headerMeta || '今天的报纸还没印好' }}</span>
-        <linshe-button
-          variant="icon"
-          size="sm"
-          title="下一期（更新）"
-          :disabled="!newerTarget || navLoading"
-          @click="navEdition(-1)"
-        >›</linshe-button>
-      </span>
-      <span v-else-if="paper" class="np-header-meta">第{{ paper.edition }}期 · {{ formatDate(paper.publish_date) }}</span>
-    </template>
+  <!-- 报纸不铺满视口（不再套 LinsheModal 外壳）：四周留一圈衬底，纸面浮起带投影；
+       关闭钮浮在报头右上角；0.3s 渐入渐出由 Transition 兜住，关闭动画走完才卸载。 -->
+  <Teleport to="body">
+    <Transition name="np-window">
+      <div v-if="visible" class="np-overlay" @click.self="closeWindow">
+        <div
+          v-if="!detailArticle"
+          class="np-close"
+          role="button"
+          tabindex="0"
+          aria-label="关闭日报"
+          @click="closeWindow"
+          @keydown.enter="closeWindow"
+        >✕</div>
 
-    <!-- 加载骨架 -->
-    <div v-if="loading" class="np-skeletons">
-      <div class="skeleton np-sk-line"></div>
-      <div class="skeleton np-sk-block"></div>
-      <div class="skeleton np-sk-block"></div>
-    </div>
+        <!-- 加载骨架 -->
+        <div v-if="loading" class="np-gate">
+          <div class="np-skeletons">
+            <div class="skeleton np-sk-line"></div>
+            <div class="skeleton np-sk-block"></div>
+            <div class="skeleton np-sk-block"></div>
+          </div>
+        </div>
 
-    <!-- 还没印好 -->
-    <div v-else-if="!paper" class="empty np-empty">
-      <div class="np-empty-icon">📰</div>
-      <p class="np-empty-title">今天的报纸还没印好</p>
-      <p class="np-empty-hint">每天零点由镇口公告站准时印发</p>
-      <linshe-button size="sm" :loading="urging" @click="urgePrint">催一下印刷机</linshe-button>
-    </div>
+        <!-- 还没印好 -->
+        <div v-else-if="!paper" class="np-gate">
+          <div class="empty np-empty">
+            <div class="np-empty-icon">📰</div>
+            <p class="np-empty-title">今天的报纸还没印好</p>
+            <p class="np-empty-hint">每天零点由镇口公告站准时印发</p>
+            <linshe-button size="sm" :loading="urging" @click="urgePrint">催一下印刷机</linshe-button>
+          </div>
+        </div>
 
-    <!-- 报纸版面：一整版铺满窗口，内容压在一页内 -->
-    <article v-else ref="paperEl" class="np-paper" :class="{ 'is-past-view': !isToday }">
+        <!-- 报纸版面：一整版铺满视口，内容压在一页内 -->
+        <article v-else ref="paperEl" class="np-paper" :class="{ 'is-past-view': !isToday }">
       <!-- 报头 -->
       <header class="np-masthead">
         <div class="np-mast-row">
@@ -99,6 +89,15 @@
             </figure>
             <p v-if="paper.world_state.description" class="np-text" data-np-clip>{{ paper.world_state.description }}</p>
             <p v-if="paper.world_state.news" class="np-text np-text-secondary" data-np-clip>{{ paper.world_state.news }}</p>
+            <linshe-button
+              v-if="!paper.world_state.image"
+              class="np-world-regen"
+              variant="ghost"
+              size="sm"
+              :loading="regenLoading.world"
+              @click.stop="regenPaperImage('world')"
+              @keydown.enter.stop
+            >重新生成配图</linshe-button>
           </section>
           <div class="np-col-list">
             <section
@@ -115,7 +114,17 @@
               <figure v-if="item.image" class="np-figure np-figure-wrap">
                 <img :src="item.image" :alt="item.title" loading="lazy" />
               </figure>
-              <div v-else class="np-img-placeholder np-figure-wrap">{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</div>
+              <div v-else class="np-img-placeholder np-figure-wrap">
+                <span>{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</span>
+                <linshe-button
+                  class="np-regen-btn"
+                  variant="ghost"
+                  size="sm"
+                  :loading="regenLoading[`item:${i}`]"
+                  @click.stop="regenPaperImage('item', i)"
+                  @keydown.enter.stop
+                >重新生成配图</linshe-button>
+              </div>
               <p class="np-text np-text-sm" data-np-clip>{{ item.content }}</p>
             </section>
           </div>
@@ -141,7 +150,17 @@
             <figure v-if="paper.character_event.image" class="np-figure np-lead-figure">
               <img :src="paper.character_event.image" :alt="paper.character_event.title" loading="lazy" />
             </figure>
-            <div v-else class="np-img-placeholder np-lead-figure">{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</div>
+            <div v-else class="np-img-placeholder np-lead-figure">
+              <span>{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</span>
+              <linshe-button
+                class="np-regen-btn"
+                variant="ghost"
+                size="sm"
+                :loading="regenLoading.lead"
+                @click.stop="regenPaperImage('lead')"
+                @keydown.enter.stop
+              >重新生成配图</linshe-button>
+            </div>
             <p class="np-text np-lead-text" data-np-clip>{{ paper.character_event.content }}</p>
           </article>
         </div>
@@ -162,7 +181,17 @@
               <figure v-if="item.image" class="np-figure np-figure-wrap">
                 <img :src="item.image" :alt="item.title" loading="lazy" />
               </figure>
-              <div v-else class="np-img-placeholder np-figure-wrap">{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</div>
+              <div v-else class="np-img-placeholder np-figure-wrap">
+                <span>{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</span>
+                <linshe-button
+                  class="np-regen-btn"
+                  variant="ghost"
+                  size="sm"
+                  :loading="regenLoading[`item:${i + leftItems.length}`]"
+                  @click.stop="regenPaperImage('item', i + leftItems.length)"
+                  @keydown.enter.stop
+                >重新生成配图</linshe-button>
+              </div>
               <p class="np-text np-text-sm" data-np-clip>{{ item.content }}</p>
             </section>
           </div>
@@ -209,13 +238,23 @@
               <img :src="detailArticle.image" :alt="detailArticle.title" />
               <figcaption class="np-detail-caption">▲ 本报插画 · 点击放大</figcaption>
             </figure>
-            <div v-else class="np-img-placeholder np-detail-nofimg">{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</div>
+            <div v-else class="np-img-placeholder np-detail-nofimg">
+              <span>{{ isToday ? '配图印刷中…' : '本期配图缺失' }}</span>
+              <linshe-button
+                class="np-regen-btn"
+                variant="ghost"
+                size="sm"
+                :loading="regenLoading[detailRegenKey]"
+                @click.stop="regenPaperImage(detailArticle.kind, detailArticle.index)"
+                @keydown.enter.stop
+              >重新生成配图</linshe-button>
+            </div>
             <p class="np-detail-text">{{ detailArticle.content }}</p>
           </div>
         </div>
       </Transition>
 
-      <!-- 图片放大：Teleport 到 body 全局层级（高于日报弹窗本体，低于 Toast） -->
+      <!-- 图片放大：Teleport 到 body 全局层级（高于日报窗体本体，低于 Toast） -->
       <Teleport to="body">
         <div style="--vel-z-index: 11000">
           <ImageLightbox
@@ -226,21 +265,27 @@
         </div>
       </Teleport>
     </article>
-  </linshe-modal>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 // 《邻舍日报》——小镇预告报纸阅读窗。
 // 纸面视觉属于设计系统的「质感岛」例外家族（同信箱/世界观编辑器）：固定暖纸底 + 墨色文字，
-// 不随暗夜主题切换；窗体外壳仍由 LinsheModal 统一提供。
-// 版面口径：整版铺满窗口（桌面三栏，特稿居中当头条），正文行数压裁保证一页装下；
+// 不随暗夜主题切换；不套 LinsheModal 外壳，四周留一圈暖纸衬底，纸面带报边做旧质感。
+// 出现方式：衬底淡入 + 纸面从底部往上浮（0.3s 口径；Esc 关闭自己兜底）。
+// 版面口径：整版铺满视口（桌面三栏，特稿居中当头条），配图优先——侧栏/异闻配图保持
+// 报纸的「文字半包围」拼版（图块浮动，文字绕图排），图框按版面高度取一份、img 以
+// contain 等比收进框内（永不裁切）；装不下先压正文（min-height 保底一行），标题始终保留。
+// 正文行数压裁（省略号）由 useArticleClip 负责。
 // 点击任意新闻块弹出详情页（全文 + 大图），详情里点图可再放大。
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, inject, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import * as api from '../api/index.js'
-import LinsheModal from './ui/LinsheModal.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { useArticleClip } from '../composables/useArticleClip.js'
+import { playNewspaperFlipSound } from '../utils/newspaperSound.js'
 
 const NEWSPAPER_TAGLINE = '今日事 · 早知道'
 const POLL_INTERVAL_MS = 20000
@@ -249,6 +294,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:modelValue', 'close', 'read'])
+
+const toastFn = inject('toast', null)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -295,7 +342,6 @@ function adjacentEdition(dir) {
 
 const olderTarget = computed(() => adjacentEdition(1))
 const newerTarget = computed(() => adjacentEdition(-1))
-const canNavOlder = computed(() => !!olderTarget.value)
 
 function editionShortLabel(e) {
   if (!e) return ''
@@ -307,10 +353,6 @@ const currentLabel = computed(() => {
   const p = paper.value
   if (!p) return ''
   return `第${p.edition}期 · ${isToday.value ? '今天' : formatDate(p.publish_date)}`
-})
-const headerMeta = computed(() => {
-  const p = paper.value
-  return p ? `第${p.edition}期 · ${formatDate(p.publish_date)}` : ''
 })
 
 /** 期号导航：dir=1 更旧，dir=-1 更新（越过最新一期即回到今天） */
@@ -407,10 +449,37 @@ const detailArticle = computed(() => {
   if (d.kind === 'item') {
     const it = items.value[d.index]
     if (!it) return null
-    return { kind: 'item', cat: it.category, title: it.title, content: it.content, image: it.image, author: '', avatar: '' }
+    return { kind: 'item', cat: it.category, title: it.title, content: it.content, image: it.image, index: d.index, author: '', avatar: '' }
   }
   return null
 })
+
+// ── 手动补印缺失配图：按钮挂在「配图印刷中/缺失」占位框上，key = 'lead' | 'world' | 'item:<下标>' ──
+const regenLoading = reactive({})
+const detailRegenKey = computed(() => {
+  const d = detailArticle.value
+  if (!d) return ''
+  return d.kind === 'item' ? `item:${d.index}` : d.kind
+})
+
+async function regenPaperImage(slot, index) {
+  const key = slot === 'item' ? `item:${index}` : slot
+  if (regenLoading[key]) return
+  regenLoading[key] = true
+  const dateAtStart = viewDate.value
+  try {
+    const data = await api.regenerateNewspaperImage({ slot, index, date: dateAtStart || undefined })
+    // 生成耗时较长，期间用户可能已切到别的期号：只在还停在同一期时把补好的报纸刷进视图
+    if (data?.newspaper && viewDate.value === dateAtStart) {
+      if (dateAtStart) pastPaper.value = data.newspaper
+      else todayPaper.value = data.newspaper
+    }
+  } catch (err) {
+    toastFn?.(err.message || '配图生成失败，请稍后再试', 'error')
+  } finally {
+    regenLoading[key] = false
+  }
+}
 
 function openDetail(d) {
   detail.value = d
@@ -418,6 +487,19 @@ function openDetail(d) {
 function closeDetail() {
   detail.value = null
   zoomSrc.value = ''
+}
+
+function closeWindow() {
+  visible.value = false
+  emit('close')
+}
+
+// Esc 分层关：大图 → 详情页 → 整份报纸（原 LinsheModal 的职责收编到这里）
+function onWindowKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (zoomSrc.value) { zoomSrc.value = ''; return }
+  if (detail.value) { closeDetail(); return }
+  closeWindow()
 }
 
 function formatDate(dateStr) {
@@ -477,6 +559,8 @@ async function urgePrint() {
 
 watch(visible, async (open) => {
   if (open) {
+    // 报纸浮现的同一拍翻一页
+    playNewspaperFlipSound()
     loading.value = true
     viewDate.value = ''
     pastPaper.value = null
@@ -488,23 +572,138 @@ watch(visible, async (open) => {
       loading.value = false
     }
     fetchEditions()
+    window.addEventListener('keydown', onWindowKeydown)
   } else {
     clearInterval(pollTimer)
     pollTimer = null
     closeDetail()
+    window.removeEventListener('keydown', onWindowKeydown)
   }
 })
 
 onBeforeUnmount(() => {
   clearInterval(pollTimer)
+  window.removeEventListener('keydown', onWindowKeydown)
 })
 </script>
 
 <style scoped>
-/* ── 报纸质感岛（例外家族：固定暖纸 + 墨色，不随主题） ── */
+/* ── 报纸质感岛（例外家族：固定暖纸 + 墨色，不随主题） ──
+   窗体即报纸，但不铺满视口：四周留一圈压暗的桌面衬底，
+   纸张带细边与投影浮在衬底上（np-paper / np-gate 共用纸壳） */
+.np-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  --np-inset: clamp(8px, 2vmin, 22px);
+  /* 浮现位移：纸面从底部往上浮的距离 */
+  --np-rise: clamp(40px, 8vh, 110px);
+  padding:
+    calc(var(--np-inset) + env(safe-area-inset-top, 0px))
+    calc(var(--np-inset) + env(safe-area-inset-right, 0px))
+    calc(var(--np-inset) + env(safe-area-inset-bottom, 0px))
+    calc(var(--np-inset) + env(safe-area-inset-left, 0px));
+  /* 衬底：比纸面压暗一档的暖桌面色 + 顶部微光，给投影一个承托面 */
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 250, 236, 0.5), rgba(255, 250, 236, 0) 62%),
+    repeating-linear-gradient(0deg, rgba(120, 96, 64, 0.03) 0 2px, rgba(120, 96, 64, 0) 2px 5px),
+    linear-gradient(180deg, #e6dcc4 0%, #d8cbae 100%);
+  color: #3a2a1a;
+  font-family: Georgia, 'Songti SC', 'STSong', 'SimSun', serif;
+}
+
+/* 纸壳：细墨边 + 直角报边 + 多层投影（贴地阴影 + 环境阴影）。
+   报边做旧：内圈高光 + 纤维暗角，让纸的四边也带着报纸质感 */
+.np-paper,
+.np-gate {
+  border: 1px solid rgba(58, 42, 26, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 253, 246, 0.85),
+    inset 0 0 0 1px rgba(255, 253, 246, 0.45),
+    inset 0 0 28px rgba(120, 96, 64, 0.12),
+    0 2px 6px rgba(58, 42, 26, 0.18),
+    0 10px 30px rgba(58, 42, 26, 0.24),
+    0 32px 80px rgba(58, 42, 26, 0.2);
+}
+
+/* 加载 / 空态：整版纸面居中 */
+.np-gate {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: linear-gradient(180deg, #f7f2e7 0%, #f3ecdc 100%);
+}
+
+/* 悬浮关闭钮：报头右上角的墨色圆章（质感岛内自包含样式，不套主题按钮） */
+.np-close {
+  position: absolute;
+  top: calc(var(--np-inset, 0px) + 10px + env(safe-area-inset-top, 0px));
+  right: calc(var(--np-inset, 0px) + 12px + env(safe-area-inset-right, 0px));
+  z-index: 20;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid rgba(58, 42, 26, 0.55);
+  border-radius: 50%;
+  background: rgba(255, 252, 245, 0.88);
+  color: #6b5a48;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(58, 42, 26, 0.2);
+  user-select: none;
+  transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
+}
+.np-close:hover,
+.np-close:focus-visible {
+  background: #8c3b22;
+  border-color: #8c3b22;
+  color: #f5efe0;
+  transform: rotate(90deg);
+}
+.np-close:focus-visible {
+  outline: 2px solid rgba(140, 59, 34, 0.5);
+  outline-offset: 2px;
+}
+
+/* 窗口浮现（0.3s 口径）：衬底渐入渐出，纸面与报头关闭钮从底部往上浮。
+   淡入淡出与上浮都走 --ease-out（cubic-bezier(0.22, 1, 0.36, 1)，先快后慢） */
+.np-window-enter-active,
+.np-window-leave-active {
+  transition: opacity 0.3s var(--ease-out);
+}
+.np-window-enter-from,
+.np-window-leave-to {
+  opacity: 0;
+}
+.np-window-enter-active .np-paper,
+.np-window-enter-active .np-gate,
+.np-window-leave-active .np-paper,
+.np-window-leave-active .np-gate,
+.np-window-enter-active .np-close,
+.np-window-leave-active .np-close {
+  transition: transform 0.34s var(--ease-out);
+  will-change: transform;
+}
+.np-window-enter-from .np-paper,
+.np-window-enter-from .np-gate,
+.np-window-leave-to .np-paper,
+.np-window-leave-to .np-gate,
+.np-window-enter-from .np-close,
+.np-window-leave-to .np-close {
+  transform: translateY(var(--np-rise, 56px));
+}
+
 .np-paper {
   position: relative;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -515,27 +714,6 @@ onBeforeUnmount(() => {
   color: #3a2a1a;
   padding: 18px 28px 14px;
   font-family: Georgia, 'Songti SC', 'STSong', 'SimSun', serif;
-}
-
-.np-header-meta {
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-/* ── 期号导航（header-extra）：‹ 期号 · 日期 › ── */
-.np-edition-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.np-edition-nav .np-header-meta {
-  min-width: 148px;
-  text-align: center;
-}
-/* 报头右侧的「第 N 期」随导航联动时弱化（避免与 header 重复） */
-.np-paper.is-past-view .np-mast-side-right {
-  opacity: 0.55;
 }
 
 /* ── 期号切换条（报头下）：上一期 ← 当前 → 下一期 ── */
@@ -569,6 +747,8 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px;
+  /* 右侧让出悬浮关闭钮的位置，别让「第 N 期」压在章下面 */
+  padding-right: 52px;
 }
 .np-mast-side {
   flex: 1;
@@ -690,7 +870,8 @@ onBeforeUnmount(() => {
   background: rgba(140, 59, 34, 0.07);
 }
 
-/* 今日异闻（世界状态）：block 流让配图可被文字环绕 */
+/* 今日异闻（世界状态）：block 流让配图可被文字半包围；正文保底一行，
+   装不下的部分由 overflow:hidden + 压裁器收省略号 */
 .np-world {
   min-height: 0;
   margin-bottom: 8px;
@@ -701,6 +882,10 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   background: rgba(255, 252, 245, 0.55);
   overflow: hidden;
+}
+/* 异闻正文：保底一行（描述不足时补充新闻仍留在版面上） */
+.np-world .np-text {
+  min-height: 1.8em;
 }
 .np-world-head {
   display: flex;
@@ -768,6 +953,8 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(58, 42, 26, 0.35);
 }
 .np-lead-title {
+  /* 标题不参与收缩：版面再紧也整块留在版面上（让配图与正文去让路） */
+  flex: 0 0 auto;
   margin: 0 0 10px;
   font-size: clamp(22px, 2.4vw, 32px);
   line-height: 1.3;
@@ -777,22 +964,58 @@ onBeforeUnmount(() => {
   font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'SimSun', serif;
 }
 .np-lead-text {
+  /* 头条正文吃掉图框之外的剩余高度；保底一行，不够时图框等比收缩 */
+  flex: 1 1 0;
+  min-height: 1.85em;
   font-size: 14px;
   margin-top: 10px;
   margin-bottom: 0;
 }
-/* 头条配图吃掉栏内剩余高度（满幅裁切是头条的专有语言；侧栏图保持原始比例环绕） */
-.np-lead-figure {
-  flex: 1 1 0;
-  min-height: 60px;
+/* 配图统一口径：细墨框 + 白衬，img 以 contain 等比缩放（永不裁切、不裁边）。
+   头条通栏；侧栏/异闻图块浮动，文字绕图排成报纸的「半包围」拼版 */
+.np-figure {
+  min-height: 0;
+  margin: 4px 0 0;
+  border: 1px solid rgba(58, 42, 26, 0.4);
+  padding: 4px;
+  background: #fffdf8;
+  overflow: hidden;
 }
-.np-lead-figure img {
+.np-figure img {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  border-radius: 2px;
+}
+/* 头条通栏：flex 内取自然高，装不下时先收缩图框（正文保底一行） */
+.np-lead-figure {
+  flex: 0 1 auto;
+  align-self: stretch;
+}
+/* 侧栏 / 异闻图块：浮动让文字半包围，按条目左右交错拼版 */
+.np-figure-wrap {
+  float: left;
+  width: 58%;
+  margin: 4px 12px 4px 0;
+}
+.np-col-list .np-article:nth-of-type(even) .np-figure-wrap {
+  float: right;
+  margin: 4px 0 4px 12px;
+}
+/* 图片优先：图框高度按「版面高度 - 报头（栏目戳 + 两行标题）」取一份，
+   装不下时图框跟版面一起缩，img 以 contain 等比收进框内（永不裁切）；
+   省下的高度（连同图侧剩余宽度）留给正文，正文 min-height 保底一行 */
+.np-article .np-figure-wrap {
+  height: calc(100% - 5.6em);
+}
+.np-img-placeholder.np-figure-wrap {
+  aspect-ratio: 4 / 3;
+  min-height: 0;
 }
 
-/* 普通新闻：block 流（float 环绕需要），超高由 overflow:hidden 兜底（全文进详情） */
+/* 普通新闻：block 流（float 环绕需要），overflow:hidden 收住图块并给正文压裁兜底。
+   配图优先：图块可缩（保持比例），正文先让路、min-height 保底一行，标题始终保留 */
 .np-article {
   min-height: 0;
   padding: 8px 4px;
@@ -819,6 +1042,8 @@ onBeforeUnmount(() => {
   text-align: justify;
 }
 .np-text-sm {
+  /* 正文保底一行；装不下的整行由 useArticleClip 量完补省略号（全文进详情） */
+  min-height: 1.8em;
   font-size: 13px;
   line-height: 1.8;
   margin-top: 6px;
@@ -837,45 +1062,25 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-/* 配图：细墨框 + 白衬。侧栏配图保持原始比例，文字半包围环绕；
-   环绕方向按条目交错（左右左右），更像报纸拼版 */
-.np-figure {
-  margin: 4px 0 0;
-  border: 1px solid rgba(58, 42, 26, 0.4);
-  padding: 4px;
-  background: #fffdf8;
-  overflow: hidden;
-}
-.np-figure-wrap {
-  float: left;
-  width: 58%;
-  margin: 4px 12px 4px 0;
-}
-.np-col-list .np-article:nth-of-type(even) .np-figure-wrap {
-  float: right;
-  margin: 4px 0 4px 12px;
-}
-.np-figure-wrap img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 2px;
-}
-.np-img-placeholder.np-figure-wrap {
-  aspect-ratio: 4 / 3;
-  min-height: 0;
-}
 .np-img-placeholder {
   margin: 4px 0 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: center;
   font-size: 12px;
   letter-spacing: 0.15em;
   color: #a08c74;
   border: 1px dashed rgba(58, 42, 26, 0.4);
   background: rgba(255, 252, 245, 0.5);
   border-radius: 2px;
+}
+/* 异闻块的补图按钮：没有占位框，直接缀在正文后（皮肤归 LinsheButton，这里只管位置） */
+.np-world-regen {
+  margin-top: 6px;
 }
 
 /* 报尾 */
@@ -1024,10 +1229,10 @@ onBeforeUnmount(() => {
   color: #8c3b22;
 }
 
-/* 详情动画（0.3s 口径；图片放大走统一 ImageLightbox） */
+/* 详情动画（0.3s 口径，同窗口淡入淡出走 --ease-out；图片放大走统一 ImageLightbox） */
 .np-detail-fade-enter-active,
 .np-detail-fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s var(--ease-out);
 }
 .np-detail-fade-enter-from,
 .np-detail-fade-leave-to {
@@ -1072,6 +1277,15 @@ onBeforeUnmount(() => {
 @media (max-width: 767px) {
   .np-paper {
     padding: 14px 16px 12px;
+  }
+  .np-mast-row {
+    padding-right: 0;
+  }
+  .np-close {
+    top: calc(var(--np-inset, 8px) + 8px + env(safe-area-inset-top, 0px));
+    right: calc(var(--np-inset, 8px) + 10px + env(safe-area-inset-right, 0px));
+    width: 36px;
+    height: 36px;
   }
   /* 期号切换条：窄屏允许换行、隐藏目标期日期，避免横向溢出 */
   .np-edition-switch {
@@ -1121,14 +1335,17 @@ onBeforeUnmount(() => {
     font-size: 23px;
     text-align: left;
   }
-  /* 手机端不做环绕：配图通栏、保持比例 */
+  /* 手机版整版可滚动、无高度压力：配图通栏、取消浮动环绕、按原始比例展示。
+     选择器带上桌面端的高特异度写法（float:right / height:calc），否则压不住 */
   .np-figure,
-  .np-col-list .np-article:nth-of-type(even) .np-figure-wrap,
   .np-figure-wrap,
+  .np-col-list .np-article:nth-of-type(even) .np-figure-wrap,
+  .np-article .np-figure-wrap,
   .np-lead-figure {
     float: none;
     flex: none;
     width: auto;
+    height: auto;
     margin: 4px 0 0;
   }
   .np-img-placeholder.np-figure-wrap {
@@ -1137,7 +1354,6 @@ onBeforeUnmount(() => {
   }
   .np-figure img {
     height: auto;
-    max-height: 220px;
   }
   .np-img-placeholder {
     flex: none;
@@ -1149,26 +1365,5 @@ onBeforeUnmount(() => {
   .np-detail-figure img {
     max-height: 38vh;
   }
-}
-</style>
-
-<style>
-/* 报纸窗体：几乎铺满全屏的一整版报纸（panel-class/body-class 是 LinsheModal 的官方布局差异机制），
-   只放大面板并去掉正文内边距让暖纸铺满内容区，不改窗体皮肤 */
-.np-panel {
-  --modal-full-width: min(1520px, 97vw);
-  height: 94vh;
-  max-height: 94vh;
-}
-.np-body {
-  padding: 0 !important;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.np-body > * {
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
 }
 </style>

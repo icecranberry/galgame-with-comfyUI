@@ -242,6 +242,65 @@ test('collectImageTasks collects only missing images in editorial order', () => 
   assert.equal(svc.collectImageTasks(null).length, 0);
 });
 
+test('findMissingImageTask maps frontend slots to missing image tasks', () => {
+  const row = {
+    id: 1,
+    items_json: JSON.stringify([
+      { title: '甲', content: 'a1', image_prompt: 'p1', image: null },
+      { title: '乙', content: 'b1', image_prompt: 'p2', image: '/images/newspaper/x.png' },
+      { title: '丙', content: 'c1', image: null }, // 没有 image_prompt：LLM 漏写，走正文兜底
+    ]),
+    character_event_json: JSON.stringify({ title: '特稿', content: 'c', image_prompt: 'p0', image: null }),
+    world_state_json: JSON.stringify({ name: '状态', description: 'd', image_prompt: 'p9', image: null }),
+  };
+
+  const lead = svc.findMissingImageTask(row, 'lead');
+  assert.equal(lead.key, 'character_event');
+  assert.equal(lead.image, 'p0');
+  assert.equal(lead.hasLoras, true);
+  assert.equal(svc.findMissingImageTask(row, 'world').image, 'p9');
+  const item = svc.findMissingImageTask(row, 'item', 0);
+  assert.equal(item.key, 'news');
+  assert.equal(item.image, 'p1');
+
+  // 已有图的槽位 / 越界下标 / 未知槽位：都不可补
+  assert.equal(svc.findMissingImageTask(row, 'item', 1), null, 'illustrated item is not regenerable');
+  assert.equal(svc.findMissingImageTask(row, 'item', 9), null);
+  assert.equal(svc.findMissingImageTask(row, 'item', -1), null);
+  assert.equal(svc.findMissingImageTask(row, 'unknown'), null);
+  assert.equal(svc.findMissingImageTask(null, 'lead'), null);
+
+  // LLM 漏写 image_prompt 的槽位走正文兜底：依然可补，画面描述由标题+正文拼出
+  const fallback = svc.findMissingImageTask(row, 'item', 2);
+  assert.ok(fallback, 'item without image_prompt falls back to body text');
+  assert.equal(fallback.key, 'news');
+  assert.ok(fallback.image.includes('丙'), 'fallback prompt mentions the title');
+  assert.ok(fallback.image.includes('c1'), 'fallback prompt mentions the body');
+  assert.equal(fallback.ragQuery, 'c1');
+
+  // 全部配好的报纸：任何槽位都不可补（无 world_state 也一样）
+  const done = {
+    id: 2,
+    items_json: JSON.stringify([{ image_prompt: 'p1', image: 'x' }]),
+    character_event_json: JSON.stringify({ image_prompt: 'p0', image: 'e' }),
+    world_state_json: null,
+  };
+  assert.equal(svc.findMissingImageTask(done, 'lead'), null);
+  assert.equal(svc.findMissingImageTask(done, 'world'), null);
+
+  // 特稿漏写 image_prompt 时同样兜底（保留 LoRA 标记）
+  const noPromptLead = {
+    id: 3,
+    items_json: '[]',
+    character_event_json: JSON.stringify({ title: '特稿', content: '正文' }),
+    world_state_json: null,
+  };
+  const leadFallback = svc.findMissingImageTask(noPromptLead, 'lead');
+  assert.ok(leadFallback, 'lead without image_prompt falls back to body text');
+  assert.equal(leadFallback.hasLoras, true);
+  assert.ok(leadFallback.image.includes('特稿'));
+});
+
 test('pickFeaturedCharacter returns a plain row (regression: was async, callers got a Promise)', async t => {
   const db = getDb();
   t.after(() => closeDb());

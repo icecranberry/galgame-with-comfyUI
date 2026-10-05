@@ -345,60 +345,130 @@ export function collectImageTasks(row) {
 
 /** 给报纸补齐缺失配图（逐张生成；单张失败不阻断其余）。返回补上的张数 */
 async function fillPaperImages(row) {
-  const db = getDb();
   const tasks = collectImageTasks(row);
-  if (tasks.length === 0) return 0;
-  // 特稿画面以主角为主，带角色 LoRA；角色已被删除时退化为无 LoRA 的普通插画
-  const character = row.character_id
-    ? db.prepare('SELECT loras, artist_override, custom_workflow FROM characters WHERE id = ?').get(row.character_id)
-    : null;
-  const featuredLoras = parseCharacterLoras(character?.loras);
-  const resolution = `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`;
   let filled = 0;
-
   for (const task of tasks) {
-    try {
-      const result = await generateNewsImage(task.image, {
-        ragQuery: task.ragQuery,
-        loras: task.hasLoras ? featuredLoras : [],
-        character: task.hasLoras ? character : null,
-      });
-      const fresh = db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(row.id);
-      if (!result || !fresh) continue;
-      recordCompletedImageTask({
-        conversationId: 'town_newspaper',
-        promptOriginal: task.image,
-        promptRefined: result.refinedPrompt,
-        outputPaths: [result.url],
-        style: result.artist,
-        resolution,
-        workflowTemplate: result.wfMode,
-        db,
-      });
-      if (task.key === 'character_event') {
-        const event = safeParseJson(fresh.character_event_json) || {};
-        event.image = result.url;
-        db.prepare('UPDATE town_newspapers SET character_event_json = ? WHERE id = ?').run(JSON.stringify(event), row.id);
-      } else if (task.key === 'world_state') {
-        const ws = safeParseJson(fresh.world_state_json) || {};
-        ws.image = result.url;
-        db.prepare('UPDATE town_newspapers SET world_state_json = ? WHERE id = ?').run(JSON.stringify(ws), row.id);
-      } else {
-        const items = safeParseJson(fresh.items_json) || [];
-        const target = items.find(i => i.image_prompt === task.item.image_prompt && !i.image);
-        if (target) {
-          target.image = result.url;
-          delete target.image_prompt; // 配图完成后不把生图提示词回传前端
-          db.prepare('UPDATE town_newspapers SET items_json = ? WHERE id = ?').run(JSON.stringify(items), row.id);
-        }
-      }
-      filled++;
-      console.log(`[newspaper] Image ready: ${result.url}`);
-    } catch (err) {
-      console.error('[newspaper] Image generation failed:', err.message);
-    }
+    if (await generateAndStorePaperImage(row, task)) filled++;
   }
   return filled;
+}
+
+/** 生成一张配图并写回对应槽位（tick 自动补印与前端手动重新生成共用）。返回是否成功 */
+async function generateAndStorePaperImage(row, task) {
+  const db = getDb();
+  try {
+    // 特稿画面以主角为主，带角色 LoRA；角色已被删除时退化为无 LoRA 的普通插画
+    const character = row.character_id
+      ? db.prepare('SELECT loras, artist_override, custom_workflow FROM characters WHERE id = ?').get(row.character_id)
+      : null;
+    const featuredLoras = parseCharacterLoras(character?.loras);
+    const resolution = `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`;
+    const result = await generateNewsImage(task.image, {
+      ragQuery: task.ragQuery,
+      loras: task.hasLoras ? featuredLoras : [],
+      character: task.hasLoras ? character : null,
+    });
+    const fresh = db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(row.id);
+    if (!result || !fresh) return false;
+    recordCompletedImageTask({
+      conversationId: 'town_newspaper',
+      promptOriginal: task.image,
+      promptRefined: result.refinedPrompt,
+      outputPaths: [result.url],
+      style: result.artist,
+      resolution,
+      workflowTemplate: result.wfMode,
+      db,
+    });
+    if (task.key === 'character_event') {
+      const event = safeParseJson(fresh.character_event_json) || {};
+      event.image = result.url;
+      db.prepare('UPDATE town_newspapers SET character_event_json = ? WHERE id = ?').run(JSON.stringify(event), row.id);
+    } else if (task.key === 'world_state') {
+      const ws = safeParseJson(fresh.world_state_json) || {};
+      ws.image = result.url;
+      db.prepare('UPDATE town_newspapers SET world_state_json = ? WHERE id = ?').run(JSON.stringify(ws), row.id);
+    } else {
+      const items = safeParseJson(fresh.items_json) || [];
+      // 常规任务按 image_prompt 认条目；正文兜底任务（image_prompt 为空）按标题认，
+      // 否则多条都没 prompt 时会补到同一条上
+      const target = items.find(i => !i.image && (task.item.image_prompt
+        ? i.image_prompt === task.item.image_prompt
+        : i.title === task.item.title));
+      if (target) {
+        target.image = result.url;
+        delete target.image_prompt; // 配图完成后不把生图提示词回传前端
+        db.prepare('UPDATE town_newspapers SET items_json = ? WHERE id = ?').run(JSON.stringify(items), row.id);
+      }
+    }
+    console.log(`[newspaper] Image ready: ${result.url}`);
+    return true;
+  } catch (err) {
+    console.error('[newspaper] Image generation failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * 纯函数：按前端槽位标记（lead=特稿 / world=今日异闻 / item=普通新闻下标）从报纸行
+ * 找出缺失且可补的配图任务。优先取 LLM 写好的 image_prompt；旧报纸或 LLM 漏写该字段时
+ * （这正是「图片一直没出来」的常见原因之一，自动补印对此无能为力）用正文兜底拼一段画面
+ * 描述，交给生图管线的润色环节优化，保证手动补图永远有得生。已有图时返回 null。
+ */
+export function findMissingImageTask(row, slot, index) {
+  if (!row) return null;
+  const tasks = collectImageTasks(row);
+  const event = safeParseJson(row.character_event_json);
+  const ws = safeParseJson(row.world_state_json);
+  if (slot === 'lead') {
+    if (!event || event.image) return null;
+    return tasks.find(t => t.key === 'character_event') || (event.title && event.content ? {
+      key: 'character_event',
+      image: `小镇报纸人物特稿插画，画面以「${event.title}」里的主角为中心：${cleanText(event.content, 200)}`,
+      ragQuery: event.content,
+      hasLoras: true,
+    } : null);
+  }
+  if (slot === 'world') {
+    if (!ws || ws.image) return null;
+    return tasks.find(t => t.key === 'world_state') || (ws.name ? {
+      key: 'world_state',
+      image: `小镇今日异闻插画，全镇居民都呈现统一状态「${ws.name}」后的街景众生相：${cleanText(ws.description || ws.news || ws.name, 200)}`,
+      ragQuery: ws.description || ws.news || ws.name,
+    } : null);
+  }
+  if (slot === 'item') {
+    if (!Number.isInteger(index) || index < 0) return null;
+    const target = (safeParseJson(row.items_json) || [])[index];
+    if (!target || target.image) return null;
+    return tasks.find(t => t.key === 'news' && t.image === target.image_prompt) || (target.title && target.content ? {
+      key: 'news',
+      item: target,
+      image: `小镇报纸新闻插画：「${target.title}」——${cleanText(target.content, 200)}`,
+      ragQuery: target.content,
+    } : null);
+  }
+  return null;
+}
+
+/**
+ * 手动补印一张缺失的配图（前端「重新生成配图」按钮）。
+ * 与 tick 自动补印共用生成落库逻辑，但不受 15 分钟冷却限制；历史期（date）也能补。
+ * @param {{ date?: string, slot: 'lead'|'world'|'item', index?: number }} opts
+ * @returns {{ ok: boolean, newspaper?: object, error?: string }}
+ */
+export async function regenerateNewspaperImage({ date, slot, index } = {}) {
+  const db = getDb();
+  const row = date
+    ? db.prepare('SELECT * FROM town_newspapers WHERE publish_date = ?').get(date)
+    : getTodayNewspaper();
+  if (!row) return { ok: false, error: '没有这一期报纸' };
+  const task = findMissingImageTask(row, slot, Number(index));
+  if (!task) return { ok: false, error: '这张配图不缺，或没有可用的生图提示词' };
+  const success = await generateAndStorePaperImage(row, task);
+  if (!success) return { ok: false, error: '配图生成失败，请稍后再试' };
+  const fresh = db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(row.id);
+  return { ok: true, newspaper: mapPaperRowForFrontend(fresh) };
 }
 
 function parseCharacterLoras(loras) {
