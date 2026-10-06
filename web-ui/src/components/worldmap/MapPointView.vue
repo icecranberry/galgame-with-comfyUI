@@ -217,6 +217,7 @@
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
 import coords from '../../data/erxiangCoords.json'
+import aliasData from '../../data/erxiangAlias.json'
 import * as api from '../../api/index.js'
 
 const props = defineProps({
@@ -251,6 +252,8 @@ const REGION_LAYOUT = {
       { n: '绘世学院', x: 1226, y: 430, place: 'r' },
       { n: '二维市', x: 1112, y: 713, place: 'r' },
       { n: '鸽川区', x: 1336, y: 728, place: 'b' },
+      // ★ 2026-10-06（A1 用户裁定）：海原电视塔**已提级为独立子地区**（lv2，与海原市平级）。
+      //   原先它挂在海原市下（lv3），全域图上只是海原市的一个点位。
       { n: '海原电视塔', x: 916, y: 950, place: 'l' },
       // ★ 2026-10-05：按用户的 ☆ 标记落为正式点位（此前只是底部「自建子区」药丸，未画在图内）。
       //   它是线路 A 的中间站（珠星站—异常防御部—泊地站），必须出现在全域图上。
@@ -295,8 +298,15 @@ const MOON_LAYOUT = {
   ],
 }
 
-/** 官方锚点名 → 本库子区名（不一致时在此登记，别散落到各处） */
-const SPOT_ALIAS = { 珠星大厦: '珠星集团CBD区' }
+/**
+ * 官方锚点名 → 本库子区名。
+ *
+ * ★ 2026-10-06（A5）：改为从 `data/erxiangAlias.json` 读 —— **单一真源**。
+ *   此前这套别名在两处各写一份（本文件 1 条 + 工具箱 `regen_coords.py` 的 28 条），
+ *   迟早漂移（鸽川区那次漏了 3 对就是这么来的），正踩项目红线 8「同一口径只留一份定义」。
+ *   改别名请改那个 JSON，不要在这里加。
+ */
+const SPOT_ALIAS = (aliasData && typeof aliasData.toLocal === 'object') ? aliasData.toLocal : {}
 
 const PLACE = {
   r: { dx: 11, dy: 4, ta: 'start' },

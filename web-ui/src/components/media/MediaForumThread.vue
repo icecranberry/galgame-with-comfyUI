@@ -48,6 +48,14 @@
         <div class="mf-floor-head">
           <span class="mf-floor-no">{{ r.floor }} 楼</span>
         </div>
+        <!-- ★ 楼层的赞 / 踩（2026-10-06 按用户期望补）。
+             数值由**服务端确定性生成**（见 mediaService 的 normalizeForumDraft），
+             不是模型写的 —— 模型写的会全楼差不多、还可能自相矛盾。
+             有踩表示这层有争议（杠精/被戳痛处/版主拉架）。 -->
+        <div v-if="r.likes != null" class="mf-vote" aria-hidden="true">
+          <span class="mf-vote-btn"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Z"/><path d="M7 10l4.5-7a2 2 0 0 1 3.5 1.3V9h4.6a2 2 0 0 1 2 2.4l-1.2 7A2 2 0 0 1 18.4 20H7"/></svg>{{ r.likes }}</span>
+          <span v-if="r.dislikes" class="mf-vote-btn is-down"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3Z"/><path d="M17 14l-4.5 7a2 2 0 0 1-3.5-1.3V15H4.4a2 2 0 0 1-2-2.4l1.2-7A2 2 0 0 1 5.6 4H17"/></svg>{{ r.dislikes }}</span>
+        </div>
         <blockquote v-if="r.quote" class="mf-quote">
           <span class="mf-quote-who">{{ quotedAuthor(r.quote) }}</span>
           <span class="mf-quote-text">{{ quotedText(r.quote) }}</span>
@@ -167,6 +175,15 @@ function quotedText(n) {
 
 .mf-floor-head { display: flex; align-items: center; gap: 8px; }
 .mf-floor-no { font-size: var(--fs-xs); color: var(--text-secondary); font-weight: 600; }
+/* 楼层赞/踩（浅色胶囊，像论坛的投票条） */
+.mf-vote { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; }
+.mf-vote-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 999px;
+  background: var(--bg-sunken); color: var(--text-secondary);
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+}
+.mf-vote-btn.is-down { color: color-mix(in srgb, var(--text-secondary) 80%, transparent); }
 .mf-quote {
   margin: 0; padding: 6px 10px;
   border-left: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);

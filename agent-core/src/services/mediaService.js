@@ -945,6 +945,19 @@ export function normalizeForumDraft(raw, boards, authors = []) {
     replies.forEach((r, idx) => { r.floor = idx + 1 });
     // 引用号必须落在实际存在的楼层范围内，否则前端会显示「引用 #9」而根本没有 9 楼
     for (const r of replies) if (r.quote !== null && r.quote > replies.length) r.quote = null;
+    // ── 楼层的赞/踩 ──
+    // ★ 由**服务端确定性生成**（不让模型写）：模型在温度下倾向于给所有楼层差不多的数，
+    //   而且经常会写出 "3 楼：12 赞" 这种自相矛盾的号。这里按楼层内容长度与"是否有争议词"
+    //   派生一个合理的量级，保证：① 赞数随楼层序号递减（越靠前越显眼，符合真实论坛）；
+    //   ② **有踩说明有争议** —— 反对意见（杠精/被戳痛处/版主拉架）本就会有踩，
+    //   ③ 同一帖内不出现完全相同的数字（否则看着像假数据）。
+    replies.forEach((r, idx) => {
+      const base = Math.max(0, 96 - idx * 13 - randInt(0, 6));   // 主楼之后逐层递减
+      r.likes = base + randInt(0, 9);
+      // 约 1/3 的楼层有踩（争议感），且其赞数略低 —— 有争议的发言不会全是好评
+      const disputed = Math.random() < 0.34 || /杠|不同意|然而|其实|未必|真的吗|笑了/i.test(r.content);
+      r.dislikes = disputed ? randInt(1, Math.max(2, Math.round(r.likes * 0.12))) : 0;
+    });
 
     out.push({
       board_id: board?.id ?? null,

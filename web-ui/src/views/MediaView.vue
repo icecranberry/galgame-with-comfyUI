@@ -533,7 +533,7 @@
              按 payload 形态分派 —— 迁移后 layout 对老帖不再可靠（见 postKind 注释）。
              图片可点击放大。 -->
         <component
-          v-if="isLayoutPost(detailPost)"
+          v-if="isLayoutPostWithComponent(detailPost)"
           :is="componentFor(detailPost)"
           :post="detailPost"
           @zoom="zoomSrc = $event"
@@ -886,10 +886,32 @@ function postKind(p) {
  * 是否「整幅版式」——需要从瀑布流里摘出去、单独渲染的那种。
  * ★ 用 `postKind(p) !== 'feed'` 的等价写法，但显式列出来是为了让
  *   "哪些形态走独立版式"这件事一眼可见（板块/瀑布流/网格各一种）。
+ * ⚠ **这是"列表要排除哪些"的判据，不是"弹窗用哪个组件"的判据** ——
+ *   两者一度混用，导致论坛帖在详情弹窗里被渲染成**周刊**（`componentFor` 兜底到 MediaWeekly）。
+ *   弹窗请用下面的 `isLayoutPostWithComponent()`。
  */
 function isLayoutPost(p) {
   const k = postKind(p)
   return k === 'forum' || k === 'gallery' || k === 'photos' || k === 'portal' || k === 'weekly' || k === 'poster'
+}
+/**
+ * 弹窗里走「动态组件」渲染的形态 —— **只列真正在 `KIND_COMPONENT` 里注册过组件的**。
+ *
+ * ★ 为什么必须与 `isLayoutPost()` 分开（2026-10-06 用户实报）：
+ *   论坛/图库有**各自专用的版式组件**（`MediaForumThread` / `MediaGallery`），
+ *   它们不在 `KIND_COMPONENT` 里。而详情弹窗的模板顺序是
+ *   `v-if="isLayoutPost" → v-else-if="postKind==='forum'" → v-else-if="'gallery'"`：
+ *   若 `isLayoutPost` 对论坛返回 true，就会**先命中第一个分支**，
+ *   而 `componentFor()` 查不到 forum 的组件 → **兜底返回 `MediaWeekly`** →
+ *   论坛帖被周刊版式渲染（用户看到"弹窗里没有楼层"）。
+ */
+function isLayoutPostWithComponent(p) {
+  return !!KIND_COMPONENT[postKind(p)]
+}
+/** 版式组件：按 payload 形态挑（⚠ 只含"动态组件渲染"的形态；论坛/图库各有专用分支） */
+const KIND_COMPONENT = { portal: MediaPortal, weekly: MediaWeekly, poster: MediaPoster }
+function componentFor(p) {
+  return KIND_COMPONENT[postKind(p)] || MediaWeekly
 }
 /** 整幅版式（不是瀑布流卡片）：论坛 / 图库 / 门户 / 周刊 / 海报 */
 function isSpecialPost(p) {
@@ -990,11 +1012,6 @@ function issueChipLabel(it) {
   return `第 ${it.issue} 期${done ? '' : `（${it.written}/${it.section_count}）`}`
 }
 
-/** 版式组件：按 payload 形态挑 */
-const KIND_COMPONENT = { portal: MediaPortal, weekly: MediaWeekly, poster: MediaPoster }
-function componentFor(p) {
-  return KIND_COMPONENT[postKind(p)] || MediaWeekly
-}
 /** 批量勾选行上的类型标签 */
 function kindLabel(p) {
   return { portal: '报刊', weekly: '周刊', poster: '海报' }[postKind(p)] || '内容'

@@ -120,6 +120,32 @@ router.put('/places/:placeId', (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
+/**
+ * PATCH /api/worldmap/places/:placeId/move —— **改归属（搬家）专用端点**。
+ *
+ * 用户 2026-10-06 裁定 A6：「加一个改归属接口」。虽然 `PUT /places/:id` 也能带
+ * `parentId` 达到同样效果，但**语义不同、风险也不同**：
+ *   · PUT 是"整体覆盖"，客户端必须把父级之外的字段也原样回传（漏传即被覆盖）；
+ *   · 本端点**只接受 `parentId` 一个字段**，其余一律不碰 —— 前端做一次"拖动节点"
+ *     的交互时不必先拉全量、也不会误清字段。
+ * ★ 成环 / 上级不存在 / 层级重算都由 `upsertPlace` 内部的 `movePlace` 负责（单一真源），
+ *   这里只做参数收敛与状态码映射。`parentId: null` = 移到顶层。
+ */
+router.patch('/places/:placeId/move', (req, res) => {
+  try {
+    // ⚠ 必须用 `in` 判断"字段在不在"，不能写 `req.body.parentId || null`：
+    //   后者会把显式传的 `null`（移到顶层）与"没传"混为一谈。
+    if (!('parentId' in (req.body || {}))) {
+      return res.status(400).json({ error: '缺少 parentId（移到顶层请显式传 null）' });
+    }
+    const r = upsertPlace(Number(req.params.placeId), { parentId: req.body.parentId });
+    if (!r.ok) {
+      return res.status(r.error === '地点不存在' ? 404 : 400).json({ error: r.error });
+    }
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
+
 router.delete('/places/:placeId', (req, res) => {
   try {
     const r = deletePlace(Number(req.params.placeId));
