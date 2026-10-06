@@ -82,10 +82,22 @@ web-ui 中所有分段选择 / 页签统一使用组件 `web-ui/src/components/u
 web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.vue`（原 `BaseModal.vue` 已改名收编），禁止手写遮罩 / 面板皮肤。
 
 1. 引入：`import LinsheModal from '.../components/ui/LinsheModal.vue'`，模板中写 `<linshe-modal>`；`v-model` 控制显隐（旧代码仍可传 `:visible`），`title` 为标题
-2. 尺寸用 `wide`（加宽）/ `full`（大型管理面板）；内容用默认插槽，底部操作区用 `#footer`，头部右侧附加内容（如计数）用 `#header-extra`；需要局部布局差异用 `panel-class` / `body-class`；需要「相对所属页面而不是整个视口居中」时传 `anchor`（宿主选择器，如小镇页传 `anchor=".page-host"`，宿主须为定位元素；留空＝视口居中）
+2. 尺寸用 `wide`（加宽）/ `full`（大型管理面板）；内容用默认插槽，底部操作区用 `#footer`，头部右侧附加内容（如计数）用 `#header-extra`；需要局部布局差异用 `panel-class` / `body-class`；需要「相对所属页面而不是整个视口居中」时传 `anchor`（宿主选择器，如小镇页传 `anchor=".page-host"`，宿主须为定位元素；留空＝视口居中）。注意：`.page-host` 在 `#app`（z-index:1 的层叠上下文）内，从管理面板等 body 层抽屉（z-index:900）里打开的弹窗**不要传 anchor**，否则整个锚定子树会被抽屉压住
 3. 暖色为暖纸外壳 + 白色内衬（标题栏与 `#footer` 留在外壳上、白色内衬只包正文），暗夜保持 Cel Glow 深色玻璃；主题色值一律走 `styles/tokens.css` 的 `--modal-*`；Esc / 点遮罩关闭
 4. 调整弹窗风格只改 `LinsheModal.vue` 与 `tokens.css` 的 `--modal-*`，不要在各页面里覆盖组件皮肤
 
+
+## LLM 请求分层（高缓存）
+
+编写新的 LLM 请求时，按「稳定前缀优先」分层：不随单次调用变化的内容尽量往前堆，变量内容靠后，user 永远最后。提供商的前缀缓存按 token 前缀命中，前面任何一层只要有一个字节变化，其后所有内容的缓存即全部失效，所以静态层必须逐字节稳定（严禁内插日期、时间戳、随机 id、用户名等每次变化的内容）。标准分层参考 `agent-core/src/services/town/townPromptBuilder.js` 头部注释（编号从 system0 数起；旧代码里也有从 1 数起的注释，以内容职责为准。中间层可按功能增删，原则不变——静态在前、变量靠后）：
+
+1. system0＝破甲词 + 世界观（如果有）：走 `getSystemRulesWithWorld({ roleplay: false })`，无世界观退 `getSystemRules`（都在 `agent-core/src/db/worldRepository.js`）
+2. system1＝世界观强化（有世界观才注入）：`getWorldIntegrationRule(scope)`（`agent-core/src/builtinRules.js`），scope 按任务选（`interaction` / `moments` / `photo` / `event` / `town_asset` 等）；没有世界观就不要加这层
+3. 任务角色人设与输出规范同属不变内容，共用静态 system 层：设计师身份 + 任务要求 + 输出格式写进同一段（或紧挨的静态层组），形如「你是一个日程安排设计师，你将给下面注入的角色人设设计一张日程表；日程要求是……；输出为 JSON，具体格式为……」；JSON 需给完整示例（字段名 + 示例值 + 字段约束，口径见下节「LLM 输出」，参考 `townPromptBuilder.js` 的 `NPC_SET_OUTPUT_STRUCTURE`）。这一层紧跟世界观强化之后、角色人设注入之前；不要拆进 user，也不要内插本次调用才有的数据
+4. 静态层结束后才注入变量内容：本次调用的角色人设（含小镇居民）、素材/场景信息等随调用变化的数据，如 `townPromptBuilder.js` 的 `【角色外观信息】` 层；角色人设统一走 characterPersona 组装入口（见「角色生图人格组装」），不要手写正则截取
+5. user 收尾：最后一条 user 消息只简要强调本次任务（执行什么、按什么格式输出），用户额外指定也放这里；不复述规范、不塞长上下文
+
+参考实现：`townPromptBuilder.js`（纯文本与 JSON 输出两套齐备）、`libraryGenerator.js` 的 `buildSystemLayers`（静态前缀 + designer 层）、`characterReactionService.js` 的 `promptPrefixFingerprint`（前缀稳定性核对）。
 
 ## LLM 输出
 
