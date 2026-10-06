@@ -26,6 +26,7 @@ import { migrateTownItemSchema } from './townItemSchema.js';
 import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
 import { cleanupInterruptedChestItems } from '../services/itemLifecycle.js';
 import { migrateWeatherHourlySchema } from './weatherHourlySchema.js';
+import { migrateTownBuildingFeatureSchema } from './townBuildingFeatureSchema.js';
 
 import { migrateExpressionStandings, recoverExpressionStandingJobs } from './expressionStandingSchema.js';
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
@@ -1010,6 +1011,27 @@ function initSchema(db) {
   migrateTownExperienceSchema(db);
   migrateTownServiceOfferSchema(db);
   migrateTownMultiMapSchema(db);
+  // 迁移: 小镇特殊建筑功能（配置/操作/配额/模板事件 + 地点用途描述列）；依赖 town_locations
+  migrateTownBuildingFeatureSchema(db);
+
+  // 迁移: 建筑地点不再携带 trade 能力位（一次性，幂等）。店内买卖全部走功能模板货架
+  // （店铺舞台），地点上的 trade 只会喂出打不开东西的「交易」入口与旧层货架数据。
+  try {
+    const rows = db.prepare("SELECT id, capabilities_json FROM town_locations WHERE capabilities_json LIKE '%trade%'").all();
+    let cleaned = 0;
+    for (const row of rows) {
+      try {
+        const caps = JSON.parse(row.capabilities_json);
+        if (!Array.isArray(caps) || !caps.includes('trade')) continue;
+        db.prepare('UPDATE town_locations SET capabilities_json = ? WHERE id = ?')
+          .run(JSON.stringify(caps.filter(c => c !== 'trade')), row.id);
+        cleaned += 1;
+      } catch { /* 单行坏数据跳过，不影响其余清理 */ }
+    }
+    if (cleaned > 0) console.log(`[db] migration: removed trade capability from ${cleaned} town location(s)`);
+  } catch (err) {
+    console.log('[db] trade capability cleanup skipped:', err.message);
+  }
 
   // 迁移: 移除 user_portraits 的 appearance 维度（用户外观由 config.user.appearance 自述，
   // 不再需要角色视角提取；幂等清理，每次启动执行。表的 CHECK 枚举保留 'appearance' 不重建表，无害）

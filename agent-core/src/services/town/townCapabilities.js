@@ -16,6 +16,11 @@ export function defaultTownCapabilities(kind, job = '') {
   if (kind === 'supplier' || ((!kind || kind === 'none') && /商|杂货|货郎|售货|卖货|摊主/.test(job))) return withWorkPermission(['trade'], job);
   return withWorkPermission(['service'], job);
 }
+/** 建筑地点的能力默认值：不再携带 trade——店内买卖全部走功能模板货架（店铺舞台），
+ *  旧 npc 交易目录对功能店铺恒为空，trade 能力位只会喂出误导性的「交易」入口。 */
+export function defaultTownLocationCapabilities(kind, job = '') {
+  return defaultTownCapabilities(kind, job).filter(c => c !== 'trade');
+}
 export function shouldHaveWorkPermission(job) {
   return TOWN_WORK_JOB_PATTERN.test(String(job || ''));
 }

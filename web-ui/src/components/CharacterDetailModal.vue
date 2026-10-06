@@ -108,8 +108,8 @@
               <linshe-input v-model="detail.editPrompt" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
             </div>
 
-            <!-- 移动端「更多设置」：桌面端是右侧悬浮面板，手机端收进正文末尾，保持内容优先 -->
-            <div class="mobile-detail-toolbar" v-if="isMobile">
+            <!-- 「更多设置」内联卡：手机端 + 平板等放不下右侧悬浮窗的宽度（见 inlineLayout） -->
+            <div class="mobile-detail-toolbar" v-if="inlineLayout">
               <div class="toolbar-title">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
@@ -141,8 +141,8 @@
               </div> -->
             </div>
 
-            <!-- 角色立绘（手机端）：桌面端是左侧悬浮窗，手机端收在正文末尾 -->
-            <CharacterStandingPanel v-if="isMobile" inline :character="character" :ctl="standingPanel" />
+            <!-- 角色立绘：窄视口收在正文末尾，宽视口是主面板左侧悬浮窗 -->
+            <CharacterStandingPanel v-if="inlineLayout" inline :character="character" :ctl="standingPanel" />
           </div>
 
           <!-- 操作栏 sticky footer -->
@@ -162,8 +162,8 @@
           </div>
         </div>
 
-        <!-- 悬浮侧边栏（桌面端）：功能整合为一张卡片 -->
-        <div class="detail-float" v-if="!isMobile">
+        <!-- 悬浮侧边栏（宽视口）：功能整合为一张卡片 -->
+        <div class="detail-float" v-if="!inlineLayout">
           <div class="float-panel">
             <div class="float-panel-header">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -199,8 +199,8 @@
           </div>
         </div>
 
-        <!-- 角色立绘（桌面端）：主面板左侧的悬浮窗；手机端改为正文末尾的内联卡（见 modal-body-detail 末尾） -->
-        <CharacterStandingPanel v-if="!isMobile" :character="character" :ctl="standingPanel" />
+        <!-- 角色立绘（宽视口）：主面板左侧的悬浮窗；窄视口改为正文末尾的内联卡（见 modal-body-detail 末尾） -->
+        <CharacterStandingPanel v-if="!inlineLayout" :character="character" :ctl="standingPanel" />
 
         <!-- ── 立绘大图查看（重新生成 / HiresFix 放大 / 下载；不放删除，面板里有）── 放在 overlay 内以复用其 10000 层级，盖过主面板 ── -->
         <ImageLightbox
@@ -463,6 +463,16 @@ const confirmFn = inject('confirm')
 const toastFn = inject('toast')
 const isMobile = inject('isMobile')
 const imageEditTasks = useImageEditTasksStore()
+
+// ── 布局口径：主面板 880px + 左立绘(300) + 右浮窗(228) 三栏并排至少要 1532px 视口 ──
+// 手机（≤767）走 isMobile；平板横屏等「放不下侧栏」的宽度同样收进正文流，
+// 否则左右两块悬浮窗会被截掉一截（平板上「两边看不全」的根因）。
+const SIDE_LAYOUT_MIN = 1532
+const hasSideRoom = ref(typeof window === 'undefined' || window.innerWidth >= SIDE_LAYOUT_MIN)
+function syncSideRoom() { hasSideRoom.value = window.innerWidth >= SIDE_LAYOUT_MIN }
+onMounted(() => window.addEventListener('resize', syncSideRoom))
+onUnmounted(() => window.removeEventListener('resize', syncSideRoom))
+const inlineLayout = computed(() => isMobile.value || !hasSideRoom.value)
 
 // ── 详情编辑状态 ──
 const detail = reactive({
@@ -1518,6 +1528,32 @@ const standingPanel = reactive({
 .lora-civitai-link:hover, .lora-tutorial-link:hover { opacity: 1; text-decoration: underline; }
 .lora-tutorial-link { margin-left: 6px; }
 
+/* ═══ 内联「更多设置」卡（手机端 + 平板等放不下侧栏的宽度，由模板 inlineLayout 决定渲染）═══ */
+.mobile-detail-toolbar {
+  display: flex; flex-direction: column;
+  margin-top: 14px; padding: 8px;
+  border-radius: 14px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+}
+.toolbar-title { display: flex; align-items: center; gap: 5px; margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-secondary); }
+.toolbar-title svg { color: var(--accent); }
+.toolbar-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 6px; border-radius: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+.toolbar-item + .toolbar-item { border-top: 1px solid var(--border); }
+.toolbar-item:active { background: rgba(var(--accent-rgb), 0.08); }
+.toolbar-item-toggle { cursor: default; }
+.toolbar-item-btn { color: var(--accent); font-weight: 600; }
+.toolbar-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); flex-shrink: 0; }
+.toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
+
+/* ═══ 平板 / 中窄视口（<1532 放不下左右悬浮窗，立绘与更多设置收进正文流）═══
+   主面板仍是居中的 min(880px, 96vw)，只把正文改成可滚动的纵向流 */
+@media (max-width: 1531px) {
+  .modal-body-detail { overflow-y: auto; }
+  .modal-body-detail .preview-card { flex: none; }
+  .modal-body-detail .prompt-textarea { flex: none; min-height: 340px; }
+}
+
 /* ═══ 移动端 ═══
    几何与 LinsheModal 的移动端段落同口径：遮罩只收留白（8px + 安全区），面板保留
    圆角 / 描边 / 白内衬的浮层观感 —— 不要再退回 100vw/100dvh + border-radius:0 的全屏面板。
@@ -1560,24 +1596,6 @@ const standingPanel = reactive({
   /* 底部操作区：说明独占一行，删除 / 保存分列两端 */
   .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
   .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
-
-  /* 更多设置：与桌面端右侧悬浮面板同款卡片 */
-  .mobile-detail-toolbar {
-    display: flex; flex-direction: column;
-    margin-top: 14px; padding: 8px;
-    border-radius: 14px;
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-  }
-  .toolbar-title { display: flex; align-items: center; gap: 5px; margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-secondary); }
-  .toolbar-title svg { color: var(--accent); }
-  .toolbar-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 6px; border-radius: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
-  .toolbar-item + .toolbar-item { border-top: 1px solid var(--border); }
-  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.08); }
-  .toolbar-item-toggle { cursor: default; }
-  .toolbar-item-btn { color: var(--accent); font-weight: 600; }
-  .toolbar-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); flex-shrink: 0; }
-  .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
 
   .form-group .fl { font-size: 12px; }
   .form-hint { font-size: 10px; }

@@ -3,6 +3,7 @@ import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { config } from '../config.js';
 import { generateEvent, generateNextBranch, concludeEvent } from '../services/eventGenerator.js';
 import { townStoryOrigins } from '../services/town/townInteractionRuntime.js';
+import { listTownBuildingFeatureEvents } from '../services/town/townBuildingFeatureRuntime.js';
 import {
   parseTownNpcEventId, townNpcEventDto, townNpcEventHistoryDto,
   generateTownNpcNextBranch, concludeTownNpcEvent,
@@ -74,8 +75,11 @@ router.get('/unread-count', (req, res) => {
   const npcRow = db.prepare(
     `SELECT COUNT(*) AS count FROM town_npc_events WHERE status IN ('open','engaged') AND expires_at > datetime('now') AND (created_at > ? OR (last_interaction_at IS NOT NULL AND last_interaction_at > ?))`
   ).get(lastSeenSQLite, lastSeenSQLite);
+  const buildingRow = db.prepare(
+    `SELECT COUNT(*) AS count FROM town_building_feature_events WHERE status IN ('open','engaged') AND expires_at > datetime('now') AND created_at > ?`
+  ).get(lastSeenSQLite);
 
-  res.json({ count: (row ? row.count : 0) + npcRow.count });
+  res.json({ count: (row ? row.count : 0) + npcRow.count + (buildingRow ? buildingRow.count : 0) });
 });
 
 // POST /api/events/mark-read — 标记已读
@@ -138,9 +142,17 @@ router.get('/', (req, res) => {
     ended_at: e.ended_at ? toISO(e.ended_at) : null,
   });
 
+  // 建筑功能模板事件（building_feature 来源）：规则执行、内容预生成，复用奇遇容器呈现。
+  // 打开奇遇页属于纯浏览，不触发任何 LLM/生图调用。
+  const buildingFeatureEvents = (() => {
+    try { return listTownBuildingFeatureEvents(); } catch { return []; }
+  })();
+
   res.json({
-    active: [...activeEvents.map(format), ...activeNpcEvents.map(formatNpcActive)],
-    history: [...history.map(format), ...npcHistory.map(formatNpcHistory)],
+    active: [...activeEvents.map(format), ...activeNpcEvents.map(formatNpcActive),
+      ...buildingFeatureEvents.filter(e => ['open', 'engaged'].includes(e.status))],
+    history: [...history.map(format), ...npcHistory.map(formatNpcHistory),
+      ...buildingFeatureEvents.filter(e => !['open', 'engaged'].includes(e.status))],
   });
 });
 

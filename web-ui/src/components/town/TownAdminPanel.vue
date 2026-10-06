@@ -458,6 +458,7 @@ v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
         @close="manager.open = false"
         @updated="onPromptRegenerated"
       />
+
     </div>
     </Transition>
   </Teleport>
@@ -476,7 +477,7 @@ import TownAssetThumb from './TownAssetThumb.vue'
 import TownAssetManager from './TownAssetManager.vue'
 import { openServiceManager } from '../../town/serviceManagerState.js'
 
-defineEmits(['close', 'new-town'])
+defineEmits(['close', 'new-town', 'changed'])
 
 const props = defineProps({ open: Boolean })
 const town = useTownStore()
@@ -1150,7 +1151,7 @@ onBeforeUnmount(() => {
   width: 440px;
   max-width: 100vw;
   height: 100%;
-  background: #f4f1eeed;
+  background: var(--side-panel-bg);
   box-shadow: -12px 0 48px rgba(54, 42, 38, 0.2);
   display: flex;
   flex-direction: column;
@@ -1196,7 +1197,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #fbf8f3;
+  background: var(--side-panel-surface);
   border-radius: 14px;
   padding: 10px 12px;
   cursor: pointer;
@@ -1210,7 +1211,7 @@ onBeforeUnmount(() => {
   width: 44px;
   height: 56px;
   border-radius: 8px;
-  background: #f1ebe1;
+  background: var(--side-panel-surface-sunken);
   display: flex;
   overflow: hidden;
   flex-shrink: 0;
@@ -1230,10 +1231,10 @@ onBeforeUnmount(() => {
 
 .ap-row-thumb.is-portrait :deep(.tat-media img) { image-rendering: auto; }
 
-.ap-thumb-missing { color: #cfc4b4; font-size: 14px; padding-bottom: 8px; }
+.ap-thumb-missing { color: var(--text-secondary); font-size: 14px; padding-bottom: 8px; }
 .ap-thumb-missing.is-big { font-size: 13px; }
 
-.ap-row-arrow { color: #c9bda9; font-size: 18px; flex-shrink: 0; }
+.ap-row-arrow { color: var(--text-secondary); font-size: 18px; flex-shrink: 0; }
 
 .ap-npc-info { flex: 1; min-width: 0; }
 
@@ -1265,7 +1266,7 @@ onBeforeUnmount(() => {
 .ap-btn-row { display: flex; gap: 6px; }
 .ap-btn-row > :first-child { flex: 1; }
 
-.ap-asset-appearance { font-size: 11px; line-height: 1.5; color: #8a7a6a; margin: 6px 0 0; overflow-wrap: anywhere; }
+.ap-asset-appearance { font-size: 11px; line-height: 1.5; color: var(--text-secondary); margin: 6px 0 0; overflow-wrap: anywhere; }
 .ap-sprite-error { color: #a44338; font-size: 12px; line-height: 1.6; margin: 0; }
 .ap-appearance-row { flex-wrap: wrap; align-items: flex-start; }
 .ap-sprite-wrap .ap-asset-appearance { max-width: 110px; }
@@ -1276,7 +1277,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 300px;
   border-radius: 14px;
-  background: #fbf8f3;
+  background: var(--side-panel-surface);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1316,7 +1317,7 @@ onBeforeUnmount(() => {
   width: 44px;
   height: 58px;
   border-radius: 8px;
-  background: #fbf8f3;
+  background: var(--side-panel-surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1324,7 +1325,7 @@ onBeforeUnmount(() => {
 }
 
 .ap-sprite img { height: 100%; image-rendering: pixelated; }
-.ap-sprite-missing { color: #cfc4b4; font-size: 12px; }
+.ap-sprite-missing { color: var(--text-secondary); font-size: 12px; }
 
 .ap-player-sprite { flex: 0 0 auto; min-width: 0; width: 130px; }
 
@@ -1336,7 +1337,7 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
   line-height: 1.7;
   margin: 0;
-  background: #fbf8f3;
+  background: var(--side-panel-surface);
   border-radius: 10px;
   padding: 8px 10px;
 }
@@ -1349,7 +1350,7 @@ onBeforeUnmount(() => {
   font-size: 11px;
   padding: 5px 8px;
   border-radius: 8px;
-  background: #fbf8f3;
+  background: var(--side-panel-surface);
 }
 
 .ap-routine-time { color: var(--accent-hover); min-width: 84px; font-variant-numeric: tabular-nums; }
@@ -1368,7 +1369,7 @@ onBeforeUnmount(() => {
   margin-top: 8px;
   padding: 12px;
   border-radius: 14px;
-  border: 1px dashed rgba(200, 186, 166, 0.7);
+  border: 1px dashed var(--border-strong);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1470,7 +1471,7 @@ onBeforeUnmount(() => {
   appearance: none;
   height: 8px;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent) var(--fill, 18%), rgba(240, 236, 232, 0.95) var(--fill, 18%));
+  background: linear-gradient(90deg, var(--accent) var(--fill, 18%), var(--side-panel-surface-sunken) var(--fill, 18%));
   outline: none;
   cursor: pointer;
 }

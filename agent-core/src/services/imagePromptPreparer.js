@@ -14,6 +14,11 @@ const CATEGORY_LIMITS = new Map([
   ['adult_pose_vocabulary', 2],
 ]);
 
+// ipk.lib.*（YAML 词库菜单）10/12 分属语素/词汤级擦边命中（「白色」蹭出 infirmary、
+// long hair + dress 拼出 long dress），不注入；14+（bigram 过半/别名/短语命中）才算概念确实被提到。
+// 框架条目是策展规则词，保持非零即入选。
+const LIB_TAG_MIN_SCORE = 14;
+
 const TAG_ALIASES = new Map([
   ['closed_eyes', ['eyes closed']],
   ['looking_at_viewer', ['looking at the viewer', 'direct eye contact', 'eye contact']],
@@ -132,6 +137,7 @@ function selectExecutableTags(prompt, items, ragQuery = '') {
       const tagParts = tag.split(',').map(part => part.trim()).filter(Boolean);
       const score = scoreExecutableTag(matchText, entry);
       if (score === 0) continue;
+      if (String(item.id || '').startsWith('ipk.lib.') && score < LIB_TAG_MIN_SCORE) continue;
       candidates.push({
         tag,
         key: normalizeTagKey(tag),

@@ -1,5 +1,7 @@
 export const CARRY_PRESS_MS = 450
 const MOVE_SLOP = 8
+// 手指没有鼠标稳：触摸长按的位移容差放宽，轻微抖动不算「已经拖走了」
+const TOUCH_MOVE_SLOP = 18
 
 /** Pointer gesture + cancellable async lease. Rendering and HTTP stay in adapters. */
 export function createResidentCarry({ request, scope, dropCell, changed = () => {}, started = () => {},
@@ -41,10 +43,10 @@ export function createResidentCarry({ request, scope, dropCell, changed = () => 
       if (gesture === g) { abort(); error(e) }
     }
   }
-  function down(point, agent) {
+  function down(point, agent, pointerType = '') {
     if (gesture) return false
     if (!agent?.actorId || agent.agentKey === 'me') return false
-    const g = { agent, scope: { ...scope() }, token: token(), pointerId: point.pointerId,
+    const g = { agent, scope: { ...scope() }, token: token(), pointerId: point.pointerId, pointerType,
       point: { x: point.x, y: point.y }, initial: { x: point.x, y: point.y }, phase: 'waiting' }
     gesture = g
     pressTimer = setTimeout(() => begin(g), CARRY_PRESS_MS)
@@ -54,7 +56,8 @@ export function createResidentCarry({ request, scope, dropCell, changed = () => 
     const g = gesture
     if (!g || point.pointerId !== g.pointerId) return false
     if (g.phase === 'waiting') {
-      if (Math.hypot(point.x - g.initial.x, point.y - g.initial.y) > MOVE_SLOP) abort()
+      const slop = g.pointerType === 'touch' ? TOUCH_MOVE_SLOP : MOVE_SLOP
+      if (Math.hypot(point.x - g.initial.x, point.y - g.initial.y) > slop) abort()
       return false
     }
     if (['starting', 'held'].includes(g.phase)) {

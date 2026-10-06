@@ -70,8 +70,19 @@
           <span class="detail-title-badge" :class="{ urgent: countdownMinutes < 10 }">{{ isExpired ? '已结束' : countdownText }}</span>
         </div>
 
+        <!-- 建筑功能模板事件：规则执行、内容预生成，由功能内容组件承载 -->
+        <div v-if="isBuildingFeature" class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel.prevent="onWheelScroll">
+          <div class="branch-track">
+            <div class="branch-card is-current">
+              <div class="branch-text">
+                <TownBuildingFeatureContent :event="event" @completed="onBuildingFeatureDone" @refresh="onBuildingFeatureRefresh" />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 横向滚动分支卡片 (80vh)，点击空白区域关闭，滚轮左右滑动 -->
-        <div class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel.prevent="onWheelScroll">
+        <div v-else class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel.prevent="onWheelScroll">
           <div class="branch-track" @click.self="closeDetail">
             <!-- 所有步骤（choice_history[0]=初始场景, [1..N]=分支步骤） -->
             <div
@@ -183,6 +194,7 @@ import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
+import TownBuildingFeatureContent from './town/TownBuildingFeatureContent.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 
 const confirmFn = inject('confirm')
@@ -196,6 +208,15 @@ const props = defineProps({
 })
 const emit = defineEmits(['updated', 'closed'])
 const store = useEventsStore()
+
+const isBuildingFeature = computed(() => props.event?.sourceType === 'building_feature')
+function onBuildingFeatureDone(operation) {
+  emit('updated', { event: { ...props.event, status: 'completed', result: operation.result || null } })
+}
+function onBuildingFeatureRefresh() {
+  store.loadEvents()
+  emit('updated', {})
+}
 
 const detailOpen = ref(false)
 const customText = ref('')

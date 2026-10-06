@@ -139,12 +139,24 @@ router.post('/mark-read', (req, res) => {
 
 // ──────────────── 朋友圈帖子 ────────────────
 
-// GET /api/moments — 全量返回所有帖子（本地 SQLite，数据量可控，无需分页）
+// GET /api/moments — keyset 分页返回帖子：默认最新 1000 条；?before_id=<id> 续拉比它更旧的一批
+// hasMore 通过多取一条探测；列表不返回 prompt（feed 渲染用不到，重新生成配图走 POST /:id/regenerate-image 自行读库）
 router.get('/', (req, res) => {
   const db = getDb();
   const nickname = userNickname();
 
-  const posts = db.prepare(`
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 1000);
+  const beforeId = parseInt(req.query.before_id, 10);
+
+  const params = [nickname];
+  let where = `WHERE mp.status = 'done'`;
+  if (Number.isFinite(beforeId) && beforeId > 0) {
+    where += ' AND mp.id < ?';
+    params.push(beforeId);
+  }
+  params.push(limit + 1);
+
+  const rows = db.prepare(`
     SELECT mp.*,
       COALESCE(c.display_name, n.display_name, ?) AS display_name,
       CASE WHEN mp.npc_id IS NOT NULL
@@ -159,17 +171,24 @@ router.get('/', (req, res) => {
     FROM moment_posts mp
     LEFT JOIN characters c ON c.id = mp.character_id
     LEFT JOIN town_npcs n ON n.id = mp.npc_id
-    WHERE mp.status = 'done'
+    ${where}
     ORDER BY mp.id DESC
-  `).all(nickname).map(p => ({
-    ...p,
-    content: sanitizeMomentContent(p.content),
-    liked: !!p.liked,
-    images: JSON.parse(p.images || '[]'),
-    created_at: toISO(p.created_at),
-  }));
+    LIMIT ?
+  `).all(...params);
 
-  res.json({ posts });
+  const hasMore = rows.length > limit;
+  const posts = rows.slice(0, limit).map(p => {
+    const { prompt, ...rest } = p;
+    return {
+      ...rest,
+      content: sanitizeMomentContent(p.content),
+      liked: !!p.liked,
+      images: JSON.parse(p.images || '[]'),
+      created_at: toISO(p.created_at),
+    };
+  });
+
+  res.json({ posts, hasMore });
 });
 
 // GET /api/moments/:id — 单个帖子详情（含评论）

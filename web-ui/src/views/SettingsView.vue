@@ -2866,7 +2866,7 @@ function resetTestPrompts() {
 </script>
 
 <style scoped>
-.settings-view { padding: 32px; overflow-y: auto; height: 100vh; height: 100dvh; flex: 1; }
+.settings-view { padding: 32px; overflow-y: auto; overflow-x: hidden; height: 100vh; height: 100dvh; flex: 1; }
 .page-header {
   margin-bottom: 28px;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2882,7 +2882,9 @@ function resetTestPrompts() {
 .header-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
 .hint { font-size: 13px; color: var(--text-secondary); }
 
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+/* 双列用 minmax(0,1fr)：格子默认 min-width:auto，生成图（最大 480px）会把列撑到
+   内容宽度之外，设置页横向溢出、滚动后左列被顶出可视区（平板上「左侧被遮盖」的根因） */
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .memory-settings-card { gap: 0; }
 .maibot-settings-card .memory-settings-entry { margin-top: 14px; }
 .memory-settings-header h3 { margin-bottom: 4px; }
@@ -3692,9 +3694,14 @@ function resetTestPrompts() {
 .style-elapsed { font-size: 13px; color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; background: var(--glass-bg-strong); border: 1px solid var(--glass-border); }
 .style-timing-breakdown { font-size: 12px; color: var(--text-muted, #999); }
 .style-timing-breakdown::before { content: ' '; }
-.style-preview-img { max-width: 480px; max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
+.style-preview-img { max-width: min(480px, 100%); max-height: 480px; border-radius: 12px; border: 1px solid var(--glass-border); cursor: pointer; object-fit: contain; background: var(--glass-bg-strong); transition: transform 0.2s ease; }
 .style-preview-img:hover { transform: scale(1.03); }
 
+
+/* ── 平板竖屏（768~1023）：双列太挤，卡片改单列 ── */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
 
 /* ── 移动端：卡片单列 + 间距收缩 ── */
 @media (max-width: 767px) {

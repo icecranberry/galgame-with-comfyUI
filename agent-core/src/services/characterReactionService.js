@@ -204,10 +204,11 @@ function verifyResourceRelation(db, type, subject, actor) {
       const postId = Number(subject.id);
       // 前端可能使用规范化字符串标识，无法回查时不阻塞
       if (!Number.isInteger(postId)) return { ok: true };
-      const post = db.prepare('SELECT id, character_id, npc_id, author_type FROM moment_posts WHERE id = ?').get(postId);
+      // moment_posts 没有 author_type 列（那是 moment_comments 的）：作者由 character_id / npc_id 推导
+      const post = db.prepare('SELECT id, character_id, npc_id FROM moment_posts WHERE id = ?').get(postId);
       if (!post) return { ok: false, status: 404, error: '动态不存在' };
-      if (post.author_type === 'user') return { ok: false, status: 400, error: '用户自己的动态没有角色目标' };
       if (post.npc_id != null) return { ok: false, status: 400, error: '镇民动态首期不接入角色反馈' };
+      if (post.character_id == null) return { ok: false, status: 400, error: '用户自己的动态没有角色目标' };
       if (Number(post.character_id) !== actor.id) return { ok: false, status: 400, error: '动态作者与反馈角色不一致' };
       return { ok: true };
     }

@@ -30,6 +30,19 @@ test('short click and early pan never send a pickup request', async t => {
   assert.equal(f.controller.move(point(60)), false)
   t.mock.timers.tick(500); await flush(); assert.equal(f.calls.length, 0)
 })
+test('touch long press tolerates finger jitter within the wider slop', async t => {
+  const f = fixture(t)
+  f.controller.down(point(), agent, 'touch')
+  assert.equal(f.controller.move(point(59)), false)
+  t.mock.timers.tick(CARRY_PRESS_MS); await flush()
+  assert.equal(f.state().phase, 'held')
+})
+test('mouse keeps the tight slop: 10px of movement kills the long press', async t => {
+  const f = fixture(t)
+  f.controller.down(point(), agent, 'mouse')
+  assert.equal(f.controller.move(point(60)), false)
+  t.mock.timers.tick(500); await flush(); assert.equal(f.calls.length, 0)
+})
 test('long press owns only its pointer, renews a lease and drops exactly once with captured scope', async t => {
   const f = fixture(t)
   f.controller.down(point(), agent)

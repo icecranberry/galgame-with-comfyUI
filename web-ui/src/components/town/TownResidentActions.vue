@@ -5,7 +5,8 @@
         <div class="resident-choices">
           <TownVnChoice v-if="!building" :disabled="locked" @select="$emit('talk', '最近过得怎么样？')">聊聊近况</TownVnChoice>
           <!-- 这位居民已有进行中的奇遇时，入口只留「继续」：特殊奇遇与服务线索都走同一条生成管线，再开只会撞 STORY_BUSY -->
-          <TownVnChoice v-if="data?.capabilities?.includes('service') && !data?.activeStory" :disabled="locked" @select="menu = 'story'">特殊奇遇</TownVnChoice>
+          <!-- 店铺没有特殊奇遇：这条入口只在面对居民时出现 -->
+          <TownVnChoice v-if="!building && data?.capabilities?.includes('service') && !data?.activeStory" :disabled="locked" @select="menu = 'story'">特殊奇遇</TownVnChoice>
           <TownVnChoice v-if="services.length && !data?.activeStory" :disabled="locked" @select="menu = 'service'">{{ serviceMenuLabel }}</TownVnChoice>
           <TownVnChoice v-if="works.length" :disabled="locked" @select="menu = 'work'">打工</TownVnChoice>
           <TownVnChoice v-if="canTrade" :disabled="locked" @select="openTrade">交易</TownVnChoice>
@@ -33,14 +34,18 @@
         </div>
       </template>
       <template v-else>
-        <TownVnChoice class="resident-back" :disabled="busy" @select="menu = ''">返回</TownVnChoice>
-        <p class="resident-page-title">{{ menuTitle }}</p>
-        <div v-if="choices.length" class="resident-choices">
-          <TownVnChoice v-for="item in choices" :key="item.key" :disabled="locked" :hint="item.wage > 0 ? `+${item.wage} 金币` : item.price != null ? `-${item.price} 金币` : ''" @select="offer(item)">{{ item.title }}</TownVnChoice>
-        </div>
-        <p v-else class="resident-empty">{{ data?.storyHint || '暂时没有可展开的剧情线索。' }}</p>
-        <p v-if="error" role="alert">{{ error }}</p>
-        <p v-if="busy" role="status">正在准备…</p>
+        <Transition name="ra-swap" mode="out-in">
+          <div :key="menu" class="resident-sub">
+            <TownVnChoice class="resident-back" :disabled="busy" @select="menu = ''">返回</TownVnChoice>
+            <p class="resident-page-title">{{ menuTitle }}</p>
+            <div v-if="choices.length" class="resident-choices">
+              <TownVnChoice v-for="item in choices" :key="item.key" :disabled="locked" :hint="item.wage > 0 ? `+${item.wage} 金币` : item.price != null ? `-${item.price} 金币` : ''" @select="offer(item)">{{ choiceLabel(item) }}</TownVnChoice>
+            </div>
+            <p v-else class="resident-empty">{{ data?.storyHint || '暂时没有可展开的剧情线索。' }}</p>
+            <p v-if="error" role="alert">{{ error }}</p>
+            <p v-if="busy" role="status">正在准备…</p>
+          </div>
+        </Transition>
       </template>
     </div>
   </section>
@@ -61,29 +66,29 @@ import TownNpcTradePanel from './TownNpcTradePanel.vue'
 import TownServiceStage from './TownServiceStage.vue'
 import { fetchTownInteractions, offerTownInteraction, respondTownInteraction, startNpcService } from '../../api/townLife.js'
 const props = defineProps({ actorKey: String, worldId: String, worldEpoch: Number, blocked: Boolean, revision: [Number, String] })
-const emit = defineEmits(['talk', 'story', 'busy'])
+const emit = defineEmits(['talk', 'story', 'busy', 'feature'])
 const tradeOpen = ref(false)
 const stageOpen = ref(false)
 const stageSession = ref(null)
 const building = computed(() => props.actorKey?.startsWith('location:'))
-// 居民要有真实货品才开交易面板；建筑（location）保留入口，因为店内购买项挂在面板里。
+// 居民和建筑都要有真实货品才开交易面板：建筑 Capability 位里有 trade 不代表有货，
+// 店内买卖早已走功能模板的货架（店铺舞台），旧交易目录为空时入口只会误导。
 const canTrade = computed(() => !!data.value?.capabilities?.includes('trade')
-  && (building.value || (data.value?.catalog || []).some(item => item.kind === 'trade')))
+  && (data.value?.catalog || []).some(item => item.kind === 'trade'))
 function openTrade() {
   if (locked.value) return
   if (canTrade.value) tradeOpen.value = true
 }
 const data = ref(null), invitation = ref(null), menu = ref(''), error = ref(''), loading = ref(false), busy = ref(false)
 const locked = computed(() => props.blocked || loading.value || busy.value)
-// 建筑服务线索（走奇遇）只来自 catalog；NPC 的「服务 / 打工」项目走独立的 offers（瞄一眼出图），两者互不混用。
-const serviceLeads = computed(() => (building.value ? (data.value?.catalog || []).filter(item => item.kind === 'service' && item.capability !== 'trade') : []))
-const serviceOffers = computed(() => (data.value?.offers || []).filter(item => item.kind === 'service'))
+// 店铺服务全部由建筑功能面板承载，建筑不再提供走奇遇的服务线索（catalog 里的 service
+// 条目只作展示，不再被拾取）；NPC 的「服务 / 打工」项目走独立的 offers（瞄一眼出图）。
+const services = computed(() => (data.value?.offers || []).filter(item => item.kind === 'service'))
 const workOffers = computed(() => (data.value?.offers || []).filter(item => item.kind === 'work'))
-const services = computed(() => [...serviceLeads.value, ...serviceOffers.value])
 const works = workOffers
-const serviceMenuLabel = computed(() => (building.value ? '店里能办什么' : '那你能帮帮我吗？'))
+const serviceMenuLabel = computed(() => '那你能帮帮我吗？')
 // 子页面标题：进入哪一页就用哪一页的名字
-const menuTitle = computed(() => menu.value === 'story' ? '特殊奇遇' : menu.value === 'work' ? '打工' : serviceMenuLabel.value)
+const menuTitle = computed(() => menu.value === 'story' ? '特殊奇遇' : serviceMenuLabel.value)
 // 已接受的奇遇回执和顶部「继续『标题』」指向同一段奇遇时，只保留顶部按钮。
 const receiptMatchesActiveStory = computed(() => invitation.value?.status === 'accepted'
   && invitation.value.result?.kind === 'story' && !!data.value?.activeStory
@@ -116,6 +121,12 @@ async function refresh() {
   } catch (err) { if (current === generation && read === reads) showError(err) }
   finally { if (current === generation && read === reads) loading.value = false }
 }
+
+/** 品类标注：店铺要在每一个选项目前标出它属于什么服务（【服装】【发型】【BUFF】） */
+function choiceLabel(item) {
+  return item.categoryLabel ? `【${item.categoryLabel}】${item.title}` : item.title
+}
+
 async function offer(item) {
   if (locked.value) return
   if (item.offerId) return startService(item)
@@ -178,4 +189,11 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 .resident-invitation { padding: 8px 0; border-top: 1px solid var(--border-strong); margin-top: 8px; }
 .resident-actions p { margin: 5px 0; line-height: 1.5; }
 .resident-actions [role='alert'] { color: #ad5147; }
+/* 子页内容切换：旧内容淡出、新内容上滑入场（0.3s 内完成，避免生硬跳变） */
+.ra-swap-enter-active { transition: opacity .24s ease, transform .24s cubic-bezier(.22,.61,.36,1); }
+.ra-swap-leave-active { transition: opacity .15s ease; }
+.ra-swap-enter-from { opacity: 0; transform: translateY(10px); }
+.ra-swap-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .ra-swap-enter-active, .ra-swap-leave-active { transition: none; } }
+
 </style>

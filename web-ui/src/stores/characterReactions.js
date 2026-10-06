@@ -467,10 +467,12 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), config.llmTimeoutMs)
       let data
+      // 声明提到内层 try 之外：emojiKey 终检在 try/finally 之后还要用它做包含判断
+      let emojis = []
       try {
         // 先把该角色实际拥有的表情类别带给模型，让它只从里面选
         const entry = await ensureMaterials(event.actorKey)
-        const emojis = (entry?.items || []).filter(item => item && item.key).map(item => item.key)
+        emojis = (entry?.items || []).filter(item => item && item.key).map(item => item.key)
         data = await api.requestCharacterReaction({
           event,
           // 用「本次操作入历史之前」的快照，避免当前操作既进 previousOperations 又当 currentOperation

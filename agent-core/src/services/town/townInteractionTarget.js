@@ -1,5 +1,5 @@
 import { townError } from './townEventService.js';
-import { townCapabilities, defaultTownCapabilities, ensureTownCapabilities, readCharacterCapabilities } from './townCapabilities.js';
+import { townCapabilities, defaultTownCapabilities, defaultTownLocationCapabilities, ensureTownCapabilities, readCharacterCapabilities } from './townCapabilities.js';
 import { inferTownBusinessKind } from './townResponsibilityDefinitions.js';
 
 export function resolveTownInteractionTarget(context, target) {
@@ -22,7 +22,7 @@ export function resolveTownInteractionTarget(context, target) {
   // 没配过才回退到关联居民的权限，再回退到默认（服务）。
   const ownCapabilities = !building && actor?.characterId ? readCharacterCapabilities(db, actor.characterId) : null;
   let capabilities;
-  if (building) capabilities = ensureTownCapabilities(db, 'town_locations', location, defaultTownCapabilities(location.business_kind));
+  if (building) capabilities = ensureTownCapabilities(db, 'town_locations', location, defaultTownLocationCapabilities(location.business_kind));
   else capabilities = ownCapabilities ?? (npc
     ? ensureTownCapabilities(db, 'town_npcs', npc, defaultTownCapabilities(inferTownBusinessKind(npc.job), npc.job))
     : defaultTownCapabilities(null));
@@ -40,5 +40,5 @@ export function sourceTradeCapabilities(db, npc, input) {
     defaultTownCapabilities(inferTownBusinessKind(npc.job), npc.job));
   const location = db.prepare('SELECT * FROM town_locations WHERE key=?').get(input.sourceLocationKey);
   if (!location || location.map_id !== npc.map_id || npc.workplace_key !== location.key) throw townError('NOT_A_TRADER');
-  return townCapabilities(location, defaultTownCapabilities(location.business_kind));
+  return townCapabilities(location, defaultTownLocationCapabilities(location.business_kind));
 }

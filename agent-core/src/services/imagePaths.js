@@ -25,6 +25,9 @@ export const IMAGE_CATEGORIES = {
   expression_standing: { dir: 'expression_standing', label: '表情立绘' },
   newspaper: { dir: 'newspaper', label: '报纸' }, // 《邻舍日报》新闻配图
   town_service: { dir: 'town_service', label: '小镇生活' }, // 打工与服务共用此目录
+  // 建筑功能的写真/合影/纪念品（buildingFeatures/media.js 的 generatePortraitImage 落这里）。
+  // 没登记就 getImageDir 直接抛 Unknown image category，三种生成型模板全部走不到结算。
+  building_features: { dir: 'building_features', label: '建筑作品' },
 };
 
 export const LEGACY_CATEGORY = 'history';

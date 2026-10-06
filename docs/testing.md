@@ -47,4 +47,12 @@
 - 删除功能或测试时同步检查其 fixture、worker、预览资源和文档入口是否仍有调用方。
 - 临时验证脚本和日志用完即删；需反复使用的回归逻辑按 `AGENTS.md` 约定纳入正式测试。
 
+## 小镇特殊建筑功能（2026-10-03 新增）
+
+「描述驱动的可执行玩法」（见 `town-special-buildings-plan.md` §14）按职责维护三组测试，全部走真实生产入口、隔离内存库、注入式 LLM/生图：
+
+- `agent-core/test/townBuildingFeature{Contract,Source,Runtime,Effects,Trade,Media,Draw}.test.js`：14 模板 schema 与排除能力门控、来源优先级与绘图提示词检测、操作幂等/报价收据/配额/资金预留、外观与状态真实注入及到期恢复、交易真实钱物与回收估值封顶、生成模板一次调用与重试复用、固定种子抽取与跨日签运。共享夹具在 `test/helpers/townBuildingFeatureFixture.js`（`saveMap` 必须 `create: true`，否则按名 upsert 会覆盖第一张图）。
+- `web-ui/test/townBuildingFeatures.test.js`、`townBuildingFeatureOperations.test.js`：以 SFC 脚本提取 handler 的方式验证选择收敛（offer/option/target/item 不混用）、报价→执行顺序、失败文案映射与模板事件邀请流。夹具 state 必须提供 handler 引用的全部模块级名字，否则 `with(state)` 抛 ReferenceError 被组件 catch 吞掉，表现为「夹具没生效」而不是报错。
+- 功能有独立总开关 `config.features.townBuildingFeatures`（`FEATURE_TOWN_BUILDING_FEATURES`，默认开）；关闭后隐藏入口并拒绝新生成与新操作，已有预留仍按既有状态机结算或释放。旧镇建筑不自动建档，由管理面板「特殊建筑功能」逐栋启用。
+
 触摸样例还验证按下形变、松手回弹、最终恢复原形，以及图片节点不被重建。「完整触摸动效预览」只在测试页覆盖媒体偏好输入，以检查完整动画分支，不修改用户系统设置。

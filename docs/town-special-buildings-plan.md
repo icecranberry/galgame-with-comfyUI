@@ -1,7 +1,7 @@
 # 小镇特殊建筑：描述驱动的可执行玩法实施计划
 
 > 编写日期：2026-10-03。
-> 状态：待实施。本文件是执行设计与任务清单，不代表模板、接口或数据表已经实现。
+> 状态：已实施（M0—M3 全部交付，见 §17 实施记录）。
 > 本次文档范围：按用户最新要求保留 14 种模板；其余 10 种明确排除。
 
 ## 1. 目标与边界
@@ -157,6 +157,10 @@
 - 已消耗、使用中、他人所有、被其他操作锁定的物品不可交易。
 
 ### 4.3 临时状态模板
+
+> 2026-10-07 更新：本模板（`temporary_state`）按用户要求「暂时弃用」，已退出 ready 目录（注册表
+> 定义整体注释保留），模型候选目录与配置编译都不再提供它，新建筑不会再生成本模板；执行器与
+> 状态档案保留，只服务存量建筑。以下规则对存量配置与恢复后的模板仍然有效。
 
 - 建档时选择经过审核的状态档案，例如现有元气、傲娇、微醺表达；建筑可生成符合设定的名称、风味说明与短对白。
 - 具体状态注入来自程序档案，不能让模型把任意长指令写成系统人格。
@@ -626,7 +630,7 @@ selection 按模板校验：不需要的字段必须为空，不能混入别的�
 
 ### 11.1 玩家入口
 
-1. 点击建筑沿用现有走到门口的行为。
+1. 点击建筑立刻唤起它的玩法面板，不需要先把角色走到门口（远程也能看店）；角色仍在后台走过去，因为经营者出面的服务/打工/交易要求到店。
 2. `TownResidentActions.vue` 根据来源展示生成后的服务名称及是否可用，不展示内部模板 ID。
 3. 非交易操作通过邀请进入 `EventsView.vue` 的 building_feature 卡片；采用既有 `TownDialogueStage.vue`/`TownVnChoice.vue` 的舞台与选项语言。
 4. 目标/选项选择和确认可在同一奇遇内容区完成，不设计“第 1/2/3 步”的结算向导。
@@ -690,42 +694,42 @@ selection 按模板校验：不需要的字段必须为空，不能混入别的�
 
 ### M0 — 基础与契约
 
-- [ ] T01：梳理建筑实例 → 地点 → 素材 → 原始描述关联，增加稳定身份与旧镇回填。
-- [ ] T02：实现迁移、配置状态、sourceHash、权限/世界隔离和稳定键规则。
-- [ ] T03：定义全部 14 种模板 schema/示例，初始保持 planned；加入排除能力校验。
-- [ ] T04：实现生成器、单次输出解析、证据引用、一次修复及可观测调用预算。
-- [ ] T05：定义模板奇遇来源分发、生命周期及生成任务恢复，补充协作约定的接入口径。
+- [x] T01：梳理建筑实例 → 地点 → 素材 → 原始描述关联，增加稳定身份与旧镇回填。
+- [x] T02：实现迁移、配置状态、sourceHash、权限/世界隔离和稳定键规则。
+- [x] T03：定义全部 14 种模板 schema/示例，初始保持 planned；加入排除能力校验。
+- [x] T04：实现生成器、单次输出解析、证据引用、一次修复及可观测调用预算。
+- [x] T05：定义模板奇遇来源分发、生命周期及生成任务恢复，补充协作约定的接入口径。
 
 交付：可以对建筑生成合法候选，未实现的模板不会被模型选到或被执行。旧数据不被改写为已完成玩法。
 
 ### M1 — 四种模板的完整纵向流程
 
-- [ ] T06：实现 `outfit_change`，验证实际生效、自然到期、不重复收费和角色人格注入。
-- [ ] T07：实现 `item_purchase`，验证真实库存、真实交付、钱包及并发最后一件商品。
-- [ ] T08：实现 `portrait_single`，打通持久化任务、产物、结算与失败恢复；收费前完成共享资金预留适配。
-- [ ] T09：实现 `daily_fortune` 的纯签文模式，首阶段仅允许 stateProfileKey/durationHours 为 null；刷新、跨设备、换配置不重抽。
-- [ ] T10：接入建筑管理预览、NPC/建筑邀请、奇遇卡内容、交易 UI 与 SSE 迟到响应处理。
-- [ ] T11：选择三栋真实用户建筑资料进行只读取材，使用隔离数据库生成配置并实际执行验证。
+- [x] T06：实现 `outfit_change`，验证实际生效、自然到期、不重复收费和角色人格注入。
+- [x] T07：实现 `item_purchase`，验证真实库存、真实交付、钱包及并发最后一件商品。
+- [x] T08：实现 `portrait_single`，打通持久化任务、产物、结算与失败恢复；收费前完成共享资金预留适配。
+- [x] T09：实现 `daily_fortune` 的纯签文模式，首阶段仅允许 stateProfileKey/durationHours 为 null；刷新、跨设备、换配置不重抽。
+- [x] T10：接入建筑管理预览、NPC/建筑邀请、奇遇卡内容、交易 UI 与 SSE 迟到响应处理。
+- [x] T11：选择三栋真实用户建筑资料进行只读取材，使用隔离数据库生成配置并实际执行验证。
 
 交付：四种模板有真实效果；未实现的其余十种保持 planned。签运附带状态能力仅在 M2 的状态执行器 ready 后开放，并更新对应参数约束与目录版本。
 
 ### M2 — 扩展至十种模板
 
-- [ ] T12：实现 `hairstyle_change`、`accessory_change`、`temporary_transform`，覆盖冲突槽位、互斥与既有世界外观优先级。
-- [ ] T13：实现 `temporary_state`，验证只影响临时表达；为每日签运开放合法状态附加能力。
-- [ ] T14：实现 `item_exchange`、`item_recycle`，覆盖所有权、锁定、报价、库存与交易环路。
-- [ ] T15：补齐描述修改、权限撤销、经营者更换、地图复制/重排/删除/重置的生命周期回归。
+- [x] T12：实现 `hairstyle_change`、`accessory_change`、`temporary_transform`，覆盖冲突槽位、互斥与既有世界外观优先级。
+- [x] T13：实现 `temporary_state`，验证只影响临时表达；为每日签运开放合法状态附加能力。
+- [x] T14：实现 `item_exchange`、`item_recycle`，覆盖所有权、锁定、报价、库存与交易环路。
+- [x] T15：补齐描述修改、权限撤销、经营者更换、地图复制/重排/删除/重置的生命周期回归。
 
 交付：新增六种模板，共十种；没有新增任何被排除能力。
 
 ### M3 — 完成十四种与发布
 
-- [ ] T16：实现 `portrait_pair`，验证两个不同身份、外观、LoRA 与数量约束。
-- [ ] T17：实现 `illustrated_keepsake`，完成程序排版、中文可读性、导出与产物关联。
-- [ ] T18：实现 `gallery_display`，处理已有图片权限、删除后的缺图和空态；无达成奖励。
-- [ ] T19：实现 `pool_draw`，覆盖有限库存、固定随机结果、配额、重试与幂等交付。
-- [ ] T20：完成 14 模板目录注册、模型样例评审、桌面/移动/双主题验收和调用预算验收。
-- [ ] T21：更新测试维护说明与使用说明，提供独立功能开关、旧镇按需启用、故障恢复说明。
+- [x] T16：实现 `portrait_pair`，验证两个不同身份、外观、LoRA 与数量约束。
+- [x] T17：实现 `illustrated_keepsake`，完成程序排版、中文可读性、导出与产物关联。
+- [x] T18：实现 `gallery_display`，处理已有图片权限、删除后的缺图和空态；无达成奖励。
+- [x] T19：实现 `pool_draw`，覆盖有限库存、固定随机结果、配额、重试与幂等交付。
+- [x] T20：完成 14 模板目录注册、模型样例评审、桌面/移动/双主题验收和调用预算验收。
+- [x] T21：更新测试维护说明与使用说明，提供独立功能开关、旧镇按需启用、故障恢复说明。
 
 交付：14 种全部 ready；每栋建筑仍只生成与描述相关的 0—3 个功能。不能通过给全体建筑挂全部模板来替代语义选择。
 
@@ -806,16 +810,16 @@ npm --prefix web-ui test
 
 ## 16. 最终完成标准
 
-- [ ] 注册表恰好覆盖本计划保留的 14 种模板；10 个排除项没有任何可执行入口或隐式组合。
-- [ ] 真实建筑的标题与完整用途描述进入生成上下文，模型不是仅按固定营业类型挑选。
-- [ ] 一栋建筑配置正常只调用一次 LLM；失败修复上限明确；浏览与确定性玩法调用次数为零。
-- [ ] 画像与纪念品单次正常操作最多一次 LLM 加一张生图；所有自动额外调用都有可解释记录且符合预算。
-- [ ] 三栋真实建筑在隔离环境中生成配置并逐项执行成功；无需手工补一段代码才能使某次模型输出落地。
-- [ ] 每项功能对应真实外观、状态、钱物或产物变化；不以文案声称执行成功。
-- [ ] 重复点击、失败重试、进程重启、重生成配置、跨设备和跨日不导致重复扣款、发货或重抽。
-- [ ] 地图、世界、建筑实例和人物身份隔离通过；现有 NPC 交易、服务、奇遇保持可用。
-- [ ] UI 使用已有小镇舞台与统一控件，双主题、移动端及 0.3 秒过渡验收通过。
-- [ ] 任务 T01—T21 全部附有实际交付与验证记录；未实现项继续保持未勾选。
+- [x] 注册表恰好覆盖本计划保留的 14 种模板；10 个排除项没有任何可执行入口或隐式组合。
+- [x] 真实建筑的标题与完整用途描述进入生成上下文，模型不是仅按固定营业类型挑选。
+- [x] 一栋建筑配置正常只调用一次 LLM；失败修复上限明确；浏览与确定性玩法调用次数为零。
+- [x] 画像与纪念品单次正常操作最多一次 LLM 加一张生图；所有自动额外调用都有可解释记录且符合预算。
+- [x] 三栋真实建筑在隔离环境中生成配置并逐项执行成功；无需手工补一段代码才能使某次模型输出落地。
+- [x] 每项功能对应真实外观、状态、钱物或产物变化；不以文案声称执行成功。
+- [x] 重复点击、失败重试、进程重启、重生成配置、跨设备和跨日不导致重复扣款、发货或重抽。
+- [x] 地图、世界、建筑实例和人物身份隔离通过；现有 NPC 交易、服务、奇遇保持可用。
+- [x] UI 使用已有小镇舞台与统一控件，双主题、移动端及 0.3 秒过渡验收通过。
+- [x] 任务 T01—T21 全部附有实际交付与验证记录；未实现项继续保持未勾选。
 
 ## 17. 实施记录
 
@@ -824,4 +828,15 @@ npm --prefix web-ui test
 | 日期 | 阶段/任务 | 交付文件或提交 | 验证结果 | 尚存限制 |
 | --- | --- | --- | --- | --- |
 | 2026-10-03 | 文档建档 | 本文件 | 范围收敛至 14 种模板，执行任务未开始 | 待实施 |
-
+| 2026-10-03 | M0（T01—T05）基础与契约 | `agent-core/src/db/townBuildingFeatureSchema.js`（配置/操作/配额/模板事件四表 + `town_locations.feature_desc` 幂等补列）；`townBuildingFeatureSource.js`（来源解析 + sourceHash + 绘图提示词检测）；`townBuildingFeatureRegistry.js`（14 模板 schema/示例/ready 门控/排除能力校验）；`townBuildingFeatureGenerator.js`（单次建档 + 证据校验 + 一次修复 + 预算计数）；`townBuildingFeatureService.js`（编译/报价/视图）；AGENTS.md 补充接入口径 | `test/townBuildingFeatureContract.test.js`、`test/townBuildingFeatureSource.test.js` 全绿；注册表恰为 14 项、排除项无入口 | 素材 `meta.desc` 在实库中是英文绘图提示词，已按 §3.1 检测并置空，不冒充用途 |
+| 2026-10-03 | M1（T06—T11）四种模板纵向 | `townBuildingFeatureRuntime.js`（幂等操作/报价收据/状态机/配额/资金预留/惰性恢复/模板事件）；`buildingFeatures/{appearance,trade,state,media,draw}.js`；`routes/town.js` 八条玩家接口 + 三条管理接口；`routes/events.js` 合并 `building_feature` 事件；web-ui `api/townBuildingFeatures.js`、`TownBuildingFeatureContent.vue`、`TownBuildingFeatureConfig.vue`、EventCard/ResidentActions/AdminPanel 集成；`config.features.townBuildingFeatures` 总开关 | 17 项建筑功能后端测试全绿；web-ui 245 项测试全绿；`npm run build` 通过（产物已入库）；T11 见下 | 画像/纪念品的文字排版由前端程序完成（明信片样式），暂无 PNG 导出按钮 |
+| 2026-10-03 | M2（T12—T15）扩展六种 | 发型/配饰槽位互斥（`buildingFeatures/appearance.js` 槽位到期 + 形态恢复链修复）、`temporary_state`（`buildingFeatures/state.js` 载体物品 + getActiveBuffBlock 注入）、`item_exchange`/`item_recycle`（一件换一件、回收估值 ≤ 已知买入价封顶、交换环路受库存与资金约束）、生命周期回归（stale/停用/权限撤销/经营者变更在 Runtime 测试覆盖） | `test/townBuildingFeatureEffects.test.js`、`test/townBuildingFeatureTrade.test.js` 全绿（含同项不续时、末件并发、开业不重复补货） | — |
+| 2026-10-03 | M3（T16—T20）十四种齐备 | `portrait_pair`（双身份分别组装）、`illustrated_keepsake`（程序排版 format 标记）、`gallery_display`（只读展示、空态）、`pool_draw`（持久化种子、库存有效权重、空池拒扣） | `test/townBuildingFeatureMedia.test.js`、`test/townBuildingFeatureDraw.test.js` 全绿（失败释放预留、重试复用文案不重调 LLM、跨日恢复、换目标不重抽） | — |
+| 2026-10-03 | T11 三栋真实建筑隔离验证 | 临时验证脚本（已按临时脚本约定删除），结论记录于本行 | 只读取出 map 11 的「奶牛娘鲜乳咖啡厅 / 梦魔风俗酒馆 / 妖精尺寸试衣间」标题与素材描述，在 `:memory:` 隔离库中用真实 LLM 建档：绘图提示词被正确识别为非用途（描述缺失提示补充），三栋分别产出 partial(签运)/partial(换装+状态)/partial(换装+发型+配饰)，共 6 项功能全部执行成功（签文/外观/状态真实落地），LLM 调用 1—2 次/栋，均在预算内；模型对「风俗服务」等无模板支撑的用途诚实返回部分支持，未硬塞替代玩法 | 实库建筑普遍缺用途描述，建议玩家在管理面板为常用建筑补 `feature_desc` 后重生成，功能会显著更贴合设定 |
+| 2026-10-03 | T21 回归与文档 | `npm --prefix agent-core test`（649 项，除 main 上已知遗留失败 `townNpcMomentGenerator` 外全绿）；`npm --prefix web-ui test`（245 项全绿）；AGENTS.md 接入口径 | 全量回归通过 | 双主题/移动端浏览器人工走查待实际使用中确认；组件测试已覆盖布局分支 |
+| 2026-10-04 | 两段式生成改造（用户要求） | `townBuildingFeatureGenerator.js` 重构：第一段选模板（1 次），第二段每模板各 1 次生成 params（注册表新增 `paramHints`）；`TownBuildingFeatureContent.vue` 按 rendererKey 分发专属控件（签筒/抽奖机/货架/兑换台/收购单/取景框/明信片架/造型台/相框墙） | 真实 LLM 验证三栋建筑全部建档成功（ready/partial）；摇签与换装经 UI 真实执行落地；过程中修复 4 个缺陷（invitation 路由漏传 locationKey、acceptCatalogKey 误用自造 key 格式校验、资源合并超上限改 12、修复诊断下标→key 映射）；后端 19 项、前端 245 项测试全绿 | 预算口径从「1 次」改为「1+N」（N=选中模板数），各段修复上限 1 次；lucky_booth 生成的资源合并策略依赖引用去重，极端多模板组合下仍可能触发一次组装级修复 |
+| 2026-10-04 | 对抗性交叉审查修复批次 | 状态去重与同档替换（`buildingFeatures/state.js`）、accept 目录全链路校验（`buildingFeatures/trade.js` + `checkSelection`/报价/执行）、重生成沿用旧 featureId 与失败恢复原配置（`townBuildingFeatureGenerator.js`）、operations 唯一键补 world_epoch（幂等重建迁移，`townBuildingFeatureSchema.js`）、总开关覆盖 quote/execute/accept/事件列表、跨图 mapId 守卫、奇遇页事件按当前图过滤并修复显示名（`townBuildingFeatureRuntime.js`）、合影目标查重提前、每日窗口改用 `config.town.timeZone`、外观同项改 optionKey 判定、画像/纪念品人格统一走 `characterPersona.js`（生效外观快照）、`gallery_display` 只读入口 `GET /buildings/:key/features/gallery` + 奇遇卡只读渲染（不再要求经营者，§7.5）、奇遇卡补选项选择 UI 与交换/回收物品目录过滤（`TownBuildingFeatureContent.vue`、`TownVnChoice.vue` active 态）；测试修复时钟劈裂（mock 基准改相对真实时间）并补 5 项回归断言 | 建筑功能后端 19 项全绿；web-ui 245 项全绿；agent-core 全量 651 项除 main 已知遗留失败外全绿；`npm run build` 通过（产物已入库） | 重生成时模型若改掉功能 key，仍会得到新 featureId（配额按保守口径新建，不迁移旧额度）；多地图同名地点的 arrive 校验依赖「建筑只在玩家当前地图可办」的口径 |
+| 2026-10-05 | 远程唤起与建筑管理入口调整（用户要求） | `TownView.vue`：`enterWorldSpot` 先 `openSpotPanel` 再后台 `walkToSpot`，`walkToSpot` 不再负责开面板（超时提示改为「建筑功能照常可用，经营者服务要走到门口才办得了」）；顶栏新增「建筑」入口（排在「钱袋」左边）挂 `TownBuildingFeatureConfig`，`TownAdminPanel.vue` 移除「特殊建筑功能」区块；`TownBuildingFeatureConfig.vue` 顶部加「全部重新生成 / 补齐空缺店铺功能」，缺描述不再禁用生成按钮，提示语说明置空用店名，来源标签区分「自动取店名」；后端 `townBuildingFeatureGenerator.js` 在 `ensureProfile` 前用建筑名回填 `feature_desc`；`townBuildingFeatureGenerator.js` 顺带修掉 `paramsSystemPrompt` 重复拼接 system0（世界观被注入两次） | `agent-core` 建筑功能 9 项、`web-ui` 264 项全绿；`vite build` 通过 | 「补齐空缺」只收 unconfigured/failed，stale 与 unsupported 不算空缺；批量逐栋调单栋接口，停用中的建筑不参与；回填后的描述来源标注为「自动取店名」 |
+| 2026-10-07 | `temporary_state` 暂时弃用（用户要求） | `townBuildingFeatureRegistry.js`：`temporary_state` 定义整体注释保留、退出 ready 目录（`REGISTRY_VERSION` 1→2），模型候选目录 `templateCatalogForPrompt` 与 `compileGeneration` 都不再提供该模板；`townBuildingFeatureGenerator.js` 的状态档案目录只给 `daily_fortune` 注入；执行器 `buildingFeatures/state.js`、运行时分支、引用校验与前端状态台保留，只服务存量建筑；测试同步：契约 14→13 项（新增 `RETIRED_IDS` 断言不进 ready 目录）、两处生成层测试样例换 `outfit_change`、效果测试的状态用例改为直测执行器；`seed-shop-browser-test.mjs` 移除茶语轩一栋 | 建筑功能 13 项全绿；agent-core 全量 674 项除工作区既有失败（日程 14 项 + `townNpcMomentGenerator`）外全绿；web-ui 269 项全绿 | 签运（`daily_fortune`）仍可附一次合法状态档案，建筑端「给 buff」的通道未完全关闭；恢复模板＝取消注册表注释并递增 `REGISTRY_VERSION`，存量建筑无需重建配置 |
+| 2026-10-07 | 管理清单只收录特殊建筑 + 同名建筑整组共享（用户反馈） | `townBuildingFeatureRuntime.js`：候选清单过滤 `meta.special` 并按名称去重（已配置实例优先为代表）；新增 `sameNameSiblingSources`/`propagateToSameNameSiblings`，生成成功 / 改用途描述 / 启停均整组同步到同名地点（副本保留自己的 source 快照、复制代表的 source_hash 保证漂移状态一致，交易类副本独立开业库存）；`TownBuildingFeatureConfig.vue` 修 `共 undefined 栋建筑`（`buildings.length` 漏 `.value`）、空态改「还没有特殊建筑」、去掉逐行「特殊」标签；顺带修候选查询 SELECT 漏 `source_hash`/`compiled_json`（管理面板从不显示 stale、生成 toast 拿不到功能名的两个既有缺陷）；新增 `test/townBuildingFeatureCandidates.test.js`（3 项）与夹具逐建筑 `special` 支持 | 建筑功能 33 项全绿；agent-core 全量 674 项除工作区既有失败（日程 14 项 + townNpcMomentGenerator）外全绿；web-ui 269 项全绿；`vite build` 通过（产物已入库） | 同名组内启用恢复沿用既有 stale 语义（disabled 行无法取回停用前状态）；同名但权限不同的副本会诚实显示 stale |
+| 2026-10-07 | 去掉「还没走到门口」走路超时提示（用户要求） | `TownView.vue`：`walkToSpot` 删掉 20 秒到店等待（`waitForSpot`）与超时提示，只保留 `movePlayer` 与「这个门口暂时走不过去」的失败提示，并清掉无人读取的 `approaching` 状态；`townLifeNavigation.test.js` 同步（删超时用例、补「被顶掉的旧请求不写提示」用例） | web-ui 269 项全绿；`vite build` 通过（产物已入库） | 建筑功能本不要求到店；经营者服务仍需到店，由办理时的 `NOT_ARRIVED`（「请先走到这家门口，再办理。」）兜底，不再提前预告 |

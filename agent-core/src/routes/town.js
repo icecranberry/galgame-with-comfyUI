@@ -44,6 +44,13 @@ import { listNpcOffers, generateNpcOffers, rerollNpcOffer, listOfferOverview } f
 import { startNpcService, continueNpcService, listNpcServiceSessions } from '../services/town/townNpcServiceRuntime.js';
 import { getTownInteractions, offerTownInteraction, respondTownInteraction, getTownTargetTrade, executeTownTargetTrade } from '../services/town/townInteractionRuntime.js';
 import {
+  getTownBuildingFeatures, quoteTownBuildingFeature, executeTownBuildingFeature,
+  getTownBuildingFeatureOperation, retryTownBuildingFeatureOperation, cancelTownBuildingFeatureOperation,
+  getTownBuildingFeatureGallery,
+  generateTownBuildingFeatures, getTownBuildingFeatureGeneration, refreshTownBuildingFeatureStock,
+  listTownBuildingFeatureCandidates, updateTownBuildingFeatureDescription, setTownBuildingFeatureEnabled,
+} from '../services/town/townBuildingFeatureRuntime.js';
+import {
   getInitState, startInit, updateBlueprint, generateSamples, startBatch,
   generateAssetPrompts,
   generateLayout, rerollLayout, relayoutWorld, confirmInit, cancelInit, getInitPreview, commitWizardNpcs,
@@ -268,6 +275,29 @@ const townCommandMessages = {
   ACCOUNT_OWNER_MISMATCH: '交易账户校验未通过，请重新读取后再试',
   TEMPLATE_NOT_FOUND: '这件商品的模板还没准备好，请稍后再来',
   INVALID_OFFER_KIND: '这个项目类型不支持',
+  // 特殊建筑功能
+  FEATURE_UNCONFIGURED: '这栋建筑还没有配置功能，请先在管理面板生成',
+  FEATURE_STALE: '建筑的描述已经变化，旧功能暂停执行，请重新生成配置',
+  FEATURE_MANUAL_LOCKED: '这份配置是手工维护的，请先解除手工维护标记再重新生成',
+  TEMPLATE_UNAVAILABLE: '这个玩法模板未开放',
+  CAPABILITY_DENIED: '这栋建筑没有对应权限',
+  NEEDS_OPERATOR: '这栋建筑还没有经营者，涉及收费的功能暂不可用',
+  TARGET_UNSUPPORTED: '选定的对象不支持这项服务',
+  INVALID_SELECTION: '选项无效，请重新选择',
+  QUOTE_EXPIRED: '报价已过期，请重新确认',
+  PRICE_CHANGED: '价格已变化，请重新确认',
+  OUT_OF_STOCK: '库存不足，暂时无法完成这项操作',
+  DAILY_LIMIT: '今天已经用过这次机会了，明天再来',
+  EFFECT_ALREADY_ACTIVE: '这项效果还在生效中，不用重复购买',
+  STALE_EPOCH: '小镇已更新，请刷新后重试',
+  LOCATION_NOT_FOUND: '地点不存在，请刷新地图',
+  GENERATION_INVALID: '生成结果未通过校验，请重试',
+  GENERATION_FAILED: '生成失败，请稍后重试',
+  OPERATION_NOT_FOUND: '操作记录不存在',
+  OPERATION_NOT_FAILED: '操作不在可重试状态',
+  OPERATION_UNAVAILABLE: '操作已结束，不能再变更',
+  OPERATION_ALREADY_SETTLED: '操作已完成结算',
+  SOURCE_CHANGED: '建筑资料在生成期间发生了变化，请重试',
   OFFER_JSON_MISSING: '这次没能生成出项目，请再试一次',
   OFFER_EMPTY: '这次没有生成出可用的项目，请再试一次',
   SERVICE_SESSION_NOT_FOUND: '这段服务已经结束，请重新选择',
@@ -610,6 +640,121 @@ router.post('/npcs/:id/reroll', async (req, res) => {
 
 router.get('/npcs/:id/messages', (req, res) => {
   res.json({ messages: getNpcChatHistory(parseInt(req.params.id, 10)) });
+});
+
+// ── 特殊建筑：描述驱动的可执行玩法（docs/town-special-buildings-plan.md §10） ──
+// GET 只读取；generate 是显式 POST（浏览不消费模型）；执行统一接受报价 + 幂等键。
+
+router.get('/buildings/:locationKey/features', (req, res) => {
+  try {
+    res.json(getTownBuildingFeatures({ mapId: req.query.mapId ? Number(req.query.mapId) : undefined,
+      locationKey: req.params.locationKey }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/buildings/:locationKey/features/generate', async (req, res) => {
+  try {
+    res.json(await generateTownBuildingFeatures({ mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+      locationKey: req.params.locationKey, force: req.body?.force === true }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+// 刷新店铺货架：固定 10 金币，重抽外观 + 商品目录并把货架补满（不限次数）
+router.post('/buildings/:locationKey/refresh', async (req, res) => {
+  try {
+    res.json(await refreshTownBuildingFeatureStock({
+      locationKey: req.params.locationKey,
+      mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+    }));
+  } catch (err) { sendTownError(res, err); }
+});
+
+router.get('/buildings/:locationKey/features/generation', (req, res) => {
+  try {
+    res.json(getTownBuildingFeatureGeneration({ mapId: req.query.mapId ? Number(req.query.mapId) : undefined,
+      locationKey: req.params.locationKey }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/buildings/:locationKey/features/quote', (req, res) => {
+  try {
+    res.json(quoteTownBuildingFeature({ mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+      locationKey: req.params.locationKey, featureId: req.body?.featureId, selection: req.body?.selection || {},
+      worldId: req.body?.worldId, worldEpoch: req.body?.worldEpoch }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/buildings/:locationKey/features/execute', (req, res) => {
+  try {
+    res.json(executeTownBuildingFeature({
+      worldId: req.body?.worldId, worldEpoch: req.body?.worldEpoch,
+      mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+      locationKey: req.params.locationKey,
+      profileRevision: req.body?.profileRevision, featureId: req.body?.featureId,
+      quoteId: req.body?.quoteId, quoteExpiresAt: req.body?.quoteExpiresAt,
+      idempotencyKey: req.body?.idempotencyKey, selection: req.body?.selection || {},
+      eventId: req.body?.eventId,
+    }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.get('/building-feature-events', (req, res) => {
+  try { res.json({ events: listTownBuildingFeatureEvents() }); }
+  catch (error) { sendTownCommandError(res, error); }
+});
+
+// 作品展示（gallery_display）：只读查询，不建操作行、不扣费（计划 §7.3「展示模板不为每次查看创建操作」）
+router.get('/buildings/:locationKey/features/gallery', (req, res) => {
+  try {
+    res.json(getTownBuildingFeatureGallery({
+      worldId: req.query.worldId, worldEpoch: req.query.worldEpoch != null ? Number(req.query.worldEpoch) : undefined,
+      mapId: req.query.mapId != null ? Number(req.query.mapId) : undefined,
+      locationKey: req.params.locationKey, featureId: req.query.featureId,
+    }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/building-feature-events/:eventId/dismiss', (req, res) => {
+  try { res.json(dismissTownBuildingFeatureEvent(req.params.eventId)); }
+  catch (error) { sendTownCommandError(res, error); }
+});
+
+router.get('/building-feature-operations/:operationId', (req, res) => {
+  try { res.json(getTownBuildingFeatureOperation(req.params.operationId)); }
+  catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/building-feature-operations/:operationId/retry', (req, res) => {
+  try { res.json(retryTownBuildingFeatureOperation(req.params.operationId)); }
+  catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/building-feature-operations/:operationId/cancel', (req, res) => {
+  try { res.json(cancelTownBuildingFeatureOperation(req.params.operationId)); }
+  catch (error) { sendTownCommandError(res, error); }
+});
+
+// ── 建筑管理：特殊功能配置区（计划 §11.2） ──
+
+router.get('/buildings/features/overview', (req, res) => {
+  try {
+    res.json({ buildings: listTownBuildingFeatureCandidates({ mapId: req.query.mapId ? Number(req.query.mapId) : undefined }) });
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.put('/buildings/:locationKey/description', (req, res) => {
+  try {
+    res.json(updateTownBuildingFeatureDescription({
+      mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+      locationKey: req.params.locationKey, description: req.body?.description }));
+  } catch (error) { sendTownCommandError(res, error); }
+});
+
+router.post('/buildings/:locationKey/features/enabled', (req, res) => {
+  try {
+    res.json(setTownBuildingFeatureEnabled({
+      mapId: req.body?.mapId != null ? Number(req.body.mapId) : undefined,
+      locationKey: req.params.locationKey, enabled: req.body?.enabled, manual: req.body?.manual }));
+  } catch (error) { sendTownCommandError(res, error); }
 });
 
 // ── NPC 功能点（送东西 / 做买卖） ──

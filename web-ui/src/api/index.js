@@ -480,7 +480,7 @@ export async function updateFeatureFlag(key, value) {
   await request(`/config/features`, { method: 'PUT', body: { key, value } })
 }
 
-// ── 角色操作反馈（左下角轻通知）──
+// ── 角色操作反馈（右下角轻通知）──
 
 /** 本次候选需要的素材：该角色启用表情包配置单里已完成的图片 + 头像（不做任何生成） */
 export function getCharacterReactionAssets(characterId) {
@@ -769,8 +769,16 @@ export function testHires() {
 }
 
 // ── Moments 朋友圈 ──
-export async function listMoments() {
-  return request(`/moments`)
+/**
+ * 分页拉取朋友圈帖子（服务端 keyset 分页：id 倒序，before_id 取更旧一批）
+ * @param {{ limit?: number, beforeId?: number }} opts 缺省 limit=1000；传 beforeId 续拉下一批
+ */
+export async function listMoments({ limit, beforeId } = {}) {
+  const params = new URLSearchParams()
+  if (limit) params.set('limit', limit)
+  if (beforeId) params.set('before_id', beforeId)
+  const qs = params.toString()
+  return request(`/moments${qs ? `?${qs}` : ''}`)
 }
 
 /**

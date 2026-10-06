@@ -8,7 +8,7 @@ import { TOWN_BUSINESS_ROLES, inferTownBusinessKind, townBuildingKind } from './
 import { buildWalkGridFromLayers } from './townMapService.js';
 import { findPath } from './townPathfinding.js';
 import { broadcastTownMapUpdated } from './townBus.js';
-import { ensureTownCapabilities, defaultTownCapabilities, townCapabilities, upgradeTownNpcCapabilities, shouldHaveWorkPermission } from './townCapabilities.js';
+import { ensureTownCapabilities, defaultTownCapabilities, defaultTownLocationCapabilities, townCapabilities, upgradeTownNpcCapabilities, shouldHaveWorkPermission } from './townCapabilities.js';
 
 const parse = (value, fallback = {}) => { try { return JSON.parse(value) ?? fallback; } catch { return fallback; } };
 export function initializeTownNpcFunctions(db, npc) {
@@ -72,7 +72,7 @@ export function reconcileTownResponsibilities({ db = getDb(), allowFallback = fa
     }
     for (const location of locations) {
       if (location.business_kind != null) {
-        ensureTownCapabilities(db, 'town_locations', location, defaultTownCapabilities(location.business_kind));
+        ensureTownCapabilities(db, 'town_locations', location, defaultTownLocationCapabilities(location.business_kind));
         continue;
       }
       const object = objects.get(location.object_id);
@@ -81,8 +81,8 @@ export function reconcileTownResponsibilities({ db = getDb(), allowFallback = fa
       location.business_kind = fromAsset && fromAsset !== 'none' ? fromAsset : townBuildingKind(location);
       db.prepare('UPDATE town_locations SET business_kind=? WHERE id=?').run(location.business_kind, location.id);
       ensureTownCapabilities(db, 'town_locations', location, asset
-        ? townCapabilities({ meta: parse(asset.meta_json) }, defaultTownCapabilities(location.business_kind))
-        : defaultTownCapabilities(location.business_kind));
+        ? townCapabilities({ meta: parse(asset.meta_json) }, defaultTownLocationCapabilities(location.business_kind))
+        : defaultTownLocationCapabilities(location.business_kind));
     }
     // 角色的托管档案不参与岗位绑定：它们只是角色挂服务 / 打工项目的影子身份
     const npcs = db.prepare('SELECT * FROM town_npcs WHERE map_id=? AND COALESCE(character_managed, 0) = 0 ORDER BY id').all(map.id);
@@ -112,7 +112,7 @@ export function reconcileTownResponsibilities({ db = getDb(), allowFallback = fa
           const id = db.prepare(`INSERT INTO town_locations(map_id,key,name,kind,grid_x,grid_y,radius,business_kind)
             VALUES(?,?,?,'outdoor',?,?,1,?)`).run(map.id, key, name, cell.x, cell.y, kind).lastInsertRowid;
           locations.push(db.prepare('SELECT * FROM town_locations WHERE id=?').get(id));
-          ensureTownCapabilities(db, 'town_locations', locations.at(-1), defaultTownCapabilities(kind));
+          ensureTownCapabilities(db, 'town_locations', locations.at(-1), defaultTownLocationCapabilities(kind));
           if (!mapUpdate) {
             db.prepare('UPDATE town_maps SET version=COALESCE(version,0)+1 WHERE id=?').run(map.id);
             mapUpdate = { mapId: map.id, version: (map.version || 0) + 1 };

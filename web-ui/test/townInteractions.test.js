@@ -82,3 +82,36 @@ test('reopening reads a saved accepted invitation and emits the exact external s
   await respond('accept')
   assert.ok(events.some(([name, id]) => name === 'story' && id === 73))
 })
+
+function computedOf(name, state) {
+  const decl = nodes.find(node => node.type === 'VariableDeclaration' && node.declarations.some(d => d.id?.name === name))
+  const init = decl.declarations.find(d => d.id?.name === name).init
+  return new Function('state', `with (state) { return (${script.slice(init.start, init.end)}) }`)(state)
+}
+
+test('buildings no longer surface catalog service leads; residents keep their offers', () => {
+  // 店铺服务全部由建筑功能面板承载：即使 catalog 里仍有 service 条目（后端目录继续下发），
+  // 面板也不得再把它们拾取成走奇遇的服务线索，「店里能办什么」入口必须消失。
+  assert.ok(!script.includes('店里能办什么'), 'building service menu label must be gone')
+  const buildingServices = computedOf('services', {
+    computed, ref,
+    building: computed(() => true),
+    data: ref({ catalog: [
+      { key: 'service:massage', kind: 'service', capability: 'service', title: '肩颈按摩' },
+      { key: 'trade:buy:comb', kind: 'trade', capability: 'trade', title: '买一把木梳' },
+    ], offers: [] }),
+  }).value
+  assert.deepEqual(buildingServices, [], 'buildings must have no service leads')
+
+  const residentState = {
+    computed, ref,
+    building: computed(() => false),
+    data: ref({ catalog: [], offers: [
+      { key: 'service:offer:1', kind: 'service', title: '剪头发', price: 12 },
+      { key: 'work:offer:2', kind: 'work', title: '帮忙喂马', wage: 5 },
+    ] }),
+  }
+  const residentServices = computedOf('services', residentState).value
+  assert.equal(residentServices.length, 1, 'resident service offers must be preserved')
+  assert.equal(residentServices[0].key, 'service:offer:1')
+})

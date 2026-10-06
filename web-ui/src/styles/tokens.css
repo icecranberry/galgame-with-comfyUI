@@ -129,6 +129,9 @@
   --side-panel-bg: #f4f1eeed;
   --side-panel-border: 1px solid rgba(0, 0, 0, 0.05);
   --side-panel-shadow: 0 6px 28px rgba(0, 0, 0, 0.08);
+  /* 侧板内部的行/卡片表面与缩略图/滑轨凹面（小镇管理面板等） */
+  --side-panel-surface: #fbf8f3;
+  --side-panel-surface-sunken: #f1ebe1;
 
   /* ── 尺度：圆角 ── */
   --radius-sm: 8px;
@@ -172,7 +175,7 @@
   --z-toast: 13000;
   --z-float: 15000;
 
-  /* ── 角色通知（左下角轻通知）：暖纸质感岛，沿用原 Toast 的既有例外 ──
+  /* ── 角色通知（右下角轻通知）：暖纸质感岛，沿用原 Toast 的既有例外 ──
        两种主题共用同一组暖纸色值，保证纸面墨色对比；尺寸与 300ms 动效走
        --dur-interaction / --ease-standard，不再把硬编码色值复制进组件。 */
   --ct-bg: #F7F4EF;
@@ -285,6 +288,8 @@
   --side-panel-bg: var(--glass-bg-strong);
   --side-panel-border: 1px solid var(--glass-border);
   --side-panel-shadow: var(--shadow-md);
+  --side-panel-surface: rgba(255, 255, 255, 0.05);
+  --side-panel-surface-sunken: rgba(0, 0, 0, 0.25);
 
   --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.32);
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);

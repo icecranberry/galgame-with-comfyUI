@@ -22,6 +22,9 @@
       @pointercancel="onCanvasCancel"
       @pointerleave="onCanvasLeave"
       @lostpointercapture="onCarryCaptureLost"
+      @touchstart="onCanvasTouchStart"
+      @touchmove="onCanvasTouchMove"
+      @touchend="onCanvasTouchEnd"
       @wheel.prevent="onWheel"
       @dblclick="onDblClick"
     ></canvas>
@@ -86,6 +89,7 @@ variant="icon" size="sm" class="town-bgm-btn"
             <path d="M5 2.905a1 1 0 0 1 .9-.995l8-.8a1 1 0 0 1 1.1.995V3L5 4V2.905z" />
           </svg>
         </linshe-button>
+        <linshe-button variant="ghost" size="sm" :disabled="uiLocked" :aria-expanded="showBuildingFeatures" @click="openBuildingFeatures">建筑</linshe-button>
         <linshe-button variant="ghost" size="sm" :disabled="uiLocked" :aria-expanded="showWalletPanel" @click="openWalletPanel">钱袋</linshe-button>
         <linshe-button v-if="npcEncounterCount > 0" variant="ghost" size="sm" :disabled="uiLocked" @click="openTownEvents" :title="`镇上有 ${npcEncounterCount} 段进行中的奇遇`">奇遇 · {{ npcEncounterCount }}</linshe-button>
         <linshe-button
@@ -242,13 +246,13 @@ v-else-if="chatNpcId != null"
     <TownResidentActivityModal v-model="residentActivityOpen" :name="chatResident?.displayName || chatNpcName"
       :activity="residentActivityMerged" :loading="residentActivity.loading" />
     <TownWalletPanel :open="showWalletPanel" @close="closeWalletPanel" />
-    <TownPaperPanel v-if="spotReady && worldSpot" :open="true" :title="worldSpot.displayName" @close="closeWorldSpot">
-      <p>选择这里的功能。服务可展开特殊奇遇，交易可查看商品并买卖。</p>
-      <TownResidentActions
-:actor-key="`location:${worldSpot.locationKey}`" :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
-        @story="openResidentStory"
-/>
-    </TownPaperPanel>
+    <TownBuildingFeatureConfig v-model:open="showBuildingFeatures" />
+    <TownShopStage
+      :open="!!shopStage" :location-key="shopStage?.locationKey || ''" :map-id="shopStage?.mapId ?? null"
+      :world-id="worldScope.worldId" :world-epoch="worldScope.worldEpoch"
+      :building-name="shopStage?.buildingName || ''" :feature-id="shopStage?.featureId || ''"
+      @close="shopStage = null" @changed="onShopChanged"
+    />
     <!-- 出行：镇子目录。每行一个目的地（整行热区，用 role=radio 而不是按钮），底部唯一主操作「启程」 -->
     <TownPaperPanel
 v-if="showTravelPanel" :open="true" hide-footer title="出行" kicker="邻舍小镇"
@@ -376,6 +380,8 @@ import TownResidentActions from '../components/town/TownResidentActions.vue'
 import TownResidentStatusModal from '../components/town/TownResidentStatusModal.vue'
 import TownResidentActivityModal from '../components/town/TownResidentActivityModal.vue'
 import TownCapabilityPicker from '../components/town/TownCapabilityPicker.vue'
+import TownBuildingFeatureConfig from '../components/town/TownBuildingFeatureConfig.vue'
+import TownShopStage from '../components/town/shop/TownShopStage.vue'
 import TownAdminPanel from '../components/town/TownAdminPanel.vue'
 import TownServiceManagerHost from '../components/town/TownServiceManagerHost.vue'
 import TownInitWizard from '../components/town/TownInitWizard.vue'
@@ -612,9 +618,11 @@ function formatActivityTime(occurredAt) {
   return date.toDateString() === now.toDateString() ? hhmm : `${date.getMonth() + 1}月${date.getDate()}日 ${hhmm}`
 }
 const showWalletPanel = ref(false)
-// 世界里点开的建筑互动面板：{ displayName, locationKey }
-const worldSpot = ref(null)
-const approaching = ref('')
+// 顶栏「建筑」入口：特殊建筑功能管理（生成是显式动作，面板内自带逐栋进度反馈）
+const showBuildingFeatures = ref(false)
+// 小镇内的店铺舞台：点建筑直接进来（建筑专有 UI），不跳奇遇页也不经过居民互动面板
+const shopStage = ref(null)
+function onShopChanged() { /* 货架变了：舞台下次打开会自己重读 */ }
 const lifeMoving = ref(false)
 const lifeMoveError = ref('')
 let dialogueRequest = 0
@@ -648,9 +656,9 @@ const renameBusy = ref(false)
 const renameError = ref('')
 const dialogueOpen = computed(() => chatNpcId.value != null || chatCharacterId.value != null)
 const dialogueInputBlocked = computed(() => dialogueOpen.value || dialogueOpening.value || showWalletPanel.value
-  || !!worldSpot.value || lifeMoving.value || showTravelPanel.value || traveling.value)
+  || showBuildingFeatures.value
+  || lifeMoving.value || showTravelPanel.value || traveling.value)
 const worldScope = computed(() => ({ worldId: town.snapshot?.worldId || '', worldEpoch: town.snapshot?.worldEpoch ?? 0 }))
-const spotReady = computed(() => !!worldSpot.value && !!worldScope.value.worldId && worldScope.value.worldEpoch > 0)
 const showAdmin = ref(false)
 const showWizard = ref(false)
 const dragging = ref(false)
@@ -694,7 +702,7 @@ watch(dialogueInputBlocked, blocked => {
   onCanvasLeave()
 }, { flush: 'sync' })
 watch(() => [town.snapshot?.worldId, town.snapshot?.worldEpoch], () => {
-  showWalletPanel.value = false; worldSpot.value = null; approaching.value = ''
+  showWalletPanel.value = false
   showTravelPanel.value = false; travelTargetId.value = null; travelError.value = ''
   renamingMapId.value = null; renameDraft.value = ''; renameError.value = ''
   ++lifeMoveRequest; lifeMoving.value = false; lifeMoveError.value = ''
@@ -828,7 +836,7 @@ function hitAgent(cssX, cssY) {
   return hdRenderer?.pick({ x: cssX, y: cssY }, { agentsOnly: true })?.agent || null
 }
 
-// ── 世界里的建筑：走到门口点一下就能展开互动与奇遇 ──
+// ── 世界里的建筑：点一下就能展开互动与奇遇，不必先走到门口 ──
 // 热区直接来自地图地点；互动目录（奇遇邀请/交易）由互动接口按建筑与岗位实时给出。
 const venueSpots = computed(() => {
   const map = renderMap.value
@@ -877,48 +885,33 @@ function playerAtLocation(location) {
   if (pos.moving) return false
   return Math.max(Math.abs(pos.x - location.x), Math.abs(pos.y - location.y)) <= (location.radius ?? 2)
 }
-function waitForSpot(location, current) {
-  return new Promise(resolve => {
-    const deadline = Date.now() + 20000
-    const tick = () => {
-      if (disposed || !current()) return resolve(false)
-      if (playerAtLocation(location)) return resolve(true)
-      if (Date.now() > deadline) return resolve(false)
-      window.setTimeout(tick, 120)
-    }
-    tick()
-  })
-}
-function openSpotPanel(spot) {
-  worldSpot.value = { displayName: spot.displayName, locationKey: spot.location.key }
-}
-function closeWorldSpot() {
-  worldSpot.value = null
-}
+/**
+ * 后台把角色送到建筑门口。走不到不提示：建筑功能本身不要求到店（服务端只校验人在当前地图），
+ * 只有经营者出面的服务/打工/交易要玩家站在地点范围内，那种情况由办理时的 NOT_ARRIVED 兜底。
+ */
 async function walkToSpot(spot, request = ++lifeMoveRequest) {
   const current = () => !disposed && request === lifeMoveRequest
-  approaching.value = spot.displayName
   lifeMoveError.value = ''
   try {
     const result = await town.movePlayer(spot.location.x, spot.location.y)
     if (result?.ok === false) throw new Error('这个门口暂时走不过去，请稍后再试。')
-    const arrived = await waitForSpot(spot.location, current)
-    if (!current()) return
-    // 到店才能开互动：服务端要求玩家真的站在地点范围内，邀请与交易才有意义。
-    if (arrived) openSpotPanel(spot)
-    else lifeMoveError.value = `还没走到${spot.displayName}门口，再点一次就好。`
   } catch (err) {
     if (current()) lifeMoveError.value = err?.message || '这个门口暂时走不过去，请稍后再试。'
-  } finally {
-    if (current()) approaching.value = ''
   }
 }
-/** 点建筑或点经营者都走同一条路：先到门口，再开这家店的玩法面板。 */
+/**
+ * 点建筑：立刻唤起面板，不再等角色走到门口。
+ * 服务端对建筑功能只校验「人在当前地图」（execute/accept 里的 NOT_ARRIVED 是跨地图守卫，
+ * 见计划第 9.2 节），把「到店」当前置只会连远程看一眼店铺都做不到。
+ * 角色仍在后台走过去：经营者出面的服务/打工/交易确实要求玩家站在地点范围内。
+ */
 function enterWorldSpot(spot) {
   if (!spot || editing.value || showAdmin.value || showWizard.value || dialogueInputBlocked.value) return
   lifeMoveError.value = ''
-  if (playerAtLocation(spot.location)) { openSpotPanel(spot); return }
-  walkToSpot(spot)
+  // 建筑有专有 UI（店铺舞台）：点建筑直接开门，不再经过居民互动纸面板
+  shopStage.value = { locationKey: spot.location.key, mapId: town.currentMapId,
+    buildingName: spot.displayName, featureId: '' }
+  if (!playerAtLocation(spot.location)) walkToSpot(spot, ++lifeMoveRequest)
 }
 
 // ── 点击/拖拽交互 ──
@@ -998,7 +991,7 @@ function onCanvasDown(e) {
   suppressClick = false
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false, pointerId: e.pointerId }
   if (!editing.value && e.button === 0 && initialized.value && hdRenderer) {
-    residentCarry.down(carryPoint(e), hitAgent(e.offsetX, e.offsetY))
+    residentCarry.down(carryPoint(e), hitAgent(e.offsetX, e.offsetY), e.pointerType)
   }
   if (editing.value && e.button === 0) {
     const cell = screenToCell(e.offsetX, e.offsetY)
@@ -1025,7 +1018,12 @@ function onCanvasMove(e) {
   }
   if (downInfo && !downInfo.moved && Math.hypot(e.offsetX - downInfo.x, e.offsetY - downInfo.y) > 8) {
     downInfo.moved = true
-    if (!editing.value || downInfo.button !== 0) dragging.value = true
+  }
+  // 拎起等待期不启动平移：手指轻微晃动先算「想拎」，超过触摸容差 abort 后才放行拖动，
+  // 否则长按的一点点抖动会同时平移地图、又把拎起 abort 掉
+  if (downInfo && downInfo.moved && !dragging.value
+    && (!editing.value || downInfo.button !== 0) && residentCarry.phase !== 'waiting') {
+    dragging.value = true
   }
   if (dragging.value && downInfo) {
     const dx = (e.offsetX - downInfo.x) / cam.zoom
@@ -1043,23 +1041,52 @@ function onCanvasMove(e) {
 }
 
 function onCanvasUp(e) {
+  // 触摸 / 笔尖的点按不再依赖浏览器 click（touchstart 已 preventDefault，部分浏览器
+  // 却仍会补发），统一自判并吞掉原生 click，行为在所有内核上确定一致
+  const selfTap = e?.pointerType === 'touch' || e?.pointerType === 'pen'
   if (residentCarry.up(carryPoint(e))) {
     suppressClick = true; downInfo = null; dragging.value = false
     return
   }
   if (downInfo && e.pointerId !== downInfo.pointerId) return
-  suppressClick = !!downInfo?.moved
-  if (editing.value && paintDrag.value && downInfo?.moved) {
+  const moved = !!downInfo?.moved
+  suppressClick = selfTap || moved
+  if (editing.value && paintDrag.value && moved) {
     fillRect(paintDrag.value.startCell, paintDrag.value.lastCell)
   }
   paintDrag.value = null
   dragging.value = false
   downInfo = null
   // 手指抬起后没有 mouseleave 那种收尾，高亮得自己清掉
-  if (e?.pointerType === 'touch') {
+  if (selfTap) {
     hoverAgentKey.value = null
     hoverSpotKey.value = null
+    if (!moved && !dialogueInputBlocked.value) handleCanvasTap(e)
   }
+}
+
+// ── 触摸适配：浏览器手势完全让位 ──
+// touchstart 起就 preventDefault：长按不再触发浏览器菜单 / 文本选择（那会 pointercancel
+// 掉拎起手势——平板上「长按拎不起来」的根因），滚动 / 双击缩放也一并禁掉
+// （touch-action: none 只管标准手势，管不住各家浏览器壳的长按菜单）。
+// 代价是触摸不再派发 click / dblclick：点按与双击改由 onCanvasUp 自行判定（handleCanvasTap）。
+function onCanvasTouchStart(e) { e.preventDefault() }
+function onCanvasTouchMove(e) { e.preventDefault() }
+function onCanvasTouchEnd(e) { e.preventDefault() }
+
+// 触摸 / 笔尖的点按与双击（对齐桌面 click / dblclick 语义：点人开对话、点地移动、双击跟随）
+let lastTapInfo = { time: 0, x: 0, y: 0 }
+function handleCanvasTap(e) {
+  const now = Date.now()
+  const isDoubleTap = now - lastTapInfo.time < 350
+    && Math.hypot(e.offsetX - lastTapInfo.x, e.offsetY - lastTapInfo.y) < 40
+  lastTapInfo = isDoubleTap ? { time: 0, x: 0, y: 0 } : { time: now, x: e.offsetX, y: e.offsetY }
+  if (isDoubleTap) {
+    if (!editing.value) followPlayer = true
+    return
+  }
+  suppressClick = false
+  onCanvasClick(e)
 }
 
 // pointercancel（手势被系统接管、来电等）：只收尾，不能算成“移动过”，
@@ -2015,7 +2042,7 @@ async function openDialogue(resident) {
   // 玩家自己也在渲染帧里，点自己的小人会命中 hitAgent；对话驻留只对居民生效，
   // 后端对 player actor 恒返 404，这里直接不进对话流程。
   if (resident?.agentKey === 'me' || resident?.kind === 'player') return
-  if (showWalletPanel.value || worldSpot.value || lifeMoving.value) return
+  if (showWalletPanel.value || lifeMoving.value) return
   const request = ++dialogueRequest
   dialogueOpening.value = true
   dialogueError.value = ''
@@ -2108,6 +2135,12 @@ function openWalletPanel() {
 function closeWalletPanel() {
   showWalletPanel.value = false
 }
+function openBuildingFeatures() {
+  if (uiLocked.value) return
+  dialogueError.value = ''
+  lifeMoveError.value = ''
+  showBuildingFeatures.value = true
+}
 // 顶栏奇遇入口：查询当前进行中的镇民奇遇，点击进奇遇页查看和继续。
 const npcEncounterCount = ref(0)
 let encounterTimer = null
@@ -2120,12 +2153,10 @@ async function refreshNpcEncounters() {
   } catch { /* 读取失败不打扰小镇页面，下个周期再试 */ }
 }
 function openTownEvents() {
-  closeWorldSpot()
   closeDialogue()
   router.push({ path: '/events' })
 }
 function openResidentStory(eventId) {
-  closeWorldSpot()
   closeDialogue()
   router.push({ path: '/events', query: { event: String(eventId) } })
 }
@@ -2414,8 +2445,11 @@ async function startTravel() {
   height: 100%;
   cursor: crosshair;
   /* 手指落在画布上时交给我们的 pointer 逻辑处理：不滚动页面、不做浏览器手势，
-     否则手势一被接管，pointermove 就断了，地图拖不动（点按仍然会派发 click）。 */
+     否则手势一被接管，pointermove 就断了，地图拖不动（点按由 onCanvasUp 自判）。
+     长按菜单 / 文本选择另由 @touchstart preventDefault 拦截——那不在 touch-action
+     的管辖内，平板浏览器会在长按时 pointercancel，拎起居民的手势直接被掐断。 */
   touch-action: none;
+  -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }

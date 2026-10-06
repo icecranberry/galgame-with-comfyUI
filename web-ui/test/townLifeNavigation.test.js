@@ -15,33 +15,59 @@ function handler(name, state) {
 const ref = value => ({ value })
 function navigation() {
   const calls = [], location = { key: 'cloud-cafe', x: 3, y: 4 }
-  const state = { disposed: false, lifeMoveRequest: 0, lifeMoving: ref(false), lifeMoveError: ref(''), approaching: ref(''),
+  const state = { disposed: false, lifeMoveRequest: 0, lifeMoving: ref(false), lifeMoveError: ref(''),
     venueSpots: ref([{ displayName: '云上咖啡馆', location }]),
-    town: { movePlayer: async (x, y) => { calls.push(['move', x, y]); return { ok: true } } },
-    waitForSpot: async () => true, openSpotPanel: spot => calls.push(['open', spot.location.key, spot.displayName]),
+    town: { currentMapId: 7, movePlayer: async (x, y) => { calls.push(['move', x, y]); return { ok: true } } },
+    shopStage: ref(null),
+    playerAtLocation: () => false,
+    editing: ref(false), showAdmin: ref(false), showWizard: ref(false), dialogueInputBlocked: ref(false),
   }
   state.walkToSpot = handler('walkToSpot', state)
+  state.enterWorldSpot = handler('enterWorldSpot', state)
   return { state, calls }
 }
+const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 
-test('walking to a building arrives and opens its interaction panel', async () => {
+test('clicking a building opens its shop stage first and only then walks over', async () => {
+  const { state, calls } = navigation()
+  state.enterWorldSpot(state.venueSpots.value[0])
+  assert.equal(state.shopStage.value.locationKey, 'cloud-cafe', '舞台不等走到门口')
+  assert.equal(state.shopStage.value.buildingName, '云上咖啡馆')
+  assert.equal(state.shopStage.value.mapId, 7)
+  assert.deepEqual(calls[0], ['move', 3, 4], '角色照旧走过去，经营者服务才办得了')
+  await tick()
+  assert.equal(state.lifeMoveError.value, '', '顺利走到就不该有提示')
+})
+
+test('clicking a building you already stand at opens the stage without moving', () => {
+  const { state, calls } = navigation()
+  state.playerAtLocation = () => true
+  state.enterWorldSpot(state.venueSpots.value[0])
+  assert.equal(state.shopStage.value.buildingName, '云上咖啡馆')
+  assert.deepEqual(calls, [])
+})
+
+test('a refused walk keeps the stage open and reports the doorway error', async () => {
+  const { state, calls } = navigation()
+  state.town.movePlayer = async () => ({ ok: false })
+  state.enterWorldSpot(state.venueSpots.value[0])
+  await tick()
+  assert.equal(calls.filter(([kind]) => kind === 'open').length, 0, '面板已被舞台取代')
+  assert.ok(state.shopStage.value, '走不过去也不收回舞台')
+  assert.match(state.lifeMoveError.value, /走不过去/)
+})
+
+test('a superseded walk stays silent: an older click never gets to report anything', async () => {
+  const { state } = navigation()
+  // 走的过程中又被点了别处（lifeMoveRequest 前进），旧请求迟到的失败不该冒出来
+  state.town.movePlayer = async () => { state.lifeMoveRequest += 1; throw new Error('这个门口暂时走不过去，请稍后再试。') }
+  await state.walkToSpot(state.venueSpots.value[0])
+  assert.equal(state.lifeMoveError.value, '', '被顶掉的旧请求不再写提示')
+})
+
+test('walkToSpot itself never opens the panel: opening belongs to the click handler', async () => {
   const { state, calls } = navigation()
   await state.walkToSpot(state.venueSpots.value[0])
-  assert.deepEqual(calls, [['move', 3, 4], ['open', 'cloud-cafe', '云上咖啡馆']])
-  assert.equal(state.lifeMoving.value, false)
-  assert.equal(state.approaching.value, '')
-})
-test('failed travel reports the doorway error and never opens the panel', async () => {
-  const failed = navigation()
-  failed.state.town.movePlayer = async () => ({ ok: false })
-  await failed.state.walkToSpot(failed.state.venueSpots.value[0])
-  assert.match(failed.state.lifeMoveError.value, /走不过去/)
-  assert.equal(failed.calls.filter(([kind]) => kind === 'open').length, 0, 'a refused walk never opens the panel')
-})
-test('a timed-out walk reports the doorway hint without opening the panel', async () => {
-  const timeout = navigation()
-  timeout.state.waitForSpot = async () => false
-  await timeout.state.walkToSpot(timeout.state.venueSpots.value[0])
-  assert.match(timeout.state.lifeMoveError.value, /还没走到云上咖啡馆门口/)
-  assert.equal(timeout.calls.length, 1)
+  assert.deepEqual(calls, [['move', 3, 4]])
+  assert.equal(state.shopStage.value, null, '舞台只由点击处理器打开')
 })

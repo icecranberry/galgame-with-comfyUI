@@ -6,11 +6,14 @@ import { onEvent as onStreamEvent } from './unifiedStream.js'
 import { emitMomentComment } from '../utils/characterReactionProducers.js'
 
 const PAGE_SIZE = 20
+const SERVER_BATCH = 1000   // 服务端分页每批条数：进页拉最新一批，到底再续拉
 
 export const useMomentsStore = defineStore('moments', () => {
-  const posts = ref([])           // 全量帖子数据
+  const posts = ref([])           // 已加载的帖子（最新在后，按 id 倒序分批追加）
   const loading = ref(false)
   const page = ref(0)             // 当前渲染到第几批（0-based）
+  const serverHasMore = ref(false)  // 服务端是否还有更旧的帖子未拉
+  let _loadingMore = false          // loadMore 服务端续拉进行中（并发守卫）
   const filterCharacterId = ref(null)  // null = 全部
   const filterLiked = ref(false)        // 是否只显示赞过的
   const filterUser = ref(false)         // 是否只显示「我」发的（与角色筛选互斥）
@@ -50,7 +53,7 @@ export const useMomentsStore = defineStore('moments', () => {
   // 当前可见的帖子（前 page * PAGE_SIZE 条）
   const visiblePosts = computed(() => filteredPosts.value.slice(0, page.value * PAGE_SIZE))
 
-  const hasMore = computed(() => filteredPosts.value.length > page.value * PAGE_SIZE)
+  const hasMore = computed(() => filteredPosts.value.length > page.value * PAGE_SIZE || serverHasMore.value)
 
   // 有帖子的作者列表（角色 + 镇民，按最新帖子时间降序）
   const charactersWithPosts = computed(() => {
@@ -75,12 +78,12 @@ export const useMomentsStore = defineStore('moments', () => {
       .map(({ _latestPostAt, ...rest }) => rest)
   })
 
-  // 加载全部帖子（页面首次挂载时调用）
+  // 加载最新一批帖子（每次进入朋友圈页面调用，分页游标重置回最新）
   async function loadPosts() {
     if (loading.value) return
     loading.value = true
     try {
-      const data = await api.listMoments()
+      const data = await api.listMoments({ limit: SERVER_BATCH })
       // 保留已有帖子的运行时状态：页面切换回来时，_comments / liked 不会因对象替换而丢失
       const prevMap = new Map(posts.value.map(p => [p.id, p]))
       posts.value = (data.posts || []).map(p => {
@@ -91,6 +94,7 @@ export const useMomentsStore = defineStore('moments', () => {
         }
         return p
       })
+      serverHasMore.value = !!data.hasMore
       page.value = 1
       await markSeen()
     } catch (err) {
@@ -128,10 +132,28 @@ export const useMomentsStore = defineStore('moments', () => {
     page.value = 1
   }
 
-  // 加载更多（滚动到底部 → 前端 slice 多展示一批，无网络请求）
-  function loadMore() {
-    if (!hasMore.value) return
-    page.value++
+  // 加载更多（滚动到底部触发）：客户端窗口还有存货就只前移窗口；存货耗尽且服务端还有 → 续拉下一批
+  async function loadMore() {
+    if (filteredPosts.value.length > page.value * PAGE_SIZE) {
+      page.value++
+      return
+    }
+    if (!serverHasMore.value || _loadingMore) return
+    _loadingMore = true
+    try {
+      // keyset 游标 = 已加载帖子中最旧的 id（新帖 unshift 在前，取 min 不受顺序影响）
+      const beforeId = posts.value.reduce((min, p) => Math.min(min, p.id), Infinity)
+      const data = await api.listMoments({ limit: SERVER_BATCH, beforeId: Number.isFinite(beforeId) ? beforeId : undefined })
+      const seen = new Set(posts.value.map(p => p.id))
+      const fresh = (data.posts || []).filter(p => !seen.has(p.id))
+      posts.value.push(...fresh)
+      if (!data.hasMore || fresh.length === 0) serverHasMore.value = false
+      page.value++
+    } catch (err) {
+      console.error('[moments] loadMore error:', err)
+    } finally {
+      _loadingMore = false
+    }
   }
 
   // 发评论 → 返回 { comment, replies }
@@ -143,7 +165,7 @@ export const useMomentsStore = defineStore('moments', () => {
       const added = (result.comment ? 1 : 0) + (result.replies?.length || (result.reply ? 1 : 0))
       post.comment_count = (post.comment_count || 0) + added
     }
-    // §2.3：只记录评论事实，原评论回复优先，不做左下角复述
+    // §2.3：只记录评论事实，原评论回复优先，不做右下角复述
     emitMomentComment({ post, commentId: result?.comment?.id })
     return result
   }
@@ -277,7 +299,7 @@ export const useMomentsStore = defineStore('moments', () => {
     newPostCount.value = 0
   }
 
-  return { posts, visiblePosts, loading, hasMore, page, filterCharacterId, filterLiked, filterUser, filteredPosts, charactersWithPosts,
+  return { posts, visiblePosts, loading, hasMore, serverHasMore, page, filterCharacterId, filterLiked, filterUser, filteredPosts, charactersWithPosts,
     newPostCount, isViewingMoments, scrollToTopSignal, requestScrollToTop,
     loadPosts, setFilter, toggleFilterLiked, toggleFilterUser, resetFilters, loadMore, addComment, loadComments, toggleLike, regeneratePostImage, generatePost, createUserPost, updatePost, deletePost,
     connectSSE, disconnectSSE, markSeen, refreshUnreadCount }

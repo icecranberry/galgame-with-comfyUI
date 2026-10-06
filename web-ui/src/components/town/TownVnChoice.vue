@@ -1,11 +1,12 @@
 <template>
   <div
     class="vn-choice"
-    :class="{ 'is-primary': primary, 'is-disabled': disabled, 'is-busy': busy }"
+    :class="{ 'is-primary': primary, 'is-active': active && !primary, 'is-disabled': disabled, 'is-busy': busy }"
     role="button"
     :tabindex="disabled || busy ? -1 : 0"
     :aria-disabled="disabled || busy || undefined"
     :aria-busy="busy || undefined"
+    :aria-pressed="active || undefined"
     @click="select"
     @keydown.enter.prevent="select"
     @keydown.space.prevent="select"
@@ -19,6 +20,8 @@
 const props = defineProps({
   /** 主选项（实心主题糖），一屏最多一个 */
   primary: { type: Boolean, default: false },
+  /** 选中态（选项列表里当前选定的一项，与 primary 互斥使用） */
+  active: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
   /** 右侧附注：价格 / 工资等 */
@@ -93,6 +96,12 @@ function select() {
   text-shadow: 0 1px 0 rgba(0, 0, 0, .18);
   box-shadow: 0 3px 0 var(--btn-lip, #a44a3e), 0 6px 14px rgba(54, 42, 56, .18);
 }
+/* 选中态：墨描边加重 + 前标记点亮，与未选的长条保持同一纸张语言 */
+.vn-choice.is-active {
+  border-color: var(--town-paper-accent, #ae6451);
+  box-shadow: 0 3px 0 #c98d6f, 0 6px 14px rgba(54, 42, 56, .16);
+}
+.vn-choice.is-active::before { content: '◆'; transform: translateY(-50%) scale(1.15); }
 .vn-choice.is-primary::before { color: #fff8ef; }
 .vn-choice.is-primary .vn-choice__hint { color: rgba(255, 255, 255, .85); }
 .vn-choice.is-disabled {
