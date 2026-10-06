@@ -1849,7 +1849,7 @@ onBeforeUnmount(() => {
   transform: scale(1.04);
 }
 
-.wiz-step.is-active .wiz-step-dot { background: var(--accent); color: #fff; }
+.wiz-step.is-active .wiz-step-dot { background: var(--accent-solid); color: #fff; }
 .wiz-step.is-done { opacity: 0.7; cursor: pointer; }
 .wiz-step.is-done:hover { background: rgba(224, 123, 108, 0.1); }
 .wiz-step.is-done .wiz-step-dot { background: rgba(124, 176, 116, 0.5); color: #fff; }

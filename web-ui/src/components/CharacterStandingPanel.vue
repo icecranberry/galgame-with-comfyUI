@@ -41,7 +41,7 @@
         class="standing-stage"
         role="button"
         tabindex="0"
-        :title="ctl.funcOpen && character?.standing_url ? '再点一次查看大图' : '点击展开立绘操作'"
+        :title="ctl.funcOpen && ctl.displayUrl ? '再点一次查看大图' : '点击展开立绘操作'"
         @click="ctl.onStageClick"
         @keydown.enter.prevent="ctl.onStageClick"
         @keydown.space.prevent="ctl.onStageClick"

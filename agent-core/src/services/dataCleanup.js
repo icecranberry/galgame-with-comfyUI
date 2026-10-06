@@ -394,15 +394,56 @@ export async function purgeData({ days = 7, targets = [] } = {}) {
   const byKey = new Map(detail.map(x => [x.key, x]));
 
   // ③ 删记录（事务内；按目标定义顺序，子表在前）
+  //
+  // ⚠ 教训（2026-10-06 用户报"未能正常删除聊天记录"）：
+  //   原来这里的 catch **只 console.warn 就吞掉** —— 结果接口照样返回 ok:true，
+  //   前端看到"清理完成"但一行都没删（实测 rows:0）。两种真实失败都被它藏了：
+  //     · FOREIGN KEY constraint failed —— 有 3 张表引用 messages.id
+  //       （memory_fragments / emotion_snapshots / user_portraits），且外键是 NO ACTION，
+  //       删 messages 前**必须先断引用**；
+  //     · database disk image is malformed —— SQLite 页损坏（需重建，见 repairDatabase）。
+  //   现在①先断引用 ②收集错误并如实上报，不再"假成功"。
+  const errors = [];
+
+  /**
+   * 删除前**断开指向 messages 的引用**（置 NULL 而非级联删除）。
+   *
+   * 为什么用 SET NULL 而不是 CASCADE：
+   *   这三张表里 `memory_fragments` 是**角色的长期记忆**、`emotion_snapshots` 是情绪轨迹、
+   *   `user_portraits` 是用户画像 —— 它们**内容本身有价值**，只是"来源那条消息没了"。
+   *   级联删会把记忆一起抹掉（用户只想清聊天记录，不想丢记忆）；置 NULL 则保留内容、
+   *   只丢掉"可回溯到原消息"的能力，符合清理语义。
+   */
+  const DETACH_REFS = [
+    { table: 'memory_fragments', col: 'source_msg_id' },
+    { table: 'emotion_snapshots', col: 'after_msg_id' },
+    { table: 'user_portraits', col: 'source_msg_id' },
+  ];
+
   const delTx = db.transaction(() => {
     for (const key of keys) {
       const t = TARGET_BY_KEY.get(key);
+      // 只对「会删掉 messages」的目标做断引用（其它目标不涉及 messages 主键）
+      if (t.tables.some(x => x.table === 'messages')) {
+        for (const d of DETACH_REFS) {
+          try {
+            db.prepare(`UPDATE ${d.table} SET ${d.col} = NULL
+              WHERE ${d.col} IS NOT NULL
+                AND ${d.col} IN (SELECT id FROM messages WHERE created_at IS NOT NULL AND created_at < ?)`
+            ).run(cutoffIso);
+          } catch (err) {
+            console.warn(`[cleanup] 断引用 ${d.table}.${d.col} 失败:`, err.message);
+            errors.push({ table: `${d.table}.${d.col}`, key, message: String(err.message || err) });
+          }
+        }
+      }
       for (const x of t.tables) {
         try {
           const r = db.prepare(`DELETE FROM ${x.table} WHERE ${x.timeCol} IS NOT NULL AND ${x.timeCol} < ?`).run(cutoffIso);
           byKey.get(key).rows += r.changes;
         } catch (err) {
           console.warn(`[cleanup] 删 ${x.table} 失败:`, err.message);
+          errors.push({ table: x.table, key, message: String(err.message || err) });
         }
       }
     }
@@ -429,9 +470,16 @@ export async function purgeData({ days = 7, targets = [] } = {}) {
   // ⑤ 失效相册缓存，界面立刻反映
   try { invalidateGalleryCache(); } catch { /* ignore */ }
 
-  console.log(`[cleanup] 完成：清理 ${d} 天前 → 记录 ${totalRows} 行 / 图片 ${totalFiles} 个（${(totalBytes / 1048576).toFixed(1)} MB）`);
+  console.log(`[cleanup] 完成：清理 ${d} 天前 → 记录 ${totalRows} 行 / 图片 ${totalFiles} 个（${(totalBytes / 1048576).toFixed(1)} MB）${errors.length ? `，${errors.length} 处失败` : ''}`);
 
-  return { ok: true, days: d, cutoff: cutoffIso, backup, detail, totalRows, totalFiles, totalBytes };
+  // ★ 有失败时带上 errors 与 partial 标记 —— 前端据此提示，
+  //   不再出现"显示清理完成、实际一行没删"的假成功。
+  return {
+    ok: true,
+    partial: errors.length > 0,
+    errors,
+    days: d, cutoff: cutoffIso, backup, detail, totalRows, totalFiles, totalBytes,
+  };
 }
 
 /** 列出已有的清理备份（供界面显示 / 手动清理旧备份） */

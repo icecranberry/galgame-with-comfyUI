@@ -585,7 +585,7 @@ function formatTime(iso) {
 
 .char-avatar {
   width: 44px; height: 44px; border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 600; flex-shrink: 0;

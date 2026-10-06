@@ -25,6 +25,8 @@ import {
   composeOutfitText, listSceneOutfits, upsertSceneOutfits,
   getSceneOutfitForNow, ensureOutfitAnnotations, planOutfitTargets, PRIVATE_SCENE, OUTFIT_SCENES,
   NUDE_DESCRIPTION,
+  NUDE_NAME,
+  sceneOutfitParam,
 } from '../src/services/outfitScene.js';
 import {
   OUTLET_LAYOUTS, ALL_LAYOUT_KEYS, MEDIA_CATEGORIES, CATEGORY_LAYOUTS,
@@ -220,11 +222,11 @@ test('裸体：写入时描述一律规范化成常量（自愈空描述）', ()
   cleanup();
 });
 
-test('裸体：调用方不传它时也会自动补齐那一行（日程标注要靠它匹配）', () => {
+test('全身：调用方不传它时也会自动补齐那一行（日程标注要靠它匹配）', () => {
   cleanup();
   db.prepare('INSERT INTO characters (id, name, display_name, base_prompt) VALUES (?,?,?,?)')
     .run(CID, '__zz_regress_nude', '__zz_regress_nude', '## 人设\nx\n\n## 你的外观\nlong black hair');
-  // 只写四套，故意不带 nude —— 前端现在就是这样（裸体不再参与输入）
+  // 只写四套，故意不带 nude —— 前端现在就是这样（这一套不再参与输入）
   upsertSceneOutfits(CID, [
     { scene: 'work', name: '工作装', description: 'black blazer', body: 'long black hair' },
     { scene: 'casual', name: '便装', description: 'hoodie', body: 'long black hair' },
@@ -233,11 +235,73 @@ test('裸体：调用方不传它时也会自动补齐那一行（日程标注�
   ]);
   const list = listSceneOutfits(CID);
   const nude = list.find(o => o.scene === 'nude');
-  assert.ok(nude, '裸体行必须被自动补齐 —— 否则日程标的「裸体」匹配不上');
+  assert.ok(nude, '该行必须被自动补齐 —— 否则日程标的套名匹配不上');
   assert.equal(nude.description, NUDE_DESCRIPTION);
-  assert.equal(nude.name, '裸体', '默认名要与日程标注口径一致');
+  // ★ 断言常量而不是字面量：真正的不变量是「自动补齐的行名 == 日程标注用的匹配键」，
+  //   写死 '裸体' 会在改套名时假失败（2026-10-05 改名「全身」就踩到）。
+  assert.equal(nude.name, NUDE_NAME, '默认名要与日程标注口径一致（应取 NUDE_NAME 常量）');
   assert.equal(nude.body, 'long black hair', 'body 应从该角色已有行继承（五套共用）');
   cleanup();
+});
+
+// ─────────────────────────────────────────────────────────
+// 形象图（头像 / 场景立绘）必须固定用指定场景，不随日程时刻漂
+// ─────────────────────────────────────────────────────────
+
+test('sceneOutfitParam：取指定场景，且注入文本含**身体**（不是只有衣服）', () => {
+  const BODY = makeChar();
+  const p = sceneOutfitParam(CID, 'work');
+  assert.ok(p, '配了常服时应返回注入参数');
+  assert.equal(p.exclusive, null);
+  assert.equal(p.limited.length, 1);
+  assert.equal(p.limited[0].name, '工作装');
+  // ★ 关键：必须用组合后的 text（身体 + 衣服）。用裸 description 会让画面丢掉身体特征
+  //   （曾经立绘就踩过：只传 description 导致生图没有发色瞳色）
+  assert.ok(p.limited[0].description.includes(BODY), '注入文本必须包含身体描述');
+  assert.ok(p.limited[0].description.includes('black blazer'), '注入文本必须包含该套衣服');
+  cleanup();
+});
+
+test('sceneOutfitParam：固定取常服，不随时刻漂（头像不能半夜变成睡衣）', () => {
+  const BODY = makeChar();
+  // 造一份带睡眠/洗浴/居家段的日程，让「自动选装」真的会随时刻变化
+  const sched = [
+    { startTime: '00:00', endTime: '07:00', activity: '睡觉', location: '自家卧室', replyDelay: -1, outfit: '睡衣' },
+    { startTime: '07:00', endTime: '08:00', activity: '淋浴', location: '自家浴室', replyDelay: 0, outfit: '裸体' },
+    { startTime: '08:00', endTime: '09:00', activity: '在家', location: '自家客厅', replyDelay: 0, outfit: '居家服' },
+    { startTime: '09:00', endTime: '18:00', activity: '上班', location: '公司', replyDelay: 0, outfit: '工作装' },
+  ];
+  db.prepare(`INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
+    VALUES (?, date('now','localtime'), ?)`).run(CID, JSON.stringify(sched));
+
+  // 前提校验：02:00 自动选装会选到睡衣 —— 头像若沿用 auto，半夜生成的头像就会穿睡衣
+  assert.equal(atHour(2)?.scene, 'sleep', '前提：自动选装确实随时刻变化（否则本测试失去意义）');
+  assert.equal(atHour(12)?.scene, 'work');
+
+  // 固定取常服：与时刻无关，且拿到的是「身体 + 常服衣服」
+  const p = sceneOutfitParam(CID, 'work');
+  assert.ok(p.limited[0].description.includes(BODY));
+  assert.ok(p.limited[0].description.includes('black blazer'), '应是常服的衣服');
+  assert.ok(!/camisole|barefoot/i.test(p.limited[0].description), '不得混入睡衣的特征');
+  cleanup();
+});
+
+test('sceneOutfitParam：该角色没有这一套时返回 null（不注入，退回基础外观）', () => {
+  makeChar();
+  assert.equal(sceneOutfitParam(CID, '不存在的场景'), null);
+  assert.equal(sceneOutfitParam(null, 'work'), null);
+  assert.equal(sceneOutfitParam(CID, ''), null);
+  cleanup();
+});
+
+test('生成头像：显式固定「常服」，不再沿用会随时间变化的自动选装', () => {
+  // 静态检查路由接线 —— 这条口径很容易被"顺手改回默认"而悄悄失效：
+  // 头像若走 'auto'，半夜生成就会穿睡衣、洗浴时段甚至不穿（2026-10-05 实测复现）。
+  const s = fs.readFileSync(path.join(SRC_DIR, 'routes/characters.js'), 'utf8');
+  assert.match(s, /sceneOutfitParam\(\s*char\.id\s*,\s*'work'\s*\)/,
+    '头像必须显式取「常服」那一套作为基准形象');
+  assert.match(s, /buildCharacterPersona\(char,\s*\{\s*variant:\s*'full',\s*outfits:\s*avatarOutfits\s*\}\)/,
+    '头像的人格组装必须把固定的 outfits 传进去');
 });
 
 // ─────────────────────────────────────────────────────────
@@ -267,8 +331,8 @@ test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
 // 网络（媒体）页：产物形态
 // ─────────────────────────────────────────────────────────
 
-test('媒体形态：社交平台(feed) / 数字报刊(portal) / 海报(poster)，且各有说明', () => {
-  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'portal', 'poster']);
+test('媒体形态：社交平台(feed) / 论坛(forum) / 图库(gallery) / 数字报刊(portal) / 海报(poster)，且各有说明', () => {
+  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'forum', 'gallery', 'portal', 'poster']);
   for (const l of OUTLET_LAYOUTS) {
     assert.ok(l.label && l.hint, `${l.key} 应有 label 与 hint`);
   }
@@ -471,14 +535,13 @@ test('分类白名单与 service 同源：路由里不得再硬编码分类字�
   const s = fs.readFileSync(path.join(SRC_DIR, 'routes/media.js'), 'utf8');
   assert.match(s, /MEDIA_CATEGORIES/, '分类白名单必须来自 services/mediaService.js');
   assert.match(s, /MEDIA_CATEGORIES\.includes\(/, '应按 MEDIA_CATEGORIES 判定，而不是逐个字面量比较');
-  // 三档分类是前后端共用的契约，缺一档就会整档不过滤
-  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'print', 'social']);
+  // 分类是前后端共用的契约，缺一档就会整档不过滤
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'print', 'social']);
 });
 
 // ─────────────────────────────────────────────────────────
 // 前端源码卫生：改名漏改会产生 ReferenceError，整块 UI 静默消失
 // ─────────────────────────────────────────────────────────
-
 test('MediaView：用到的 activeIs* 计算属性都必须有定义', () => {
   /**
    * ★ 踩过的坑（正是本次"出刊与期号导航没有真实出现"的根因）：
@@ -539,16 +602,47 @@ test('每个形态都恰好归属一个分类（新增形态却忘记归类时�
   for (const k of ALL_LAYOUT_KEYS) {
     assert.equal(owners(k).length, 1, `形态 ${k} 应恰好属于一个分类，实际属于：${owners(k).join('、') || '（无）'}`);
   }
-  // 分区本身也要与前端标签一一对上（前端 MediaView 的 CATEGORIES 就是这三档）
-  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'print', 'social']);
+  // 分区本身也要与前端标签一一对上（前端 MediaView 的 CATEGORIES 就是这几档）
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'print', 'social']);
   assert.deepEqual(CATEGORY_LAYOUTS.print, ['poster', 'weekly']);
   assert.deepEqual(CATEGORY_LAYOUTS.digital, ['portal'], '海报/周刊必须从「数字报刊」摘出去，否则同刊会同时在两档出现');
+  assert.deepEqual(CATEGORY_LAYOUTS.forum, ['forum'], '论坛必须是独立一档（版聊帖不能混进瀑布流）');
+  assert.deepEqual(CATEGORY_LAYOUTS.gallery, ['gallery'], '图库必须是独立一档');
 });
 
 test('前端分类口径与后端布局表同步：新增形态必须在前端归类', () => {
   const s = fs.readFileSync(path.join(WEB_SRC, 'views/MediaView.vue'), 'utf8');
   const missing = ALL_LAYOUT_KEYS.filter(k => !s.includes(`'${k}'`));
   assert.deepEqual(missing, [], `MediaView.vue 未归类的形态：${missing.join('、')}`);
+});
+
+test('MediaSettingsModal：每个形态都要有短标签 —— 不得静默回落到某一个分类', () => {
+  /**
+   * ★ 2026-10-05 实际踩过：设置弹窗里的形态短标签是
+   *     `if (portal) … if (weekly) … if (poster) … return '社交平台'` 的链式写法。
+   *   新增 `forum` / `gallery` 两个形态时**只改了 MediaView、漏了这个文件** →
+   *   媒体设置列表里「二相论坛」「规则34」被**静默显示成「社交平台」**。
+   *
+   *   这与「前端必须归类每个形态」是同一类缺陷，只是发生在另一个文件，
+   *   所以上面那条只查 MediaView 的断言拦不住 —— 这里补上设置弹窗。
+   *   注意：链式写法的危险恰恰在于**不报错**，所以断言要同时钉住"覆盖"与"不许兜底"。
+   */
+  const file = path.join(WEB_SRC, 'components/MediaSettingsModal.vue');
+  const s = stripComments(fs.readFileSync(file, 'utf8'));
+
+  const keys = OUTLET_LAYOUTS.map(l => l.key);
+  assert.ok(keys.length >= 5, '可新建形态应至少 5 个（否则这条检查本身失效了）');
+  const missing = keys.filter(k => !s.includes(`'${k}'`));
+  assert.deepEqual(missing, [], `MediaSettingsModal.vue 未覆盖的形态：${missing.join('、')}（会静默回落到默认标签）`);
+
+  // 不得把某个具体分类当作"兜底返回值" —— 这正是本次错标的成因
+  assert.ok(
+    !/return\s*'社交平台'/.test(s),
+    '形态短标签不得以「社交平台」兜底：新增形态会被静默错标成它',
+  );
+  // 短标签必须从权威清单派生（layoutDefs / FALLBACK_LAYOUTS），而不是另写一份映射
+  assert.match(s, /function layoutShortLabel/, '应保留 layoutShortLabel 作为列表短标签的唯一出口');
+  assert.match(s, /layoutDefs\.value\.find/, 'layoutShortLabel 应从 layoutDefs（后端权威清单）派生');
 });
 
 // ─────────────────────────────────────────────────────────

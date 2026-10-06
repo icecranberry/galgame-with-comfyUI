@@ -618,6 +618,9 @@ async function _execute(rawPrompt, opts) {
       alreadyPrepared: opts.alreadyPrepared === true,
       skipOptimization: opts.skipOptimization === true,
       ragTimeoutMs: opts.ragTimeoutMs,
+      // ★ 时段锚点：调用方传入该画面发生的时刻（日程/朋友圈/聊天），
+      //   把光照钉在正确时段 —— 修「凌晨 2 点的活动生成出白天图」。
+      timeOfDay: opts.timeOfDay,
     });
     if (_limitEnabled()) {
       await acquireSlot();

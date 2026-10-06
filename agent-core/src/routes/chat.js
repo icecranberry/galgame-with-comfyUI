@@ -19,6 +19,7 @@ import {
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
+import { buildCastBodySummary } from '../services/characterBuild.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { getWorldStateBlock, getCharacterEventBlockFor } from '../services/newspaperService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
@@ -1865,6 +1866,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   let crossRefCharIdsForImage = [];
   let crossRefImageMsgs = [];
   const crossBlocks = [];
+  let crossCharsForCast = [];
   if (crossMatches.length > 0) {
     const crossChars = crossMatches.map(m =>
       db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
@@ -1873,6 +1875,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
     crossBlocks.push(...crossChars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
 
     crossRefCharIdsForImage = crossChars.map(c => c.id);
+    crossCharsForCast = crossChars;
   }
 
   // 文本里提到用户本人时同样注入其资料（用户不是角色：没有 id、没有 LoRA）
@@ -1881,9 +1884,14 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   }
 
   if (crossBlocks.length > 0) {
+    // 多人同框时额外给一份「体型对照」：把各人身高排好序并要求画面体现高度差。
+    // 身高本来就写在各自外观段里，但同框时模型会默认把大家画成一样高（实测偏差明显）。
+    // 单人或读不出身高时返回 null，不加噪声。
+    const castSummary = buildCastBodySummary([character, ...crossCharsForCast].filter(Boolean));
     crossRefImageMsgs.push({
       role: 'system',
       content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`
+        + (castSummary ? `\n\n${castSummary}` : '')
     });
   }
 

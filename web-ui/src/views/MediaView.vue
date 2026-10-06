@@ -40,24 +40,10 @@
 
       <div class="header-right">
         <span class="media-count" v-if="total > 0">共 {{ total }} 帖</span>
-        <!-- 自动抓帖频率：常显当前档位，点开就地调（不塞进设置页，传媒自己管自己的节奏）
-             传统报纸分类下隐藏 —— 《邻舍日报》由镇口公告站零点自动印发，没有"抓帖"一说 -->
-        <button
-          v-if="activeCategory !== 'print'"
-          type="button"
-          class="auto-chip"
-          :class="{ active: freqOpen, off: auto.minutes === 0 }"
-          :title="auto.minutes === 0 ? '自动抓帖已关闭，只能手动刷新' : `每 ${autoLabel}自动抓一批`"
-          @click="freqOpen = !freqOpen"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 16,14"/>
-          </svg>
-          自动 · {{ auto.minutes === 0 ? '关闭' : autoLabel }}
-          <svg class="chip-caret" :class="{ open: freqOpen }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="6,9 12,15 18,9"/>
-          </svg>
-        </button>
+        <!-- ⚠ 这里原本有个「自动 · xx」chip（点开就地调自动抓帖频率）。
+             2026-10-05 已搬到「设置 → 功能开关」：它是常驻配置（决定后台夜里要不要自己抓内容），
+             不是内容页的操作按钮；模型也改成「每晚几批 + 夜间窗口内错峰随机」，
+             正好和设置页的「朋友圈发帖频率」并排，两个频率一起看更直观。 -->
         <linshe-button class="btn-op" variant="secondary" @click="showSettings = true">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
             <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
@@ -157,42 +143,6 @@
       </div>
     </Transition>
 
-    <!-- 频率面板：就地展开在顶栏下方，不遮挡内容、不引弹层定位问题 -->
-    <Transition name="freq">
-      <div v-if="freqOpen" class="freq-panel">
-        <div class="freq-row">
-          <span class="freq-label">自动抓帖频率</span>
-          <input
-            class="freq-range"
-            type="range"
-            min="0"
-            :max="Math.max(0, steps.length - 1)"
-            step="1"
-            :value="stepIdx"
-            @input="onFreqInput($event.target.value)"
-          />
-          <span class="freq-val" :class="{ off: auto.minutes === 0 }">{{ autoLabel }}</span>
-        </div>
-        <div class="freq-ticks">
-          <button
-            v-for="(s, i) in steps"
-            :key="s.minutes"
-            type="button"
-            class="freq-tick"
-            :class="{ on: i === stepIdx }"
-            @click="applyFreq(i)"
-          >{{ s.label }}</button>
-        </div>
-        <div class="freq-hint">
-          {{ currentStep?.hint || '' }}
-          <template v-if="auto.minutes > 0 && nextInText">
-            · <b v-if="nextInText === '即将'">马上开抓</b>
-            <b v-else>下次约 {{ nextInText }}后</b>
-          </template>
-        </div>
-      </div>
-    </Transition>
-
     <!-- 媒体标签 + 批量操作条：**同一行**显示。
          标签靠左（可横向滚动），批量操作整条**靠右**，与「全部 / 网络热门」等标签平齐 ——
          此前它单独占一行且左对齐，夹在板块栏下面显得很突兀。 -->
@@ -274,40 +224,14 @@
       </div>
     </div>
 
-    <!-- 传统报纸：只有一个《邻舍日报》，内容是整版报纸不在帖子流里 —— 给张入口卡 -->
-    <div v-if="isPrintCategory" class="np-entry-wrap">
-      <button type="button" class="np-entry" @click="showNewspaper = true">
-        <span class="np-entry-icon">📰</span>
-        <span class="np-entry-main">
-          <span class="np-entry-title">
-            邻舍日报
-            <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
-          </span>
-          <span class="np-entry-sub">二相乐园唯一持牌报纸 · 每天零点由镇口公告站印发</span>
-        </span>
-        <span class="np-entry-go">阅读本期 ›</span>
-      </button>
-      <p class="np-entry-hint">
-        《邻舍日报》是整版报纸（报头 / 三栏排版 / 人物特稿 / 期号切换），不按帖子流展示。
-      </p>
-    </div>
-
-    <!-- 板块筛选（选中某个媒体后才出现） -->
-    <div v-if="boards.length && !activeIsPeriodical" class="board-bar">
-      <linshe-button
-        v-for="b in boardChips"
-        :key="b.id ?? 'all'"
-        variant="chip"
-        :active="activeBoard === b.id"
-        @click="onBoardChange(b.id)"
-      >
-        <span class="board-label">{{ b.name }}</span>
-        <span class="board-count">{{ b.post_count }}</span>
-      </linshe-button>
-    </div>
-
-    <!-- 期号导航（数字报刊专用）—— 与《邻舍日报》的期号切换同口径：
-         最新在前，点某期只看那一期；括号里是「已写块数/总块数」，一眼看出哪期是完整的。 -->
+    <!-- 期号导航（数字报刊 / 海报 / 旧周刊共用）—— 与《邻舍日报》的期号切换同口径：
+         最新在前，点某期只看那一期；括号里是「已写块数/总块数」，一眼看出哪期是完整的。
+         ★ 位置固定在**媒体标签行正下方、《邻舍日报》入口卡之前**，与「数字报刊」分类的口径完全一致。
+           「官方传媒」里曾经它排在日报卡之下，那会带来两个问题：
+             ① 比另一档松散（数字报刊那边期号导航紧跟标签行）；
+             ② 日报卡横在中间，容易被读成"这是日报的期号" —— 它其实标的是**当前选中的刊物**
+                （如《狸狸八卦》），与日报无关。
+           （日报卡的形态说明已并进它的副标题行，见下方 np-entry 注释，不再占独立一行。） -->
     <div v-if="activeIsPeriodical && issues.length" class="issue-bar">
       <linshe-button variant="chip" :active="!activeIssueId" @click="activeIssueId = null">
         最新<span class="board-count">{{ issues.length }} 期</span>
@@ -320,6 +244,42 @@
         :title="it.title"
         @click="activeIssueId = activeIssueId === it.post_id ? null : it.post_id"
       >{{ issueChipLabel(it) }}</linshe-button>
+    </div>
+
+    <!-- 传统报纸：只有一个《邻舍日报》，内容是整版报纸不在帖子流里 —— 给张入口卡.
+         ★ 形态说明（"整版报纸…不按帖子流展示"）与副标题**同排**，紧贴在它右侧、基线平齐。
+           它原先独占卡片下方一整行，把版式撑得比「数字报刊」松散 —— 收进副标题行后，
+           整个「官方传媒」区块的纵向节奏与数字报刊对齐。 -->
+    <div v-if="isPrintCategory" class="np-entry-wrap">
+      <button type="button" class="np-entry" @click="showNewspaper = true">
+        <span class="np-entry-icon">📰</span>
+        <span class="np-entry-main">
+          <span class="np-entry-title">
+            邻舍日报
+            <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
+          </span>
+          <span class="np-entry-subline">
+            <span class="np-entry-sub">二相乐园唯一持牌报纸 · 每天零点由镇口公告站印发</span>
+            <span class="np-entry-hint">《邻舍日报》是整版报纸（报头 / 三栏排版 / 人物特稿 / 期号切换），不按帖子流展示。</span>
+          </span>
+        </span>
+        <span class="np-entry-go">阅读本期 ›</span>
+      </button>
+    </div>
+
+    <!-- 板块筛选（选中某个媒体后才出现）。
+         论坛/图库两档各自在版式内带了分区导航，这里不再重复出一条。 -->
+    <div v-if="boards.length && !activeIsPeriodical && !isForumCategory && !isGalleryCategory" class="board-bar">
+      <linshe-button
+        v-for="b in boardChips"
+        :key="b.id ?? 'all'"
+        variant="chip"
+        :active="activeBoard === b.id"
+        @click="onBoardChange(b.id)"
+      >
+        <span class="board-label">{{ b.name }}</span>
+        <span class="board-count">{{ b.post_count }}</span>
+      </linshe-button>
     </div>
 
     <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
@@ -380,6 +340,35 @@
         </div>
       </div>
     </div>
+
+    <!-- ── 论坛：版聊列表（独立版式，不参与瀑布流列布局）── -->
+    <MediaForumList
+      v-if="isForumCategory && forumPosts.length"
+      :posts="forumPosts"
+      :outlets="filteredOutlets"
+      :active-outlet="activeOutlet"
+      :active-board-id="activeBoard"
+      :boards="boards"
+      :batch-mode="batchMode"
+      :selected-ids="selectedPostIds"
+      @open="openPost"
+      @board="onBoardChange"
+      @pick="togglePick"
+    />
+
+    <!-- ── 规则34：图片站（左标签栏 + 等宽 4 列瀑布流）── -->
+    <MediaGallery
+      v-if="isGalleryCategory && galleryPosts.length"
+      :posts="galleryPosts"
+      :outlets="filteredOutlets"
+      :active-outlet="activeOutlet"
+      :active-board-id="activeBoard"
+      :batch-mode="batchMode"
+      :selected-ids="selectedPostIds"
+      @open="openPost"
+      @board="onBoardChange"
+      @pick="togglePick"
+    />
 
     <!-- ── 帖子流：瀑布流 ── -->
     <div v-if="feedPosts.length" class="masonry">
@@ -530,12 +519,19 @@
              按 payload 形态分派 —— 迁移后 layout 对老帖不再可靠（见 postKind 注释）。
              图片可点击放大。 -->
         <component
-          v-if="postKind(detailPost) !== 'feed'"
+          v-if="isLayoutPost(detailPost)"
           :is="componentFor(detailPost)"
           :post="detailPost"
           @zoom="zoomSrc = $event"
           @section-loaded="onSectionLoaded"
           @section-error="onSectionError"
+        />
+
+        <!-- 论坛主题帖：主楼 + 楼层（版聊，不用 feed 那套单条排版） -->
+        <MediaForumThread
+          v-else-if="postKind(detailPost) === 'forum'"
+          :post="detailPost"
+          @zoom="zoomSrc = $event"
         />
 
         <template v-else>
@@ -553,22 +549,46 @@
             v-if="detailPost.image"
             :src="bustUrlIfOverwritten(detailPost.image)"
             class="detail-img"
+            :class="{ 'is-gallery': postKind(detailPost) === 'gallery' }"
             alt=""
             @click="zoomSrc = bustUrlIfOverwritten(detailPost.image)"
           />
-          <p class="detail-content">{{ detailPost.content }}</p>
+          <p v-if="detailPost.content" class="detail-content">{{ detailPost.content }}</p>
         </template>
 
-        <!-- 标签 / 数据 / 评论：三种形态共用 -->
+        <!-- 标签 / 数据 / 评论：所有形态共用 -->
         <div v-if="detailPost.tags.length" class="post-tags">
           <span v-for="t in detailPost.tags" :key="t" class="tag">#{{ t }}</span>
+        </div>
+        <!-- 图库（规则34）：把本条随机到的生成参数摊开 —— 体位 / 画幅比例 / 画师串
+             （这三样都是服务端逐条随机分配的，展示出来才看得出"随机"是真的） -->
+        <div v-if="postKind(detailPost) === 'gallery' && detailPost.payload?.gallery" class="gallery-params">
+          <span class="gp-item"><b>体位</b>{{ detailPost.payload.gallery.pose || '—' }}
+            <template v-if="detailPost.payload.gallery.poseNo">（{{ detailPost.payload.gallery.poseNo }}）</template>
+          </span>
+          <span class="gp-item"><b>画幅</b>{{ detailPost.payload.gallery.aspect || '—' }}
+            <template v-if="detailPost.payload.gallery.width">（{{ detailPost.payload.gallery.width }}×{{ detailPost.payload.gallery.height }}）</template>
+          </span>
+          <span class="gp-item gp-artist" :title="detailPost.payload.gallery.artist || ''">
+            <b>画师串</b>{{ shortArtist(detailPost.payload.gallery.artist) }}
+          </span>
+        </div>
+        <!-- 环境层：本条随机到的场景/光影/视角/焦点/摄影效果/表情/状态/道具。
+             与上面「体位 / 画幅 / 画师串」同一口径 —— 这几样都是服务端逐条随机分配的，
+             摊开才看得出"随机"是真的（标签与画面同源，见后端 galleryEnvelope.js）。 -->
+        <div v-if="postKind(detailPost) === 'gallery' && envRows(detailPost).length" class="gallery-params gallery-env">
+          <span v-for="e in envRows(detailPost)" :key="e.dim" class="gp-item" :title="e.en">
+            <b>{{ e.label }}</b>{{ e.en }}
+          </span>
         </div>
         <div class="detail-stats-row">
           <span>♥ {{ formatNum(detailPost.likes) }}</span>
           <span>👁 {{ formatNum(detailPost.views) }}</span>
-          <span>💬 {{ detailPost.comments.length }}</span>
+          <span v-if="postKind(detailPost) === 'forum'">💬 {{ (detailPost.payload?.forum?.replies || []).length }}</span>
+          <span v-else>💬 {{ detailPost.comments.length }}</span>
         </div>
-        <div class="comment-list">
+        <!-- 论坛的「评论」就是楼层，已在上面按楼层渲染过，这里不再重复列 -->
+        <div v-if="postKind(detailPost) !== 'forum'" class="comment-list">
           <div v-for="(c, i) in detailPost.comments" :key="i" class="comment-item">
             <span class="comment-author">{{ c.author }}</span>
             <span class="comment-text">{{ c.content }}</span>
@@ -599,8 +619,12 @@ import NewspaperModal from '../components/NewspaperModal.vue'
 import MediaWeekly from '../components/media/MediaWeekly.vue'
 import MediaPoster from '../components/media/MediaPoster.vue'
 import MediaPortal from '../components/media/MediaPortal.vue'
+import MediaForumList from '../components/media/MediaForumList.vue'
+import MediaForumThread from '../components/media/MediaForumThread.vue'
+import MediaGallery from '../components/media/MediaGallery.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
+import { ENV_DIM_ORDER, envDimLabel } from '../utils/galleryEnvelopeLabels.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import { useNewspaperStore } from '../stores/newspaper.js'
 
@@ -662,7 +686,9 @@ const CATEGORIES = [
    */
   { key: 'print', label: '官方传媒', icon: '📰', hint: '报纸 / 海报 —— 官方印刷物料，按期出刊' },
   { key: 'digital', label: '数字报刊', icon: '📸', hint: '数字刊物 —— 门户网，可点开各板块看正文' },
-  { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
+  { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 帖子流，一屏看多条' },
+  { key: 'forum', label: '网络论坛', icon: '🧵', hint: '版聊论坛 —— 主题帖 + 楼层回复，文字为主、少量图片' },
+  { key: 'gallery', label: '规则34', icon: '🔞', hint: '成人图片站 —— 一排 4 张；每条随机体位 + 随机画师串 + 随机比例' },
 ]
 const activeCategory = ref('social')   // 默认落在内容最多的社交平台
 
@@ -672,6 +698,10 @@ const isPrintCategory = computed(() => activeCategory.value === 'print')
 /** 当前分类的中文名（刷新面板里说清「在哪个档里随机抽」） */
 const activeCategoryLabel = computed(
   () => CATEGORIES.find(c => c.key === activeCategory.value)?.label || '当前分类')
+
+/** 论坛 / 图库档 —— 这两档的帖子不参与瀑布流（各自有专属版式） */
+const isForumCategory = computed(() => activeCategory.value === 'forum')
+const isGalleryCategory = computed(() => activeCategory.value === 'gallery')
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -703,12 +733,35 @@ function isPrintOutlet(o) {
   return layout === 'poster' || layout === 'weekly'
 }
 
+/** 「网络论坛」= 版聊形态（主题帖 + 楼层） */
+function isForumOutlet(o) {
+  return (o.layout || 'feed') === 'forum'
+}
+
+/** 「规则34」= 图库形态（一排 4 张） */
+function isGalleryOutlet(o) {
+  return (o.layout || 'feed') === 'gallery'
+}
+
+/**
+ * 分类 → 「这个 outlet 属不属于这一档」的判定（**唯一一份**）。
+ * 与后端 `CATEGORY_LAYOUTS` 一一对应；新增档位时只改这里与 CATEGORIES，
+ * 不再在各处写 `a ? ... : b ? ... : 其余全归最后一档` 的链式三元 ——
+ * 那种写法在档位变多后会把新档的媒体偷偷并进最后一档（漏判不会报错）。
+ */
+const CATEGORY_PICKERS = {
+  social: o => (o.layout || 'feed') === 'feed',
+  forum: isForumOutlet,
+  gallery: isGalleryOutlet,
+  print: isPrintOutlet,
+  digital: isDigitalOutlet,
+}
+function pickerFor(key) {
+  return CATEGORY_PICKERS[key] || (() => false)
+}
+
 /** 当前分类下的媒体（按形态归类，加新媒体时自动归位，不用手动维护） */
-const filteredOutlets = computed(() => (
-  activeCategory.value === 'print' ? outlets.value.filter(isPrintOutlet)
-    : activeCategory.value === 'digital' ? outlets.value.filter(isDigitalOutlet)
-      : outlets.value.filter(o => !isPrintOutlet(o) && !isDigitalOutlet(o))
-))
+const filteredOutlets = computed(() => outlets.value.filter(pickerFor(activeCategory.value)))
 
 /** 「全部」标签上的数字：当前分类下所有媒体的帖子数之和 */
 const categoryTotal = computed(() => filteredOutlets.value.reduce((s, o) => s + (o.post_count || 0), 0))
@@ -719,10 +772,8 @@ const categoryTotal = computed(() => filteredOutlets.value.reduce((s, o) => s + 
  * 否则这一档的数字只统计海报、会漏掉天天出的日报）。
  */
 function categoryCount(key) {
-  const picker = key === 'print' ? isPrintOutlet : key === 'digital' ? isDigitalOutlet : null
-  const n = outlets.value
-    .filter(o => (picker ? picker(o) : (!isPrintOutlet(o) && !isDigitalOutlet(o))))
-    .reduce((s, o) => s + (o.post_count || 0), 0)
+  const pick = pickerFor(key)
+  const n = outlets.value.filter(pick).reduce((s, o) => s + (o.post_count || 0), 0)
   return key === 'print' ? n + (newspaperStore.unread ? 1 : 0) : n
 }
 
@@ -744,102 +795,9 @@ async function onCategoryChange(key) {
   await loadPage(0)
 }
 
-// ── 自动抓帖频率 ──
-// 档位表以后端下发的 MEDIA_AUTO_STEPS 为准（前后端口径唯一）；
-// 这里留一份**兜底副本**：后端还没重启 / 接口临时不通时，控件至少是可用的、不显示空白。
-// 改档位时记得两边一起改（后端口径在 services/mediaService.js）。
-const FALLBACK_AUTO_STEPS = [
-  { minutes: 0,   label: '关闭',    hint: '不自动抓帖，只有你点「刷新」时才生成。' },
-  { minutes: 720, label: '12 小时', hint: '一天两批，几乎不占算力。' },
-  { minutes: 240, label: '4 小时',  hint: '一天六批，内容慢慢积累。' },
-  { minutes: 120, label: '2 小时',  hint: '一天十几批。' },
-  { minutes: 60,  label: '1 小时',  hint: '每小时一批（每批 3 条）。' },
-  { minutes: 20,  label: '20 分钟', hint: '默认节奏，社区一直有新鲜感。' },
-  { minutes: 10,  label: '10 分钟', hint: '比较频繁，LLM 消耗明显上升。' },
-  { minutes: 5,   label: '5 分钟',  hint: '最频繁档；每批 3 条要调一次 LLM，烧 token 很快。' },
-]
-
-const freqOpen = ref(false)
-const steps = ref(FALLBACK_AUTO_STEPS)
-const auto = ref({ minutes: 20, nextInMs: null, generating: false })
-/** 倒计时每秒刷新用的时间戳（只用来触发 nextInText 重算） */
-const nowTick = ref(Date.now())
-let tickTimer = null
-
-/** 当前 minutes 对应的档位下标（找不到时取最接近的） */
-const stepIdx = computed(() => {
-  const list = steps.value
-  if (!list.length) return 0
-  const m = auto.value.minutes
-  const exact = list.findIndex(s => s.minutes === m)
-  if (exact >= 0) return exact
-  let best = 0, bestDiff = Infinity
-  list.forEach((s, i) => {
-    const d = Math.abs(s.minutes - m)
-    if (d < bestDiff) { bestDiff = d; best = i }
-  })
-  return best
-})
-
-const currentStep = computed(() => steps.value[stepIdx.value] || null)
-const autoLabel = computed(() => {
-  const s = currentStep.value
-  if (!s) return '—'
-  return s.minutes === 0 ? '关闭' : s.label
-})
-
-/** 距下次自动抓帖的倒计时文案 */
-const nextInText = computed(() => {
-  const ms = auto.value.nextInMs
-  if (ms == null) return ''
-  // 服务刚启动（lastAutoAt=0）或刚到点时 nextInMs=0 → 马上就会抓，别显示「0 秒」
-  if (ms <= 0) return '即将'
-  // 依赖 nowTick 让文案每秒重算
-  const left = Math.max(0, ms - (nowTick.value - _autoSyncAt))
-  if (left <= 1000) return '即将'
-  const min = Math.floor(left / 60000)
-  if (min >= 60) return `${(min / 60).toFixed(1)} 小时`
-  if (min >= 1) return `${min} 分钟`
-  return `${Math.round(left / 1000)} 秒`
-})
-let _autoSyncAt = Date.now()
-
-async function loadAuto() {
-  try {
-    const d = await api.getMediaAuto()
-    // 后端下发的档位表优先；为空则保留兜底副本，避免滑块变成空的
-    if (Array.isArray(d.steps) && d.steps.length) steps.value = d.steps
-    if (d.auto) { auto.value = d.auto; _autoSyncAt = Date.now() }
-  } catch (err) {
-    // 后端未重启/接口不通：保留兜底档位表，控件仍可操作
-    console.warn('[media] 读取自动频率失败（用兜底档位表）:', err?.message || err)
-  }
-}
-
-/** 拖动时先本地更新（跟手），松手才写库 */
-function onFreqInput(rawIdx) {
-  const i = Number(rawIdx)
-  const s = steps.value[i]
-  if (!s) return
-  auto.value = { ...auto.value, minutes: s.minutes, nextInMs: s.minutes === 0 ? null : auto.value.nextInMs }
-}
-
-async function applyFreq(i) {
-  const s = steps.value[i]
-  if (!s || s.minutes === auto.value.minutes) { freqOpen.value = true; return }
-  const prev = auto.value.minutes
-  auto.value = { ...auto.value, minutes: s.minutes }
-  try {
-    const d = await api.setMediaAuto(s.minutes)
-    if (d.auto) { auto.value = d.auto; _autoSyncAt = Date.now() }
-    if (d.steps) steps.value = d.steps
-    toastFn?.(s.minutes === 0 ? '已关闭自动抓帖（仍可手动刷新）' : `自动抓帖已设为每 ${s.label}一批`, 'success')
-  } catch (err) {
-    console.error('[media] 保存自动频率失败:', err)
-    auto.value = { ...auto.value, minutes: prev }
-    // 404 = 后端还没重启（这条路由是新增的），提示要说清楚，别让用户以为是网络问题
-    toastFn?.('保存失败' + '：' + (err?.message || ''), 'error')
-  }
+async function reloadAll() {
+  await Promise.all([reloadOutlets(), loadPage(0)])
+  await reloadIssues()
 }
 
 const totalAllOutlets = computed(() => outlets.value.reduce((s, o) => s + (o.post_count || 0), 0))
@@ -864,21 +822,56 @@ const hasMore = computed(() => posts.value.length < total.value)
  *   title/content、没有 payload_json。若只看 outlet.layout，版式组件会因 `v-if="data"`
  *   不通过而渲染成空白；这里退回 feed 卡片，正常显示标题与正文。
  */
+/**
+ * 帖子版式类型 —— **按 payload 形态判定，不看 outlet.layout**。
+ *
+ * 为什么按 payload 而不是媒体形态：媒体可以中途改形态，旧帖仍按原形态渲染
+ * （db 里 payload 就是当时那期的真实结构），所以只有 payload 是权威。
+ *
+ * 五个形态（与 pkind 对应的渲染组件）：
+ *   feed    独立帖子（瀑布流卡片）
+ *   forum   论坛主题帖（版聊楼层）
+ *   gallery 图片站条目（等宽多列瀑布流）
+ *   portal  门户/数字报刊
+ *   weekly  旧周刊
+ *   poster  海报
+ */
 function postKind(p) {
   const pl = p?.payload
   if (!pl) return 'feed'
+  // ★ 先判两个新形态：它们的 payload 结构最独特，且都要从瀑布流里摘出去
+  if (pl.gallery) return 'gallery'
+  if (pl.forum && Array.isArray(pl.forum.replies)) return 'forum'
   if (pl.portal && Array.isArray(pl.sections)) return 'portal'
   if (Array.isArray(pl.columns)) return 'weekly'
   if (Array.isArray(pl.panels)) return 'poster'
   return 'feed'
 }
-/** 整幅版式（不是瀑布流卡片）：周刊 / 海报 / 门户 */
+/**
+ * 是否「整幅版式」——需要从瀑布流里摘出去、单独渲染的那种。
+ * ★ 用 `postKind(p) !== 'feed'` 的等价写法，但显式列出来是为了让
+ *   "哪些形态走独立版式"这件事一眼可见（板块/瀑布流/网格各一种）。
+ */
+function isLayoutPost(p) {
+  const k = postKind(p)
+  return k === 'forum' || k === 'gallery' || k === 'portal' || k === 'weekly' || k === 'poster'
+}
+/** 整幅版式（不是瀑布流卡片）：论坛 / 图库 / 门户 / 周刊 / 海报 */
 function isSpecialPost(p) {
   return postKind(p) !== 'feed'
 }
-const feedPosts = computed(() => posts.value.filter(p => !isSpecialPost(p)))
+/** 瀑布流卡片：只有 feed 走这里；论坛与图库各有自己的版式组件 */
+const feedPosts = computed(() => posts.value.filter(p => postKind(p) === 'feed'))
+/** 论坛主题帖（版聊列表） */
+const forumPosts = computed(() => posts.value.filter(p => postKind(p) === 'forum'))
+/** 规则34 图库条目（等宽多列瀑布流） */
+const galleryPosts = computed(() => posts.value.filter(p => postKind(p) === 'gallery'))
+/** 整幅版式：门户 / 周刊 / 海报 */
 const specialPosts = computed(() => {
-  const list = posts.value.filter(isSpecialPost)
+  const list = posts.value.filter(p => {
+    const k = postKind(p)
+    return k === 'portal' || k === 'weekly' || k === 'poster'
+  })
   // 期号导航：选了某一期就只看那一期（其余仍在列表里，取消筛选即可回来）
   if (!activeIssueId.value) return list
   return list.filter(p => p.id === activeIssueId.value)
@@ -988,6 +981,35 @@ function formatNum(n) {
   const v = Number(n) || 0
   if (v >= 10000) return (v / 10000).toFixed(1).replace(/\.0$/, '') + '万'
   return String(v)
+}
+
+/**
+ * 画师串的短显示：只取前几个「@名字」，过长就省略。
+ *
+ * 画师串是一条很长的 prompt 片段（形如 `@chigusa_minori, @xxx, ...`），
+ * 详情里整条铺开会把参数行撑爆，所以截到 32 字 + 省略号，完整内容挂在 `title` 上（hover 可见）。
+ * 与规则34 缩略图上的「画师串」徽标同一口径。
+ */
+function shortArtist(s) {
+  const v = String(s || '').trim()
+  if (!v) return '—'
+  return v.length > 32 ? v.slice(0, 32).trim() + '…' : v
+}
+
+/**
+ * 详情页的「环境层」行：把 `payload.gallery.env` 按维度顺序摊成
+ * `{ dim, label, en }`，供模板一行列出（场景/光影/视角/焦点/摄影效果/表情/状态/道具）。
+ * 维度显示名来自 `utils/galleryEnvelopeLabels.js`（唯一真源）。
+ */
+function envRows(post) {
+  const env = post?.payload?.gallery?.env
+  if (!Array.isArray(env) || !env.length) return []
+  const order = new Map(ENV_DIM_ORDER.map((k, i) => [k, i]))
+  return env
+    .filter(e => e?.en && e?.dim)
+    .slice()
+    .sort((a, b) => (order.get(a.dim) ?? 99) - (order.get(b.dim) ?? 99))
+    .map(e => ({ dim: e.dim, label: envDimLabel(e.dim), en: e.en }))
 }
 
 function openPost(p) {
@@ -1313,10 +1335,6 @@ async function onRefresh() {
   }
 }
 
-async function reloadAll() {
-  await Promise.all([reloadOutlets(), loadPage(0)])
-  await reloadIssues()
-}
 
 // ── SSE ──
 let unsubNew = null
@@ -1324,7 +1342,7 @@ let unsubImg = null
 
 onMounted(async () => {
   newspaperStore.startPolling()
-  await Promise.all([reloadOutlets(), loadAuto()])
+  await reloadOutlets()
   await loadPage(0)
   // ★ loading 必须在**加载数据的最后一步之后、任何"附加步骤"之前**收尾。
   //   踩过的坑：原先它排在 `await reloadIssues()` 后面，而 reloadIssues 里有个未定义标识符
@@ -1337,14 +1355,13 @@ onMounted(async () => {
   // **只在打开页面时补一次**，不做后台定时扫描 —— 否则会持续占用 ComfyUI。
   api.fillMediaImages(6).catch(() => { /* 后端未重启时 404，忽略 */ })
 
-  // 倒计时每秒重算（只在展开面板时才有视觉意义，但开销可忽略）
-  tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
-
+  // ⚠ 这里原本还有个「每秒重算自动抓帖倒计时」的定时器 + 读 `loadAuto()`。
+  //   自动抓帖的开关已移到**设置 → 功能开关**（不在这个内容页），倒计时也随之搬走
+  //   （设置页只在打开时读一次状态，不需要每秒 tick）。
   unsubNew = onEvent('media_new_posts', async () => {
     refreshing.value = false
     clearTimeout(refreshTimer)
     await reloadAll()
-    loadAuto()   // 自动批次刚跑过 → 倒计时归零重算
     toastFn?.('新帖已到', 'success')
   })
   // 配图就绪：只替换那一张，不整页重载
@@ -1357,7 +1374,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearTimeout(refreshTimer)
-  if (tickTimer) clearInterval(tickTimer)
   newspaperStore.stopPolling()
   if (unsubNew) unsubNew()
   if (unsubImg) unsubImg()
@@ -1400,27 +1416,9 @@ onUnmounted(() => {
 .media-count { font-size: 13px; color: var(--text-secondary); }
 .btn-op, .btn-refresh { padding: 8px 18px; }
 
-/* ── 自动抓帖频率 chip ── */
-.auto-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px; font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.auto-chip:hover { color: var(--text-primary); }
-.auto-chip.active { border-color: var(--accent); color: var(--accent); background: rgba(var(--accent-rgb), 0.1); }
-/* 关闭态压暗一点，提示「现在不会自动更新」 */
-.auto-chip.off { opacity: 0.62; }
-.chip-caret { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.chip-caret.open { transform: rotate(180deg); }
+/* ── 自动抓帖频率 chip ──
+   已移除：开关搬到「设置 → 功能开关」（常驻配置不该塞在内容页顶栏）。
+   保留 .freq-panel —— 刷新目标面板（.refresh-panel）仍在用它的展开样式。 */
 
 /* ── 频率面板 ── */
 .freq-panel {
@@ -1446,7 +1444,7 @@ onUnmounted(() => {
   transition: color var(--dur-fast), background var(--dur-fast);
   -webkit-tap-highlight-color: transparent;
 }
-.refresh-caret:hover, .refresh-caret.active { color: var(--accent); background: var(--accent-light); }
+.refresh-caret:hover, .refresh-caret.active { color: var(--accent); background: rgba(var(--accent-rgb), 0.14); }
 
 /* ── 刷新目标面板 ── */
 .refresh-panel { padding-top: 10px; }
@@ -1464,8 +1462,8 @@ onUnmounted(() => {
   transition: border-color var(--dur-fast), background var(--dur-fast);
   -webkit-tap-highlight-color: transparent;
 }
-.rp-item:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-light); }
-.rp-item.current { border-color: var(--accent); background: var(--accent-light); }
+.rp-item:hover:not(:disabled) { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+.rp-item.current { border-color: var(--accent); background: rgba(var(--accent-rgb), 0.14); color: var(--text-bright); }
 .rp-item:disabled { opacity: 0.5; cursor: default; }
 .rp-icon { font-size: 14px; line-height: 1; }
 .rp-main { display: flex; flex-direction: column; gap: 1px; }
@@ -1473,39 +1471,13 @@ onUnmounted(() => {
 .rp-hint { font-size: 10.5px; color: var(--text-secondary); }
 .rp-tag {
   font-size: 10px; padding: 1px 6px; border-radius: var(--radius-full);
-  background: var(--accent); color: #fff;
+  background: var(--accent-solid); color: #fff;
 }
 .rp-empty { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
-.freq-row { display: flex; align-items: center; gap: 14px; }
-.freq-label { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--text-bright); }
-.freq-range { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
-.freq-val {
-  flex-shrink: 0; min-width: 62px; text-align: right;
-  font-size: 13px; font-weight: 700; color: var(--accent);
-}
-.freq-val.off { color: var(--text-secondary); }
 
-/* 档位刻度：直接点某一档跳过去，比拖滑块精准 */
-.freq-ticks { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 7px; }
-.freq-tick {
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-family: inherit; font-size: 11px; font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.freq-tick:hover { color: var(--text-primary); }
-.freq-tick.on {
-  background: rgba(var(--accent-rgb), 0.14);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 700;
-}
-.freq-hint { font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
-.freq-hint b { color: var(--accent); }
+/* ⚠ 以下 freq-* 里的 freq-row / freq-label / freq-range / freq-val / freq-ticks /
+   freq-tick / freq-hint 都只服务已被移除的「自动抓帖频率」面板，2026-10-05 一并清掉。
+   只有 .freq-panel 与下面两个 Transition 类保留 —— 刷新目标面板（.refresh-panel）仍在用它们。 */
 
 .freq-enter-active { transition: all 0.25s cubic-bezier(0.3, 1.2, 0.5, 1); overflow: hidden; }
 .freq-leave-active { transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
@@ -1540,7 +1512,10 @@ onUnmounted(() => {
   -webkit-tap-highlight-color: transparent;
 }
 .cat-tab:hover:not(.active) { color: var(--text-primary); background: var(--bg-tertiary); }
+/* ⚠ active 态原为 `color: var(--accent)` + 半透明 accent 底：
+   暗夜下橙字压暗红底只有 4.19（11px 小字需 4.5）。暗夜改用亮字。 */
 .cat-tab.active { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
+[data-theme="dark"] .cat-tab.active { color: var(--text-bright); }
 .cat-icon { font-size: 14px; }
 .cat-num {
   font-size: 11px; font-weight: 500; opacity: 0.65;
@@ -1572,9 +1547,18 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: 7px;
   font-size: 17px; font-weight: 700; color: var(--text-bright);
 }
+/* 副标题 + 形态说明同一排：说明在副标题右侧，两段文字**基线平齐**（align-items:baseline）。
+   窄屏放不下时整块折到第二行，仍然左对齐起排。 */
+.np-entry-subline {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 2px 12px;
+  min-width: 0;
+}
 .np-entry-sub { font-size: 12px; color: var(--text-secondary); }
 .np-entry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
-.np-entry-hint { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.7; color: var(--text-secondary); opacity: 0.8; }
+/* 说明文字：比副标题更轻一档，区分主次（原来它是卡片外的独立 <p>，
+   移进按钮内必须是行内元素 —— button 里不能放 <p>） */
+.np-entry-hint { font-size: 11.5px; line-height: 1.7; color: var(--text-secondary); opacity: 0.8; }
 
 /* ── 媒体标签页 ── */
 /* 媒体标签行 + 批量操作条：同一行。
@@ -1872,7 +1856,7 @@ onUnmounted(() => {
 .special-pick.on { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
 /* 这里的勾选框在浅色卡片外，用主题描边而不是白色描边 */
 .special-pick .pick-box { background: none; border-color: var(--glass-border); color: var(--accent); }
-.special-pick .pick-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.special-pick .pick-box.on { background: var(--accent-solid); border-color: var(--accent); color: #fff; }
 .special-pick-title {
   min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1881,15 +1865,17 @@ onUnmounted(() => {
 
 /* ── 周刊/海报：整幅版式 + 下方操作条 ── */
 .special-wrap { display: flex; flex-direction: column; gap: 8px; }
-/* 旧版式（周刊/海报）保持原来的窄栏居中——它们按 880px 宽度设计的排版，
-   拉满宽屏会显得空；门户则吃满宽度（见下）。 */
-.special-wrap.is-weekly,
-.special-wrap.is-poster {
+/* 周刊仍是按 880px 设计的竖排文稿版式，保持窄栏居中 —— 拉满宽屏会显得空。 */
+.special-wrap.is-weekly {
   max-width: 880px;
   margin: 0 auto;
   width: 100%;
 }
-/* 门户：横版卡片网格吃满宽屏 */
+/* 海报（2026-10-05 改横版后）与门户一样吃满宽屏：
+   海报改成"左主图 + 右信息栏"的横版头版后，再按 880px 居中会在宽屏两侧各空 ~500px
+   —— 正是这次改版要解决的空白。版式自身在窄容器里会由 container query 退回竖排，
+   所以放开宽度不会把内容挤坏（详情弹窗、手机仍走竖版）。 */
+.special-wrap.is-poster,
 .special-wrap.is-portal { max-width: none; }
 .special-ops {
   display: flex; align-items: center; gap: 10px;
@@ -1918,7 +1904,7 @@ onUnmounted(() => {
   width: 20px; height: 20px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; flex-shrink: 0;
-  background: var(--accent); color: #fff;
+  background: var(--accent-solid); color: #fff;
   font-size: 11px; font-weight: 700;
 }
 .author-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
@@ -1964,8 +1950,28 @@ onUnmounted(() => {
 .detail-author { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-bright); }
 .detail-stats { font-size: 12px; color: var(--text-secondary); }
 .detail-img { width: 100%; border-radius: 12px; display: block; }
+/* 图库条目：图就是主体 —— 限高并把点击放大做实（cursor/边框） */
+.detail-img.is-gallery {
+  max-height: 70vh; width: auto; max-width: 100%; margin: 0 auto;
+  object-fit: contain; cursor: zoom-in;
+  border: 1px solid var(--border);
+}
 .detail-content { margin: 0; font-size: 13px; line-height: 1.85; color: var(--text-primary); white-space: pre-wrap; }
 .detail-stats-row { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); }
+/* 图库（规则34）本条随机到的生成参数 */
+.gallery-params {
+  display: flex; flex-wrap: wrap; gap: 8px 18px;
+  padding: 9px 12px; border-radius: var(--radius-md);
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-secondary);
+}
+.gp-item { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.gp-item b { color: var(--accent); font-weight: 600; flex-shrink: 0; }
+.gp-artist { min-width: 0; }
+.gp-artist { overflow-wrap: anywhere; }
+/* 环境层那一行：8 个维度并排，密一点，与上面「体位/画幅/画师串」分开成块 */
+.gallery-env { margin-top: 8px; gap: 6px 16px; }
+.gallery-env .gp-item b { color: var(--accent-3); }
 .comment-list { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
 .comment-item { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; }
 .comment-author { flex-shrink: 0; font-weight: 600; color: var(--accent); }
@@ -1978,13 +1984,8 @@ onUnmounted(() => {
   .btn-op, .btn-refresh { padding: 6px 12px; }
   /* 窄屏顶栏挤：帖子总数去掉（分类标签上已有数字） */
   .media-count { display: none; }
-  /* 频率 chip 只留档位文字 */
-  .auto-chip { padding: 6px 10px; font-size: 11px; }
-  .auto-chip svg:first-child { display: none; }
+  /* 刷新面板（.freq-panel）窄屏收窄内边距（自动抓帖 chip 已搬到设置页，这里只剩它） */
   .freq-panel { padding: 10px 14px 12px; }
-  .freq-row { gap: 10px; }
-  .freq-label { font-size: 12px; }
-  .freq-val { min-width: 52px; font-size: 12px; }
   /* 分类三档放不下 → 缩小 + 去掉图标，横向滚动 */
   .cat-bar { gap: 0; }
   .cat-tab { padding: 7px 9px; font-size: 12px; gap: 4px; }

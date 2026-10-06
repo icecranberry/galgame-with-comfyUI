@@ -5,13 +5,36 @@
   <linshe-modal v-model="visibleModel" :title="`人设润色 — ${displayName || ''}`" wide>
     <div class="pr-body">
       <p class="pr-intro">
-        邻舍会按你选的力度改写人格提示词里的人设部分，
+        邻舍会按你的要求改写人格提示词里的人设部分，
         <strong>「## 你的外观」段会被原样保留</strong>（那一段由「修正外观」负责，不受此处影响）。
         生成结果需要你在角色卡上再点一次「保存」才会真正生效。
       </p>
 
       <div class="pr-section">
-        <label class="fl">润色力度</label>
+        <label class="fl">你的润色要求<span class="pr-opt">（可只填这里）</span></label>
+        <linshe-input
+          v-model="instruction"
+          type="textarea"
+          :rows="4"
+          maxlength="2000"
+          placeholder="直接写你要怎么改，例如：加强她的疏离感与旧伤线索，多用短句与具体动作；把啰嗦的心理描写删掉；保留所有专有名词……"
+        />
+        <div class="pr-quick">
+          <span class="pr-quick-label">常用：</span>
+          <button
+            v-for="q in QUICK_INSTRUCTIONS"
+            :key="q.label"
+            type="button"
+            class="pr-quick-chip"
+            :title="q.text"
+            @click="fillInstruction(q.text)"
+          >{{ q.label }}</button>
+        </div>
+        <div class="pr-hint">写什么就按什么改（优先级最高）。留空则只看下面的预设力度。</div>
+      </div>
+
+      <div class="pr-section">
+        <label class="fl">润色力度<span class="pr-opt">（可选预设，不填要求时必选其一）</span></label>
         <linshe-tabs v-model="mode" :options="MODE_OPTIONS" size="sm" aria-label="人设润色力度" />
         <div class="pr-hint">{{ modeHint }}</div>
       </div>
@@ -50,7 +73,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
@@ -80,13 +103,28 @@ const MODE_HINTS = {
   concise: '删去冗余与重复表达，保留全部设定要点，大约压到原文的七成。',
 }
 
-const mode = ref('polish')
+// 常用要求：点一下填进输入框，用户可再改 —— 只是省打字，不锁死走向
+const QUICK_INSTRUCTIONS = [
+  { label: '更有画面感', text: '多用具体动作、场景与感官细节（气味、声音、光线），少用抽象形容词。' },
+  { label: '更克制内敛', text: '语气克制、留白，把情绪藏在动作与细节里，不要直接说出感受。' },
+  { label: '加矛盾张力', text: '强化人设的内在矛盾与拉扯（表里不一、想靠近又推开），让性格更有张力。' },
+  { label: '口语化', text: '改得更口语、更像真人说话，减少书面腔与排比句。' },
+]
+
+const mode = ref('')
+const instruction = ref('')
 const refining = ref(false)
 const result = ref('')
 const error = ref('')
 const originalLen = ref(0)
 
 const modeHint = computed(() => MODE_HINTS[mode.value] || '')
+
+function fillInstruction(text) {
+  instruction.value = instruction.value.trim()
+    ? `${instruction.value.replace(/\s*$/, '')} ${text}`
+    : text
+}
 
 // 外观段会被原样保留 —— 若这张卡根本没有外观段，明确说明，免得用户以为漏润了
 const appearanceNotice = computed(() => (
@@ -110,12 +148,19 @@ watch(() => props.modelValue, v => {
   if (v) {
     result.value = ''
     error.value = ''
+    // ⚠ 不清空用户的输入内容（instruction / mode）—— 用户常会调着词反复试，清掉会很烦。
+    //    只清"上一次的产出"。
   }
 })
 
 async function run() {
   if (!String(props.basePrompt || '').trim()) {
     error.value = '人格提示词为空，没有可润色的内容'
+    return
+  }
+  // 两者都空就没法改：明确提示，避免静默返回原文（用户会以为"点了没反应"）
+  if (!mode.value && !instruction.value.trim()) {
+    error.value = '请写一段润色要求，或选一个预设力度'
     return
   }
   refining.value = true
@@ -125,6 +170,7 @@ async function run() {
       basePrompt: props.basePrompt,
       displayName: props.displayName,
       mode: mode.value,
+      instruction: instruction.value.trim(),
     })
     result.value = d.base_prompt || ''
     originalLen.value = String(props.basePrompt || '').length
@@ -147,6 +193,21 @@ function apply() {
 .pr-body { display: flex; flex-direction: column; gap: 14px; }
 .pr-intro { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 6px; }
+.pr-opt { font-weight: 400; font-size: 11px; color: var(--text-secondary); margin-left: 4px; }
+
+.pr-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.pr-quick-label { font-size: 11px; color: var(--text-secondary); }
+.pr-quick-chip {
+  font: inherit; font-size: 11px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border-color, rgba(128,128,128,.25));
+  background: transparent; color: var(--text-primary);
+  cursor: pointer; transition: background .15s, border-color .15s;
+}
+.pr-quick-chip:hover {
+  background: rgba(var(--accent-rgb), 0.10);
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
 
 .pr-section { display: flex; flex-direction: column; }
 .pr-hint { margin-top: 6px; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }

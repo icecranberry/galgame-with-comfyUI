@@ -393,7 +393,7 @@ router.post('/:id/like', (req, res) => {
 router.post('/:id/regenerate-image', async (req, res) => {
   const db = getDb();
   const post = db.prepare(
-    'SELECT id, character_id, npc_id, content, prompt, resolution FROM moment_posts WHERE id = ?'
+    'SELECT id, character_id, npc_id, content, prompt, resolution, created_at FROM moment_posts WHERE id = ?'
   ).get(req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
@@ -426,6 +426,9 @@ router.post('/:id/regenerate-image', async (req, res) => {
           width,
           height,
           postId: post.id,
+          // ★ 用帖子原本的发布时间当画面时刻 —— 补图/重绘也要保持当时的光照，
+          //   否则"凌晨发的帖"重绘一次就变成白天了。
+          at: post.created_at,
         }));
     if (imageUrls.length === 0) {
       return res.status(502).json({ error: '图片生成失败，请稍后重试' });
@@ -463,6 +466,9 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
     width = config.comfyui.momentsWidth,
     height = config.comfyui.momentsHeight,
     postId = null,
+    // ★ 该画面发生的时刻（Date / 毫秒 / 'HH:MM'）；不给则用"现在"。
+    //   用于注入时段光照锚点（修"凌晨的活动生成出白天图"）。
+    at = undefined,
   } = opts;
 
   const imageUrls = [];
@@ -499,6 +505,8 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
           height,
           scene: 'moments',
           priority: manual ? 'high' : 'low',
+          // ★ 时段锚点：把画面钉在帖子发布的真实时刻（用户在凌晨发的帖不该画成大白天）。
+          timeOfDay: at,
           ...loraOpts,
         });
 
@@ -967,6 +975,8 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     manual: opts.manual,
     otherChars,
     postId,
+    // ★ 发帖即此刻：把当前时刻作为画面时刻（角色不会在凌晨 2 点发一条大白天照片）
+    at: new Date(),
   });
   // 生图失败不阻塞发帖——无图但有文案
   imageUrls = genImageUrls;

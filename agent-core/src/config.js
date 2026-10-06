@@ -17,12 +17,48 @@ const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
 export const FREE_EGG_MODELS = ['mimo-v2.5-free'];
 const FREE_EGG_MODEL = FREE_EGG_MODELS[0];
 
+/**
+ * 解析 DB 路径（唯一入口，见 `config.dbPath` 上的说明）。
+ *
+ * 优先级：显式 `DB_PATH` > 测试期内存库 > `<baseDir>/data/agent.db`。
+ * 用 `NODE_TEST_CONTEXT` 判定"是否在 node:test 的子进程里"（Node 官方设置的标记变量），
+ * 比 `process.argv` 匹配 `.test.js` 可靠：后者漏掉被 import 的测试文件与自定义 runner。
+ *
+ * ★ 写成**接收 env 的纯函数**，是为了能直接单测这套判定逻辑 ——
+ *   若内联在 `config` 字面量里，就只能靠起子进程去验，而那些子进程在受限沙箱下会被拦。
+ *
+ * @param {Record<string,string|undefined>} [env]
+ * @param {string} [baseDir] - 默认值锚定的目录（不随启动 cwd 漂移）
+ * @returns {string}
+ */
+export function resolveDbPath(env = process.env, baseDir = resolve(__dirname, '..')) {
+  // 显式配置优先（测试自己设了 DB_PATH 就照用，支持绝对路径）
+  if (env.DB_PATH) return env.DB_PATH;
+  // 测试期默认内存库 —— 绝不碰真库
+  if (env.NODE_TEST_CONTEXT && env.ALLOW_REAL_DB_IN_TESTS !== '1') return ':memory:';
+  return resolve(baseDir, 'data', 'agent.db');
+}
+
 export const config = {
   // 开发环境检测：生产启动（launcher / PM2）会注入 NODE_ENV=production；npm run dev 等开发启动不设置
   isDev: process.env.NODE_ENV !== 'production',
   port: parseInt(process.env.PORT, 10) || 3099,
-  // DB_PATH 显式配置时原样使用（支持绝对路径）；默认值锚定 agent-core/，不随启动 cwd 漂移
-  dbPath: process.env.DB_PATH || resolve(__dirname, '..', 'data', 'agent.db'),
+  /*
+   * DB 路径。
+   *
+   * ★ 测试期安全阀：`node --test` 跑测试时**默认一律用内存库**。
+   *
+   *   为什么必须有这道阀：仓库里有一批测试文件（当时 32 个）**没有自己设 `DB_PATH`**，
+   *   它们会直接打开真实的 `data/agent.db`；而其中 `local-patch-regression.test.js`
+   *   会在里面 createOutlet / deleteOutlet / 写 system_settings。
+   *   也就是说「跑一次全量测试 = 在生产数据上做一次写操作」，
+   *   且**出问题时没有任何日志可查**（2026-10-05 媒体「狸狸八卦」连同两条帖子
+   *   就在一次测试窗口内消失，事后无法判定是谁删的）。
+   *
+   *   显式设了 `DB_PATH` 的测试不受影响（env 优先）。
+   *   确实需要真库的集成测试请显式设 `ALLOW_REAL_DB_IN_TESTS=1` 放行。
+   */
+  dbPath: resolveDbPath(),
   llm: {
     provider: process.env.LLM_PROVIDER || 'deepseek',
     // 每日免费鸡蛋开关（仅内存，不做持久化：重启后默认关闭）。
@@ -118,13 +154,24 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
       const v = parseFloat(process.env.MOMENT_FREQ);
       return Number.isFinite(v) ? Math.max(0, Math.min(24, v)) : 0;
     })(),
-    // 传媒内容页自动抓帖间隔（分钟）。
-    // **默认 0 = 关闭**：传媒属于「用户想看时才看」的内容，
-    // 默认自动抓帖会在后台持续调 LLM，与"按需生成"的取向不符。
-    // 想要自动补内容可在传媒页的「自动」档位里开启。
-    mediaAutoMinutes: (() => {
-      const v = parseInt(process.env.MEDIA_AUTO_MINUTES, 10);
-      return Number.isFinite(v) ? v : 0;
+    /*
+     * 传媒自动抓帖：**每晚几批**（0 = 关闭）。
+     *
+     * ★ 2026-10-05 由「固定间隔（分钟）」改成「夜间窗口内错峰随机」：
+     *   旧模型是"每 N 分钟无条件抓一批（每批 3 条）"——24 小时均匀铺开，
+     *   既不符合"论坛/社交平台是有人白天在看的社区"这个直觉，也是全天持续烧 token。
+     *   新模型与**朋友圈发帖频率**同一取向：
+     *     · 只在**夜间窗口**内（20:00 → 次日 02:00）动手，白天不产生新内容；
+     *     · 窗口按「今晚几批」等分成若干时段，**在时段内随机**取时刻 → 错峰、不扎堆；
+     *     · **一批只出 1 条**（见 mediaService.AUTO_BATCH_SIZE），细水长流。
+     *   「几批」而不是「几分钟」：用户关心的是"一晚上大概看到几条新内容"。
+     *
+     * **默认 0 = 关闭**：传媒属于「想看时才看」的内容，默认自动抓帖会持续调 LLM。
+     * 开关在**设置 → 功能开关**（不在传媒页顶栏，避免把常驻配置塞进内容页）。
+     */
+    mediaAutoPerNight: (() => {
+      const v = parseInt(process.env.MEDIA_AUTO_PER_NIGHT, 10);
+      return Number.isFinite(v) ? Math.max(0, v) : 0;
     })(),
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
@@ -287,6 +334,8 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     gender: process.env.USER_GENDER || '',
     appearance: process.env.USER_APPEARANCE || '',
     persona: process.env.USER_PERSONA || '',
+    // 人类（用户）的居住地点：地图里的地点名。空 = 未指定（不猜）。
+    home: process.env.USER_HOME || '',
   },
   groupChat: {
     activity: 2, // 1~5：仅控制冷场等待时长和自动闲聊轮数
@@ -608,13 +657,24 @@ export function updateMomentFreq(value) {
  * @param {number|string} value
  * @returns {number} 实际生效的分钟数
  */
-export function updateMediaAutoMinutes(value) {
+/**
+ * 设置传媒自动抓帖的「每晚几批」（0 = 关闭）。
+ *
+ * 可选值必须在 `mediaService.MEDIA_AUTO_STEPS` 里（前端滑块就是从那里渲染的）；
+ * 传入非法值时钳到最近的合法档，避免库里存进一个界面无法表示的值。
+ *
+ * @param {number|string} value
+ * @returns {number}
+ */
+export function updateMediaAutoPerNight(value) {
   const raw = parseInt(value, 10);
-  let n = Number.isFinite(raw) ? raw : 20;
-  if (n !== 0) n = Math.max(5, Math.min(720, n));
-  config.features.mediaAutoMinutes = n;
-  persistSettingSync('feature_mediaAutoMinutes', String(n));
-  console.log(`[config] mediaAutoMinutes = ${n}${n === 0 ? '（已关闭自动）' : ''}`);
+  let n = Number.isFinite(raw) ? raw : 0;
+  if (n < 0) n = 0;
+  // 上限与 MEDIA_AUTO_STEPS 的最快档一致；再往上密集到没有"错峰"的意义了
+  if (n > 0) n = Math.max(1, Math.min(16, n));
+  config.features.mediaAutoPerNight = n;
+  persistSettingSync('feature_mediaAutoPerNight', String(n));
+  console.log(`[config] mediaAutoPerNight = ${n}${n === 0 ? '（已关闭自动抓帖）' : `（每晚 ${n} 批）`}`);
   return n;
 }
 
@@ -751,7 +811,7 @@ export function updateLlmConfig({ apiKey, baseURL, model, thinkingMode, headers,
   return { ok: true };
 }
 
-export function updateUserConfig({ nickname, gender, appearance, persona }) {
+export function updateUserConfig({ nickname, gender, appearance, persona, home }) {
   if (nickname !== undefined) {
     config.user.nickname = nickname;
     persistSettingSync('user_nickname', nickname);
@@ -767,6 +827,12 @@ export function updateUserConfig({ nickname, gender, appearance, persona }) {
   if (persona !== undefined) {
     config.user.persona = persona;
     persistSettingSync('user_persona', persona);
+  }
+  // ★ 人类（用户）的居住地点 —— 地图里的地点名（子区或场景）。
+  //   空串是**合法值**（= 把已选的居住地清掉、回到未指定），所以这里判 `!== undefined` 而不是真值。
+  if (home !== undefined) {
+    config.user.home = String(home || '').trim();
+    persistSettingSync('user_home', config.user.home);
   }
   console.log('[config] User settings saved');
 }

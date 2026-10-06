@@ -44,6 +44,80 @@ export function levelLabel(level) {
 export const LEVEL_LABEL = { ...LEVEL_NAMES };
 export const POI_TYPES = ['零售', '餐饮', '服务', '配套'];
 
+// ═══════════════════════════════════════════════════════════
+// 地点的结构化属性（2026-10-05 加）
+//
+// ── 为什么要有这几个字段 ─────────────────────────────────
+// 日程生成过去靠提示词里一段**散文**告诉模型「哪些地方不能去」「在家该穿什么」，
+// 但散文不可查询、且在地图数据之外 → 改地图不会改它，「ROLL 到不合适场景」
+// 和「穿错衣服」都由此而来。改成结构化字段后，注入侧可以**过滤 + 标注**，
+// 把「模型猜」变成「后端算」。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 准入等级。**未标注（空串）按 public 处理** —— 迁移不可能给存量打标，
+ * 若把空串当 restricted，一次升级会把所有地点关掉。
+ *
+ * - public        随时可去
+ * - restricted    谢绝外人 / 需身份（如「珠星总部」「非仪式期的幻月秘庭」）
+ * - private       角色私人空间（自己的房间等），只在归属该角色时进池
+ * - time_window   有时段（配 open_at/close_at）
+ */
+export const ACCESS_LEVELS = ['public', 'restricted', 'private', 'time_window'];
+export const ACCESS_LABEL = {
+  public: '公开', restricted: '谢绝外人', private: '私人空间', time_window: '限时段',
+};
+
+/**
+ * 区域性质 —— 与服装联动（`outfitScene`）。
+ *
+ * - residence        居住区域（自己住处）→ 居家 / 睡衣
+ * - activity         主要活动区域        → 常服 / 私服
+ * - private_transit  私密转运（浴室等）  → 全身（原「裸体」，仅私密场景）
+ */
+export const ZONE_LEVELS = ['residence', 'activity', 'private_transit'];
+export const ZONE_LABEL = {
+  residence: '居住区域', activity: '主要活动区域', private_transit: '私密空间（洗浴等）',
+};
+/** zone → 该场景下应当优先穿的服装 key（供注入与校验；'' = 不限定） */
+export const ZONE_OUTFIT_HINT = {
+  residence: 'home', activity: 'work', private_transit: 'nude',
+};
+
+/** 归一化准入：非法值 → ''（=未标注），不做猜测性兜底 */
+export function normalizeAccess(v) {
+  const s = String(v ?? '').trim();
+  return ACCESS_LEVELS.includes(s) ? s : '';
+}
+/** 归一化分区：非法值 → ''（=未标注） */
+export function normalizeZone(v) {
+  const s = String(v ?? '').trim();
+  return ZONE_LEVELS.includes(s) ? s : '';
+}
+/** 时间点校验：接受 'HH:MM'，其余 → '' */
+function normalizeClock(v) {
+  const s = String(v ?? '').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : '';
+}
+
+/** 是否「默认可进候选池」——public 与未标注都算（见 normalizeAccess 的说明） */
+export function isAccessibleByDefault(access) {
+  const a = normalizeAccess(access);
+  return a === '' || a === 'public';
+}
+
+/** 拒绝原因文案（注入时标注给模型看，比只写 access 值更有用） */
+export function accessReason(place) {
+  const a = normalizeAccess(place?.access);
+  if (a === 'restricted') return '谢绝外人／需身份';
+  if (a === 'private') return '某角色的私人空间';
+  if (a === 'time_window') {
+    const o = normalizeClock(place?.open_at), c = normalizeClock(place?.close_at);
+    return (o && c) ? `仅 ${o}–${c} 时段开放` : '仅特定时段开放';
+  }
+  return '';
+}
+
 /** 一次展开最多接受多少个场景（防模型失控吐几十个） */
 const MAX_SCENES_PER_DISTRICT = 10;
 /** 每场景 POI 数量区间（范式要求一区 6~9 个） */
@@ -110,6 +184,12 @@ function mapPlaceRow(r) {
     id: r.id, map_id: r.map_id, parent_id: r.parent_id, level: r.level,
     key: r.key, name: r.name, name_en: r.name_en || '', kind: r.kind || '',
     summary: r.summary || '', pois: safeParse(r.pois_json, []), sort_order: r.sort_order,
+    // 结构化属性（见文件中部 ACCESS_LEVELS / ZONE_LEVELS 的说明）
+    access: r.access || '', zone: r.zone || '', category: r.category || '',
+    scene_prompt: r.scene_prompt || '', open_at: r.open_at || '', close_at: r.close_at || '',
+    // ★ 手动摆放的归一化坐标（-1 = 用户没摆过，走自动排布）
+    pos_x: typeof r.pos_x === 'number' ? r.pos_x : -1,
+    pos_y: typeof r.pos_y === 'number' ? r.pos_y : -1,
     // 是否已细化（L2 有子场景就算已展开）——前端据此显示「展开 / 已展开」
     expanded: false,
   };
@@ -178,38 +258,163 @@ export function duplicateMap(sourceId, newName = '') {
       'SELECT * FROM world_map_places WHERE map_id = ? ORDER BY level, sort_order, id'
     ).all(sourceId);
     const ins = db.prepare(`INSERT INTO world_map_places
-      (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order,
+       access, zone, category, scene_prompt, open_at, close_at, pos_x, pos_y)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const idMap = new Map();   // 旧 id → 新 id
     for (const r of rows) {
       const newParent = r.parent_id ? (idMap.get(r.parent_id) ?? null) : null;
       const nid = Number(ins.run(mid, newParent, r.level, r.key, r.name, r.name_en, r.kind,
-        r.summary, r.pois_json, r.sort_order).lastInsertRowid);
+        r.summary, r.pois_json, r.sort_order,
+        r.access || '', r.zone || '', r.category || '', r.scene_prompt || '',
+        r.open_at || '', r.close_at || '',
+        // 复制地图时**保留用户手动摆过的点位**（-1 则照旧表示未摆）
+        typeof r.pos_x === 'number' ? r.pos_x : -1,
+        typeof r.pos_y === 'number' ? r.pos_y : -1).lastInsertRowid);
       idMap.set(r.id, nid);
     }
     return { ok: true, map: getMap(mid) };
   })();
 }
 
-/** 手动增改一个地点 */
+/**
+ * 手动增改一个地点。
+ *
+ * ★ 支持**移动**（`patch.parentId`）—— 这是「动不了位置」的根治。
+ *
+ * 早先这里只白名单了 `name/name_en/kind/summary/pois`，**改不了 `parent_id`**，
+ * 于是「把某个地点挪到另一个父级下」在界面上完全做不到，只能删掉重建
+ * （重建会换 id，任何引用它的状态都会失效）。实测踩过这个坑。
+ *
+ * 移动不是单纯改一列：`level` 是**冗余存储**的（列表按 `level, sort_order` 排序，
+ * 层级还要参与「大区/子区/场景」计数），所以整棵子树都要按位移量重算；
+ * 另外必须防**成环**（把父节点挪进自己的子孙里 → 那棵子树会从树上消失，
+ * 用户看到的是"地点凭空不见了"，而且再也点不回来）。
+ */
 export function upsertPlace(placeId, patch = {}) {
   const db = getDb();
   const cur = db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(placeId);
   if (!cur) return { ok: false, error: '地点不存在' };
-  const pois = patch.pois !== undefined ? normalizePois(patch.pois) : safeParse(cur.pois_json, []);
-  db.prepare(`UPDATE world_map_places SET name = ?, name_en = ?, kind = ?, summary = ?, pois_json = ?
-    WHERE id = ?`).run(
-    patch.name !== undefined ? (clampText(patch.name, 40) || cur.name) : cur.name,
-    patch.name_en !== undefined ? clampText(patch.name_en, 60) : cur.name_en,
-    patch.kind !== undefined ? clampText(patch.kind, 20) : cur.kind,
-    patch.summary !== undefined ? clampText(patch.summary, 600) : cur.summary,
-    JSON.stringify(pois), placeId);
-  touchMap(cur.map_id);
-  return { ok: true, place: mapPlaceRow(db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(placeId)) };
+
+  return db.transaction(() => {
+    // ── ① 移动（可选）──
+    if (patch.parentId !== undefined) {
+      const moved = movePlace(placeId, patch.parentId, cur);
+      if (!moved.ok) return moved;
+    }
+
+    // ── ② 字段更新 ──
+    const pois = patch.pois !== undefined ? normalizePois(patch.pois) : safeParse(cur.pois_json, []);
+    db.prepare(`UPDATE world_map_places SET name = ?, name_en = ?, kind = ?, summary = ?, pois_json = ?,
+        access = ?, zone = ?, category = ?, scene_prompt = ?, open_at = ?, close_at = ?,
+        pos_x = ?, pos_y = ?
+      WHERE id = ?`).run(
+      patch.name !== undefined ? (clampText(patch.name, 40) || cur.name) : cur.name,
+      patch.name_en !== undefined ? clampText(patch.name_en, 60) : cur.name_en,
+      patch.kind !== undefined ? clampText(patch.kind, 20) : cur.kind,
+      patch.summary !== undefined ? clampText(patch.summary, 600) : cur.summary,
+      JSON.stringify(pois),
+      // ⚠ access/zone 用 normalize*（非法值落空串=未标注），**不做猜测性兜底**
+      patch.access !== undefined ? normalizeAccess(patch.access) : (cur.access || ''),
+      patch.zone !== undefined ? normalizeZone(patch.zone) : (cur.zone || ''),
+      patch.category !== undefined ? clampText(patch.category, 20) : (cur.category || ''),
+      patch.scene_prompt !== undefined ? clampText(patch.scene_prompt, 400) : (cur.scene_prompt || ''),
+      patch.open_at !== undefined ? normalizeClock(patch.open_at) : (cur.open_at || ''),
+      patch.close_at !== undefined ? normalizeClock(patch.close_at) : (cur.close_at || ''),
+      // ★ 手动摆放的坐标（归一化 0~1；非法/缺省保持原值）。前端拖完写回这里 → 落库、
+      //   后端与 LLM 都能读到（原先只存 localStorage，后端根本看不见）。
+      patch.pos_x !== undefined ? normalizeUnit(patch.pos_x, cur.pos_x) : (cur.pos_x ?? -1),
+      patch.pos_y !== undefined ? normalizeUnit(patch.pos_y, cur.pos_y) : (cur.pos_y ?? -1),
+      placeId);
+
+    touchMap(cur.map_id);
+    return { ok: true, place: mapPlaceRow(db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(placeId)) };
+  })();
+}
+
+/** 把 `null` / `''` / `0` / `'0'` 统一成"无父级"，其余转成数字 */
+function normalizeParentId(v) {
+  if (v === null || v === undefined || v === '' || v === 0 || v === '0') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * 归一化坐标（0~1）。非法输入返回 `fallback`（保持原值，不做猜测）。
+ * `-1` 是"未摆放"哨兵值，原样放行。
+ */
+function normalizeUnit(v, fallback = -1) {
+  if (v === null || v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  if (n < 0) return -1;                       // 负值一律视为"未摆放"
+  return Math.min(1, Math.max(0, n));
+}
+
+/**
+ * 移动一个地点到新父级下（含整棵子树的 `level` 重算）。
+ * 校验三件事，任一不过就整笔回滚（在 `upsertPlace` 的事务里）：
+ *   ① 目标父级必须存在、且在**同一张图**内
+ *   ② 不能移到自己或自己的**子孙**下（成环 → 子树脱离树，等于数据丢失）
+ *   ③ 目标父级 == 当前父级 → 视为无变化
+ */
+function movePlace(placeId, rawParentId, cur) {
+  const db = getDb();
+  const parentId = normalizeParentId(rawParentId);
+
+  if (parentId === cur.parent_id) return { ok: true, moved: false };
+  if (parentId === placeId) return { ok: false, error: '不能把地点移动到它自己下面' };
+
+  let parent = null;
+  if (parentId !== null) {
+    parent = db.prepare('SELECT * FROM world_map_places WHERE id = ? AND map_id = ?').get(parentId, cur.map_id);
+    if (!parent) return { ok: false, error: '目标上级地点不存在' };
+
+    // ★ 成环检测：沿 parent 往上走，撞到自己就拒绝
+    //   （用带步数上限的循环而不是递归 —— 数据一旦已成环，递归会无限转）
+    let walker = parent;
+    for (let i = 0; i < 200 && walker; i++) {
+      if (walker.id === placeId) return { ok: false, error: '不能把地点移动到它自己的下级里' };
+      walker = walker.parent_id
+        ? db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(walker.parent_id)
+        : null;
+    }
+  }
+
+  const newLevel = parent ? parent.level + 1 : LEVEL.REGION;
+  const delta = newLevel - cur.level;
+
+  // 新父级下排到最后（保持用户原有序：搬家 = 追加，不插队）
+  const maxOrder = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_map_places WHERE map_id = ? AND COALESCE(parent_id, 0) = COALESCE(?, 0)'
+  ).get(cur.map_id, parentId).m;
+
+  db.prepare('UPDATE world_map_places SET parent_id = ?, level = ?, sort_order = ? WHERE id = ?')
+    .run(parentId, newLevel, maxOrder + 1, placeId);
+
+  // 整棵子树跟着位移（level 是冗余列，不重算的话"大区/子区/场景"计数与排序全错）
+  if (delta !== 0) {
+    const descendants = db.prepare(`
+      WITH RECURSIVE sub(id) AS (
+        SELECT id FROM world_map_places WHERE parent_id = ?
+        UNION ALL
+        SELECT p.id FROM world_map_places p JOIN sub s ON p.parent_id = s.id
+      )
+      SELECT id FROM sub
+    `).all(placeId).map(r => r.id);
+    if (descendants.length) {
+      const upd = db.prepare('UPDATE world_map_places SET level = level + ? WHERE id = ?');
+      for (const id of descendants) upd.run(delta, id);
+    }
+  }
+  return { ok: true, moved: true };
 }
 
 /** 手动新增一个地点（层级由父节点推导） */
-export function addPlace(mapId, { parentId = null, name, nameEn = '', kind = '', summary = '', pois = [] } = {}) {
+export function addPlace(mapId, {
+  parentId = null, name, nameEn = '', kind = '', summary = '', pois = [],
+  access = '', zone = '', category = '', scenePrompt = '', openAt = '', closeAt = '',
+} = {}) {
   const db = getDb();
   const map = db.prepare('SELECT * FROM world_maps WHERE id = ?').get(mapId);
   if (!map) return { ok: false, error: '地图不存在' };
@@ -226,10 +431,14 @@ export function addPlace(mapId, { parentId = null, name, nameEn = '', kind = '',
     'SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_map_places WHERE map_id = ? AND level = ? AND COALESCE(parent_id, 0) = COALESCE(?, 0)'
   ).get(mapId, level, parentId).m;
   const key = uniqueKey(mapId, toKey(nameEn || name, `p${Date.now()}`));
-  const r = db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  const r = db.prepare(`INSERT INTO world_map_places
+      (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order,
+       access, zone, category, scene_prompt, open_at, close_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     mapId, parentId, level, key, clean, clampText(nameEn, 60), clampText(kind, 20),
-    clampText(summary, 600), JSON.stringify(normalizePois(pois)), maxOrder + 1);
+    clampText(summary, 600), JSON.stringify(normalizePois(pois)), maxOrder + 1,
+    normalizeAccess(access), normalizeZone(zone), clampText(category, 20),
+    clampText(scenePrompt, 400), normalizeClock(openAt), normalizeClock(closeAt));
   touchMap(mapId);
   return { ok: true, place: mapPlaceRow(db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(Number(r.lastInsertRowid))) };
 }
@@ -412,13 +621,18 @@ ${parent ? `它属于「${parent.name}」。` : ''}${place.summary ? `它的定�
   const scenes = normalizeScenes(safeParse(repairJson(jsonStr), null));
   if (!scenes.length) throw new Error('模型没产出可用场景，请重试');
 
-  const ins = db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const ins = db.prepare(`INSERT INTO world_map_places
+      (map_id, parent_id, level, key, name, name_en, kind, summary, pois_json, sort_order, access, zone, category, scene_prompt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const tx = db.transaction(() => {
     db.prepare('DELETE FROM world_map_places WHERE parent_id = ?').run(placeId);   // 幂等：换一批 = 整体替换
     scenes.forEach((s, i) => {
       ins.run(place.map_id, placeId, LEVEL.SCENE, uniqueKey(place.map_id, toKey(s.key, `scene${i + 1}`)),
-        s.name, s.name_en, s.kind, s.summary, JSON.stringify(s.pois), i);
+        s.name, s.name_en, s.kind, s.summary, JSON.stringify(s.pois), i,
+        // ★ 这几个字段由 AI 一并产出（问题 3 的「AI 自动匹配」）：
+        //   access/zone 是枚举、非法值落空串；scene_prompt 是生图用的英文场景描述。
+        normalizeAccess(s.access), normalizeZone(s.zone),
+        clampText(s.category, 20), clampText(s.scene_prompt, 400));
     });
   });
   tx();
@@ -439,6 +653,10 @@ function SCENE_FORMAT() {
       "name_en": "英文合成意译名（词缀构词）",
       "kind": "类型（如 商店街 / 站台 / 公园 / 河岸 / 居民街 / 学校）",
       "summary": "一句话交代这块地方长什么样、什么人来、什么时候最热闹（≤60字）",
+      "category": "功能分类（商店街 / 商业设施 / 公园 / 文化 / 餐饮 / 居住 / 地标 / 交通）",
+      "access": "public | restricted | private | time_window",
+      "zone": "residence | activity | private_transit",
+      "scene_prompt": "英文场景描述（供生图用，只写画面：环境、光线、材质、氛围，≤40词，不要写人）",
       "pois": [
         { "name": "店名／地点名（中文，意象＋功能热词融合，2~7字）", "type": "零售|餐饮|服务|配套", "blurb": "一句话说清它是什么、有什么生活气息（≤30字）" }
       ]
@@ -449,6 +667,18 @@ function SCENE_FORMAT() {
 **场景数量：4~7 个**。
 
 每个场景的 **pois：6~9 个**，且必须**同时覆盖 零售、餐饮、服务 三大类各至少 1 个**（配套类可选）。
+
+**结构化字段的判定标准（重要，日程生成会按这些字段过滤与联动服装）**：
+- access：绝大多数是 public。写 restricted **仅限**「谢绝外人 / 需要身份才能进」的地方
+  （例：私人公司总部、需要许可的机构、非开放期不对外的地方）；写 private 仅限
+  「属于某个具体角色的私人空间」（例：某人的单身公寓、私人卧室）；写 time_window
+  **仅限**「开放有明显时段性且白天基本关着」的地方（夜市、深夜档、只在特定时段开的店）。
+  **不确定就写 public** —— 宁可放宽，不要把话说死。
+- zone：residence 只给「有人真的住在这儿」的地方（住宅楼、宿舍、公寓）；
+  **主要活动地（商店街、车站、公园、学校）一律 activity**；private_transit 只给
+  「洗浴 / 更衣」这类必然不穿衣服的场所，很少用。
+- scene_prompt：**只描述画面本身**，供生图模型用。写环境、光线、材质、季节、氛围、
+  建筑风格与店招细节；**不要出现人物**（人物由角色外观另供）。全英文。
 
 硬性纪律（务必遵守）：
 1. **优先平凡日常场所**——便利店、面包坊、澡堂、洗衣店、站台、小饭馆、文具店、报刊亭……
@@ -471,6 +701,11 @@ function normalizeScenes(raw) {
       kind: clampText(s?.kind, 16),
       summary: clampText(s?.summary, 240),
       pois: normalizePois(s?.pois),
+      // 结构化属性（AI 一并产出；非法值在写入侧落空串）
+      access: s?.access,
+      zone: s?.zone,
+      category: clampText(s?.category, 20),
+      scene_prompt: clampText(s?.scene_prompt, 400),
     }))
     .filter(s => s.name)
     .slice(0, MAX_SCENES_PER_DISTRICT);
@@ -523,4 +758,97 @@ export function exportMarkdown(mapId) {
   };
   for (const rg of map.tree) walk(rg, 1);
   return L.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 日程侧的地点属性查询（准入 / 分区 / 场景提示词）
+//
+// ⚠ 这是**唯一真源**：日程注入与前端弹窗都走这里，不要在 routes/schedule.js
+//   里另写一份过滤逻辑 —— 否则两处口径迟早漂移（项目红线 8）。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 取「某区域下可用于日程的地点」及其属性。
+ *
+ * @param {string} areaName 子区名（level 2）
+ * @param {number|null} mapId
+ * @returns {Array<{id,name,kind,category,access,zone,scene_prompt,summary,reason}>}
+ */
+export function listAreaPlaceAttrs(areaName, mapId = null) {
+  const { areas } = listAreasForSchedule(mapId);
+  const area = areas.find(a => a.name === areaName);
+  return area?.places ?? [];
+}
+
+/** 列出可作为日常活动区域的子区（含其下地点属性）——日程弹窗与注入共用 */
+export function listAreasForSchedule(mapId = null) {
+  let id = Number(mapId) || null;
+  if (!id) id = listMaps()[0]?.id ?? null;
+  if (!id) return { mapId: null, mapName: '', areas: [] };
+  const map = getMap(id);
+  if (!map || !Array.isArray(map.tree)) return { mapId: null, mapName: '', areas: [] };
+  const areas = [];
+  for (const region of map.tree) {
+    for (const district of region.children ?? []) {
+      const places = (district.children ?? [])
+        .filter(s => s.level === LEVEL.SCENE)
+        .map(s => ({
+          id: s.id, name: s.name, kind: s.kind || '', category: s.category || '',
+          access: normalizeAccess(s.access), zone: normalizeZone(s.zone),
+          scene_prompt: s.scene_prompt || '', summary: s.summary || '',
+          open_at: s.open_at || '', close_at: s.close_at || '',
+          reason: accessReason(s),
+        }));
+      areas.push({
+        id: district.id, name: district.name, region: region.name,
+        kind: district.kind || '',
+        access: normalizeAccess(district.access), zone: normalizeZone(district.zone),
+        places,
+      });
+    }
+  }
+  return { mapId: map.id, mapName: map.name, areas };
+}
+
+/**
+ * 从候选里挑出「本次可进提示词」的地点，并给出需要标注的例外。
+ *
+ * 规则（用户口径：「别去不合适的地方」）：
+ *  - public / 未标注 → 进候选池
+ *  - restricted / private → **默认不进**；但若用户显式勾选了它，则**进池并带 `仅限…` 标注**
+ *    （用户显式指令优先于自动过滤，与本项目其它「显式优先」口径一致）
+ *  - time_window → 进池，但附开放时段，由模型自己核验
+ *  - 用户**取消勾选**的地点一律排除（排除优先于一切）
+ *
+ * ⚠ **子区自身的 access 也要算**：`幻月秘庭` 是 lv2 子区、access=restricted，
+ *    它下面的场景若只看自己的 access 会被整区放行 —— 所以这里额外接受
+ *    `parentAccess`，父级受限时其下所有场景一并受限（除非场景自己显式写了 public）。
+ *
+ * @param {Array} places  来自 listAreaPlaceAttrs
+ * @param {Set<string>} excluded 用户取消勾选的地点名
+ * @param {string} [parentAccess] 所属子区的 access（继承用）
+ * @returns {{included:Array,excluded:Array,annotated:Array}} annotated = 被显式放行但需标注的
+ */
+export function pickSchedulePlaces(places = [], excluded = new Set(), parentAccess = '') {
+  const included = [], excludedOut = [], annotated = [];
+  const pa = normalizeAccess(parentAccess);
+  const parentBlocked = pa === 'restricted' || pa === 'private';
+  for (const p of places) {
+    const name = p?.name;
+    if (!name) continue;
+    if (excluded.has(name)) { excludedOut.push({ name, why: 'user-excluded' }); continue; }
+    // 父级受限且子项自己没写 public → 继承受限（子项显式 public 可解锁）
+    const own = normalizeAccess(p.access);
+    const access = own === 'public' ? own : (parentBlocked && own === '' ? pa : own);
+    if (isAccessibleByDefault(access)) { included.push({ ...p, access, note: '' }); continue; }
+    if (access === 'time_window') {
+      const t = accessReason(p);
+      const item = { ...p, access, note: t };
+      included.push(item); annotated.push(item);
+      continue;
+    }
+    // restricted / private：默认不进池，由调用方按「是否被显式勾选」决定是否放行
+    excludedOut.push({ name, why: access, reason: accessReason({ ...p, access }) });
+  }
+  return { included, excluded: excludedOut, annotated };
 }

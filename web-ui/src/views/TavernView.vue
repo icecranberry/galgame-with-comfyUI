@@ -87,6 +87,27 @@
             <div v-if="!editingPersona" class="edit-pen" role="button" tabindex="0" @click="startEditPersona" @keydown.enter.prevent="startEditPersona" @keydown.space.prevent="startEditPersona" title="编辑其他说明">✎</div>
           </div>
         </div>
+        <!-- ★ 居住地（2026-10-05）：从世界地图里选，角色日程里"回家/去找你"就有真实落点。
+             此前完全没有这个入口，角色的日程只能含糊写"公寓"。 -->
+        <div class="user-field-row">
+          <span class="field-label">居住地</span>
+          <div class="field-value-wrap">
+            <select
+              v-if="editingHome"
+              v-model="userHomeInput"
+              class="inline-input"
+              @change="saveHome"
+              @blur="editingHome = false"
+            >
+              <option value="">（未指定）</option>
+              <optgroup v-for="g in userHomeGroups" :key="g.area" :label="g.area">
+                <option v-for="p in g.places" :key="p.name" :value="p.name">{{ p.name }}</option>
+              </optgroup>
+            </select>
+            <span v-else class="field-value" @click="startEditHome">{{ userHome || '点击选择你的住处…' }}</span>
+            <div v-if="!editingHome" class="edit-pen" role="button" tabindex="0" @click="startEditHome" @keydown.enter.prevent="startEditHome" @keydown.space.prevent="startEditHome" title="编辑居住地">✎</div>
+          </div>
+        </div>
       </div>
       </div>
       <div v-if="!isMobile" class="mailbox-card card" @click="showMailbox = true">
@@ -885,7 +906,7 @@ import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTic
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import { useCharacterFoldersStore } from '../stores/characterFolders.js'
-import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
+import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, userHome, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
@@ -1356,6 +1377,44 @@ async function savePersona() {
 function cancelEditPersona() {
   editingPersona.value = false
   userPersonaInput.value = userPersona.value
+}
+
+// ── 居住地（人类侧，2026-10-05）──
+//
+// 候选来自世界地图（子区 + 场景两级）。用户选了之后，日程生成会带上
+// 「<昵称> 的住处」，角色写"回家 / 去找你"时就有真实落点，不再含糊写"公寓"。
+// ⚠ 未指定时**不猜**（空串 = 未指定），提示词里那一段整段不出现。
+// ⚠ 本文件是 `<script setup>`（**不是 TS**）—— 不能写 `ref<T>()` / `: T` 这类类型注解。
+const editingHome = ref(false)
+const userHomeInput = ref('')
+const userHomeGroups = ref([])
+
+function startEditHome() {
+  userHomeInput.value = userHome.value || ''
+  editingHome.value = true
+  // 候选清单从日程选项接口取（那里已经按地图整理好了，不另抄地名表）
+  if (!userHomeGroups.value.length) loadHomeOptions()
+}
+
+async function loadHomeOptions() {
+  try {
+    const d = await api.getRegenerateOptions()
+    const groups = []
+    for (const a of d.areas || []) {
+      // 子区本身可住（"住在二维市"），其下场景也可住（"住在旧川里"）
+      const places = [{ name: a.name }, ...(a.places || []).map(p => ({ name: p.name }))]
+      groups.push({ area: a.name, places })
+    }
+    userHomeGroups.value = groups
+  } catch { /* 离线时静默：下拉里就只剩"（未指定）" */ }
+}
+
+async function saveHome() {
+  editingHome.value = false
+  const val = String(userHomeInput.value || '').trim()
+  if (val !== (userHome.value || '')) {
+    await saveUserConfig({ home: val })
+  }
 }
 
 // ═══════════════════════════════════════
@@ -2083,7 +2142,7 @@ onMounted(async () => {
   min-width: 18px; height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -2746,7 +2805,7 @@ onMounted(async () => {
   user-select: none;
   transition: all var(--dur-fast) ease;
 }
-.char-search-clear:hover { background: var(--accent); color: #fff; }
+.char-search-clear:hover { background: var(--accent-solid); color: #fff; }
 
 /* ── 文件夹筛选栏 ── */
 .folder-bar {

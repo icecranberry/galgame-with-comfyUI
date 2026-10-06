@@ -468,7 +468,7 @@ defineExpose({ refresh, toggleSelectMode })
   font-weight: 700;
   color: #fff;
   user-select: none;
-  background: var(--accent);
+  background: var(--accent-solid);
   transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 }
 .char-avatar-img {
@@ -498,7 +498,7 @@ defineExpose({ refresh, toggleSelectMode })
   opacity: 0.7;
 }
 .char-all.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   border-color: var(--accent);
   opacity: 1;

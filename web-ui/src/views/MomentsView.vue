@@ -559,7 +559,7 @@ async function triggerGenerate(c) {
   opacity: 0.7;
 }
 .filter-all.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   border-color: var(--accent);
   opacity: 1;

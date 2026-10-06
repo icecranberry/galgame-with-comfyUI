@@ -517,10 +517,10 @@ router.get('/user', (req, res) => {
   res.json(getUserConfig());
 });
 
-// PUT /api/config/user — 更新用户昵称 + 性别 + 外观 + 其他说明
+// PUT /api/config/user — 更新用户昵称 + 性别 + 外观 + 其他说明 + 居住地点
 router.put('/user', (req, res) => {
-  const { nickname, gender, appearance, persona } = req.body;
-  updateUserConfig({ nickname, gender, appearance, persona });
+  const { nickname, gender, appearance, persona, home } = req.body;
+  updateUserConfig({ nickname, gender, appearance, persona, home });
   res.json({ ok: true, ...getUserConfig() });
 });
 

@@ -78,6 +78,15 @@ export async function updateCharacter(id, data) {
   return request(`/characters/${id}`, { method: 'PUT', body: data })
 }
 
+/**
+ * 生成一个候选「论坛马甲」（网名 + 网络人设）—— 只返回，不落库。
+ * 用户可改可重掷，确认后随 updateCharacter 一起保存。
+ * 失败时返回 { alias: '', error }（接口是 200，不是抛错）→ 前端提示可手填。
+ */
+export async function generateForumAlias(characterId) {
+  return request(`/characters/${characterId}/forum-alias`, { method: 'POST', body: {} })
+}
+
 // 设置角色置顶状态（幂等写入，不是 toggle —— 传目标值）
 export async function togglePin(characterId, pinned) {
   return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
@@ -376,11 +385,18 @@ export function expandAppearanceDraft({ brief, basePrompt, displayName, sceneLab
   })
 }
 
-/** 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存 */
-export function refinePersonaDraft({ basePrompt, displayName, mode }) {
+/**
+ * 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存。
+ * @param {object} p
+ * @param {string} p.basePrompt 整卡正文
+ * @param {string} [p.displayName] 角色名
+ * @param {string} [p.mode] 可选预设（polish/enrich/concise）；留空表示只用自定义指令
+ * @param {string} [p.instruction] 用户**手写的自定义润色要求**（可空）
+ */
+export function refinePersonaDraft({ basePrompt, displayName, mode, instruction }) {
   return request('/characters/refine-persona-draft', {
     method: 'POST',
-    body: { base_prompt: basePrompt, display_name: displayName, mode },
+    body: { base_prompt: basePrompt, display_name: displayName, mode, instruction },
   })
 }
 
@@ -1388,6 +1404,15 @@ export function getScheduleOverview() {
   return request(`/schedule`)
 }
 
+// 日程台账（长期观测：八股/稳定性/风险）
+export function getScheduleLedger() {
+  return request(`/schedule/ledger`)
+}
+
+export function getCharacterScheduleLedger(characterId) {
+  return request(`/schedule/ledger/${characterId}`)
+}
+
 export function getCharacterSchedule(characterId) {
   return request(`/schedule/${characterId}`)
 }
@@ -1412,10 +1437,32 @@ export function retakePeekSnapshot(characterId, prompt) {
   return request(`/schedule/${characterId}/peek/retake`, { method: 'POST', body: { prompt } })
 }
 
-export function regenerateSchedule(characterId, direction) {
+/**
+ * 重新生成单个角色的日程。
+ * @param {number} characterId
+ * @param {string} [direction] 补充说明（原「日程方向」文本框）
+ * @param {object} [options]  本次编排约束：{ areas, areaStrict, nsfwRatio, sleepType, mapId }
+ *                            **全部省略时请求体与旧版完全一致**（行为不变）
+ */
+export function regenerateSchedule(characterId, direction, options = {}) {
   const body = {}
   if (direction) body.direction = direction
+  if (options && typeof options === 'object') {
+    if (Array.isArray(options.areas) && options.areas.length) {
+      body.areas = options.areas
+      if (options.areaStrict) body.areaStrict = true
+      if (options.mapId) body.mapId = options.mapId
+    }
+    if (options.nsfwRatio !== undefined && options.nsfwRatio !== null) body.nsfwRatio = options.nsfwRatio
+    if (options.sleepType && options.sleepType !== 'auto') body.sleepType = options.sleepType
+  }
   return request(`/schedule/${characterId}/regenerate`, { method: 'POST', body })
+}
+
+/** 日程弹窗的全部选项（区域 / NSFW 档位 / 睡眠类型），档位由后端定义、前端只渲染 */
+export function getRegenerateOptions(mapId) {
+  const q = mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''
+  return request(`/schedule/regenerate-options${q}`)
 }
 
 /** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */
@@ -2189,9 +2236,16 @@ export function getMediaAuto() {
   return request('/media/auto')
 }
 
-/** 改传媒自动抓帖频率；minutes=0 关闭自动（只手动刷新） */
-export function setMediaAuto(minutes) {
-  return request('/media/auto', { method: 'PUT', body: { minutes } })
+/**
+ * 改传媒自动抓帖频率：`perNight` = **每晚几批**（0 = 关闭，只手动刷新）。
+ *
+ * ★ 2026-10-05 语义变更：由「固定间隔（分钟）」改成「每晚几批」。
+ *   自动抓帖只在**夜间窗口**（20:00→次日 02:00）内**错峰随机**执行，白天不产新内容；
+ *   每批只出 1 条（`mediaService.AUTO_BATCH_SIZE`）。
+ *   可用档位由 `GET /media/auto` 的 `steps` 下发，界面上就是一个滑块。
+ */
+export function setMediaAuto(perNight) {
+  return request('/media/auto', { method: 'PUT', body: { perNight } })
 }
 
 /** 清理未被引用的孤儿配图（重复生图的历史遗留）+ 重置卡住的生成状态 */

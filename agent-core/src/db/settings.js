@@ -88,7 +88,7 @@ export const SETTING_TO_CONFIG = {
   feature_eventFreq:                 { obj: 'features', key: 'eventFreq',          type: 'float' },
   feature_momentFreq:                { obj: 'features', key: 'momentFreq',         type: 'float' },
   // 传媒内容页自动抓帖的间隔（分钟）；0 = 关闭自动、只手动刷新
-  feature_mediaAutoMinutes:          { obj: 'features', key: 'mediaAutoMinutes',    type: 'int' },
+  feature_mediaAutoPerNight:         { obj: 'features', key: 'mediaAutoPerNight',  type: 'int' },
   feature_disturbMode:              { obj: 'features', key: 'disturbMode',         type: 'bool' },
   feature_schedule:                 { obj: 'features', key: 'schedule',             type: 'bool' },
   feature_scheduleRefreshDays:      { obj: 'features', key: 'scheduleRefreshDays',  type: 'int' },
@@ -113,6 +113,10 @@ export const SETTING_TO_CONFIG = {
   user_gender:                     { obj: 'user',     key: 'gender',            type: 'string' },
   user_appearance:                 { obj: 'user',     key: 'appearance',        type: 'string' },
   user_persona:                    { obj: 'user',     key: 'persona',           type: 'string' },
+  // ★ 人类（用户）的居住地点：地图里的一个**子区或场景名**（如「二维市」「旧川里」）。
+  //   角色日程里"回家/去找你"就有了真实落点；对角色而言这也是一条已知信息
+  //   （谁都知道你住哪），但**不要替角色擅自搬动**——用户没设就留空，按未指定处理。
+  user_home:                       { obj: 'user',     key: 'home',              type: 'string' },
   workflow_mode:                   { obj: 'workflow',key: 'mode',             type: 'string' },
   workflow_custom_template:        { obj: 'workflow',key: 'customTemplate',   type: 'string' },
   comfy_global_lora:              { obj: 'comfyui',  key: 'globalLora',       type: 'json' },

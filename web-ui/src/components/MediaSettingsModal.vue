@@ -165,7 +165,10 @@ const form = ref(null)
  */
 const FALLBACK_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
+  { key: 'forum', label: '网络论坛', hint: '版聊主题帖（标题 + 正文 + 楼层回复）· 文字为主、少量图片' },
+  { key: 'gallery', label: '图片站', hint: '图集条目 · 每条随机画师串与题材组合' },
   { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
+  { key: 'poster', label: '海报', hint: '一张只讲一个瓜：热点速报条 → 大标题 → 主图 → 短文案' },
 ]
 const layoutDefs = ref([...FALLBACK_LAYOUTS])
 const layoutOptions = computed(() => layoutDefs.value.map(l => ({ label: l.label, value: l.key })))
@@ -173,12 +176,24 @@ const layoutOptions = computed(() => layoutDefs.value.map(l => ({ label: l.label
 function currentLayoutDef(key) {
   return layoutDefs.value.find(l => l.key === key) || FALLBACK_LAYOUTS[0]
 }
-/** 列表里的形态短标签（长说明放不下，列表只需要能区分） */
+/**
+ * 列表里的形态短标签。
+ *
+ * ★ **从后端下发的权威清单派生**（`/media/layouts`），取不到才落到下面的兜底。
+ *
+ *   这里原本是 `if (portal) … if (weekly) … if (poster) … return '社交平台'` 的链式写法 ——
+ *   新增 `forum` / `gallery` 两个形态时**漏改这里**，于是「二相论坛」「规则34」
+ *   在列表里被**静默显示成「社交平台」**。
+ *   这正是项目红线警告过的「同一口径只留一份定义」/「其余全归最后一档」，只是换了个文件复发。
+ *
+ *   兜底用**原始 key**（如 `forum`）而不是某个猜的标签：显示成英文键很扎眼，
+ *   一眼就知道是"没对上"，不会被误当成正确分类。
+ */
+const LEGACY_LAYOUT_LABELS = { weekly: '周刊' }   // 历史形态，已不在新建列表里
 function layoutShortLabel(key) {
-  if (key === 'portal') return '数字报刊'
-  if (key === 'weekly') return '周刊'
-  if (key === 'poster') return '海报'
-  return '社交平台'
+  const hit = layoutDefs.value.find(l => l.key === key)
+  if (hit?.label) return hit.label
+  return LEGACY_LAYOUT_LABELS[key] || key || '未知形态'
 }
 /** 选中形态的说明（讲清产物差别，避免建错源） */
 const layoutHint = computed(() => currentLayoutDef(form.value?.layout)?.hint || '')

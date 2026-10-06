@@ -2021,7 +2021,10 @@ function renderContent(text) {
   40%, 60% { fill: #aaa; }
 }
 
+/* ⚠ msg-text 会继承气泡颜色；当气泡是 accent 实底时是白字压亮橙（暗夜实测 2.55）。
+   加一层深色描边阴影提升可读性 —— 比改气泡配色更稳（气泡色是品牌设计）。 */
 .msg-text { font-size:14px; line-height:1.6; }
+[data-theme="dark"] .msg-text { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45); }
 /* 表情包独立气泡：高度固定 140px，宽度随图片比例自适应，柔和圆角白底 */
 .msg-sticker-bubble {
   height:140px; width:auto; padding:0; border-radius:8px; overflow:hidden; flex-shrink:0;
@@ -3262,11 +3265,15 @@ function renderContent(text) {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   opacity: 0.75; margin-top: 2px;
 }
+/* ⚠ #e0245e 是深玫红，压暗夜深底上对比度仅 3.7（小字需 4.5）。暗夜改用亮粉。 */
 .header-affinity { font-size: 14px; font-weight: 600; color: #e0245e; white-space: nowrap;display: flex;align-items: center; }
+[data-theme="dark"] .header-affinity { color: #ff6b9d; }
 .affinity-heart-icon { vertical-align: middle; margin-right: 1px; flex-shrink: 0; }
 .header-affinity-delta { font-size: 11px; font-weight: 500; margin-left: 4px; }
 .header-affinity-delta.delta-up { color: #e0245e; }
 .header-affinity-delta.delta-down { color: #4a90d9; }
+[data-theme="dark"] .header-affinity-delta.delta-up { color: #ff6b9d; }
+[data-theme="dark"] .header-affinity-delta.delta-down { color: #7ab6f0; }
 .chat-header-right { display: flex; align-items: center; gap: 10px; }
 .header-reason {
   font-size: 11px; color: var(--text-secondary); font-style: italic;

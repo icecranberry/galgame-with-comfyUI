@@ -1205,7 +1205,7 @@ function formatTime(iso) {
 .mention-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 12px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;

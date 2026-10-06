@@ -35,17 +35,21 @@ import { config } from '../config.js';
  * `getSceneOutfitForNow` 也按名称回查。所以留一组稳定的默认名，界面自动写入、用户不用管。
  */
 export const OUTFIT_SCENES = [
-  { key: 'nude', label: '裸体', defaultName: '裸体', desc: '不穿任何衣物。**只用于私密场景**：洗浴、泡澡，以及在自己家里/酒店客房等私密空间里的性场景。**睡眠时段不用它**（睡觉一律穿睡衣）' },
+  // ⚠ 2026-10-05：「裸体」已改名「全身」（界面与内部匹配名一起改，见 migrateOutfitNudeRename）。
+  //   改这里的 label / defaultName 必须同步迁移存量（character_outfits.name + 两张日程表的 outfit 标注）——
+  //   套名是**日程标注的匹配键**，只改常量会让老数据匹配不上、角色静默回退成默认服装。
+  //   语义不变：这一套仍是"不穿任何衣物"的私密状态，NUDE_DESCRIPTION 常量也不动。
+  { key: 'nude', label: '全身', defaultName: '全身', desc: '即「不穿任何衣物」的全身体态（原叫「裸体」）。**只用于私密场景**：洗浴、泡澡，以及在自己家里/酒店客房等私密空间里的性场景。**睡眠时段不用它**（睡觉一律穿睡衣）' },
   { key: 'work', label: '常服', defaultName: '日常装', desc: '上班、出勤、执行职务时穿（角色的招牌/常态形象）' },
   { key: 'casual', label: '私服', defaultName: '便装', desc: '上街、社交、休闲外出时穿的便装' },
-  { key: 'home', label: '居家', defaultName: '居家服', desc: '在家中休息、做家务时穿的宽松舒适衣物' },
+  { key: 'home', label: '居家', defaultName: '居家服', desc: '在家中休息、做家务时穿的宽松舒适衣物。**脚上必须是一双室内拖鞋（indoor slippers）**——居家不等于赤脚（赤脚只属睡衣那套）；也不要用外出鞋（运动鞋/靴子/高跟鞋）' },
   { key: 'sleep', label: '睡衣', defaultName: '睡衣', desc: '睡觉时穿的睡衣或内衣，**赤脚、不穿鞋袜**。**睡眠时段强制使用这一套**' },
 ];
 
 /**
- * 只用于私密场景的那一套（裸体）。
+ * 只用于私密场景的那一套（原「裸体」，现名「全身」）。
  * `getSceneOutfitForNow` 的兜底必须跳过它 —— 否则日程里没有 `outfit` 标注时，
- * 角色会在街上「兜底成裸体」。洗浴/私密性场景必须由日程**显式标注**才会用到。
+ * 角色会在街上「兜底成不穿衣服」。洗浴/私密性场景必须由日程**显式标注**才会用到。
  */
 export const PRIVATE_SCENE = 'nude';
 
@@ -60,7 +64,7 @@ const LABEL_BY_KEY = Object.fromEntries(OUTFIT_SCENES.map(s => [s.key, s.label])
  *
  * ── 为什么这样拆（2026-10-04）──────────────────────────────
  * 原先 description 把身体和衣服混写，于是同一部位在「角色外观段 / work / casual」
- * 三处互相矛盾（银狼的发型有三个版本），且裸体场景没有身体真源。
+ * 三处互相矛盾（银狼的发型有三个版本），且全身场景没有身体真源。
  * 现在：`body` 一列存**该角色 5 套共用的身体描述**，`description` 只存**衣服**；
  * 注入时才拼成自包含文本 —— 身体只存一份，不会在各套之间漂移。
  *
@@ -91,6 +95,31 @@ export function listSceneOutfits(characterId) {
 }
 
 /**
+ * 把「某一套场景服装」转成 `buildCharacterPersona` 认的 `outfits` 参数。
+ *
+ * ── 什么时候用它（而不是让 buildCharacterPersona 走 'auto'）──
+ * `'auto'` 会按**当前日程时刻**选装：夜里变睡衣、洗浴时段变全身、在家变居家。
+ * 这对聊天/朋友圈是对的（角色此刻确实那么穿），但**生成形象图时必须固定**：
+ * 头像、场景立绘这类要的是角色的**基准形象**，不能"白天生成是常服、半夜生成是睡衣"。
+ * 所以调用方显式指定场景，由本函数取那一套喂进去。
+ *
+ * ⚠ 用 `hit.text`（身体 + 服装的组合文本），**不要用裸 `description`** ——
+ *   `description` 现在只存衣服，直接用会让画面丢掉身体特征。
+ *   （本函数正是为了把这句口径收成一处，避免各生成点各写一遍、写法漂移。）
+ *
+ * @param {number} characterId
+ * @param {string} scene - 场景 key（work / casual / home / sleep / nude）
+ * @returns {{limited: Array<{name:string, description:string}>, exclusive: null}|null}
+ *          该角色没有这一套时返回 null（= 不注入，退回基础外观）
+ */
+export function sceneOutfitParam(characterId, scene) {
+  if (!characterId || !scene) return null;
+  const hit = listSceneOutfits(characterId).find(o => o.scene === scene);
+  if (!hit) return null;
+  return { limited: [{ name: hit.name, description: hit.text || hit.description }], exclusive: null };
+}
+
+/**
  * 写角色的「身体描述」，**同步到该角色全部服装行**。
  *
  * 这是"单一真源"的落点：界面只让用户编辑一个身体字段，保存时写进每一行，
@@ -104,22 +133,88 @@ export function setCharacterBody(characterId, body) {
 }
 
 /**
- * 裸体那套的**固定描述** —— 所有角色、任何情况都一样，是**系统常量**，不提供用户输入。
+ * 全身那套的**固定描述** —— 所有角色、任何情况都一样，是**系统常量**，不提供用户输入。
  *
  * 为什么它必须是常量而不是"可填的一项"：
- *   · 「裸体」的含义本身就是"没穿衣服"，没有任何可定制的余地；
+ *   · 「全身」（不穿衣服）就是"没穿"这一个状态，没有任何可定制的余地；
  *   · 真正需要因人而异的是**身体**，那已经由共用的 `body` 承担；
- *   · 让它可填反而会出问题 —— 一旦被存成空字符串，注入里就没有"裸体"这个声明了，
- *     模型会照基础外观把衣服画上（2026-10-04 实测：姬子那条裸体行的描述就是空的）。
+ *   · 让它可填反而会出问题 —— 一旦被存成空字符串，注入里就没有"不穿衣服"这个声明了，
+ *     模型会照基础外观把衣服画上（2026-10-04 实测：姬子那条该行的描述就是空的）。
  */
 export const NUDE_DESCRIPTION = 'completely nude, wearing no clothing at all, bare skin visible';
-/** 裸体那一套的默认名（日程标注按名字匹配，全库统一用它） */
-export const NUDE_NAME = '裸体';
+/** 那一套的默认名（日程标注按名字匹配，全库统一用它）。
+ *  2026-10-05 由「裸体」改为「全身」—— 改这里**必须**同步跑 migrateOutfitNudeRename，
+ *  否则老角色的行仍叫「裸体」，新日程标「全身」就匹配不上了。 */
+export const NUDE_NAME = '全身';
 
-/** 规范化形态的写入：裸体的描述一律用常量，调用方传什么都以常量为准 */
+/** 规范化形态的写入：全身那套的描述一律用常量，调用方传什么都以常量为准 */
 function normalizeGarment(scene, description) {
   if (scene === PRIVATE_SCENE) return NUDE_DESCRIPTION;
-  return String(description || '').trim().slice(0, 1200);
+  return enforceSceneFootwear(scene, String(description || '').trim().slice(0, 1200));
+}
+
+/**
+ * 出口层兜底：强制「居家＝拖鞋、睡衣＝赤脚」这一对相反的脚部口径。
+ *
+ * ── 为什么必须在这里做（2026-10-06 用户反馈）────────────────────
+ * 用户注意到居家服被生成成"没有鞋子"，但现实中居家是穿拖鞋的。
+ * 实测存量 15 套居家：2 套写成赤脚、3 套自相矛盾（如「barefoot + 拖鞋」「袜子 + barefoot」）。
+ * 根因是提示词只约束了睡衣、对居家**完全没规定**，模型只能随机发挥。
+ * 提示词已补（本条 + GEN_SYSTEM_PROMPT + buildDeriveLayer + expand 入口），
+ * 但**模型有惯性** —— 按项目红线，「改提示词不够，必须在出口层兜底」。
+ *
+ * ⚠ 只做**最小干预**：能在已有文本里识别到鞋/赤脚就替换那一个词，
+ *   识别不到才追加；且**睡衣不追加任何鞋类**（睡衣的规则是"不出现鞋"）。
+ */
+export function enforceSceneFootwear(scene, description) {
+  if (description == null || description === '') return description;   // 空值原样返回（不凭空造鞋）
+  const d = String(description);
+  if (scene !== 'home' && scene !== 'sleep') return d;
+
+  // ── 按逗号分段后**原位**处理 ──
+  // ⚠ 两个坑：
+  //   ① 不能只替换"关键词"（会留下悬空片段："covered in fuzzy slippers and ankle socks"
+  //      删词后剩 "covered in"、"white slippers with gold trim" 剩 "with gold trim"）；
+  //   ② **不能把拖鞋挪到末尾重排** —— 那会打乱原有描述结构（实测把「裸脚踝」甩到最后，
+  //      读起来像换了个人）。所以按段**原位**替换/删除。
+  const segs = d.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+
+  const FOOT_RE = /slipper|shoe|sneaker|boot|heel|sandal|loafer|sock|stocking|pantyhose|tights|barefoot|bare\s+feet|bare\s+foot|bare\s+ankle|ankle\s+warm|拖鞋|室内鞋|棉拖|袜子|长袜|赤脚|光脚|赤足|光着脚/i;
+  const SLIPPER_RE = /slipper|拖鞋|室内鞋|棉拖/i;
+  // 「裸脚踝/脚链」这类**不是鞋**的脚部描述 —— 居家场景下与拖鞋并不冲突（拖鞋本来就露脚踝）
+  const ANKLE_KEEP_RE = /bare\s+ankle|anklet|脚链/i;
+
+  const cleaned = (arr) => {
+    // 相邻重复段合并（如 "indoor slippers, indoor slippers" → 一个），再清标点
+    const dedup = [];
+    for (const s of arr) {
+      const last = dedup[dedup.length - 1];
+      if (last && last.toLowerCase() === s.toLowerCase() && SLIPPER_RE.test(s)) continue;
+      dedup.push(s);
+    }
+    return dedup.join(', ').replace(/,\s*,/g, ',').replace(/[,\s]+$/, '').trim();
+  };
+
+  if (scene === 'home') {
+    // 居家：把「赤脚/袜子」段原位换成拖鞋；已有拖鞋段原样保留；裸脚踝段保留原位。
+    // ★ 若全文**已有**拖鞋，就不再替换（只把赤脚/袜子段删掉）—— 否则会出现
+    //   「indoor slippers, indoor slippers」或「indoor slippers, white cloth slippers」这类重复。
+    const hasSlipperAnywhere = segs.some(s => SLIPPER_RE.test(s));
+    const out = [];
+    for (const s of segs) {
+      if (!FOOT_RE.test(s)) { out.push(s); continue; }            // 非脚部段：原样
+      if (SLIPPER_RE.test(s)) { out.push(s); continue; }           // 已有拖鞋：原样
+      if (ANKLE_KEEP_RE.test(s)) { out.push(s); continue; }        // 裸脚踝：原样
+      // 赤脚 / 袜子段：已有拖鞋则直接删掉，否则原位换成拖鞋
+      if (!hasSlipperAnywhere) out.push('indoor slippers');
+    }
+    if (!out.some(s => SLIPPER_RE.test(s))) out.push('indoor slippers');
+    return cleaned(out);
+  }
+
+  // 睡衣：原位**删除**所有脚部段（画面里不出现任何鞋袜，含裸脚踝/脚套），末尾补 barefoot
+  const out = segs.filter(s => !FOOT_RE.test(s));
+  return `${cleaned(out)}, barefoot`.replace(/^,\s*/, '').trim();
 }
 
 /** 批量写入场景服装（供「一键生成」用）。同名同场景则更新描述，避免重复堆叠 */
@@ -143,8 +238,9 @@ export function upsertSceneOutfits(characterId, outfits) {
       const exist = find.get(characterId, o.scene);
       if (exist) {
         /**
-         * 裸体那套**保留已有名字**：日程标注是按「名字」匹配的，
-         * 若这里被改名，已生成的日程里那些 `outfit: "裸体"` 就匹配不上了。
+         * 全身那套**保留已有名字**：日程标注是按「名字」匹配的，
+         * 若这里被改名，已生成的日程里那些 `outfit: "全身"` 就匹配不上了。
+         * （2026-10-05 从「裸体」改名时，存量就是靠 migrateOutfitNudeRename 一起迁的。）
          * 其余套按调用方给的名字更新。
          */
         const name = o.scene === PRIVATE_SCENE ? (exist.name || o.name) : o.name;
@@ -157,12 +253,12 @@ export function upsertSceneOutfits(characterId, outfits) {
     }
 
     /**
-     * 兜底：**保证裸体行存在**。
+     * 兜底：**保证「全身」那一行存在**。
      *
-     * 前端不再提供裸体的输入（它是常量），所以调用方可能根本不传它 ——
+     * 前端不再提供它的输入（描述是常量），所以调用方可能根本不传它 ——
      * 但 `getSceneOutfitForNow` 是按「名字」匹配日程标注的，
-     * 没有这一行，日程里标的「裸体」就匹配不上；`buildOutfitAnnotateLayer`
-     * 也靠它决定要不要渲染「裸体什么时候才用」那段提示。
+     * 没有这一行，日程里标的「全身」就匹配不上；`buildOutfitAnnotateLayer`
+     * 也靠它决定要不要渲染「它在什么时候才用」那段提示。
      * 所以由这里负责建（缺则补、有则上面已把描述规范化为常量 → 顺带自愈空描述）。
      */
     if (!find.get(characterId, PRIVATE_SCENE)) {
@@ -200,14 +296,17 @@ const GEN_SYSTEM_PROMPT = `你是角色外观设计助手。你为角色设计**
 不要中文、不要完整句子、不要「她穿着一件」这类叙述。
 
 【五套场景定义（scene 字段照抄英文 key；本次具体要哪几套以用户消息为准，别多给）】
-- nude（裸体）：**不穿任何衣物**的私密状态（洗浴、在自己家里/酒店客房这类私密空间里的性场景）。
+- nude（全身）：**不穿任何衣物**的私密状态（洗浴、在自己家里/酒店客房这类私密空间里的性场景）。
   这一套的 \`description\` 固定写 \`completely nude, wearing no clothing, bare skin\`；
-  \`body\` 要写得比平时**更完整**（既然是裸体，身体就是画面主体）：
+  \`body\` 要写得比平时**更完整**（既然是全身、不穿衣服，身体就是画面主体）：
   除发型瞳色外，补上肤色、体型、胸/腰/腿的形态、以及显著身体特征（痣、伤痕、纹身、兽耳兽尾等）。
 - work（常服）：这个角色在**其职业/身份场合**日常穿的那身。制式职业（警察、护士、学生等）
   就是对应制服；自由职业者则是工作时常穿的那身。
 - casual（私服）：休息日上街、见朋友、逛街时穿的便装。
 - home（居家）：在家里做家务、放松、看书时穿的宽松舒适衣物。
+  **★ 脚上要穿室内拖鞋**：description 里必须写出 indoor slippers（与服装风格协调的家居拖鞋），
+  因为现实中居家就是穿拖鞋 —— **不要写成 barefoot**（赤脚只属睡衣那套），也不要用外出鞋
+  （sneakers / boots / heels / sandals 一律不写）。
 - sleep（睡衣）：**睡觉时穿的睡衣或内衣**（睡裙 / 睡衣睡裤 / 吊带内衣 + 短裤 / 内裤等），
   不要设计成能穿出门的服装。
   **★ 必须赤脚**：description 里必须明确写出 barefoot。
@@ -222,13 +321,13 @@ const GEN_SYSTEM_PROMPT = `你是角色外观设计助手。你为角色设计**
 3. 只输出 JSON，不要解释、不要 Markdown 代码块。
 
 ## 输出格式
-{"outfits":[{"scene":"nude","name":"裸体","body":"...","description":"completely nude, wearing no clothing, bare skin"},{"scene":"work","name":"...","body":"...","description":"..."}]}`;
+{"outfits":[{"scene":"nude","name":"全身","body":"...","description":"completely nude, wearing no clothing, bare skin"},{"scene":"work","name":"...","body":"...","description":"..."}]}`;
 
 /**
  * 反推层：把「已填好的分项」交给模型，让它**据此反推未填的分项**。
  *
  * ── 设计意图（2026-10-04 用户提出，替代原先固定「按工装推其余三套」）──
- * 用户可能只填了一两项（比如手工填了常服、或从一张图反推了裸体），
+ * 用户可能只填了一两项（比如手工填了常服、或从一张图反推了全身），
  * 其余项不该从人设凭空重画 —— 那会让「同一个人」的身体漂移。
  * 正确做法：**以已填项为锚**，身体取自锚点、只补该套的服装。
  *
@@ -245,6 +344,10 @@ function buildDeriveLayer(seeds, bodySource, scenes) {
   const sleepNote = scenes.includes('sleep')
     ? '\n5. **睡衣那一套要赤脚**：不要写任何鞋袜（shoes / slippers / socks 等），只交代 barefoot。'
     : '';
+  // 居家与睡衣相反：居家是穿拖鞋的（用户口径 2026-10-06）。不点明模型会写成 barefoot。
+  const homeNote = scenes.includes('home')
+    ? '\n6. **居家那一套要穿室内拖鞋**：脚上写 indoor slippers，**不要写成 barefoot**（赤脚只属睡衣那套），也不要写外出鞋。'
+    : '';
 
   return `【已确定的基准（最高优先级，必须原样沿用）】
 以下是这个角色**已经确定好**的外观，请把它们当作事实基准：
@@ -260,7 +363,7 @@ ${bodySource}
 2. **只设计 description**（这一套的服装），不要动身体。
 3. 服装要与已确定那套处在**同一套审美体系**里（相近的配色偏好、材质与气质），
    看得出是同一个人换了衣服，而不是换了一个人。
-4. 不要把已确定的那套衣服原样再写一遍 —— 新补的几套必须和它明显不同。${sleepNote}`;
+4. 不要把已确定的那套衣服原样再写一遍 —— 新补的几套必须和它明显不同。${sleepNote}${homeNote}`;
 }
 
 /**
@@ -273,13 +376,13 @@ ${bodySource}
  * 若把"带 body"当已填，调用方只要顺手给每一条都附上 body，目标就会被**全部剔空**，
  * 上层静默拿到空数组，表现为"点了反推没反应"。
  *
- * ② **裸体永远不在生成目标里** —— 它的描述是系统常量（`NUDE_DESCRIPTION`），
+ * ② **「全身」永远不在生成目标里** —— 它的描述是系统常量（`NUDE_DESCRIPTION`），
  *    让 LLM 去"设计"它纯属浪费、还可能被写坏；那一行由 `upsertSceneOutfits` 负责维护。
  *
  * 抽成独立函数是为了**能在不调 LLM 的前提下单测**这几条语义。
  *
  * @param {Array<{scene:string, body?:string, description?:string}>} seeds 已填好的分项
- * @param {string[]} [wanted] 调用方指定的目标；留空 = 全部还没填的（不含裸体）
+ * @param {string[]} [wanted] 调用方指定的目标；留空 = 全部还没填的（不含全身）
  */
 export function planOutfitTargets(seeds, wanted = []) {
   const rows = (Array.isArray(seeds) ? seeds : [])
@@ -287,7 +390,7 @@ export function planOutfitTargets(seeds, wanted = []) {
   const filled = new Set(
     rows.filter(s => String(s.description || '').trim()).map(s => s.scene),
   );
-  // 可生成的场景：**排除裸体** —— 它的描述是系统常量，不需要（也不该）让 LLM 生成
+  // 可生成的场景：**排除全身** —— 它的描述是系统常量，不需要（也不该）让 LLM 生成
   const generable = SCENE_KEYS.filter(s => s !== PRIVATE_SCENE);
   const want = (Array.isArray(wanted) ? wanted : []).filter(s => generable.includes(s));
   return (want.length ? want : generable).filter(s => !filled.has(s));
@@ -379,32 +482,44 @@ export async function generateSceneOutfits(character, opts = {}) {
     // 身体一律以真源为准（模型可能仍自作主张改写），保证五套完全一致
     const body = bodySource || String(hit?.body || '').trim().slice(0, 2000);
     let description = String(hit?.description || '').trim().slice(0, 1200);
-    // nude 那套必须显式声明裸体，否则生图模型会沿用基础外观里的默认服装
+    // nude 那套必须显式声明"不穿衣服"，否则生图模型会沿用基础外观里的默认服装
     if (scene === PRIVATE_SCENE && !/nude|no clothing|bare skin/i.test(description)) {
       description = FALLBACK_OUTFITS[PRIVATE_SCENE].description;
     }
-    // 非裸体套缺服装描述才兜底；裸体套允许 description 就是那串 nude 声明
+    // 非全身套缺服装描述才兜底；全身套允许 description 就是那串 nude 声明
     if (!description && scene !== PRIVATE_SCENE) {
-      out.push({ scene, ...FALLBACK_OUTFITS[scene], body });
+      // ⚠ 兜底分支也必须过脚部护栏（FALLBACK 里的 home/sleep 文案已合规，但统一走一遍
+      //   可防日后改文案时漏掉这个分支 —— 少一个出口就是一条静默绕过）
+      out.push({
+        scene,
+        name: FALLBACK_OUTFITS[scene].name,
+        description: enforceSceneFootwear(scene, FALLBACK_OUTFITS[scene].description),
+        body,
+      });
       continue;
     }
     out.push({
       scene,
       name: String(hit?.name || '').trim().slice(0, 20) || DEFAULT_NAME_BY_SCENE[scene],
-      description,
+      // ★ 出口层兜底脚部口径（居家＝拖鞋、睡衣＝赤脚）—— 提示词压不住模型惯性，见 enforceSceneFootwear
+      description: enforceSceneFootwear(scene, description),
       body,
     });
   }
   return out;
 }
 
-/** 模型漏给某场景时的兜底（尽量中性，避免画不出来） */
+/** 模型漏给某场景时的兜底（尽量中性，避免画不出来）。
+ *  ⚠ nude 的名字**必须**用 NUDE_NAME 常量、不能写字面量 —— 这是第二处硬编码套名，
+ *    写死会让这条兜底路径注入「裸体」而库里/日程里是「全身」，两边对不上。 */
 const FALLBACK_OUTFITS = {
-  nude: { name: '裸体', description: 'completely nude, wearing no clothing at all, bare skin visible' },
+  nude: { name: NUDE_NAME, description: 'completely nude, wearing no clothing at all, bare skin visible' },
   work: { name: '工作装', description: 'a simple practical work outfit, neat and comfortable, suitable for daily work' },
   casual: { name: '便装', description: 'casual everyday clothes, a simple top with matching bottoms, relaxed style' },
-  home: { name: '居家服', description: 'comfortable loose loungewear, soft fabric, relaxed fit for staying at home' },
-  sleep: { name: '睡衣', description: 'a simple sleepwear set, soft lightweight fabric, camisole and shorts' },
+  // 居家兜底带室内拖鞋（用户口径 2026-10-06：居家是穿拖鞋的，赤脚只属睡衣）
+  home: { name: '居家服', description: 'comfortable loose loungewear, soft fabric, relaxed fit for staying at home, indoor slippers' },
+  // 睡衣兜底明确赤脚（且不出现任何鞋类）
+  sleep: { name: '睡衣', description: 'a simple sleepwear set, soft lightweight fabric, camisole and shorts, barefoot' },
 };
 
 // ── 按日程决定此刻的服装 ──────────────────────────────────
@@ -461,7 +576,7 @@ function findCurrentIndex(activities, minutes) {
  *  4. 都没匹配上 → 回到该角色的第一套**日常**服装（兜底，避免没衣服穿）
  *
  * ⚠ **兜底绝不能落到 `nude`** —— 那是"只用于私密场景"的一套，
- *   若成了兜底，日程里没写 outfit 的角色会在大街上裸体。见 PRIVATE_SCENE。
+ *   若成了兜底，日程里没写 outfit 的角色会在大街上不穿衣服。见 PRIVATE_SCENE。
  *
  * @returns {{outfit: object, scene: string, source: string}|null}
  *          source 便于排查：'sleep' | 'schedule' | 'fallback'
@@ -471,14 +586,14 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
   if (!outfits.length) return null;
 
   const sleepOutfit = outfits.find(o => o.scene === 'sleep') || null;
-  // 「白天可兜底」的服装：排除睡眠、也排除私密裸体
+  // 「白天可兜底」的服装：排除睡眠、也排除私密全身
   const dayOutfits = outfits.filter(o => o.scene !== 'sleep' && o.scene !== PRIVATE_SCENE);
   const byName = new Map(outfits.map(o => [o.name, o]));
   const byId = new Map(outfits.map(o => [String(o.id), o]));
 
   const acts = todayActivities(characterId, date);
   if (!acts.length) {
-    // 没有日程：用第一套白天服装兜底（实在没有才退睡衣；**绝不用裸体**）
+    // 没有日程：用第一套白天服装兜底（实在没有才退睡衣；**绝不用"全身"**）
     const fallback = dayOutfits[0] || sleepOutfit;
     return fallback ? { outfit: fallback, scene: fallback.scene, source: 'fallback' } : null;
   }
@@ -525,7 +640,28 @@ export function asPersonaOutfits(sceneOutfit) {
  * 只有角色配了场景服装时才调用；没配的角色日程生成保持原样（零影响）。
  * @returns {string|null}
  */
-export function buildOutfitAnnotateLayer(characterId) {
+/**
+ * 由地图的 zone 标注生成「地点性质对照」块 —— **给答案，不给判断**。
+ *
+ * ⚠ 这一块是**数据**，不是让模型自己推断。
+ *   过去只给「自己住处 vs 其余」，于是「别人家」「酒店客房」这类边界场景
+ *   模型经常判错。现在若调用方带上了地图里标注过的 zone，就直接列出地名归属，
+ *   把判定从"推断"变成"查表"。
+ */
+function buildZoneHintBlock(opts = {}) {
+  const zr = Array.isArray(opts.residencePlaces) ? opts.residencePlaces.filter(Boolean) : [];
+  const za = Array.isArray(opts.activityPlaces) ? opts.activityPlaces.filter(Boolean) : [];
+  const zp = Array.isArray(opts.privatePlaces) ? opts.privatePlaces.filter(Boolean) : [];
+  if (!zr.length && !za.length && !zp.length) return '';
+  const L = ['', '', '**本次已由地图数据标注的地点性质（以下地名直接按此归类，不要再自行推断）**：'];
+  if (zr.length) L.push(`- 「住所内」：${zr.map(n => `「${n}」`).join('、')} —— 在这些地点内的时段按住所内处理（居家服 / 睡衣）。`);
+  if (za.length) L.push(`- 「住所外」：${za.map(n => `「${n}」`).join('、')} —— 在这些地点内的时段必须穿外出服。`);
+  if (zp.length) L.push(`- 「私密空间（洗浴/更衣）」：${zp.map(n => `「${n}」`).join('、')} —— 只有这些地方该用"全身"那一套。`);
+  L.push('- 不在上面的地名仍按本节的一般规则自行判断。');
+  return L.join('\n');
+}
+
+export function buildOutfitAnnotateLayer(characterId, opts = {}) {
   const outfits = listSceneOutfits(characterId);
   if (outfits.length < 2) return null;   // 只有一套就没什么可分配的
 
@@ -540,28 +676,30 @@ export function buildOutfitAnnotateLayer(characterId) {
   const workName = outfits.find(o => o.scene === 'work')?.name;
   const casualName = outfits.find(o => o.scene === 'casual')?.name;
   const homeName = outfits.find(o => o.scene === 'home')?.name;
-  // 「白天的服装」要排除睡眠与裸体 —— 把裸体列进这里等于教模型"白天可以光着"
+  // 「白天的服装」要排除睡眠与全身 —— 把它列进这里等于教模型"白天可以光着"
   const dayNames = outfits.filter(o => o.scene !== 'sleep' && o.scene !== PRIVATE_SCENE)
     .map(o => `"${o.name}"`).join(' / ') || '（无）';
 
   // 示例用角色真实拥有的服装名，避免出现"示例里写了 A、可选清单里没有 A"的自相矛盾
   const exOut = workName || casualName || outfits[0].name;
   const exHome = homeName || outfits[0].name;
+  // 地点性质对照（有地图 zone 数据时才非空）
+  const zoneHintBlock = buildZoneHintBlock(opts);
 
-  // 裸体那一段只在角色真的配了「裸体」时才讲 —— 没配的角色别被提示词带偏
+  // 全身那一段只在角色真的配了它时才讲 —— 没配的角色别被提示词带偏
   const nudeBlock = nudeName ? `
 
-### 二点五、「裸体」什么时候才用（严格）
+### 二点五、「${nudeName}」（不穿衣服）什么时候才用（严格）
 "${nudeName}"**只用于私密场景**，一天里通常只有 1~2 段：
 - **洗浴类**：洗澡、泡澡、冲凉、泡温泉。
 - **私密性场景**：在自己家里、酒店客房这类**私密空间**里做爱。
 
 判定要点：
 - **地点必须在私密空间**（自己家 / 酒店客房 / 浴室）。在**外面**（街上、酒馆、车站、广场、
-  公园、河岸）做爱**不标裸体** —— 那种场合角色仍穿着衣服或不整，标对应的外出服。
-- **睡眠时段绝不标裸体**（睡觉一律穿"${sleepName || '睡衣'}"，硬规则，哪怕裸睡）。
+  公园、河岸）做爱**不标"${nudeName}"** —— 那种场合角色仍穿着衣服或不整，标对应的外出服。
+- **睡眠时段绝不标"${nudeName}"**（睡觉一律穿"${sleepName || '睡衣'}"，硬规则，哪怕裸睡）。
 - 洗完澡接着过日常时，别忘了**从浴室出来那一段重新标上衣服**（居家或外出）。
-- 用不到就完全不出现这个值 —— 不要为了"丰富"而给角色安排裸体时段。` : '';
+- 用不到就完全不出现这个值 —— 不要为了"丰富"而给角色安排这段时段。` : '';
 
   return `## 着装标注（额外要求）
 这个角色在一天中会换衣服。可选服装如下：
@@ -574,7 +712,7 @@ ${list}
 ### 一、先给每个时段判断「在自己住所内 / 在住所外」
 - **住所内**＝这个角色自己的住处（卧室、浴室、客厅、厨房等）。
 - **住所外**＝其余一切地方：街道、商店、胡同、车站、广场、公园、河岸、酒馆、学校、公司，
-  以及**别人家**（哪怕在室内，也不是"在家"）。
+  以及**别人家**（哪怕在室内，也不是"在家"）。${zoneHintBlock}
 
 ### 二、以下 4 个时点**必须**标 outfit，一个都不能漏
 1. **入睡** → 标"${sleepName || '睡衣'}"（睡眠时段的 outfit 必须是它）。

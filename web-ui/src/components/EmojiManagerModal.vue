@@ -1278,7 +1278,7 @@ onBeforeUnmount(() => {
 }
 .emoji-char-avatar {
   width: 40px; height: 40px; border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; font-weight: 600;
@@ -1401,7 +1401,7 @@ onBeforeUnmount(() => {
 .emoji-batch-btn.paused {
   border-style: solid;
   border-color: var(--accent);
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
 }
 .emoji-batch-btn.paused:hover:not(.is-disabled) { background: var(--accent-hover); }
@@ -1431,7 +1431,7 @@ onBeforeUnmount(() => {
   user-select: none;
 }
 .emoji-pause-btn:hover {
-  background: var(--accent);
+  background: var(--accent-solid);
   border-color: var(--accent);
   color: var(--on-accent);
   box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.25);
@@ -1647,7 +1647,7 @@ onBeforeUnmount(() => {
   transform: translateY(0);
 }
 .emoji-card-delete:hover:not(.is-disabled) {
-  background: var(--accent);
+  background: var(--accent-solid);
   border-color: var(--accent);
   color: var(--on-accent);
 }

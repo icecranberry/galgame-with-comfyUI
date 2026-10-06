@@ -573,8 +573,15 @@ type="range" min="1" max="10" step="1"
 
         <div class="toggle-row theme-mode-row">
           <div>
-            <div class="tl">界面主题</div>
-            <div class="td">暖色、暗夜，或按时间自动切换</div>
+            <!-- 自动类模式（跟随系统 / 按时间）下把「当前实际生效哪个」写在标题旁，
+                 用户能立刻确认跟进生效了，不必靠肉眼比对整页配色。
+                 ★ 放标题行而不是说明行：本行是 `space-between` 两栏 flex，
+                   徽标若并进左侧说明文字会把左栏撑宽、把右侧 4 个模式 chip 挤到折行。 -->
+            <div class="tl">
+              界面主题
+              <span v-if="themeResolved" class="td-resolved">当前：{{ themeResolved }}</span>
+            </div>
+            <div class="td">暖色、暗夜，或跟随系统 / 按时间自动切换</div>
           </div>
           <div class="theme-mode-options" role="group" aria-label="界面主题">
             <linshe-button
@@ -664,6 +671,30 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
               @change="onMomentFreqChange"
             />
             <span class="freq-val">{{ momentFreqLabel }}</span>
+          </div>
+        </div>
+
+        <!-- 传媒自动抓帖：★ 2026-10-05 从「传媒页顶栏」搬到这里。
+             它是常驻配置（决定后台要不要在夜里自己抓内容），不是内容页的操作按钮。
+             模型也与朋友圈同一取向：只在夜间窗口（20:00→次日 02:00）内**错峰随机**，
+             白天不产新内容，且**每批只出 1 条**（不再一次涌进来三条）。 -->
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">传媒自动抓帖</div>
+            <div class="td">
+              {{ mediaAutoHint }}
+              <template v-if="mediaAutoStepIdx > 0 && mediaNextText">
+                · <b>{{ mediaInNightWindow ? mediaNextText : '白天不生成，' + mediaNextText }}</b>
+              </template>
+            </div>
+          </div>
+          <div class="freq-control">
+            <input
+              type="range" min="0" :max="Math.max(0, mediaAutoSteps.length - 1)" step="1"
+              v-model.number="mediaAutoStepIdx"
+              @change="onMediaAutoChange"
+            />
+            <span class="freq-val">{{ mediaAutoLabel }}</span>
           </div>
         </div>
 
@@ -1167,7 +1198,7 @@ base
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getMediaAuto, setMediaAuto } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1191,6 +1222,12 @@ import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
 const settingsStore = useSettingsStore()
 const themeModes = THEME_MODES
+// 自动类模式下显示实际生效的主题名（跟随系统 / 按时间才需要，固定模式不必啰嗦）
+const themeResolved = computed(() => {
+  const m = settingsStore.themeMode
+  if (m !== 'system' && m !== 'auto') return ''
+  return settingsStore.theme === 'dark' ? '暗夜' : '暖色'
+})
 const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -1355,6 +1392,92 @@ function momentStepFromValue(v) {
   return best
 }
 const backgroundConcurrency = ref(3)
+
+// ── 传媒自动抓帖（每晚几批）──
+// ★ 2026-10-05 从「传媒页顶栏」搬到「设置 → 功能开关」：
+//   它是**常驻配置**（决定后台要不要在夜里自己抓内容），不是内容页的操作按钮。
+// 语义也从「每 N 分钟一批（每批 3 条）」改成「**每晚几批 + 夜间窗口内错峰随机**、每批 1 条」——
+//   与上面的「朋友圈发帖频率」同一取向：白天不产内容，晚上散着来，一次不要太多。
+// 档位表以后端下发的 `MEDIA_AUTO_STEPS` 为准（前端口径唯一），这里只留一份兜底副本。
+const FALLBACK_MEDIA_AUTO_STEPS = [
+  { value: 0,  label: '关闭',      hint: '不自动抓帖，只有你在传媒页点「刷新」时才生成。' },
+  { value: 1,  label: '每晚 1 批', hint: '一晚上随机补 1 条，几乎无感。' },
+  { value: 2,  label: '每晚 2 批', hint: '一晚上随机补 2 条。' },
+  { value: 4,  label: '每晚 4 批', hint: '一晚上随机补 4 条，社区慢慢有动静。' },
+  { value: 8,  label: '每晚 8 批', hint: '一晚上随机补 8 条，比较活跃。' },
+  { value: 16, label: '每晚 16 批', hint: '一晚上随机补 16 条，LLM 消耗明显上升。' },
+]
+const mediaAutoSteps = ref([...FALLBACK_MEDIA_AUTO_STEPS])
+const mediaAutoStepIdx = ref(0)   // 默认「关闭」，与后端默认值一致
+const mediaAutoHint = computed(() => mediaAutoSteps.value[mediaAutoStepIdx.value]?.hint || '')
+const mediaAutoLabel = computed(() => mediaAutoSteps.value[mediaAutoStepIdx.value]?.label || '—')
+/** 后端记的「下次抓帖时刻」（只在开启时才有意义，用于文案提示） */
+const mediaNextAt = ref(null)
+const mediaInNightWindow = ref(false)
+const mediaNextText = computed(() => {
+  if (!mediaNextAt.value) return ''
+  const d = new Date(mediaNextAt.value)
+  if (Number.isNaN(d.getTime())) return ''
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `下次约 ${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`
+})
+/** 库里存的 perNight → 最接近的档位下标（老值/异常值都能对上） */
+function mediaAutoStepFromValue(v) {
+  if (v == null) return 0
+  let best = 0
+  let bestDiff = Infinity
+  mediaAutoSteps.value.forEach((s, i) => {
+    const d = Math.abs(s.value - v)
+    if (d < bestDiff) { bestDiff = d; best = i }
+  })
+  return best
+}
+
+async function loadMediaAuto() {
+  try {
+    const d = await getMediaAuto()
+    // ★ 只接受**新形状**的档位表（每项有数字 `value`）。
+    //   后端还没重启时，`/media/auto` 会返回旧形状（每项是 `minutes`）——
+    //   直接拿来渲染会得到一个所有档位 value 都是 undefined 的坏滑块。
+    //   这种情况**保留兜底档位表**（新形状），并提示需要重启后端才生效。
+    const steps = Array.isArray(d.steps) ? d.steps.filter(s => Number.isFinite(s?.value)) : []
+    if (steps.length) mediaAutoSteps.value = steps
+    else if (Array.isArray(d.steps) && d.steps.length) {
+      console.warn('[settings] /media/auto 返回的是旧形状（minutes），需要重启 agent-core 才生效')
+    }
+    const cur = Number(d.auto?.perNight ?? 0)
+    mediaAutoStepIdx.value = mediaAutoStepFromValue(Number.isFinite(cur) ? cur : 0)
+    mediaNextAt.value = d.auto?.nextAt || null
+    mediaInNightWindow.value = !!d.auto?.inNightWindow
+  } catch (err) {
+    // 后端未重启 / 接口不通：保留兜底档位表，滑块仍可用（点保存会给出明确报错）
+    console.warn('[settings] 读取传媒自动抓帖设置失败（用兜底档位表）:', err?.message || err)
+    mediaAutoStepIdx.value = 0
+  }
+}
+
+async function onMediaAutoChange() {
+  const step = mediaAutoSteps.value[mediaAutoStepIdx.value]
+  if (!step || !Number.isFinite(step.value)) return
+  const prev = mediaAutoStepIdx.value
+  try {
+    const d = await setMediaAuto(step.value)
+    const steps = Array.isArray(d.steps) ? d.steps.filter(s => Number.isFinite(s?.value)) : []
+    if (steps.length) mediaAutoSteps.value = steps
+    mediaNextAt.value = d.auto?.nextAt || null
+    mediaInNightWindow.value = !!d.auto?.inNightWindow
+    toastFn?.(
+      step.value === 0
+        ? '已关闭传媒自动抓帖（仍可在传媒页手动刷新）'
+        : `传媒自动抓帖已设为「${step.label}」，只在夜里错峰生成`,
+      'success',
+    )
+  } catch (err) {
+    mediaAutoStepIdx.value = prev
+    toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
+  }
+}
 
 // ── 防打扰模式 ──
 const disturbMode = ref(false)
@@ -1974,6 +2097,8 @@ onMounted(async () => {
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
     momentFreqStepIdx.value = momentStepFromValue(features.momentFreq)
+    // 传媒自动抓帖状态（档位表 + 排期）——单独一个接口，失败不阻断设置页其余部分
+    loadMediaAuto()
     backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
@@ -3423,7 +3548,7 @@ function resetTestPrompts() {
 .profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
 .profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
 .profile-tag.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
@@ -3621,11 +3746,50 @@ function resetTestPrompts() {
   opacity: 1;
 }
 
-/* ── 界面主题（功能开关内）── */
-.theme-mode-row { align-items: flex-start; }
-.theme-mode-options { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; padding-top: 2px; }
+/* ── 界面主题（功能开关内）──
+   ★ 这一行放的是 4 个模式 chip（暖色 / 暗夜 / 跟随系统 / 按时间），合计需 ~240px，
+     而设置页的卡片宽度随视口变化很大（实测卡片内宽 825 / 475 / 219 三档）。
+     所以用**放不下就整块折行**的策略，而不是让左右两栏互相硬挤：
+       · 左栏 `flex: 1 1 200px` + `min-width: min(200px,100%)` —— 保住可读宽度，
+         绝不被压成 0（曾用 `min-width:0`，窄卡片下标题被压成一列单字）。
+       · chip 区 `flex: 0 1 auto` —— 自身可收缩，靠 flex-wrap 内部换行，绝不溢出容器。
+       · 行本身 `flex-wrap: wrap` —— 两者排不下时 chip 区整体落到第二行。
+     真正手机宽度（≤767px）由下方移动端规则改成纵向堆叠。 */
+.theme-mode-row {
+  align-items: flex-start; flex-wrap: wrap;
+  /* 容器查询：按**本行自身宽度**判断要不要让 chip 独占一行。
+     用容器查询而不是视口媒体查询 —— 设置卡在宽视口下也可能是双列窄卡（实测 219px），
+     视口查询根本分辨不出来。 */
+  container-type: inline-size;
+}
+.theme-mode-row > div:first-child { flex: 1 1 200px; min-width: min(200px, 100%); }
+.theme-mode-options {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+  flex: 0 1 auto;
+  padding-top: 2px;
+}
+/* 窄卡片：chip 反正要折行，索性整块独占一行、左对齐起排，
+   比「3 个在右 + 1 个在右下」更整齐。 */
+@container (max-width: 380px) {
+  .theme-mode-options { flex-basis: 100%; justify-content: flex-start; }
+}
+/* 「当前：暗夜 / 暖色」—— 自动类模式下才出现，挂在标题旁，比标题轻一档。
+   nowrap 是**必需**的：窄栏里被压窄时不能让「当前：暗夜」断成两行。 */
+.td-resolved {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 7px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
 @media (max-width: 767px) {
   .theme-mode-row { flex-direction: column; align-items: stretch; gap: 10px; }
-  .theme-mode-options { justify-content: flex-start; }
+  .theme-mode-row > div:first-child { flex: none; min-width: 0; }
+  .theme-mode-options { justify-content: flex-start; flex: none; }
 }
 </style>

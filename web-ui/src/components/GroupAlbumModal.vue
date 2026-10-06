@@ -231,7 +231,7 @@ function onDeleted(url) {
   font-size: 11px;
   font-weight: 700;
   color: #fff;
-  background: var(--accent);
+  background: var(--accent-solid);
   border: 1.5px solid rgba(255, 255, 255, 0.85);
 }
 .ga-owner img {

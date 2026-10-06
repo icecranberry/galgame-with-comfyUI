@@ -19,7 +19,7 @@ import {
   generatePortalSection,
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
-import { config, updateMediaAutoMinutes } from '../config.js';
+import { config, updateMediaAutoPerNight } from '../config.js';
 
 const router = Router();
 
@@ -241,19 +241,34 @@ router.get('/status', (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// GET /api/media/auto — 当前自动抓帖频率
+// GET /api/media/auto — 当前自动抓帖设置（每晚几批 + 排期 + 可选档位）
 router.get('/auto', (req, res) => {
   try {
     res.json({ auto: getAutoState(), steps: MEDIA_AUTO_STEPS });
   } catch (err) { fail(res, err); }
 });
 
-// PUT /api/media/auto — 改自动抓帖频率 Body: { minutes }
-// minutes=0 关闭自动（只手动刷新）；其余夹在 5 分钟 ~ 12 小时
+/**
+ * PUT /api/media/auto — 改自动抓帖频率。Body: { perNight }
+ *
+ * ★ 2026-10-05 语义变更：由「固定间隔（分钟）」改成「**每晚几批**」。
+ *   自动抓帖只在夜间窗口（20:00→次日 02:00）内**错峰随机**执行，白天不产新内容。
+ *   `perNight = 0` 关闭（只手动刷新）。可选值 = `MEDIA_AUTO_STEPS` 里的档位。
+ *
+ * 兼容：仍接受旧的 `{ minutes }` 字段 —— 老前端/老脚本传进来时**不静默忽略**，
+ * 而是按"曾经开过就折成每晚 1 批、0 就是关"处理，避免"看起来设置成功了其实没生效"。
+ */
 router.put('/auto', (req, res) => {
   try {
-    const minutes = updateMediaAutoMinutes(req.body?.minutes);
-    res.json({ ok: true, auto: getAutoState(), minutes });
+    const raw = req.body?.perNight ?? req.body?.nights;
+    let value;
+    if (raw == null && req.body?.minutes != null) {
+      value = Number(req.body.minutes) > 0 ? 1 : 0;
+    } else {
+      value = updateMediaAutoPerNight(raw);
+    }
+    if (raw != null) updateMediaAutoPerNight(value);
+    res.json({ ok: true, auto: getAutoState(), perNight: Number(config.features.mediaAutoPerNight ?? 0) });
   } catch (err) { fail(res, err); }
 });
 

@@ -111,7 +111,11 @@ router.post('/maps/:id/places', (req, res) => {
 router.put('/places/:placeId', (req, res) => {
   try {
     const r = upsertPlace(Number(req.params.placeId), req.body || {});
-    if (!r.ok) return res.status(404).json({ error: r.error });
+    if (!r.ok) {
+      // 「不存在」是 404，其余（移动成环 / 上级不存在 / 校验不过）是 **400** ——
+      // 早先一律 404，前端会把「不能移动到自己的下级里」这种参数错误当成资源丢失。
+      return res.status(r.error === '地点不存在' ? 404 : 400).json({ error: r.error });
+    }
     res.json(r);
   } catch (err) { fail(res, err); }
 });

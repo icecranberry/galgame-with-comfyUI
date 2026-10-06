@@ -20,6 +20,16 @@
                   class="lib-gear"
                   role="button"
                   tabindex="0"
+                  title="日程台账（长期观测）"
+                  aria-label="日程台账"
+                  @click="openLedger"
+                  @keydown.enter.prevent="openLedger"
+                  @keydown.space.prevent="openLedger"
+                ><ledger-icon :size="18" /></div>
+                <div
+                  class="lib-gear"
+                  role="button"
+                  tabindex="0"
                   title="日程设置"
                   aria-label="日程设置"
                   @click="openSettings"
@@ -191,7 +201,71 @@
       </template>
     </linshe-modal>
 
-    <!-- ═══ 瞄一眼快照弹窗（胶卷边框风格） ═══ -->
+    <!-- ═══ 日程台账（长期观测：八股/稳定性/风险） ═══ -->
+    <linshe-modal v-model="ledgerOpen" title="日程台账">
+      <div class="ledger-body">
+        <p class="ledger-hint">
+          本台账把每个角色**已生成的全部日程**做量化对比，用来持续观察编排的合理性、稳定性与八股程度。
+          <b>复读率</b>＝不同日期日程间的 4 字片段重合度；<b>地点集中</b>＝Top5 地点占全部地点的比例；<b>道具</b>＝每篇高频道具名词数。
+        </p>
+
+        <div v-if="ledgerLoading" class="ledger-loading">正在统计…</div>
+        <div v-else-if="ledgerError" class="ledger-error">{{ ledgerError }}</div>
+        <template v-else>
+          <div class="ledger-summary">
+            <span>纳入角色 <b>{{ ledgerData.summary.withSchedules }}</b></span>
+            <span>风险项 <b>{{ ledgerData.summary.totalIssues }}</b></span>
+            <span>平均复读 <b>{{ ledgerData.summary.avgRepeat4gram }}%</b></span>
+            <span>平均道具词/篇 <b>{{ ledgerData.summary.avgPropPerRecord }}</b></span>
+          </div>
+
+          <div class="ledger-risk-wrap">
+            <span class="ledger-risk-label">风险分布：</span>
+            <span v-for="r in ledgerRisk" :key="r.code" class="ledger-risk-chip" :title="riskTitle(r.code)">
+              {{ riskLabel(r.code) }} ×{{ r.count }}
+            </span>
+          </div>
+
+          <div class="ledger-list">
+            <div
+              v-for="c in ledgerRows"
+              :key="c.character.id"
+              class="ledger-row"
+              :class="{ 'is-open': ledgerExpanded === c.character.id }"
+              @click="ledgerExpanded = ledgerExpanded === c.character.id ? 0 : c.character.id"
+            >
+              <div class="ledger-row-head">
+                <span class="ledger-name">{{ c.character.name }}</span>
+                <span v-if="c.cliche.measurable === false" class="ledger-metric is-na" title="只有一份日程快照，无可比对象（需积累多天才可量化）">复读 不可测</span>
+                <span v-else class="ledger-metric" :class="repeatClass(c.cliche.repeat4gram)">复读 {{ c.cliche.repeat4gram }}%</span>
+                <span class="ledger-metric">地点集中 {{ c.cliche.topPlaceShare }}%</span>
+                <span class="ledger-metric">道具 {{ c.cliche.propPerRecord }}/篇</span>
+                <span class="ledger-records">{{ c.records }} 份{{ c.hasTemplate ? '（含模板）' : '' }}</span>
+              </div>
+              <div v-if="ledgerExpanded === c.character.id" class="ledger-row-detail">
+                <div v-if="c.cliche.sampleTop?.length" class="ledger-detail-line">
+                  <b>高频地点：</b>{{ c.cliche.sampleTop.slice(0, 8).map(x => `${x.place}×${x.count}`).join('、') }}
+                </div>
+                <div v-if="c.stability" class="ledger-detail-line">
+                  <b>与模板相似度：</b>{{ c.stability.avgPlaceSimilarity }}%（样本 {{ c.stability.samples }} 份，越高＝越照抄模板）
+                </div>
+                <div v-if="c.riskByCode?.length" class="ledger-detail-line">
+                  <b>风险：</b>{{ c.riskByCode.map(r => `${riskLabel(r.code)}×${r.count}`).join('、') }}
+                </div>
+                <div v-if="c.latest?.issues?.length" class="ledger-detail-line ledger-issues">
+                  <b>最近一次问题：</b>
+                  <div v-for="(it, i) in c.latest.issues" :key="i" class="ledger-issue">{{ issueText(it) }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <linshe-button variant="ghost" :loading="ledgerLoading" @click="loadLedger">刷新</linshe-button>
+        <linshe-button variant="primary" @click="ledgerOpen = false">关闭</linshe-button>
+      </template>
+    </linshe-modal>
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="peekOpen" class="peek-overlay" @click="onPeekClose">
@@ -288,11 +362,11 @@
       </Transition>
     </Teleport>
 
-    <!-- ═══ 改变日程方向输入弹窗 ═══ -->
+    <!-- ═══ 改变日程方向输入弹窗（含地图联动 / NSFW 强度 / 睡眠类型）═══ -->
     <Teleport to="body">
       <Transition name="modal">
         <div v-if="showRegenerateModal" class="reset-overlay" @click.self="showRegenerateModal = false">
-          <div class="reset-dialog" @click.stop>
+          <div class="reset-dialog regen-dialog" @click.stop>
             <div class="reset-dialog-header">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="1,4 1,10 7,10" />
@@ -303,21 +377,133 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               </linshe-button>
             </div>
-            <div class="reset-dialog-desc">
-              <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则正常随机规划。</p>
-              <linshe-input
-                type="textarea"
-                v-model="regenerateDirection"
-                class="regenerate-textarea"
-                placeholder="例如：今天做一场深夜直播、去鸽川区摆摊接客、宅在宿舍打一天游戏、去幻月游戏押注..."
-                rows="3"
-                ref="regenerateTextareaRef"
-                @keydown.enter.exact="confirmRegenerateWithDirection"
-              />
+
+            <div class="regen-body">
+              <div class="reset-dialog-desc">
+                <p>定向规划{{ detailChar?.display_name || '...' }}今天的行程。留空则正常随机规划。</p>
+                <linshe-input
+                  type="textarea"
+                  v-model="regenerateDirection"
+                  class="regenerate-textarea"
+                  placeholder="例如：今天做一场深夜直播、去鸽川区摆摊接客、宅在宿舍打一天游戏、去幻月游戏押注..."
+                  rows="3"
+                  ref="regenerateTextareaRef"
+                  @keydown.enter.exact="confirmRegenerateWithDirection"
+                />
+              </div>
+
+              <!-- ── 主要活动区域（与地图联动）── -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">主要活动区域</span>
+                  <span class="regen-sec-note">{{ regenAreaHint }}</span>
+                  <button
+                    v-if="regenAreas.length" type="button" class="regen-link"
+                    @click="regenAreas = []"
+                  >清空</button>
+                </div>
+
+                <p v-if="regenOptionsLoading" class="regen-sec-empty">正在读取世界地图…</p>
+                <p v-else-if="!regenAreaGroups.length" class="regen-sec-empty">世界地图里还没有可用区域</p>
+                <div v-else class="regen-area-groups">
+                  <div v-for="g in regenAreaGroups" :key="g.region" class="regen-area-group">
+                    <span class="regen-area-region">{{ g.region }}</span>
+                    <div class="regen-chips">
+                      <button
+                        v-for="a in g.areas" :key="a.name" type="button"
+                        class="regen-chip" :class="{ on: regenAreas.includes(a.name) }"
+                        :title="a.places?.length ? `选中后可展开，逐个划掉不想去的地点（共 ${a.places.length} 个）` : '该区域暂时没有场景'"
+                        @click="toggleArea(a.name)"
+                      >{{ a.name }}</button>
+                      <!-- 展开按钮：只对已选中的区域显示（未选中的区域展示地点没有意义） -->
+                      <button
+                        v-for="a in g.areas.filter((x: any) => regenAreas.includes(x.name) && x.places?.length)"
+                        :key="`ex-${a.name}`" type="button"
+                        class="regen-chip regen-chip-sub"
+                        :class="{ on: regenExpandedArea === a.name }"
+                        :title="`展开「${a.name}」的地点清单，逐个划掉不想去的`"
+                        @click="toggleAreaExpand(a.name)"
+                      >{{ regenExpandedArea === a.name ? '收起' : '地点' }} <span class="regen-chip-n">{{ a.places.length }}</span></button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ── 地点级：展开后默认全勾，取消勾选 = 排除 ── -->
+                <div v-if="regenExpandedAreaObj" class="regen-places">
+                  <p class="regen-places-hint">
+                    <b>{{ regenExpandedAreaObj.name }}</b> 的地点（默认可去；<b>点一下划掉</b>不想让角色去的地方）
+                  </p>
+                  <div class="regen-place-list">
+                    <label
+                      v-for="p in (regenExpandedAreaObj.places || [])"
+                      :key="p.name" class="regen-place"
+                      :class="{ off: !placeChecked(regenExpandedAreaObj, p) }"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="placeChecked(regenExpandedAreaObj, p)"
+                        @change="togglePlace(regenExpandedAreaObj, p)"
+                      >
+                      <span class="regen-place-name">{{ p.name }}</span>
+                      <span v-if="p.category" class="regen-place-tag">{{ p.category }}</span>
+                      <!-- 受限地点：灰显 + 写明原因（不是"莫名其妙不见了"） -->
+                      <span v-if="p.reason" class="regen-place-reason">{{ p.reason }}</span>
+                      <span v-else-if="p.zone === 'residence'" class="regen-place-tag is-zone">居住</span>
+                    </label>
+                  </div>
+                </div>
+
+                <label v-if="regenAreas.length" class="regen-strict">
+                  <linshe-switch v-model="regenAreaStrict" size="sm" />
+                  <span>硬约束 —— 每个时段的地点都不得跑出所选区域</span>
+                </label>
+              </section>
+
+              <!-- ── NSFW 强度 ── -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">NSFW 强度</span>
+                  <span class="regen-sec-note">{{ regenNsfwBand.label }} · 性时段 {{ regenNsfwCount }}</span>
+                  <button
+                    v-if="regenNsfw !== regenDefaults.nsfwRatio" type="button" class="regen-link"
+                    @click="regenNsfw = regenDefaults.nsfwRatio"
+                  >复位</button>
+                </div>
+                <linshe-slider v-model="regenNsfw" :min="0" :max="100" :step="25" />
+                <div class="regen-scale">
+                  <span
+                    v-for="b in regenNsfwBands" :key="b.at"
+                    :class="{ on: regenNsfw === b.at }"
+                    @click="regenNsfw = b.at"
+                  >{{ b.label }}</span>
+                </div>
+                <!-- ★ 实质行为数量：这是用户口径里的核心指标（0 / 0~1 / 0~2 / 1~3 / 2~5），
+                     此前只显示了"性时段"数，用户看不到自己调的到底是哪一档，以为没生效。 -->
+                <p class="regen-sec-note regen-nsfw-detail">
+                  实质行为 <b>{{ regenExplicitText }}</b>
+                  <span class="regen-nsfw-sub">（房事／口交／自慰到出／多人——角色亲自参与的那种）</span>
+                </p>
+                <p class="regen-sec-note">{{ regenNsfwBand.hint }}</p>
+              </section>
+
+              <!-- ── 睡眠类型 ── -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">睡眠类型</span>
+                  <span class="regen-sec-note">不选「自动」即固定作息</span>
+                </div>
+                <linshe-select v-model="regenSleepType" :options="regenSleepOptions" size="sm" />
+              </section>
             </div>
+
             <div class="reset-dialog-actions">
-              <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmRegenerateRandom">随机日程规划</linshe-button>
-              <linshe-button class="reset-btn-confirm" variant="primary" @click="confirmRegenerateWithDirection" :disabled="!regenerateDirection.trim()">按此方向生成</linshe-button>
+              <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmRegenerateRandom">完全随机</linshe-button>
+              <linshe-button
+                class="reset-btn-confirm" variant="primary"
+                @click="confirmRegenerateWithDirection"
+                :disabled="!regenHasAnySetting"
+                :title="regenHasAnySetting ? '' : '请至少填写方向、选择区域、调整强度或指定睡眠类型'"
+              >按以上设定生成</linshe-button>
             </div>
           </div>
         </div>
@@ -434,11 +620,13 @@ import CharacterStatusCard from '../components/CharacterStatusCard.vue'
 import CharacterDetailDrawer from '../components/CharacterDetailDrawer.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import GearIcon from '../components/GearIcon.vue'
+import LedgerIcon from '../components/LedgerIcon.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 
 const store = useScheduleStore()
@@ -501,6 +689,85 @@ async function openSettings() {
     // 读取失败时沿用本地值打开弹窗
   }
   settingsOpen.value = true
+}
+
+// ═══ 日程台账（长期观测：八股/稳定性/风险）═══
+const ledgerOpen = ref(false)
+const ledgerLoading = ref(false)
+const ledgerError = ref('')
+const ledgerData: any = ref({ characters: [], summary: {} })
+const ledgerExpanded = ref(0)
+
+const ledgerRows = computed(() => {
+  const list = Array.isArray(ledgerData.value?.characters) ? [...ledgerData.value.characters] : []
+  return list.sort((a, b) => (b.cliche?.repeat4gram || 0) - (a.cliche?.repeat4gram || 0))
+})
+
+const ledgerRisk = computed(() => {
+  const m = new Map<string, number>()
+  for (const c of ledgerData.value?.characters || []) {
+    for (const r of c.riskByCode || []) m.set(r.code, (m.get(r.code) || 0) + (r.count || 0))
+  }
+  return [...m.entries()].map(([code, count]) => ({ code, count })).sort((a, b) => b.count - a.count)
+})
+
+const RISK_LABELS: Record<string, string> = {
+  'unreachable-place': '地点不可直达',
+  'forbidden-place': '进入受限地点',
+  'no-location': '缺少地点',
+  'thin-desc': '描述过薄',
+  'sleep-short': '睡眠不足',
+  'sleep-long': '睡眠过长',
+  'bad-time': '时间格式异常',
+  'gap': '时间轴空档',
+  'overlap': '时间轴重叠',
+  'gap-start': '首段未接续零点',
+  'teleport': '跨区无换场时间',
+}
+function riskLabel(code: string) { return RISK_LABELS[code] || code }
+function riskTitle(code: string) {
+  return ({
+    'unreachable-place': '日程里出现不在交通网上的孤立地点（如幻月秘庭、世界尽头酒馆）却未交代如何抵达',
+    'forbidden-place': '进入 restricted/private 的地点',
+    'no-location': '该条活动没有填写 location',
+    'thin-desc': '活动描述字数过少，信息量不足',
+    'sleep-short': '睡眠时长低于合理下限（<5h）',
+    'sleep-long': '睡眠时长偏长（>11h）',
+    'bad-time': '时间点不可解析',
+    'gap': '相邻活动之间有空档',
+    'overlap': '相邻活动时间重叠',
+    'gap-start': '当天首段活动不是从 00:00 开始',
+    'teleport': '跨区切换却没有预留通勤时间',
+  } as Record<string, string>)[code] || code
+}
+function issueText(it: any) {
+  const time = it?.startTime ? `[${it.startTime}] ` : ''
+  const act = it?.activity ? `（${it.activity}）` : ''
+  return `· ${time}${it?.detail || riskLabel(it?.code || '')}${act}`
+}
+function repeatClass(v: number) {
+  if (v >= 45) return 'is-high'
+  if (v >= 25) return 'is-mid'
+  return 'is-low'
+}
+
+async function loadLedger() {
+  ledgerLoading.value = true
+  ledgerError.value = ''
+  try {
+    const r = await api.getScheduleLedger()
+    ledgerData.value = r || { characters: [], summary: {} }
+  } catch (err: any) {
+    ledgerError.value = '读取失败：' + (err?.message || '未知错误')
+  } finally {
+    ledgerLoading.value = false
+  }
+}
+
+function openLedger() {
+  ledgerOpen.value = true
+  ledgerExpanded.value = 0
+  loadLedger()
 }
 
 async function onConfirmSettings() {
@@ -634,15 +901,225 @@ const resetDirection = ref('')
 const resetDirectionTextareaRef = ref<any>(null)
 const resetCancelling = ref(false)
 
-// ── 日程方向输入弹窗 ──
+// ── 日程方向输入弹窗（含地图联动 / NSFW 强度 / 睡眠类型）──
 const showRegenerateModal = ref(false)
 const regenerateDirection = ref('')
 const regenerateTextareaRef = ref<any>(null)
 
-watch(showRegenerateModal, (v) => {
-  if (v) {
-    nextTick(() => regenerateTextareaRef.value?.focus())
+/** 弹窗选项全部来自后端 GET /schedule/regenerate-options（档位只在后端定义一份，前端不抄） */
+const regenOptionsLoading = ref(false)
+const regenOptionsLoaded = ref(false)
+const regenAreaGroups = ref<Array<{ region: string; areas: any[] }>>([])
+const regenNsfwBands = ref<any[]>([])
+const regenSleepOptions = ref<any[]>([])
+const regenDefaults = ref<{ nsfwRatio: number; sleepType: string }>({ nsfwRatio: 50, sleepType: 'auto' })
+
+const regenAreas = ref<string[]>([])
+const regenAreaStrict = ref(false)
+const regenNsfw = ref(50)
+const regenSleepType = ref('auto')
+
+// ── 地点级排除（问题 1「排除通道」）──────────────────────
+//
+// 用户口径是「别 ROLL 到不合适的场景」，意图是**排除**而不是"指定要去哪"：
+// 从 70 个里划掉 3 个（一次点击）远比"从 70 个里挑 5 个"工作量小，
+// 而且不会把一天流水退化成打卡清单。
+//
+// 数据结构：{ [区域名]: [被取消勾选的地点名] }。默认全勾（含受限地点），
+// 受限地点的**默认勾选态由后端给定**（`defaultChecked`）—— 后端说不可达的，前端就默认不勾，
+// 用户想放行再手动勾回来（= 显式指令，后端在 forcedPlaces 里标注原因）。
+const regenExcludedByArea = ref<Record<string, string[]>>({})
+/** 展开到「地点级」的区域（只展开用户正在看的那个，不做全量 70 节点树） */
+const regenExpandedArea = ref('')
+const regenAccessLabel = ref<Record<string, string>>({})
+const regenZoneLabel = ref<Record<string, string>>({})
+
+const regenAreaHint = computed(() => {
+  if (!regenAreas.value.length) return '不限 —— 按角色原设自由活动'
+  const picked = regenAreaGroups.value.flatMap(g => g.areas).filter(a => regenAreas.value.includes(a.name))
+  const total = picked.reduce((s, a) => s + (a.places?.length || 0), 0)
+  const dropped = picked.reduce((s, a) => s + (regenExcludedByArea.value[a.name]?.length || 0), 0)
+  const restricted = picked.reduce((s, a) => s + (a.places || []).filter(p => !p.defaultChecked).length, 0)
+  const bits = [`已选 ${regenAreas.value.length} 个区域`]
+  if (total) bits.push(`候选 ${total - dropped} 个地点`)
+  if (restricted) bits.push(`其中 ${restricted} 个受限默认排除`)
+  if (dropped) bits.push(`已手动排除 ${dropped} 个`)
+  return bits.join(' · ')
+})
+
+const regenNsfwBand = computed(() => {
+  const bands = regenNsfwBands.value
+  if (!bands.length) return { label: '标准', sexCount: '3~5', hint: '' }
+  let best = bands[0]
+  let bestD = Infinity
+  for (const b of bands) {
+    const d = Math.abs(b.at - regenNsfw.value)
+    if (d < bestD) { bestD = d; best = b }
   }
+  return best
+})
+const regenNsfwCount = computed(() => {
+  const n = regenNsfwBand.value?.sexCount
+  return n === 0 ? '0 个' : `${n} 个`
+})
+/**
+ * 实质行为数量文案 —— **必须与后端 `scheduleGenerator.explicitTextOf` 同口径**：
+ * 有 `explicitFloor` 的档（50 标准档）只写下限「≥ 2」，其余写区间。
+ * ⚠ 不能一律写成区间：50 档若显示「0~2」，用户会以为下限是 0 而调低密度，
+ *   与 scheduleInst 里写死的「≥2 实质」冲突（后端也有同样的测试钉着）。
+ */
+const regenExplicitText = computed(() => {
+  const b = regenNsfwBand.value
+  if (!b) return '—'
+  if (Number.isFinite(b.explicitFloor)) return `≥ ${b.explicitFloor} 个`
+  const lo = Number(b.explicitMin) || 0
+  const hi = Number(b.explicitMax) || 0
+  return lo === hi ? `${lo} 个` : `${lo}~${hi} 个`
+})
+/** 有任何一项与默认不同，或填了方向 → 允许提交；全默认时禁用，避免「点了没反应」 */
+const regenHasAnySetting = computed(() =>
+  !!regenerateDirection.value.trim()
+  || regenAreas.value.length > 0
+  || regenNsfw.value !== regenDefaults.value.nsfwRatio
+  || regenSleepType.value !== regenDefaults.value.sleepType
+)
+
+/** 展开中的区域对象（模板里直接用，别在模板里内联 flatMap 长表达式） */
+const regenExpandedAreaObj = computed(() =>
+  regenAreaGroups.value.flatMap(g => g.areas).find(a => a.name === regenExpandedArea.value) || null
+)
+
+function toggleArea(name: string) {
+  const i = regenAreas.value.indexOf(name)
+  if (i >= 0) {
+    regenAreas.value = regenAreas.value.filter(x => x !== name)
+    if (regenExpandedArea.value === name) regenExpandedArea.value = ''
+  } else {
+    regenAreas.value = [...regenAreas.value, name]
+  }
+}
+
+/** 展开/收起某个区域的地点清单（下钻到地点级；一次只展开一个，避免 70 节点树） */
+function toggleAreaExpand(name: string) {
+  regenExpandedArea.value = regenExpandedArea.value === name ? '' : name
+}
+
+/** 某地点当前是否「会被注入」（默认勾选态由后端给，受限地点默认不勾） */
+function placeChecked(area: any, p: any) {
+  const ex = regenExcludedByArea.value[area.name] || []
+  if (ex.includes(p.name)) return false
+  return !!p.defaultChecked
+}
+
+/**
+ * 勾选/取消一个地点。
+ * - 默认勾选的（public）地点：取消 = **加入排除**（用户口径的"划掉不合适的那几个"）
+ * - 默认不勾的（受限）地点：勾上 = **显式放行**（后端会标注原因，见 readScheduleOptions）
+ */
+function togglePlace(area: any, p: any) {
+  const cur = placeChecked(area, p)
+  const ex = [...(regenExcludedByArea.value[area.name] || [])]
+  const want = !cur
+  // 「排除名单」的语义是"相对默认态取反"：默认勾的进名单=排除；
+  // 默认不勾的点回来时要**从名单里移除**（表示恢复默认的排除），
+  // 同时记入 pickedPlaces 让后端知道"是我显式放行的"。
+  if (p.defaultChecked) {
+    if (!want && !ex.includes(p.name)) ex.push(p.name)
+    else if (want) { const i = ex.indexOf(p.name); if (i >= 0) ex.splice(i, 1) }
+  } else {
+    // 受限地点：名单里的含义反过来 —— 出现 = 显式放行
+    if (want && !ex.includes(p.name)) ex.push(p.name)
+    else if (!want) { const i = ex.indexOf(p.name); if (i >= 0) ex.splice(i, 1) }
+  }
+  regenExcludedByArea.value = { ...regenExcludedByArea.value, [area.name]: ex }
+}
+
+/** 提交给后端的「排除名单」：只含**默认勾选但被取消**的地点（真正的排除） */
+function buildExcludedPayload() {
+  const out: Record<string, string[]> = {}
+  for (const g of regenAreaGroups.value) {
+    for (const a of g.areas) {
+      const ex = regenExcludedByArea.value[a.name] || []
+      const names = ex.filter(n => (a.places || []).some((p: any) => p.name === n && p.defaultChecked))
+      if (names.length) out[a.name] = names
+    }
+  }
+  return out
+}
+
+/** 提交给后端的「显式放行」清单：默认不勾但被用户勾上的受限地点 */
+function buildPickedPayload() {
+  const out: string[] = []
+  for (const g of regenAreaGroups.value) {
+    for (const a of g.areas) {
+      if (!regenAreas.value.includes(a.name)) continue
+      const ex = regenExcludedByArea.value[a.name] || []
+      for (const p of (a.places || [])) {
+        if (!p.defaultChecked && ex.includes(p.name)) out.push(p.name)
+      }
+    }
+  }
+  return out
+}
+
+/** 记住上次选择（按角色区分），下次打开弹窗自动恢复 */
+const REGEN_LS = 'linshe.schedule.regeneratePrefs'
+function loadRegenPrefs(charId: number) {
+  try {
+    const all = JSON.parse(localStorage.getItem(REGEN_LS) || '{}')
+    return all[String(charId)] || null
+  } catch { return null }
+}
+function saveRegenPrefs(charId: number) {
+  if (!charId) return
+  try {
+    const all = JSON.parse(localStorage.getItem(REGEN_LS) || '{}')
+    all[String(charId)] = {
+      areas: regenAreas.value,
+      areaStrict: regenAreaStrict.value,
+      nsfwRatio: regenNsfw.value,
+      sleepType: regenSleepType.value,
+    }
+    localStorage.setItem(REGEN_LS, JSON.stringify(all))
+  } catch { /* 隐私模式等，忽略 */ }
+}
+
+async function ensureRegenOptions() {
+  if (regenOptionsLoaded.value || regenOptionsLoading.value) return
+  regenOptionsLoading.value = true
+  try {
+    const d = await api.getRegenerateOptions()
+    regenDefaults.value = d.defaults || { nsfwRatio: 50, sleepType: 'auto' }
+    regenNsfwBands.value = Array.isArray(d.nsfwBands) ? d.nsfwBands : []
+    regenSleepOptions.value = Array.isArray(d.sleepTypes) ? d.sleepTypes.map((s: any) => ({ label: s.label, value: s.value })) : []
+    regenAccessLabel.value = d.accessLabel || {}
+    regenZoneLabel.value = d.zoneLabel || {}
+    const groups: Array<{ region: string; areas: any[] }> = []
+    for (const a of d.areas || []) {
+      let g = groups.find(x => x.region === a.region)
+      if (!g) { g = { region: a.region, areas: [] }; groups.push(g) }
+      g.areas.push(a)
+    }
+    regenAreaGroups.value = groups
+    regenOptionsLoaded.value = true
+  } catch (err) {
+    console.error('[schedule] 读取日程选项失败:', err)
+  } finally {
+    regenOptionsLoading.value = false
+  }
+}
+
+watch(showRegenerateModal, (v) => {
+  if (!v) return
+  const charId = detailChar.value?.id
+  // 每次打开先按记忆/默认复位，避免上次的角色设置串到这次
+  const prefs = charId ? loadRegenPrefs(charId) : null
+  regenAreas.value = prefs?.areas || []
+  regenAreaStrict.value = !!prefs?.areaStrict
+  regenNsfw.value = typeof prefs?.nsfwRatio === 'number' ? prefs.nsfwRatio : regenDefaults.value.nsfwRatio
+  regenSleepType.value = prefs?.sleepType || regenDefaults.value.sleepType
+  ensureRegenOptions()
+  nextTick(() => regenerateTextareaRef.value?.focus())
 })
 const resetProgressPct = computed(() => {
   const rt = store.resetTask
@@ -941,11 +1418,11 @@ async function onRegenerate() {
   regenerateDirection.value = ''
 }
 
-async function doRegenerate(direction) {
+async function doRegenerate(direction, options) {
   if (!detailChar.value || detailRegenerating.value) return
   detailRegenerating.value = true
   try {
-    try { await store.regenerateSchedule(detailChar.value.id, direction) } catch { return }
+    try { await store.regenerateSchedule(detailChar.value.id, direction, options) } catch { return }
     detailLoading.value = true
     try {
       const d = await store.fetchCharacterSchedule(detailChar.value.id)
@@ -957,12 +1434,31 @@ async function doRegenerate(direction) {
   }
 }
 
-async function confirmRegenerateWithDirection() {
-  if (!regenerateDirection.value.trim()) return
-  showRegenerateModal.value = false
-  doRegenerate(regenerateDirection.value.trim())
+function regenOptionsPayload() {
+  const excluded = buildExcludedPayload()
+  const picked = buildPickedPayload()
+  return {
+    areas: regenAreas.value,
+    areaStrict: regenAreaStrict.value,
+    nsfwRatio: regenNsfw.value,
+    sleepType: regenSleepType.value,
+    // 问题 1：地点级排除（划掉不合适的那几个）
+    ...(Object.keys(excluded).length ? { excludedByArea: excluded } : {}),
+    // 问题 2：用户显式放行的受限地点（后端会标注原因后放行）
+    ...(picked.length ? { pickedPlaces: picked } : {}),
+  }
 }
 
+async function confirmRegenerateWithDirection() {
+  if (!regenHasAnySetting.value) return
+  const charId = detailChar.value?.id
+  if (charId) saveRegenPrefs(charId)
+  const direction = regenerateDirection.value.trim()
+  showRegenerateModal.value = false
+  doRegenerate(direction || undefined, regenOptionsPayload())
+}
+
+/** 完全随机：不加方向、不带任何约束（与功能上线前的行为一致） */
 async function confirmRegenerateRandom() {
   showRegenerateModal.value = false
   doRegenerate()
@@ -1297,6 +1793,33 @@ function finishReset() {
 </script>
 
 <style scoped>
+/* ═══ 日程台账（长期观测）═══ */
+.ledger-body { display: flex; flex-direction: column; gap: 12px; min-width: min(680px, 84vw); max-height: 66vh; overflow-y: auto; }
+.ledger-hint { margin: 0; font-size: 12px; line-height: 1.7; color: var(--text-secondary, #8a8a8a); }
+.ledger-hint b { color: var(--text-primary, #333); }
+.ledger-loading, .ledger-error { padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-secondary, #8a8a8a); }
+.ledger-error { color: #c0392b; }
+.ledger-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; border-radius: 10px; background: var(--bg-secondary, rgba(0,0,0,0.03)); font-size: 12.5px; color: var(--text-secondary, #666); }
+.ledger-summary b { color: var(--text-primary, #222); font-variant-numeric: tabular-nums; }
+.ledger-risk-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.ledger-risk-label { color: var(--text-secondary, #888); }
+.ledger-risk-chip { padding: 2px 8px; border-radius: 999px; background: rgba(192,57,43,0.10); color: #c0392b; font-variant-numeric: tabular-nums; cursor: help; }
+.ledger-list { display: flex; flex-direction: column; gap: 6px; }
+.ledger-row { border-radius: 10px; border: 1px solid var(--border-color, rgba(0,0,0,0.08)); overflow: hidden; cursor: pointer; transition: background .15s; }
+.ledger-row:hover { background: var(--bg-secondary, rgba(0,0,0,0.02)); }
+.ledger-row.is-open { background: var(--bg-secondary, rgba(0,0,0,0.03)); }
+.ledger-row-head { display: flex; align-items: center; gap: 12px; padding: 9px 12px; font-size: 12.5px; }
+.ledger-name { flex: 0 0 88px; font-weight: 600; color: var(--text-primary, #222); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ledger-metric { color: var(--text-secondary, #777); font-variant-numeric: tabular-nums; }
+.ledger-metric.is-high { color: #c0392b; font-weight: 600; }
+.ledger-metric.is-mid { color: #d68910; }
+.ledger-metric.is-low { color: #27ae60; }
+.ledger-metric.is-na { color: var(--text-tertiary, #aaa); font-style: italic; cursor: help; }
+.ledger-records { margin-left: auto; color: var(--text-tertiary, #aaa); font-variant-numeric: tabular-nums; }
+.ledger-row-detail { padding: 4px 12px 12px 112px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary, #666); line-height: 1.7; }
+.ledger-detail-line b { color: var(--text-primary, #333); }
+.ledger-issues { display: flex; flex-direction: column; }
+.ledger-issue { padding-left: 4px; color: var(--text-tertiary, #999); }
 .schedule-view {
   flex: 1; display: flex; flex-direction: column;
   height: 100vh; height: 100dvh; overflow: hidden;
@@ -1671,7 +2194,7 @@ function finishReset() {
   position: relative;
 }
 .pk-char { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pk-char-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-solid); flex-shrink: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .pk-char-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .pk-char-avatar-text { color: var(--on-accent); font-size: 13px; font-weight: 600; line-height: 1; user-select: none; }
 .pk-char b { display: block; font-size: 0.85rem; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1822,6 +2345,177 @@ function finishReset() {
   padding: 10px 12px;
   box-sizing: border-box;
 }
+
+/* ── 编排日程弹窗（含地图联动 / NSFW / 睡眠类型）── */
+.regen-dialog {
+  max-width: 520px;
+  max-height: min(86vh, 760px);
+  display: flex;
+  flex-direction: column;
+}
+/* 内容区独立滚动：开关一多时不能把「生成」按钮顶出视口 */
+.regen-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+.regen-sec {
+  padding: 14px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.regen-sec + .regen-sec { border-top: 1px solid var(--glass-border); margin-top: 14px; }
+.regen-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.regen-sec-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-bright);
+}
+.regen-sec-note {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.regen-sec-empty {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.regen-link {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--accent);
+  text-decoration: underline;
+}
+.regen-link:hover { color: var(--accent-hover); }
+
+/* 区域选择 */
+.regen-area-groups { display: flex; flex-direction: column; gap: 10px; }
+.regen-area-group { display: flex; flex-direction: column; gap: 6px; }
+.regen-area-region {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: .04em;
+}
+.regen-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.regen-chip {
+  padding: 3px 11px;
+  border-radius: var(--radius-full);
+  border: var(--border);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out);
+}
+.regen-chip:hover { background: var(--glass-bg-hover); color: var(--text-primary); }
+.regen-chip.on {
+  background: color-mix(in srgb, var(--accent-3) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-3) 55%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.regen-strict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.regen-nsfw-detail { margin-top: 4px; }
+.regen-nsfw-detail b { color: var(--text-primary); }
+.regen-nsfw-sub { opacity: .75; }
+
+/* ── 地点级排除（下钻）── */
+.regen-chip-sub {
+  opacity: .78;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.regen-chip-n {
+  font-size: 10px;
+  opacity: .75;
+  font-variant-numeric: tabular-nums;
+}
+.regen-places {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: var(--border);
+  background: var(--surface-2, var(--glass-bg));
+}
+.regen-places-hint {
+  margin: 0 0 8px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.regen-place-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.regen-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 2px 8px 2px 4px;
+  border-radius: var(--radius-full);
+  border: var(--border);
+  background: var(--glass-bg);
+}
+.regen-place input { cursor: pointer; margin: 0; }
+/* 已划掉（= 排除）：整条压暗并划线，一眼看出"这个不会去" */
+.regen-place.off {
+  opacity: .48;
+}
+.regen-place.off .regen-place-name { text-decoration: line-through; }
+.regen-place-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-3) 12%, transparent);
+  color: var(--text-secondary);
+}
+.regen-place-tag.is-zone {
+  background: color-mix(in srgb, var(--accent-1, var(--accent-3)) 16%, transparent);
+}
+.regen-place-reason {
+  font-size: 10px;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+
+/* NSFW 刻度 */
+.regen-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.regen-scale span { cursor: pointer; padding: 2px 4px; border-radius: var(--radius-sm); }
+.regen-scale span:hover { color: var(--text-primary); }
+.regen-scale span.on { color: var(--accent); font-weight: 700; }
+
 .reset-dialog-actions {
   display: flex; gap: 12px; padding: 16px 20px;
   border-top: 1px solid var(--glass-border);

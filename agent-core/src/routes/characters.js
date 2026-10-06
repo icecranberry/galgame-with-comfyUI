@@ -18,12 +18,13 @@ import { charArtistOverride } from '../services/characterImageOpts.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { forceProactiveNow } from '../services/proactiveChatScheduler.js';
 import { saveBase64Image, deleteImageFileByUrl, imageUrlExists, buildImageUrl, getImageDir, getPendingDir } from '../services/imagePaths.js';
+import { buildForumAliasGenPrompt } from '../services/forumAlias.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '../services/scheduleManager.js';
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
-import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, setCharacterBody, OUTFIT_SCENES } from '../services/outfitScene.js';
+import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, setCharacterBody, OUTFIT_SCENES, sceneOutfitParam } from '../services/outfitScene.js';
 import { listSceneStandings, upsertSceneStanding, deleteSceneStanding, getSceneStandingRow, STANDING_SCENE_KEYS, STANDING_SCENE_LABELS } from '../services/characterStanding.js';
 import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
@@ -412,10 +413,14 @@ router.put('/:id/archived', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override, forum_alias, forum_persona } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
+  // 论坛马甲：与 display_name 不同，它**不参与**任何人称/人格裁剪 ——
+  // 马甲只是论坛里显示的名字，改它不该触发 short_prompt 重裁或日程重生成。
+  if (forum_alias !== undefined) { updates.push('forum_alias = ?'); params.push(String(forum_alias || '').trim() || null); }
+  if (forum_persona !== undefined) { updates.push('forum_persona = ?'); params.push(String(forum_persona || '').trim() || null); }
   // 纯外观修改判定：short_prompt（裁剪/LLM 浓缩）与日程模板人格都只取「## 你的外观」
   // 之前的文本，标题前正文与角色名都未变时，跳过重裁/重优化与日程重生成标记
   let appearanceOnlyEdit = false;
@@ -482,6 +487,45 @@ router.put('/:id', (req, res) => {
         console.warn(`[char] short_prompt LLM optimization failed for char ${charId}:`, err.message);
       }
     });
+  }
+});
+
+/**
+ * POST /api/characters/:id/forum-alias — 生成一个候选「论坛马甲」（网名 + 网络人设）
+ *
+ * 只生成并返回，**不落库** —— 用户可改可重掷，确认后由 PUT /:id 保存。
+ * 生成失败时返回 200 + `{ alias:'', error }` 而不是 500：
+ *   马甲是增强项，生成不出来也不该炸掉人设编辑；前端据此提示"可手动填写"。
+ *   （注意别静默返回空对象 —— 那和"点了没反应"一样难查，所以带上 error 让前端能区分。）
+ */
+router.post('/:id/forum-alias', async (req, res) => {
+  const db = getDb();
+  const charId = parseInt(req.params.id, 10);
+  const char = db.prepare('SELECT id, name, display_name, base_prompt, short_prompt FROM characters WHERE id = ?').get(charId);
+  if (!char) return res.status(404).json({ error: '角色不存在' });
+
+  const { system, user } = buildForumAliasGenPrompt(char);
+  try {
+    const raw = await chatSync([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], {
+      temperature: 1.0, max_tokens: 400,
+      response_format: { type: 'json_object' }, label: 'forum-alias',
+    });
+
+    const match = String(raw || '').match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('LLM 未返回 JSON');
+    const parsed = JSON.parse(match[0]);
+    // 网名去掉可能被模型带上的 @、引号与首尾空白
+    const alias = String(parsed?.alias || '').trim().replace(/^@+/, '').replace(/^["'「『]+|["'」』]+$/g, '').slice(0, 24);
+    if (!alias) throw new Error('模型没有给出网名');
+    // 人设是"一句话速写"，不给人设小传：截到 60 字（提示词要求 ≤40，留点余量）
+    const persona = String(parsed?.persona || '').trim().slice(0, 60);
+    res.json({ alias, persona });
+  } catch (err) {
+    console.warn(`[char] 论坛马甲生成失败 (id=${charId}):`, err.message);
+    res.json({ alias: '', persona: '', error: err.message });
   }
 });
 
@@ -1211,10 +1255,17 @@ ${imageRuleContent ? `【画面描述要求】\n${imageRuleContent}\n` : ''}
 - 白色背景（simple background）
 - 直接输出英文画面描述，不要任何格式包装或额外文字`;
 
+// 头像固定用**「常服」那一套**（= 身体 + 常服的衣服）作为角色的基准形象。
+// ★ 不能沿用默认的 'auto' 选装 —— 那会按**当前日程时刻**挑：半夜生成变睡衣、
+//   洗浴时段变全身、在家变居家，同一个角色不同时间生成的头像穿着都不一样。
+//   头像要的是稳定可辨认的形象，所以显式指定场景。
+//   （角色若没配常服，sceneOutfitParam 返回 null → 不注入，退回角色卡基础外观，与旧行为一致。）
+const avatarOutfits = sceneOutfitParam(char.id, 'work');
+
 const userMsg = `请根据以下角色设定，生成一张脸部特写头像的画面描述：
 
 ---角色设定---
-${buildCharacterPersona(char, { variant: 'full' })}
+${buildCharacterPersona(char, { variant: 'full', outfits: avatarOutfits })}
 ---
 
 要求：脸部特写，表情跟随人格但是表情幅度很小。`;
@@ -1377,12 +1428,8 @@ function buildStandingMessages(char, requirement, mode = 'normal', scene = null)
   let sceneLabel = '';
   if (scene) {
     sceneLabel = STANDING_SCENE_LABELS[scene] || scene;
-    const hit = listSceneOutfits(char.id).find(o => o.scene === scene);
-    // ⚠ 用 `hit.text`（身体 + 服装的组合文本），不要用裸 `description` ——
-    //   description 现在只存衣服，直接用会让立绘丢掉身体特征。
-    outfits = hit
-      ? { limited: [{ name: hit.name, description: hit.text || hit.description }], exclusive: null }
-      : null;
+    // 取该场景的 {limited:[...]} 参数；口径（尤其"用 hit.text 而非 description"）见 outfitScene.sceneOutfitParam
+    outfits = sceneOutfitParam(char.id, scene);
   }
   const personaText = buildCharacterPersona(char, { variant: 'short', person: char.display_name, outfits });
   msgs.push({
@@ -1948,8 +1995,9 @@ const EXPAND_APPEARANCE_SYSTEM_PROMPT = `你是角色服装外观描述助手。
 【输出格式（严格遵守）】
 - **中文叙述与英文 tag 混合**：先写中文的自然语言描述，末尾接一串逗号分隔的英文 tag（把同一套服装的可视要素转成 Danbooru 风格英文标签）。
 - 长度 60~150 字（含英文 tag）。
-- 示例：
-宽松的米白针织长衫，下摆印着歪斜的黑色小兔涂鸦，袖口和领口是红色包边。一条太长的黑白格纹居家裤松松垮垮，赤脚踩在木地板上。loose knit loungewear, off-white, rabbit doodle print, red piping, checkered pants, barefoot
+- 示例（注意两例的**脚部处理相反**，别搞混）：
+  · 睡衣例（赤脚）：宽松的米白针织长衫，下摆印着歪斜的黑色小兔涂鸦，袖口和领口是红色包边。一条太长的黑白格纹睡裤松松垮垮，赤脚踩在地板上。loose sleepwear, off-white, rabbit doodle print, red piping, checkered pajama pants, barefoot
+  · 居家例（拖鞋）：灰蓝色宽松针织开衫配同色系棉质长裤，裤脚挽起一截，领口松垮。脚上一双米色毛绒家居拖鞋。grey-blue loose knit cardigan, matching cotton lounge pants, rolled cuffs, relaxed neckline, beige fuzzy indoor slippers
 
 【硬性要求】
 - **第三人称、只描述服装与外观本身**：不要出现「她」「他」「用户」「我」，不要写身份、职业、性格、动作、姿势、表情。
@@ -1977,11 +2025,14 @@ router.post('/expand-appearance-draft', async (req, res) => {
 
   try {
     const model = config.llm.model || 'deepseek-chat';
-    // 睡衣是唯一「脚上不该有东西」的场景：人睡觉时鞋袜早脱了。
-    // 不点明的话模型会顺手写鞋或袜，生图就画出一双鞋 —— 实测 8 套睡衣里有 3 套完全没提脚部。
+    // 脚上的规则按场景分两种，别搞反：
+    //   · 睡衣 = 唯一的「脚上不该有东西」场景（人睡觉时鞋袜早脱了）→ 必须 barefoot、不出现任何鞋；
+    //   · 居家 = 现实中在家穿拖鞋 → 必须 indoor slippers，**不要写成 barefoot**。
+    // 此前只约束了睡衣，居家完全没提 → 模型随机发挥，实测 15 套里有 2 套写成赤脚、3 套自相矛盾。
     const sceneLine = sceneLabel
       ? `这套是「${sceneLabel}」（${sceneLabel === '工装' ? '上班/出勤的常态形象' : sceneLabel === '私服' ? '上街、休闲外出' : sceneLabel === '居家' ? '在家里休息、做家务' : sceneLabel === '睡衣' ? '睡觉时穿的贴身衣物，不要设计成能穿出门的服装' : '该场景'}），整体要符合这个场合。`
         + (sceneLabel === '睡衣' ? '\n★ 睡衣必须**赤脚**：description 里要明确写出 barefoot（赤足）。画面里不要出现任何鞋类或袜类物体（shoes / boots / slippers / heels / socks / stockings），连「床边摆着一双没穿的拖鞋」也不要写——生图模型看到 slippers 就会画出来。' : '')
+        + (sceneLabel === '居家' ? '\n★ 居家要**穿室内拖鞋**：description 里脚部必须写出 indoor slippers（家居拖鞋，与服装风格协调）。**不要写成 barefoot**（赤脚只属睡衣那套），也不要写外出鞋（sneakers / boots / heels / sandals）。' : '')
       : '';
     console.log(`[expand-appearance] expanding ${brief.length} chars for "${displayName}"${sceneLabel ? ` (scene: ${sceneLabel})` : ''}`);
 
@@ -2018,15 +2069,23 @@ router.post('/expand-appearance-draft', async (req, res) => {
 
 
 // POST /api/characters/refine-persona-draft — 润色人设（外观段原样保留）
-// Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise' }
-// → { ok, base_prompt（润色后整卡）, original_prompt, mode }
+// Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise', instruction }
+//   instruction = 用户**手写的自定义要求**（可空）。有它时以它为主，mode 只是可选预设。
+// → { ok, base_prompt（润色后整卡）, original_prompt, mode, instruction }
 router.post('/refine-persona-draft', async (req, res) => {
   const basePrompt = typeof req.body?.base_prompt === 'string' ? req.body.base_prompt : '';
   if (!basePrompt.trim()) {
     return res.status(400).json({ error: '人格提示词为空，没有可润色的内容' });
   }
   const displayName = String(req.body?.display_name || '').trim() || '角色';
-  const mode = PERSONA_REFINE_MODES[req.body?.mode] ? req.body.mode : 'polish';
+  // mode 允许为空（= 只用自定义指令）；给了非法值才回落到默认
+  const rawMode = req.body?.mode;
+  const mode = PERSONA_REFINE_MODES[rawMode] ? rawMode : (rawMode ? 'polish' : '');
+  const instruction = typeof req.body?.instruction === 'string'
+    ? req.body.instruction.trim().slice(0, 2000) : '';
+  if (!mode && !instruction) {
+    return res.status(400).json({ error: '请选择润色力度，或写下你的润色要求' });
+  }
 
   // 只把「外观段之前」的部分交给模型；外观段与它之后的内容原样拼回
   const { target, appearance, tail } = splitPersonaAroundAppearance(basePrompt);
@@ -2036,7 +2095,18 @@ router.post('/refine-persona-draft', async (req, res) => {
 
   try {
     const model = config.llm.model || 'deepseek-chat';
-    console.log(`[refine-persona] polishing "${displayName}" (mode: ${mode}, ${target.length} chars)`);
+    console.log(`[refine-persona] polishing "${displayName}" (mode: ${mode || '-'}, instruction: ${instruction.length} chars, ${target.length} chars)`);
+
+    /**
+     * 指令拼装：**用户的自由指令优先**。
+     * · 只给指令 → 完全按用户的走（mode 留空时不再塞预设，避免两者打架）；
+     * · 只给预设 → 行为与旧版逐字一致（保持兼容）；
+     * · 两者都给 → 预设作为"基调"，用户指令作为"具体抓手"，并明确指令优先。
+     */
+    const modeLine = mode ? `润色方式：${PERSONA_REFINE_MODES[mode]}` : '';
+    const instrBlock = instruction
+      ? `\n\n【用户的具体要求（**最高优先级**，与上面的润色方式冲突时以本条为准）】\n${instruction}`
+      : '';
 
     const llmResult = await chatSync([
       // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
@@ -2044,7 +2114,7 @@ router.post('/refine-persona-draft', async (req, res) => {
       { role: 'system', content: REFINE_PERSONA_SYSTEM_PROMPT },
       {
         role: 'user',
-        content: `角色名：${displayName}\n润色方式：${PERSONA_REFINE_MODES[mode]}\n\n以下是该角色的人设正文（已排除外观段），请输出润色结果：\n\n${target}`,
+        content: `角色名：${displayName}\n${modeLine}\n\n以下是该角色的人设正文（已排除外观段），请输出润色结果：\n\n${target}${instrBlock}`,
       },
     ], { model, temperature: 0.7, max_tokens: 4096, label: '人设润色' });
 
@@ -2064,7 +2134,7 @@ router.post('/refine-persona-draft', async (req, res) => {
     // 原顺序拼回：润色后的前段 + 原外观段 + 原外观之后的段落
     const newBasePrompt = [polished, appearance, tail].filter(Boolean).join('\n\n');
     console.log(`[refine-persona] done (${target.length} → ${polished.length} chars)`);
-    res.json({ ok: true, base_prompt: newBasePrompt, original_prompt: basePrompt, mode });
+    res.json({ ok: true, base_prompt: newBasePrompt, original_prompt: basePrompt, mode, instruction });
   } catch (err) {
     console.error('[refine-persona] error:', err.message);
     res.status(500).json({ error: '人设润色失败: ' + String(err?.message || err) });

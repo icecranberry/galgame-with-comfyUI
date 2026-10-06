@@ -417,7 +417,7 @@ watch(() => props.visible, (val) => {
   user-select: none;
 }
 .ded-act.push { width: auto; background: rgba(var(--accent-rgb), 0.1); color: var(--accent, var(--accent)); font-size: 16px; }
-.ded-act.push:hover { background: var(--accent); color: var(--on-accent); }
+.ded-act.push:hover { background: var(--accent-solid); color: var(--on-accent); }
 .ded-act.remove { background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); }
 .ded-act.remove:hover { background: var(--danger); color: var(--on-accent); }
 .ded-act.edit { background: var(--bg-tertiary); color: var(--text-secondary); font-size: 13px; }

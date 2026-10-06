@@ -19,6 +19,33 @@ import { reapplyActiveEventSchedule } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
 
 /**
+ * 该角色是否**禁止日程**。
+ *
+ * 归档 = 不参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 拉群 / 小镇奇遇），
+ * **日程也在其列** —— 归档角色不该再花 token 生成或重建日程。
+ *
+ * ── 为什么需要一个独立判据（而不是让调用方各自叠加 SQL 条件）──
+ * 拒绝改写 `schedule_enabled` 是有道理的（见 routes/characters.js 的归档注释：
+ * 不改四个细分开关，否则"归档再取消"会把用户单独设过的偏好一起抹掉）。
+ * 代价是各处选人要**自己**叠加 `archived = 0`，结果就漏了 —— 实测现状：
+ *   · replyQueueScheduler 的选人查询有过滤 ✅
+ *   · POST /schedule/regenerate-all 有过滤 ✅
+ *   · ★ 但 `snapshotTodaySchedule()` 与 `getTodayScheduleRaw()` 的 fallback **完全没有**
+ *     → 归档角色 51 个，`daily_schedules` 每天仍被重建 51 条（实测 10-05 仍有 51 条，
+ *       而它们的模板早在 10-03 就停止更新了 —— 说明"钱没再花在生成上，
+ *       但快照仍在被无意义地重建"，日程页/概览里也照旧列着它们）。
+ *
+ * 所以判据收口到这里一处，两个入口统一调用。查库失败时返回 false（不拦），
+ * 避免一次瞬时读失败就把角色永久挡在日程之外。
+ */
+export function isScheduleForbidden(characterId) {
+  try {
+    const row = getDb().prepare('SELECT COALESCE(archived, 0) AS archived FROM characters WHERE id = ?').get(characterId);
+    return !!row?.archived;
+  } catch { return false; }
+}
+
+/**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
  */
 function cropPersonaForSchedule(basePrompt) {
@@ -41,21 +68,340 @@ function normalizeTags(tags) {
   return [];
 }
 
+// ═══════════════════════════════════════════════════════════
+// 本次编排约束（日程弹窗的高级选项）
+//
+// 设计要点：**不修改 scheduleInst 那个跨角色共享的常量**（它吃 LLM 前缀缓存），
+// 而是在人格之后单独加一层 system 消息。所有选项都不传时本层不出现，
+// 行为与「没有这个功能」逐字节一致 —— 默认值即「不改行为」。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * NSFW 强度档（滑块 0/25/50/75/100 五档）。
+ * ⚠ `at:50` 必须与 scheduleInst 里写死的「性 3~5 个（≥2 实质）」保持一致 ——
+ *    这样「不动滑块」就等于保持现状，不会悄悄改变既有行为。
+ */
+export const NSFW_BANDS = [
+  { at: 0, label: '关闭', sexCount: 0, explicitMin: 0, explicitMax: 0, hint: '本次日程完全不含性内容' },
+  { at: 25, label: '少量', sexCount: '1~2', explicitMin: 0, explicitMax: 1, hint: '点到为止，不刻意安排' },
+  {
+    at: 50, label: '标准', sexCount: '3~5', explicitMin: 0, explicitMax: 2, hint: '与当前默认一致',
+    // ★ explicitFloor：**文案下限**，与上面「区间」是两回事，别合并。
+    //   用户口径的区间是 0~2，但 scheduleInst 里写死的是「性 3~5（其中 ≥2 个是实质行为）」。
+    //   若这里按区间拼成「0~2 个」，模型会以为下限是 0 而降低密度 ——「不动滑块」就改变了既有行为。
+    //   有 explicitFloor 时拼「≥ N」，没有时拼「min~max」。见 buildScheduleConstraintBlock。
+    explicitFloor: 2,
+  },
+  { at: 75, label: '密集', sexCount: '6~8', explicitMin: 1, explicitMax: 3, hint: '一天里以性为主线之一' },
+  { at: 100, label: '极高', sexCount: '9~11', explicitMin: 2, explicitMax: 5, hint: '几乎每个时段都带性' },
+];
+
+/**
+ * 档位的「实质行为」文案。**有 explicitFloor 就只写下限**（兼容 scheduleInst 原文），
+ * 否则写区间。抽成函数是为了让「档位只有一份定义」这条不破在文案拼装上。
+ */
+export function explicitTextOf(band) {
+  if (!band) return '';
+  if (Number.isFinite(band.explicitFloor)) return `≥ ${band.explicitFloor}`;
+  return `${band.explicitMin}~${band.explicitMax}`;
+}
+
+/** 睡眠类型（与 scheduleInst「睡眠时间」一节列出的档位逐字对应；改一边必须改另一边） */
+export const SLEEP_TYPES = {
+  auto: { label: '自动（按角色职业与作息设定）', text: '' },
+  early: { label: '早睡早起型', text: '晚上 9-11 点睡，早上 5-7 点起' },
+  standard: { label: '标准作息型', text: '晚上 11 点-次日 0 点睡，早上 7-8 点起' },
+  late: { label: '晚睡型', text: '次日 0-1 点睡，早上 8-9 点起' },
+  stay_up: { label: '熬夜型', text: '凌晨 1-4 点睡，上午 9-12 点起' },
+  overnight: { label: '通宵型', text: '凌晨 4 点-天亮才睡，中午 12 点-下午 2 点起' },
+  night_shift: { label: '昼伏夜出型', text: '早上 6-8 点睡，下午 14-16 点起' },
+  fragmented: { label: '碎片化睡眠', text: '分两段睡（如晚上睡 4h + 下午补觉 3h）' },
+  // ★ 不睡眠型：仅限设定上"不需要睡眠"的存在（智械/机器人/人造人/能量体）。
+  //   选它时全天无睡眠 block —— 校验逻辑据此放行（见 validateSchedule 的 noSleep 分支）。
+  none: { label: '不睡眠（智械/机器人等）', text: '全天不安排睡眠 block（replyDelay 全为 0）' },
+};
+
+/** 数值取最接近的一档；非数字返回 null（= 不指定，不加约束层） */
+export function nsfwBandOf(ratio) {
+  // ⚠ 必须显式挡掉 null / '' / 布尔：Number(null)===0、Number('')===0 会被误判成「关闭」档，
+  //   而「没传」和「用户明确选了关闭」是两回事。
+  if (ratio === null || ratio === undefined || ratio === '' || typeof ratio === 'boolean') return null;
+  const n = Number(ratio);
+  if (!Number.isFinite(n)) return null;
+  const clamped = Math.max(0, Math.min(100, n));
+  let best = NSFW_BANDS[0];
+  let bestD = Infinity;
+  for (const b of NSFW_BANDS) {
+    const d = Math.abs(b.at - clamped);
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  return best;
+}
+
+/**
+ * 把「本次选中地点的 zone」整理成着装层可用的三组地名。
+ *
+ * ⚠ 只取**用户本次勾选的区域**里的地点 —— 没勾区域时不带 zone（保持旧行为，
+ *   着装层仍按"居所内/外"自行判断），这是「默认不改行为」的落实点。
+ *
+ * 注意 `private_transit` 归到「私密空间」那一组，而不是住所内 —— 浴室被标成
+ * private_transit 时，模型会知道那是唯一该用"全身"的地方。
+ */
+function buildOutfitZoneHints(options = {}) {
+  const placeZones = options.placeZonesByArea || {};
+  const areas = Array.isArray(options.areas) ? options.areas : [];
+  if (!areas.length || !Object.keys(placeZones).length) return {};
+  const residencePlaces = [], activityPlaces = [], privatePlaces = [];
+  for (const a of areas) {
+    for (const p of (placeZones[a] || [])) {
+      if (!p?.name) continue;
+      // ⚠ 逐点映射，**不是整区一刀切** —— 同一子区里可能既有住宅又有商店
+      if (p.zone === 'residence') residencePlaces.push(p.name);
+      else if (p.zone === 'private_transit') privatePlaces.push(p.name);
+      else if (p.zone === 'activity') activityPlaces.push(p.name);
+    }
+  }
+  const dedupe = (arr) => [...new Set(arr)];
+  return {
+    residencePlaces: dedupe(residencePlaces),
+    activityPlaces: dedupe(activityPlaces),
+    privatePlaces: dedupe(privatePlaces),
+  };
+}
+
+/**
+ * 组装「本次编排约束」块。返回 null 表示本次没有任何约束（调用方不要 push 空消息）。
+ *
+ * @param {object} opts
+ * @param {string[]} [opts.areas]        主要活动区域（世界地图的「子区」名）
+ * @param {boolean} [opts.areaStrict]    区域是否硬约束
+ * @param {Record<string,string[]>} [opts.scenesByArea] 各区域下的真实地点名（已按准入过滤）
+ * @param {Record<string,Array<{name,note}>>} [opts.notesByArea]  需标注准入原因的地点
+ * @param {Record<string,Array<{name,prompt}>>} [opts.promptsByArea] 地点的场景提示词
+ * @param {Record<string,string[]>} [opts.zonesByArea]  各区域出现过的 zone（供服装联动）
+ * @param {Array<{name,area,note}>} [opts.forcedPlaces] 被用户显式放行的受限地点
+ * @param {Array<{name,area,note}>} [opts.accessNotes] 全图受限地点（准入禁令清单）
+ * @param {number} [opts.nsfwRatio]      0~100
+ * @param {string} [opts.sleepType]      SLEEP_TYPES 的键
+ * @returns {string|null}
+ */
+export function buildScheduleConstraintBlock(opts = {}) {
+  const parts = [];
+
+  // ── 准入禁令（问题 2 的完整落点）──
+  //
+  // 为什么单独成段、且**不依赖 areas**：用户不勾任何区域时，上文那段硬编码散文
+  // （`不写进去的地方：珠星总部、海原电视塔…`）仍然是唯一依据 —— 而它在地图数据
+  // 之外，改地图不会改它。这里把地图里**真实标注过**的受限地点列出来，就补上了
+  // 「改地图即生效」这条链路。
+  //
+  // ⚠ 只在真的有标注时才出现：地图里没标注过任何 access 时本段不生成，
+  //    于是 `buildScheduleConstraintBlock()` 仍然返回 null ——「默认不改行为」不破。
+  const accessNotes = Array.isArray(opts.accessNotes) ? opts.accessNotes.filter(n => n?.name) : [];
+  const areas0 = Array.isArray(opts.areas) ? opts.areas.map(a => String(a || '').trim()).filter(Boolean) : [];
+  if (accessNotes.length) {
+    const lines = accessNotes.map(n => `- ${n.area ? `${n.area} · ` : ''}${n.name}：**${n.note || '仅限特定对象'}**`);
+    parts.push(`【准入禁令（本次由地图数据给定，优先于上文那一段列举）】
+
+下列地点**不是随便能去的**，本次日程里出现它们时必须带上限制语，且不要安排不合身份的角色前往：
+${lines.join('\n')}
+
+若与上文「不写进去的地方」那一段有出入，**以本条为准**（地图数据是最新的）。`);
+  }
+
+  // ── 主要活动区域 ──
+  const areas = Array.isArray(opts.areas) ? opts.areas.map(a => String(a || '').trim()).filter(Boolean) : [];
+  if (areas.length) {
+    const lines = [];
+    lines.push(`角色的日常活动主要发生在：${areas.join('、')}。`);
+    const scenesByArea = opts.scenesByArea || {};
+    const masks = opts.promptsByArea || {};
+    const notes = opts.notesByArea || {};
+    const summaries = opts.summariesByArea || {};
+    const sceneLines = [];
+    let withSummary = 0;
+    for (const a of areas) {
+      const sc = Array.isArray(scenesByArea[a]) ? scenesByArea[a].filter(Boolean) : [];
+      if (!sc.length) continue;
+      // ★★ 地点简介 —— **八股现象的直接解药**（2026-10-05 用户实报）。
+      //
+      // 病根：过去这里只给一串**裸地名**（「鸽川大道、鸽川埠、鸽川河与滨河道…」），
+      // 模型不知道这些地方长什么样，于是只能反复使用 <world_setting> 里**唯一被具体描写过**
+      // 的那几个画面 —— "世界尽头酒馆总是黄金马桶"、"愿宝总要摆一下"就是这么来的：
+      // 它没有别的素材可写，只能复读手边仅有的那点具体细节。
+      //
+      // 地图里**本来就有这些简介**（实测 lv3 78 个里 65 个有，且写得不错）。
+      // 把它们一并给出，模型才有"可写的东西"，才不必复读。
+      const sumOf = new Map((summaries[a] || []).map(s => [s.name, s.summary]));
+      const promptOf = new Map((masks[a] || []).map(p => [p.name, p.prompt]));
+      const plain = sc.filter(n => !promptOf.has(n) && !sumOf.has(n));
+      if (plain.length) sceneLines.push(`- ${a}：${plain.join('、')}`);
+      for (const [n, sm] of sumOf) { withSummary++; sceneLines.push(`- ${a} · ${n}：${sm}`); }
+      for (const [n, pr] of promptOf) sceneLines.push(`- ${a} · ${n}（画面）：${pr}`);
+    }
+    if (sceneLines.length) {
+      lines.push(`这些区域里**真实存在**的地点（location 优先从这里面挑，不要自造地名）：\n${sceneLines.join('\n')}`);
+    }
+    // ★ 只在**真有简介**时才给「不要复读」这条：否则等于叫模型去用一份它没拿到的素材。
+    if (withSummary >= 2) {
+      lines.push(`上面对每个地点都给了它**自己**的样子。写 description 时请用**那个地点特有**的细节（店面、光线、陈设、声音、人物在该处的常态），
+**不要把同一个画面反复用在不同的地方**。同一个地点这一天里出现两次以上时，也请换个角度写它（早上与深夜的样子不同）。`);
+    }
+    // 需要标注准入的例外（time_window / 用户显式放行的受限地点）：
+    // 不给原因，模型只会当成普通地点随便安排。
+    const noteLines = [];
+    for (const a of areas) for (const n of (notes[a] || [])) noteLines.push(`- ${a} · ${n.name}：**${n.note}**`);
+    for (const f of (opts.forcedPlaces || [])) noteLines.push(`- ${f.area || ''} · ${f.name}：**${f.note}**（本次用户已显式指定，可用）`);
+    if (noteLines.length) {
+      lines.push(`下列地点有**准入限制**，安排到它们时必须在 location 里带上限制语，且不要给不合适的角色安排：\n${noteLines.join('\n')}`);
+    }
+    lines.push(opts.areaStrict
+      ? '**约束强度：硬约束。** 每个时段的 location 都必须落在上述区域内；通勤与过场也尽量在区域内部消化，不要跑出区域。'
+      : '**约束强度：软约束。** 以上述区域为主（占全天时段的 2/3 以上），允许因剧情需要短暂离开。');
+    lines.push('若上文「地点必须来自<world_setting>」一节里写有「不写进去的地方」，而本次指定的区域与其冲突，**以本条的本次指定为准**（用户显式指令优先）。');
+    parts.push(`【主要活动区域（本次限定）】\n${lines.join('\n')}`);
+  }
+
+  // ── 区域通勤基线（问题 6）──
+  //
+  // 上文 `scheduleInst` 里只有一句**形容词**（「地点要顺路，不要反复横跳」），
+  // 模型无法据此"计算" —— 它不知道二维市到鸽川区要走多久。这里把**后端算好的
+  // 通勤分钟**直接给它，"顺路"就从形容词变成了可核验的约束。
+  //
+  // ⚠ 只在调用方真的传了通勤边时才出现（没落库的图行为与上线前一致）。
+  const transit = Array.isArray(opts.transitEdges) ? opts.transitEdges.filter(e => e?.from_stop && e?.to_stop) : [];
+  if (transit.length) {
+    const byLine = new Map();
+    for (const e of transit) {
+      if (!byLine.has(e.line_id)) byLine.set(e.line_id, { name: e.line_name || '', segs: [] });
+      byLine.get(e.line_id).segs.push(e);
+    }
+    const tl = [];
+    for (const [lid, g] of byLine) {
+      const items = g.segs.map(e => `${e.from_stop} → ${e.to_stop} 约 ${e.minutes} 分`);
+      tl.push(`- ${lid} ${g.name}：${items.join(' · ')}`);
+    }
+    // 跨翼提示：两翼在图上不共享坐标系，只能查表 —— 让模型知道这条线的"长"是有依据的
+    const hasWater = transit.some(e => e.mode === 'water');
+    parts.push(`【区域通勤基线（后端已算好，不是实时路线；含进站/靠泊）】
+
+${tl.join('\n')}
+${hasWater ? '\n⚠ 水路线是**长线**：跨翼航段单程可占半天以上（例：海原站→渡画泉隐全程约 5.5 小时）。安排水路出行时，当天那一段前后不要再塞跨区活动。\n' : ''}
+你的日程里**两段相邻活动的换场时间不得明显小于上表数值**。上一段在 A、下一段在 B 时，
+中间要么留出通勤时间，要么**合并成同一段**（写成"在 A 收拾后前往 B"）。
+不要出现"刚在城东吃完早饭、下一段立刻出现在城西"这种瞬移。`);
+  }
+
+  // ── 居住 / 活动分区 → 服装联动（问题 5）──
+  //
+  // 关键：**不要让模型自己推断"这是不是在家"**。过去 `buildOutfitAnnotateLayer`
+  // 让模型按「住所内 / 住所外」自行判断，于是「别人家」「酒店」这类边界场景频繁判错。
+  // 现在直接把选中地点的 zone 给它：zone=residence 的地方就是"住所内"，等价判定。
+  const zones = opts.zonesByArea || {};
+  const zoneSet = new Set();
+  for (const a of areas) for (const z of (zones[a] || [])) zoneSet.add(z);
+  if (zoneSet.size) {
+    const zl = [];
+    if (zoneSet.has('residence')) {
+      zl.push('- 标记为**居住区域**的地点就是该角色的住所内部：在这些地点内的时段，着装按「住所内」处理（居家服 / 睡衣），不要标外出服。');
+    }
+    if (zoneSet.has('activity')) {
+      zl.push('- 标记为**主要活动区域**的地点一律属于「住所外」，在其中的时段该穿常服或私服。');
+    }
+    if (zoneSet.has('private_transit')) {
+      zl.push('- 标记为**私密空间（洗浴等）**的地点，是"全身"那一套唯一该出现的场合。');
+    }
+    if (zl.length) {
+      parts.push(`【地点性质与着装（本次由数据给定，不要自行推断）】\n${zl.join('\n')}`);
+    }
+  }
+
+  // ── 用户（人类侧）居住地 ──
+  //
+  // 为什么要给模型这条：日程里「回家」「去找你」「路过你家楼下」这类活动，
+  // 如果模型不知道用户住哪，只能含糊写"公寓"，与用户真实选择的落点对不上。
+  // ⚠ **用户没设就不出现**（空串 = 未指定，不猜、不编）。
+  const userHome = String(opts.userHome || '').trim();
+  if (userHome) {
+    const userName = String(opts.userName || '用户').trim() || '用户';
+    parts.push(`【${userName} 的住处（人类侧，地图里已指定）】
+
+${userName} 住在「${userHome}」。日程里凡是涉及"回家 / 顺路经过 / 去找 Ta"的时段，
+地点请用这个真实落点（可写成「${userHome}」或更具体的门牌/房间），**不要含糊写成"公寓"**。
+注意这是**${userName} 的**住处，不是角色自己的家 —— 角色自己的住处另有其地。`);
+  }
+
+  // ── NSFW 强度 ──
+  const band = nsfwBandOf(opts.nsfwRatio);
+  if (band) {
+    if (band.sexCount === 0) {
+      parts.push(`【NSFW 强度：关闭（本次覆盖上文所有相关的下限要求）】
+
+本次**不安排任何性时段**。上文中以下要求本次一律不适用，不得再执行：
+- 「### 3. 一天里的性活动（每个角色都要有，总数 3~6 个）」
+- 时段预算里的「性 3~5（其中 ≥2 个是实质行为）」
+- 交付前自检第 1 条「性时段 ≥ 3 个，其中实质行为 ≥ 2 个」（本次按「性时段 = 0」判定为通过）
+
+原本安排性时段的那些时段（洗澡、睡前、起床后、午休、换衣服等）改写成**普通的日常活动**；其余骨架（睡眠 / 进食 / 工作 / 通勤 / 社交娱乐）与「人类日常骨架」要求全部照常执行。`);
+    } else {
+      parts.push(`【NSFW 强度：${band.label}（本次覆盖上文的数量要求）】
+
+本次性时段数量以本条为准：**${band.sexCount} 个**，其中角色亲自参与的**实质行为（性交／口交／自慰到出／多人）${explicitTextOf(band)} 个**。
+
+上文中「总数 3~6 个」「性 3~5」以及自检第 1 条「性时段 ≥ 3 个」的数量要求，本次按本条的数值执行；**除数量之外的一切要求**（性活动必须能从角色处境推出来、严禁照抄 <world_setting> 例句、禁止「别人在做她只是看着」、用词口径）**全部照常适用**。`);
+    }
+  }
+
+  // ── 睡眠类型 ──
+  const sleep = SLEEP_TYPES[opts.sleepType];
+  if (sleep && sleep.text) {
+    parts.push(`【睡眠类型（本次固定）】
+
+本次就寝与起床时间固定为**${sleep.label}**：${sleep.text}。
+上文的「睡眠时间个性化」一节本次不适用（不要按角色气质另外挑一种）；但**睡眠 block 的 replyDelay 仍必须是 -1**，睡眠总时长仍要在 5~9 小时之间。`);
+  }
+
+  if (!parts.length) return null;
+  return `<schedule_constraints priority="high">
+本次日程编排的**附加约束**。凡与上文冲突处，以本块为准；本块没提到的部分，上文要求全部照常执行。
+
+${parts.join('\n\n')}
+</schedule_constraints>`;
+}
+
 /**
  * 为角色生成日程模板
  * @param {object} character - { id, display_name, base_prompt }
+ * @param {string} [direction] - 用户指定的日程方向
+ * @param {object} [options] - 本次编排约束（见 buildScheduleConstraintBlock）
  * @returns {Promise<{schedule_json: string, version: number}>}
  */
-// 同一角色的自动刷新、手动刷新与补发任务共享正在执行的生成。
+// ⚠ 2026-10-08 合并 v3.7.0：上游加了「同角色并发去重」（自动刷新/手动刷新/补发共享同一个生成），
+//    本地补丁加了第 3 个参数 `options`（日程编排约束层，routes/schedule.js:976 会传）。
+//    两者都要 → 去重包装保留，并把 options 透传给实现函数。
+//    去重键包含 options 摘要：不同约束的生成**不能**互相复用（否则用户选了活动区域却拿到旧结果）。
 const pendingSchedules = new Map();
-export function generateSchedule(character, direction) {
-  if (pendingSchedules.has(character.id)) return pendingSchedules.get(character.id);
-  const pending = generateScheduleImpl(character, direction).finally(() => pendingSchedules.delete(character.id));
-  pendingSchedules.set(character.id, pending);
+export function generateSchedule(character, direction, options = {}) {
+  const key = `${character.id}::${JSON.stringify(options)}`;
+  if (pendingSchedules.has(key)) return pendingSchedules.get(key);
+  const pending = generateScheduleImpl(character, direction, options)
+    .finally(() => pendingSchedules.delete(key));
+  pendingSchedules.set(key, pending);
   return pending;
 }
-async function generateScheduleImpl(character, direction) {
+async function generateScheduleImpl(character, direction, options = {}) {
   const db = getDb();
+  /*
+   * ★ 归档角色禁止日程（防空烧 token）。
+   * 各调度器的选人查询虽然都叠了 `archived = 0`，但：
+   *   · 新建/导入角色的路径（routes/characters.js 里两处）是**直接**调的，没有过滤；
+   *   · 手动重生成接口也是直接调的。
+   * 在这些地方拦一道，比要求每个调用方都记得加条件可靠。
+   * 返回 `{ skipped: true }` 而不是抛错 —— 调用方（如 regenerate-all 的循环）不该因此报错。
+   */
+  if (character?.id && isScheduleForbidden(character.id)) {
+    return { schedule_json: null, version: 0, skipped: true, reason: 'archived' };
+  }
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
 
@@ -181,22 +527,27 @@ async function generateScheduleImpl(character, direction) {
 ## 睡眠时间个性化（极其重要）
 **角色之间睡眠时间必须高度多样化，不要让所有角色都遵循朝九晚五的社畜作息。** 根据角色个性大胆决定就寝和起床时间，以下为参考类型：
 
-- 夜猫子·轻度→凌晨 1-2 点睡，上午 9-10 点起
-- 夜猫子·重度→凌晨 3-4 点睡，中午 11-12 点起（游戏宅、深夜主播、同人画师、程序员、自由职业者等）
-- 夜猫子·通宵修仙→凌晨 5-6 点睡，下午 1-2 点起（重度网瘾、作息完全崩坏的 NEET、深夜工作的特殊职业）
-- 早睡早起型→晚上 9-10 点睡，早上 5-6 点起（运动员、晨练爱好者、老派作息）
-- 标准社畜型→晚上 11-12 点睡，早上 7 点起
-- NEET/家里蹲→凌晨 2-4 点睡，中午 11-13 点起
-- 艺人/夜场型→凌晨 1-3 点睡，上午 10-11 点起（偶像、乐队、酒吧驻唱等）
+- 早睡早起型→晚上 9-11 点睡，早上 5-7 点起（运动员、晨练爱好者、老派作息、有早班的职业）
+- 标准作息型→晚上 11 点-次日 0 点睡，早上 7-8 点起（**绝大多数普通人的默认档**：上班族、学生、有固定作息的职业）
+- 晚睡型→次日 0-1 点睡，早上 8-9 点起（轻度熬夜，仍属正常范围）
+- 熬夜型→凌晨 1-4 点睡，上午 9-12 点起（游戏宅、深夜主播、同人画师、自由职业者等）
+- 通宵型→凌晨 4 点-天亮才睡，中午 12 点-下午 2 点起（重度网瘾、作息完全崩坏的 NEET、深夜工作）
 - 昼伏夜出型→早上 6-8 点睡，下午 14-16 点起（夜班工人、深夜保安、地下社会等）
 - 碎片化睡眠→分两段睡（如晚上睡 4h + 下午补觉 3h），适合作息极度不规律的创作者或病人
+- **不睡眠型→全天无睡眠 block**（replyDelay 全为 0）。**仅限"设定上不需要睡眠"的存在**：
+  智械 / 机器人 / 人造人 / 纯能量体 / 明确写了"无需睡眠"的角色。**人类角色一律不适用**。
 
 睡眠 block 的 replyDelay 必须是 -1（暂停一切回复）。睡眠总时长通常在 5-9 小时之间（极端夜猫子可能只睡 5-6 小时）。
 
 **关键原则**：
-1. 角色的人格和职业直接决定睡眠类型——性格懒散的 NEET 不可能是早睡早起型，深夜主播不可能是社畜型
-2. 如果角色是自由职业、创作者、ACG 宅、夜生活相关职业，80% 以上的概率是夜猫子型
-3. 睡眠时间要贴合角色的"角色设定气質"——比如病娇角色可能作息极度不规律，军武角色可能作息严格
+1. 角色的职业与作息设定决定睡眠档，**但默认档是「标准作息型」**（晚上 11 点-次日 0 点）。
+   ⚠ 不要因为"这个角色有点个性"就顺手给夜猫子档 —— **只有设定上明确偏夜行**（夜班/深夜职业、
+   明确写了作息颠倒、重度网瘾）才用熬夜或更晚的档。
+2. **人类角色的入睡时间落在 0 点之后的，应当是少数**。绝大多数人类角色在 21:00~24:00 之间入睡；
+   凌晨 1 点后入睡只给"确有夜间活动理由"的角色。**不许把全库角色都排成凌晨 2 点睡。**
+3. 睡眠时间要贴合角色的作息设定——病娇角色可能作息不规律，军武角色可能作息严格。
+4. **不睡眠型必须由设定支撑**：只有角色卡/世界观明确说"不需要睡眠"才用（如智械、机器人）。
+   人类角色漏掉睡眠 block 会被校验拦下。
 
 ## replyDelay 规则（非常重要）
 - 正常活动都是 replyDelay=0（即时回复）
@@ -266,8 +617,11 @@ ${direction}**
   // msgs[3.5]: 着装标注（仅当角色配了 ≥2 套场景服装时才有；没配则完全不加，原提示词不变）
   //   放在这里而非 scheduleInst：scheduleInst 是跨角色共享常量（吃 LLM 前缀缓存），
   //   服装列表每个角色都不同，塞进去会让缓存全部失效。
-  const outfitLayer = buildOutfitAnnotateLayer(character.id);
+  const outfitLayer = buildOutfitAnnotateLayer(character.id, buildOutfitZoneHints(options));
   if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
+  // msgs[3.7]: 本次编排约束（区域 / NSFW 强度 / 睡眠类型）——不传选项时整层不出现
+  const constraintLayer = buildScheduleConstraintBlock(options);
+  if (constraintLayer) msgs.push({ role: 'system', content: constraintLayer });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
     ? `请遵循<world_setting>来安排日程，角色设定如果和<world_setting>有冲突，则以<world_setting>最高优先级，角色设定会因为<world_setting>改变,日程内容必须体现<world_setting>的设定。
@@ -336,7 +690,7 @@ ${directionMsg}`;
 /**
  * 解析并校验 LLM 输出的日程 JSON
  */
-export function parseAndValidateSchedule(raw, displayName) {
+export function parseAndValidateSchedule(raw, displayName, opts = {}) {
   let activities;
 
   // 优先尝试完整 JSON 解析（兼容 json_object 模式的 {"activities":[...]} 和旧格式 [...]）
@@ -388,10 +742,16 @@ export function parseAndValidateSchedule(raw, displayName) {
   }
 
   // 校验必有一个 sleeping block（replyDelay=-1）且覆盖 ≥5 小时
+  // ⚠ 例外：**「不睡眠型」角色**（智械/机器人/人造人/能量体）全天可以没有睡眠 block。
+  //   只有显式 `opts.noSleep === true`（或 sleepType==='none'）才放行 —— 默认仍要求睡眠，
+  //   避免"人类角色漏了睡眠"被静默放过。
+  const noSleep = opts.noSleep === true || opts.sleepType === 'none';
   const sleepingBlocks = activities.filter(a => a.replyDelay === -1);
   if (sleepingBlocks.length === 0) {
-    console.warn(`[scheduleGen] No sleeping block found for ${displayName}`);
-    return null;
+    if (!noSleep) {
+      console.warn(`[scheduleGen] No sleeping block found for ${displayName}`);
+      return null;
+    }
   }
 
   // 计算最长睡眠时长
@@ -401,7 +761,7 @@ export function parseAndValidateSchedule(raw, displayName) {
     const adjusted = duration < 0 ? duration + 24 * 60 : duration;
     if (adjusted > maxSleepDuration) maxSleepDuration = adjusted;
   }
-  if (maxSleepDuration < 15) {
+  if (maxSleepDuration < 15 && !noSleep) {
     console.warn(`[scheduleGen] Sleep too short (${maxSleepDuration}min) for ${displayName}, need ≥15min`);
     return null;
   }
@@ -617,6 +977,8 @@ export function assignNextRefreshTime(characterId) {
  */
 export function snapshotTodaySchedule(characterId) {
   const db = getDb();
+  // ★ 归档角色禁止日程：不重建快照（见 isScheduleForbidden 的说明）
+  if (isScheduleForbidden(characterId)) return null;
   const template = db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id = ?').get(characterId);
   if (!template) return null;
 

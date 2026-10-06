@@ -24,6 +24,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
+// 媒体删除墓碑要落库（补种逻辑据此跳过"用户删过的"媒体）
+import { getSetting, setSetting } from '../db/settings.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { saveBase64Image, deleteImageFileByUrl, getImageDir } from './imagePaths.js';
@@ -34,6 +36,14 @@ import { config } from '../config.js';
 import { extractFirstJson, repairJson } from './eventGenerator.js';
 import { buildCharacterPersona } from './characterPersona.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
+import { buildAliasRuleBlock, collectUsedAliases, disambiguateAliases } from './forumAlias.js';
+import { SEX_POSITIONS } from '../data/sexPositions.js';
+// 规则34：图库文本（作品名/备注/署名）里不得出现角色名 —— 出口统一清洗
+import { stripCharacterNames } from '../utils/characterNameGuard.js';
+// 规则34：环境层（场景/光影/视角/景别/表情/状态/道具）—— 7 维随机 + 耦合约束
+import { pickGalleryEnvelope } from './galleryEnvelope.js';
+import { listSceneOutfits } from './outfitScene.js';
+import { deriveBuild } from './characterBuild.js';
 
 /** 一次刷新默认抽多少条 */
 export const DEFAULT_BATCH_SIZE = 6;
@@ -46,30 +56,133 @@ export const MAX_BATCH_SIZE = 12;
  * 连续拖动既拖不准也说不清（要拖到 37 分钟还是 40 分钟？）；
  * 档位还能顺手把生成成本写在标签上，用户一眼知道自己在选什么。
  */
-export const MEDIA_AUTO_STEPS = [
-  { minutes: 0,   label: '关闭',    hint: '不自动抓帖，只有你点「刷新」时才生成。' },
-  { minutes: 720, label: '12 小时', hint: '一天两批，几乎不占算力。' },
-  { minutes: 240, label: '4 小时',  hint: '一天六批，内容慢慢积累。' },
-  { minutes: 120, label: '2 小时',  hint: '一天十几批。' },
-  { minutes: 60,  label: '1 小时',  hint: '每小时一批（每批 3 条）。' },
-  { minutes: 20,  label: '20 分钟', hint: '默认节奏，社区一直有新鲜感。' },
-  { minutes: 10,  label: '10 分钟', hint: '比较频繁，LLM 消耗明显上升。' },
-  { minutes: 5,   label: '5 分钟',  hint: '最频繁档；每批 3 条要调一次 LLM，烧 token 很快。' },
-];
-/** 校验用：允许的分钟值集合 */
-export const ALLOWED_MEDIA_AUTO_MINUTES = MEDIA_AUTO_STEPS.map(s => s.minutes);
 /**
- * 自动补充：到点后给随机一个媒体补一小批。
- * **间隔不再写死** —— 由 `config.features.mediaAutoMinutes` 决定（0 = 关闭）。
- * 调度器 1 分钟 tick 一次，这里做「到点才动手」的节流。
+ * 自动抓帖档位：**每晚几批**（0 = 关闭）。
+ *
+ * ★ 2026-10-05 由「固定间隔（分钟）」改成「每晚几批 + 夜间窗口内错峰随机」：
+ *   旧模型每 N 分钟无条件抓一批（每批 3 条），24 小时均匀铺开 —— 既不像"有人的社区"，
+ *   也是全天持续烧 token。新模型：
+ *     · 只在**夜间窗口**（20:00 → 次日 02:00）内动手，白天不产新内容；
+ *     · 窗口按批数等分成时段，**在时段内随机**取时刻 → 错峰、不扎堆；
+ *     · **一批只出 1 条**（见 AUTO_BATCH_SIZE），细水长流。
+ *   与「朋友圈发帖频率」同一取向（那边是 `momentFreq` × 基准间隔）。
  */
-export const AUTO_BATCH_SIZE = 3;
+export const MEDIA_AUTO_STEPS = [
+  { value: 0,  label: '关闭',      hint: '不自动抓帖，只有你点「刷新」时才生成。' },
+  { value: 1,  label: '每晚 1 批', hint: '一晚上随机补 1 条，几乎无感。' },
+  { value: 2,  label: '每晚 2 批', hint: '一晚上随机补 2 条。' },
+  { value: 4,  label: '每晚 4 批', hint: '一晚上随机补 4 条，社区慢慢有动静。' },
+  { value: 8,  label: '每晚 8 批', hint: '一晚上随机补 8 条，比较活跃。' },
+  { value: 16, label: '每晚 16 批', hint: '一晚上随机补 16 条，LLM 消耗明显上升。' },
+];
+/** 校验用：允许的「每晚批数」集合 */
+export const ALLOWED_MEDIA_AUTO_VALUES = MEDIA_AUTO_STEPS.map(s => s.value);
 
-/** 当前生效的自动间隔（毫秒）；0 表示关闭自动 */
-function autoIntervalMs() {
-  const minutes = Number(config.features.mediaAutoMinutes ?? 0);
-  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
-  return Math.max(5, minutes) * 60 * 1000;
+/** 夜间窗口：20:00 → 次日 02:00（本地时间）。白天不产新内容。 */
+export const MEDIA_NIGHT_START_HOUR = 20;
+export const MEDIA_NIGHT_END_HOUR = 2;
+/** 两批之间的最小间隔 —— 防止窗口很小时两次抓取挤在一起 */
+export const MEDIA_MIN_GAP_MS = 5 * 60 * 1000;
+
+/**
+ * 自动抓帖**每批生成几条**。
+ *
+ * ★ 用户口径（2026-10-05）：社交平台 / 网络论坛 / 规则34「一次生成不要太多帖子」。
+ *   原来是 3 条/批；改成 1 条/批，靠"晚上多来几批"补总量 —— 这样内容在时间上是散开的，
+ *   而不是每隔几小时突然涌进来三条。
+ */
+export const AUTO_BATCH_SIZE = 1;
+
+/**
+ * 求 `t` 落在（或即将到来）的那个夜间窗口。
+ *
+ * 窗口跨午夜，所以三种情况：
+ *   · 20:00 之后 → 今晚的窗口（今天 20:00 → 明天 02:00）
+ *   · 02:00 之前 → 仍在**昨晚**开始的窗口里（昨天 20:00 → 今天 02:00）
+ *   · 02:00~20:00 → 白天，返回**即将到来**的窗口（今天 20:00 → 明天 02:00）
+ *
+ * 纯函数（只读入参与本地时区），便于单测。
+ *
+ * @param {number} t - 毫秒时间戳
+ * @returns {{start:number, end:number}} 窗口起止（毫秒时间戳）
+ */
+export function nightWindowFor(t) {
+  const d = new Date(t);
+  const h = d.getHours();
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const DAY = 24 * 3600_000;
+  const at = (base, hour) => base + hour * 3600_000;
+
+  if (h >= MEDIA_NIGHT_START_HOUR) {
+    // 今晚
+    return { start: at(dayStart, MEDIA_NIGHT_START_HOUR), end: at(dayStart + DAY, MEDIA_NIGHT_END_HOUR) };
+  }
+  if (h < MEDIA_NIGHT_END_HOUR) {
+    // 昨晚开始的窗口还没结束
+    return { start: at(dayStart - DAY, MEDIA_NIGHT_START_HOUR), end: at(dayStart, MEDIA_NIGHT_END_HOUR) };
+  }
+  // 白天：下一个窗口在今晚
+  return { start: at(dayStart, MEDIA_NIGHT_START_HOUR), end: at(dayStart + DAY, MEDIA_NIGHT_END_HOUR) };
+}
+
+/** `t` 是否落在夜间窗口内（用于"到点了但已经天亮"的兜底判断） */
+export function isWithinNightWindow(t) {
+  const { start, end } = nightWindowFor(t);
+  return t >= start && t < end;
+}
+
+/**
+ * 排下一次自动抓帖时刻：**在夜间窗口内错峰随机**。
+ *
+ * 做法：把整个夜间窗口**等分成 `perNight` 个固定的格**；这次用「now 之后的第一格」，
+ * **并把时刻随机落在格内任意位置**。这样
+ *   · 一晚恰好 `perNight` 批（一格一批），不会越排越密、也不会把前面的格跳过去；
+ *   · 具体时刻每晚不同（格内随机 → 相邻两批的间隔在 0~2 格之间浮动）—— 就是"错峰随机刷"；
+ *   · 相邻两批不会贴在一起（有 `MEDIA_MIN_GAP_MS` 兜底）。
+ *
+ * ⚠ 两次改错都记在这里，免得再走回头路：
+ *   ① 最初按「**从 now 起还剩多少时间**」重新分格 —— 每排一次剩余时间就变短、格子跟着变多，
+ *      一晚 2 批实际排出 4 批（越排越密）。
+ *   ② 改成「在**剩余格子里随机挑一格**」—— 第一抽就可能跳到最后一格，把中间几格全跳过，
+ *      一晚 4 批实际只出 2 批（越排越稀）。
+ *   正确做法是这两者的中间：**格子按窗口绝对划分**（保证总数），**只在格内随机**（保证错峰）。
+ *
+ * 纯函数：随机源由 `rand` 注入，便于单测。
+ *
+ * @param {number} now - 当前毫秒时间戳
+ * @param {number} perNight - 每晚批数（>0）
+ * @param {() => number} [rand] - 返回 [0,1) 的随机源
+ * @returns {number} 下次抓帖的毫秒时间戳（必然落在某个夜间窗口内）
+ */
+export function nextAutoAt(now, perNight, rand = Math.random) {
+  const n = Math.max(1, Math.floor(Number(perNight) || 1));
+  const win = nightWindowFor(now);
+  const slot = (win.end - win.start) / n;
+
+  // now 之后第一个可用的格下标（0..n-1；已经过去几格就跳过几格）
+  const fromIdx = Math.max(0, Math.ceil((now - win.start) / slot));
+
+  if (fromIdx < n) {
+    // ★ 就取这一格，**只在格内**随机 —— 不额外跳格，否则会把中间的格浪费掉
+    let t = win.start + fromIdx * slot + rand() * slot;
+    // 兜底：不能离 now 太近（格很小时两批可能贴着）
+    if (t < now + MEDIA_MIN_GAP_MS) t = now + MEDIA_MIN_GAP_MS;
+    // 也不能越过窗口末尾（`fromIdx < n` 保证 now 至少还差一整格，所以这里不会越界）
+    return Math.min(t, win.end - 1);
+  }
+
+  // 本窗口的格都过完了 → 落到**下一个**窗口里的随机一格
+  const nextWin = nightWindowFor(win.end + 1);
+  const nextSlot = (nextWin.end - nextWin.start) / n;
+  const k2 = Math.floor(rand() * n);
+  return nextWin.start + k2 * nextSlot + rand() * nextSlot;
+}
+
+/** 当前生效的「每晚批数」；0 表示关闭自动 */
+function autoPerNight() {
+  const n = Number(config.features.mediaAutoPerNight ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(ALLOWED_MEDIA_AUTO_VALUES[ALLOWED_MEDIA_AUTO_VALUES.length - 1], Math.floor(n));
 }
 
 // ── 并发守卫 ──
@@ -139,7 +252,7 @@ export function getOutlet(id) {
  * ⚠ 这张表也被 `routes/media.js` 用来做入参白名单 ——
  *   **别再在路由里硬编码分类字面量**（曾经因此漏掉 print，导致该分类不过滤、返回全部帖子）。
  */
-export const MEDIA_CATEGORIES = ['print', 'digital', 'social'];
+export const MEDIA_CATEGORIES = ['print', 'digital', 'social', 'forum', 'gallery'];
 
 /**
  * 分类 → 形态 的映射（**单一真源**）。
@@ -157,6 +270,8 @@ export const CATEGORY_LAYOUTS = {
   print: ['poster', 'weekly'],   // 官方传媒：印刷/实体形态的物料
   digital: ['portal'],           // 数字报刊：可点开板块的数字刊物
   social: [null],                // 社交平台：帖子流（NULL 与 feed 同义）
+  forum: ['forum'],              // 网络论坛：版聊主题帖（文字为主、少量图片）
+  gallery: ['gallery'],          // 规则34：成人图片站（1 排 4 张，随机画师串 + 随机题材）
 };
 
 /**
@@ -183,12 +298,19 @@ function categoryFilter(category, alias = 'o') {
  *   · `poster` —— 海报：一张只讲一个瓜。热点速报条 → 大标题 → 主图 → 爆点气泡 → 短文案 → 小图组
  *                 （《狸狸八卦》就是这种：它的提示词明确写「每期出一张海报（不是文章）」，
  *                  一度被错设成 portal 而做成了门户网，现已归位）
+ *   · `forum`  —— 网络论坛：**版聊**。一条 = 一个主题帖（标题 + 正文 + 楼层回复）。
+ *                 文字为主、图片只是偶尔出现（不是每帖都有图）。
+ *   · `gallery`—— 规则34：**成人图片站**。一条 = 一个图集条目（1 排 4 张）。
+ *                 特征是**每条随机换画师串**（画风各异）+ 随机色情题材组合。
  * `weekly` 是 portal 之前的旧形态，渲染分支仍兼容（老数据），但新建时不再提供。
  *
- * 与前端分类的对应：feed →「社交平台」；portal →「数字报刊」；poster/weekly →「官方传媒」。
+ * 与前端分类的对应：feed →「社交平台」；forum →「网络论坛」；gallery →「规则34」；
+ *                    portal →「数字报刊」；poster/weekly →「官方传媒」。
  */
 export const OUTLET_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
+  { key: 'forum', label: '网络论坛', hint: '版聊主题帖（标题 + 正文 + 楼层回复）· 文字为主、少量图片' },
+  { key: 'gallery', label: '图片站', hint: '图集条目（1 排 4 张）· 每条随机画师串与题材组合' },
   { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
   { key: 'poster', label: '海报', hint: '一张只讲一个瓜：热点速报条 → 大标题 → 主图 → 爆点气泡 → 短文案 → 小图组' },
 ];
@@ -224,6 +346,8 @@ export function createOutlet({ name, tagline = '', prompt = '', icon = '', layou
     INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
     VALUES (?, ?, ?, ?, ?, 1, ?)
   `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, normalizeLayout(layout));
+  // 用户又亲手把同名媒体建回来了 → 撤掉删除墓碑，语义才算一致
+  forgetDeletedOutlet(nm);
   return getOutlet(Number(r.lastInsertRowid));
 }
 export function updateOutlet(id, patch = {}) {
@@ -251,9 +375,76 @@ export function updateOutlet(id, patch = {}) {
   return getOutlet(id);
 }
 
+/**
+ * 删除一个媒体（连同帖子与板块，靠 ON DELETE CASCADE）。
+ *
+ * ★ **必须留一条「已删除」墓碑**。
+ *
+ *   背景：`db/index.js` 的 `LATE_SEEDED` 会在**每次启动**把"默认清单里有、库里没有"的
+ *   媒体补种回来（用于给老库补上后续版本新增的媒体）。但它**分不清**
+ *   「这个库里还没有」和「用户主动删掉了」—— 于是：
+ *
+ *     用户删掉《狸狸八卦》→ 后端重启（`node --watch` 下改个文件就会重启）
+ *     → 补种逻辑把它又建回来（新 id）→ 用户看到"删了又回来"，以为删除没生效。
+ *
+ *   实测踩过：用户 14:2x 删掉《狸狸八卦》，14:30 一次重启后它就以 id 545 复活了。
+ *
+ *   所以删除时把名字记进 `system_settings.media_outlets_deleted`，
+ *   补种时跳过墓碑里的名字 —— 这才是"尊重用户的删除"的完整实现。
+ *
+ *   ⚠ 图片文件留着不删（可能被别处引用，且删文件不可逆）。
+ *
+ * @param {number} id
+ * @returns {boolean} 是否真的删掉了（不存在时 false）
+ */
 export function deleteOutlet(id) {
-  // 帖子与板块靠 ON DELETE CASCADE 一并清掉；图片文件留着不删（可能被别处引用，且删文件不可逆）
-  return getDb().prepare('DELETE FROM media_outlets WHERE id = ?').run(id).changes > 0;
+  const db = getDb();
+  const row = db.prepare('SELECT name FROM media_outlets WHERE id = ?').get(id);
+  const changed = db.prepare('DELETE FROM media_outlets WHERE id = ?').run(id).changes > 0;
+  if (changed && row?.name) rememberDeletedOutlet(row.name);
+  return changed;
+}
+
+/** 媒体删除墓碑的 setting key（值为 JSON 数组，存名字） */
+export const DELETED_OUTLETS_KEY = 'media_outlets_deleted';
+
+/** 读墓碑名单（拿不到就返回空数组，绝不抛错 —— 不能因为墓碑坏了就打不开媒体页） */
+function readDeletedOutlets() {
+  try {
+    const raw = getSetting(DELETED_OUTLETS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr.filter(x => typeof x === 'string' && x) : [];
+  } catch { return []; }
+}
+
+/** 记下"这个媒体是用户删的"，补种时不再复活它 */
+export function rememberDeletedOutlet(name) {
+  try {
+    const n = String(name || '').trim();
+    if (!n) return;
+    const list = readDeletedOutlets();
+    if (!list.includes(n)) list.push(n);
+    setSetting(DELETED_OUTLETS_KEY, JSON.stringify(list));
+  } catch { /* 记不上也不该阻断删除本身 */ }
+}
+
+/**
+ * 用户手工新建同名媒体时，把墓碑撤掉 ——
+ * 否则他删掉 A、又自己建回 A，之后 A 再被删就不会留墓碑（语义不一致）。
+ */
+export function forgetDeletedOutlet(name) {
+  try {
+    const n = String(name || '').trim();
+    if (!n) return;
+    const list = readDeletedOutlets();
+    if (!list.includes(n)) return;
+    setSetting(DELETED_OUTLETS_KEY, JSON.stringify(list.filter(x => x !== n)));
+  } catch { /* ignore */ }
+}
+
+/** 该名字是否被用户删过（供补种逻辑判断） */
+export function isOutletDeletedByUser(name) {
+  return readDeletedOutlets().includes(String(name || '').trim());
 }
 
 export function listBoards(outletId) {
@@ -318,6 +509,9 @@ function mapPostRow(r) {
     views: r.views,
     comments: safeParse(r.comments_json, []) || [],
     image: r.image,
+    // 配图状态：图库形态要用它区分「排队生图中」与「生成失败」（否则两种都是空白格）
+    image_status: r.image_status || null,
+    image_error: r.image_error || null,
     // 周刊/海报的结构化正文（feed 形态为 null）
     payload: safeParse(r.payload_json, null),
     layout: r.layout || 'feed',
@@ -374,7 +568,7 @@ export function listPostsNeedingImage(limit = 8) {
   // ⚠ 必须排除门户：门户由 fillPortalImages 负责逐块补图，而门户帖的 image_prompt 存的是
   //   「第一块的头图提示词」，被这里捞到会**额外多生一张重复的主图**（正是两层设计要避免的浪费）。
   return getDb().prepare(`
-    SELECT p.id, p.image_prompt, p.character_id FROM media_posts p
+    SELECT p.id, p.image_prompt, p.character_id, p.payload_json FROM media_posts p
     LEFT JOIN media_outlets o ON o.id = p.outlet_id
     WHERE p.image_status = 'pending' AND p.image_prompt IS NOT NULL AND p.image_prompt != ''
       AND COALESCE(o.layout, 'feed') != 'portal'
@@ -428,26 +622,70 @@ export function pickActiveCharacters(count = 2) {
   const n = Math.max(0, Math.min(3, count));
   if (!n) return [];
   return getDb().prepare(`
-    SELECT id, display_name, avatar_path, short_prompt, base_prompt, loras, custom_workflow, artist_override
+    SELECT id, display_name, avatar_path, short_prompt, base_prompt, loras, custom_workflow, artist_override,
+           forum_alias, forum_persona
     FROM characters
     WHERE COALESCE(archived, 0) = 0
     ORDER BY RANDOM() LIMIT ?
   `).all(n);
 }
 
-/** 提示词：让 LLM 产出 { posts: [...] } */
-function buildFormatPrompt(outlet, boards, authors) {
+/**
+ * 全库角色名（**含归档**）—— 供图库把标题/备注/署名里的角色名洗掉。
+ *
+ * 为什么不是只取本次出镜的那几位：模型在图上认人，但它也可能把**别处**看来的名字
+ * 顺手写进作品名（系统提示词与世界设定里到处都是角色名）。既然口径是
+ * 「规则34 不许出现人名/角色名」，那就对**全部**名字设防。
+ */
+function listCharacterDisplayNames() {
+  try {
+    return getDb().prepare(`SELECT display_name FROM characters`).all()
+      .map(r => String(r.display_name || '').trim())
+      .filter(Boolean);
+  } catch { return []; }
+}
+
+/**
+ * 该媒体近期用过的网名（发帖人 + 评论者），供下一批去重。
+ *
+ * 为什么要回灌给模型而不是只靠后端消歧：
+ *   后端消歧会把 `小明` 改成 `小明2`，虽然保住了内容，但连着一串
+ *   `小明2 小明3 小明4` 反而假。真正的解法是让模型**一开始就别重复**，
+ *   后端只做兜底。取最近 40 条帖子，够覆盖"这一屏还能看到"的范围。
+ */
+function recentUsedAliases(outletId, limit = 40) {
+  if (!outletId) return [];
+  const rows = getDb().prepare(`
+    SELECT author_name, comments_json FROM media_posts
+    WHERE outlet_id = ? ORDER BY id DESC LIMIT ?
+  `).all(outletId, limit);
+  return collectUsedAliases(rows.map(r => ({
+    author_name: r.author_name,
+    comments: safeParse(r.comments_json, []) || [],
+  })));
+}
+
+/**
+ * 提示词：让 LLM 产出 { posts: [...] }
+ * @param {object} [opts]
+ * @param {string[]} [opts.usedAliases] 该媒体近期用过的网名 —— 喂回规则里做去重
+ */
+function buildFormatPrompt(outlet, boards, authors, opts = {}) {
   const boardNames = boards.map(b => b.name);
   const boardRule = boardNames.length
     ? `"board" 必须从这个媒体的板块里选：${boardNames.map(x => `「${x}」`).join('、')}`
     : `"board" 填 ""（本媒体还没有板块）`;
 
+  // 角色的帖子在论坛里用**马甲**署名（没填马甲才退回真名）。
+  // 注意这里只是"告诉模型第 N 条是谁写的" —— 真正落库的 author_name 由
+  // normalizeMediaDraft 按 authors[i] 覆盖，不依赖模型有没有把名字填对。
   const authorRule = authors.length
-    ? authors.map((a, i) => `第 ${i + 1} 条帖子的作者必须是「${a.display_name}」本人`).join('；')
-      + `。这几条要用 Ta 自己的口吻与身份写，author 字段填其名字「对应角色名」，不要加任何后缀；`
-      + `其余帖子的 author 填一个符合该媒体气质的匿名用户名（每个都不同）。`
-    : `author 填一个符合该媒体气质的匿名用户名（每个都不同）。`;
+    ? authors.map((a, i) => `第 ${i + 1} 条帖子的作者必须是「${a.display_name}」本人（论坛马甲：${a.forum_alias || a.display_name}）`).join('；')
+      + `。这几条要用 Ta 自己的口吻与身份写，author 字段填 Ta 的论坛马甲，不要填真名；`
+      + `其余帖子的 author 填一个符合该媒体气质的网名。`
+    : `author 填一个符合该媒体气质的网名。`;
 
+  const aliasRule = buildAliasRuleBlock({ used: opts.usedAliases || [] });
   const imageRules = String(getGlobalRule('image_prompt')?.rule_content || '').trim();
 
   return `请严格按照以下 JSON 格式输出，不要输出任何解释或 JSON 以外的文字：
@@ -477,7 +715,9 @@ function buildFormatPrompt(outlet, boards, authors) {
 - "likes"/"views"：普通帖子点赞 20~3000；由上面点名的那几位角色本人发的帖子，因为有关注度，点赞要给到 800~12000。views 相应放大。
 - "comments"：每条帖子 1~4 条评论，观点要有支持、反对、质疑、调侃、歪楼等不同声音，禁止清一色附和、禁止"同上/+1"这类无信息量回复。
 - 所有 title/content/comments 用中文；所有 image_prompt 用英文。
-- 内容必须符合 <world_setting> 的时代感与生活细节，不出现世界观之外的事物。${imageRules ? `\n\n生图规则（所有 image_prompt 必须遵守）：\n${imageRules}` : ''}`;
+- 内容必须符合 <world_setting> 的时代感与生活细节，不出现世界观之外的事物。
+
+${aliasRule}${imageRules ? `\n\n生图规则（所有 image_prompt 必须遵守）：\n${imageRules}` : ''}`;
 }
 
 /** 提示词：本次素材（世界观由 stage 层注入，这里给板块与角色资料） */
@@ -488,7 +728,14 @@ function buildMaterialsPrompt(outlet, boards, authors, count) {
 
   const authorBlock = authors.length
     ? `\n【本次由以下角色本人发帖（按顺序对应第 1~${authors.length} 条）】\n`
-      + authors.map((a, i) => `${i + 1}. ${a.display_name}\n${buildCharacterPersona(a, { variant: 'short', person: a.display_name }) || '（无补充资料）'}`).join('\n\n')
+      + authors.map((a, i) => {
+        const head = `${i + 1}. ${a.display_name}（论坛马甲：${a.forum_alias || a.display_name}）`
+        // 网上人设只影响**这一条帖子**的调门（爱逛什么板、什么话题会下场），不并入人格本身
+        const net = a.forum_persona ? `\nTa 在网上的人设：${a.forum_persona}` : ''
+        // ★ person 仍传真名：模型需要知道角色的真实身份才能写出符合人设的内容，
+        //   马甲只决定「署名显示什么」，不改变 Ta 是谁。
+        return `${head}\n${buildCharacterPersona(a, { variant: 'short', person: a.display_name }) || '（无补充资料）'}${net}`
+      }).join('\n\n')
     : '';
 
   return `本次要为「${outlet.name}」生成 ${count} 条新帖子。
@@ -540,7 +787,10 @@ export function normalizeMediaDraft(raw, boards, authors = []) {
       tags: (Array.isArray(item?.tags) ? item.tags : []).map(t => clampText(t, 12)).filter(Boolean).slice(0, 5),
       author_type: author ? 'character' : 'anonymous',
       character_id: author ? author.id : null,
-      author_name: author ? author.display_name : (clampText(item?.author, 24) || '匿名用户'),
+      // 角色在论坛用**马甲**署名（没填马甲才退回真名）。author_type 仍是 'character'，
+      // 前端照旧打「角色」徽标 —— 玩家知道是谁，看到的名字却是网名，
+      // 正好是「不点名但大家都心里有数」那种论坛感。
+      author_name: author ? (author.forum_alias || author.display_name) : (clampText(item?.author, 24) || '匿名用户'),
       author_avatar: author ? (author.avatar_path || null) : null,
       likes,
       views: Number.isFinite(viewsRaw) && viewsRaw > 0 ? Math.floor(viewsRaw) : likes * randInt(8, 25),
@@ -550,6 +800,32 @@ export function normalizeMediaDraft(raw, boards, authors = []) {
   });
 
   if (!out.length) throw new Error('没有可用的帖子');
+
+  // ── 同批网名消歧 ──
+  // 跨帖子查重（发帖人与评论者共用一套名字空间）。规则里已经把"已用名单"喂给了模型，
+  // 这里是兜底：重名不丢弃、只追加序号（`小明` → `小明2`，真实互联网撞名就这么干），
+  // 这样评论区不会凭空少内容。
+  //
+  // 用「槽位」而不是手动推进下标：名字散落在 post.author_name 与 comments[].author 两处，
+  // 手算索引一旦错位就会张冠李戴地改名（而且很难看出来）。
+  // ★ 角色马甲不进槽位（不改名），但要作为 `reserved` **预占**名字空间 ——
+  //   否则评论者可能恰好也叫这个马甲，出现「匿名网友顶着角色马甲说话」的场面。
+  const slots = []
+  const reservedAliases = []
+  for (const p of out) {
+    // 角色帖的作者名 = 马甲：预占名字空间，但自己不参与改名
+    if (p.author_type === 'character') reservedAliases.push(p.author_name)
+    else slots.push({ read: () => p.author_name, write: v => { p.author_name = v } })
+    // 评论者无论帖子是谁发的，都要参与消歧
+    for (const c of p.comments) {
+      slots.push({ read: () => c.author, write: v => { c.author = v } })
+    }
+  }
+  const fixedNames = disambiguateAliases(slots.map(s => s.read()), { reserved: reservedAliases })
+  slots.forEach((s, i) => {
+    if (fixedNames[i] && fixedNames[i] !== s.read()) s.write(fixedNames[i])
+  })
+
   return out;
 }
 
@@ -562,6 +838,679 @@ export function normalizeMediaDraft(raw, boards, authors = []) {
  * @returns {Promise<{outletId:number, batchId:string, inserted:number}>}
  */
 // ══════════════════════════════════════════
+// 论坛形态（网络论坛）—— 版聊主题帖
+// ══════════════════════════════════════════
+
+/**
+ * 论坛主题帖的输出格式约束。
+ *
+ * 与 feed 的差别（这是"论坛感"的来源，别抄成 feed 的格式）：
+ *   · 一条 = **一个主题帖**（标题 + 楼主正文 + N 层回复），不是一条独立动态；
+ *   · 回复有**楼层号**，可以「引用」上面某一层（`quote` 填那一层的楼层号）；
+ *   · **文字为主、图片只是偶尔出现** —— 明确要求只有约 1/4 的帖子给 image_prompt；
+ *   · 论坛有「顶楼」「前排」「爬楼」「沙发」这类站点黑话与抬杠氛围。
+ */
+function buildForumFormatPrompt(outlet, boards, authors, opts = {}) {
+  const boardNames = boards.map(b => b.name);
+  const boardRule = boardNames.length
+    ? `"board" 必须从这个论坛的板块里选：${boardNames.map(x => `「${x}」`).join('、')}`
+    : `"board" 填 ""（本论坛还没有板块）`;
+
+  const authorRule = authors.length
+    ? authors.map((a, i) => `第 ${i + 1} 个主题帖的楼主必须是「${a.display_name}」本人（论坛马甲：${a.forum_alias || a.display_name}）`).join('；')
+      + `。这几个帖要用 Ta 自己的口吻与身份写，author 字段填 Ta 的论坛马甲，不要填真名；`
+      + `其余帖子的楼主与回复者都填符合该论坛气质的网名。`
+    : `楼主与回复者都填符合该论坛气质的网名。`;
+
+  const aliasRule = buildAliasRuleBlock({ used: opts.usedAliases || [] });
+  const imageRules = String(getGlobalRule('image_prompt')?.rule_content || '').trim();
+
+  return `请严格按照以下 JSON 格式输出，不要输出任何解释或 JSON 以外的文字：
+
+{
+  "posts": [
+    {
+      "board": "板块名（${boardRule}）",
+      "title": "主题帖标题（≤30字，论坛标题风格：可带【求助】【讨论】【实况】这类前缀）",
+      "content": "楼主正文（80~400字，第一人称，有具体细节与情绪）",
+      "tags": ["标签1", "标签2"],
+      "author": "楼主名（见下方作者要求）",
+      "likes": 数字（点赞/收藏数，见下方热度要求）,
+      "views": 数字（浏览数，通常为 likes 的 15~60 倍；论坛帖的浏览量远高于点赞）,
+      "replies": [
+        { "floor": 1, "author": "网名", "content": "回复内容（15~120字）", "quote": 楼层号或 null }
+      ],
+      "image_prompt": "**一律填空字符串 \\"\\"**（论坛是纯文字版面，不出图）"
+    }
+  ]
+}
+
+字段要求：
+- ${boardRule}。
+- 作者要求：${authorRule}
+- "replies"：每个主题帖 **2~8 层**回复。这是论坛，重点在**你来我往**，不是清一色附和：
+  · 要有不同的声音——赞同、抬杠、质疑、玩梗、歪楼、版主警告、二楼抢沙发都行；
+  · 后面的楼层要**接住前面楼层的话**（可以 @ 某人或引用），像真的在爬楼，而不是各说各话；
+  · "floor" 从 1 开始递增，连续不跳号；"quote" 填被引用的楼层号（不引用就填 null）；
+  · 允许出现「+1」「mark」「先回再看」这类短回复，但**全帖不能只有这种**。
+- "likes"/"views"：普通主题帖 likes 5~800；由上面点名的那几位角色本人发的帖子给到 300~5000。
+- ★★ **论坛是纯文字版面，一律不配图**：image_prompt 全部填**空字符串**（两个双引号，中间无内容）。
+  （2026-10-05 用户口径。此前写的是「约四分之一可有图」，实测 12 条里 5 条配了图 → 版面变成图文混排，
+  与「论坛＝文字版」的定位不符。**只有社交平台与规则34才配图**。）
+- 同一批次内每个主题帖的**板块、主题、楼主都必须明显不同**，禁止同质化与模板化。
+- 所有 title/content/replies 用中文；image_prompt 用英文。
+- 内容必须符合 <world_setting> 的时代感与生活细节，不出现世界观之外的事物。
+
+${aliasRule}${imageRules ? `\n\n生图规则（有图片的那几条 image_prompt 必须遵守）：\n${imageRules}` : ''}`;
+}
+
+/** 规整论坛主题帖 → 可落库的帖子数组 */
+export function normalizeForumDraft(raw, boards, authors = []) {
+  const list = Array.isArray(raw?.posts) ? raw.posts : null;
+  if (!list) throw new Error('LLM 输出缺少 posts 数组');
+
+  const boardByName = new Map(boards.map(b => [b.name, b]));
+  const out = [];
+
+  list.forEach((item, i) => {
+    const title = clampText(item?.title, 60);
+    const content = clampText(item?.content, 1600);
+    if (!title || !content) return;
+
+    const boardName = clampText(item?.board, 16);
+    const board = boardByName.get(boardName) || null;
+    const author = authors[i] || null;
+
+    const likesRaw = Number(item?.likes);
+    const viewsRaw = Number(item?.views);
+    const likes = Number.isFinite(likesRaw) && likesRaw >= 0 ? Math.floor(likesRaw) : randInt(5, 800);
+
+    // ── 楼层 ──
+    // floor 一律按数组顺序**重新编号**（不信模型给的号）：模型偶尔会跳号/重复，
+    // 而前端的「引用 #N」是按号去找层的，号一乱引用就指错人。
+    const replies = (Array.isArray(item?.replies) ? item.replies : [])
+      .map(r => ({
+        author: clampText(r?.author, 24) || '匿名',
+        content: clampText(r?.content, 400),
+        quote: Number.isFinite(Number(r?.quote)) && Number(r?.quote) > 0 ? Math.floor(Number(r.quote)) : null,
+      }))
+      .filter(r => r.content)
+      .slice(0, 12);
+    replies.forEach((r, idx) => { r.floor = idx + 1 });
+    // 引用号必须落在实际存在的楼层范围内，否则前端会显示「引用 #9」而根本没有 9 楼
+    for (const r of replies) if (r.quote !== null && r.quote > replies.length) r.quote = null;
+
+    out.push({
+      board_id: board?.id ?? null,
+      title,
+      content,
+      tags: (Array.isArray(item?.tags) ? item.tags : []).map(t => clampText(t, 12)).filter(Boolean).slice(0, 5),
+      author_type: author ? 'character' : 'anonymous',
+      character_id: author ? author.id : null,
+      author_name: author ? (author.forum_alias || author.display_name) : (clampText(item?.author, 24) || '匿名用户'),
+      author_avatar: author ? (author.avatar_path || null) : null,
+      likes,
+      // 论坛浏览量的量级远高于点赞（feed 是 8~25 倍，这里 15~60 倍）
+      views: Number.isFinite(viewsRaw) && viewsRaw > 0 ? Math.floor(viewsRaw) : likes * randInt(15, 60),
+      comments: [],
+      // ★ 论坛是**纯文字版面**（用户口径）——出口层强制清空 image_prompt。
+      //   只改提示词不够：模型有惯性（此前一直允许"约四分之一配图"），
+      //   实测仍会零星产出，于是版面变成图文混排。这里做兜底，让口径可被保证。
+      image_prompt: null,
+      payload: { forum: { replies } },
+    });
+  });
+
+  if (!out.length) throw new Error('没有可用的主题帖');
+
+  // 网名消歧：楼主（角色马甲预占）与所有回复者共用一套名字空间。
+  // 论坛帖的回复者数量是 feed 评论的数倍，撞名概率显著更高，这一步不能省。
+  const slots = [];
+  const reservedAliases = [];
+  for (const p of out) {
+    if (p.author_type === 'character') reservedAliases.push(p.author_name);
+    else slots.push({ read: () => p.author_name, write: v => { p.author_name = v } });
+    for (const r of p.payload.forum.replies) {
+      slots.push({ read: () => r.author, write: v => { r.author = v } });
+    }
+  }
+  const fixedNames = disambiguateAliases(slots.map(s => s.read()), { reserved: reservedAliases });
+  slots.forEach((s, i) => {
+    if (fixedNames[i] && fixedNames[i] !== s.read()) s.write(fixedNames[i]);
+  });
+
+  return out;
+}
+
+/** 生成一批论坛主题帖 */
+async function generateForumBatch(outlet, count, withCharacters) {
+  const db = getDb();
+  const n = Math.max(1, Math.min(MAX_BATCH_SIZE, count));
+  const boards = listBoards(outlet.id);
+  const authorCount = !withCharacters ? 0 : Math.min(3, Math.max(1, Math.floor(n / 3)));
+  const authors = pickActiveCharacters(authorCount);
+
+  const worldSetting = getWorldSetting();
+  const msgs = [
+    { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
+    { role: 'system', content: outlet.prompt },
+    { role: 'system', content: buildForumFormatPrompt(outlet, boards, authors, { usedAliases: recentUsedAliases(outlet.id) }) },
+    { role: 'user', content: buildMaterialsPrompt(outlet, boards, authors, n) },
+  ];
+
+  const raw = await chatSync(msgs, {
+    temperature: 0.9,
+    max_tokens: 8000,
+    response_format: { type: 'json_object' },
+    label: `media-forum:${outlet.name}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  if (!jsonStr) throw new Error('LLM 未返回 JSON');
+  const drafts = normalizeForumDraft(JSON.parse(repairJson(jsonStr)), boards, authors);
+  return insertDrafts(outlet, drafts, n);
+}
+
+// ══════════════════════════════════════════
+// 图库形态（规则34）—— 随机画师串 + 随机题材组合
+// ══════════════════════════════════════════
+
+/**
+ * 画师串池 = `artist_favorites`（设置页「画师串收藏夹」）。
+ *
+ * 这是本形态的核心特征：**每条图的画风都不一样**，所以画师串必须逐条随机，
+ * 而不是所有图都套同一个 `config.comfyui.momentsArtist`。
+ * 池子为空时回落到当前配置的画师串，保证功能不会因为没收藏过画师而崩。
+ */
+export function listArtistPool() {
+  try {
+    const rows = getDb().prepare('SELECT artist FROM artist_favorites ORDER BY sort_order, id').all();
+    const list = rows.map(r => String(r.artist || '').trim()).filter(Boolean);
+    if (list.length) return list;
+  } catch { /* 表可能还没建 */ }
+  const fb = String(config.comfyui?.momentsArtist || '').trim();
+  return fb ? [fb] : [];
+}
+
+/** 从池子里不重复地抽 n 个画师串（池子不够就允许重复） */
+function pickRandomArtists(n) {
+  const pool = listArtistPool();
+  if (!pool.length) return [];
+  const bag = [...pool];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (!bag.length) bag.push(...pool);
+    const k = Math.floor(Math.random() * bag.length);
+    out.push(bag.splice(k, 1)[0]);
+  }
+  return out;
+}
+
+/**
+ * ★ 画幅比例池 —— **每条随机**。
+ * 尺寸按同一像素预算（长边 ~1600、约 1.9MP）给出，避免个别比例把显存吃爆。
+ * 竖幅留给「全身/站立」类，横幅留给「横躺/侧卧」类（由抽取时按体位画幅倾向加权）。
+ */
+export const GALLERY_ASPECTS = [
+  { key: '2:3', w: 1088, h: 1632 },
+  { key: '3:4', w: 1200, h: 1600 },
+  { key: '9:16', w: 972, h: 1728 },
+  { key: '1:1', w: 1440, h: 1440 },
+  { key: '4:3', w: 1600, h: 1200 },
+  { key: '3:2', w: 1632, h: 1088 },
+  { key: '16:9', w: 1728, h: 972 },
+];
+
+/** 横躺类体位（适合横幅）—— 按体位名/判定里出现的「卧/躺/侧」等字样加权 */
+const LYING_RE = /卧|躺|侧|睡|仰|俯|趴/;
+
+/**
+ * 图库条目的**标签上限**。
+ *
+ * ★ 6 是"只有体位"时代的值。环境层（7 维）一上来就占 7~8 个，
+ *   还按 6 截会把环境层与体位 core 词整段砍掉 = 白扩。
+ *   卡片上只显示前 3 个（`MediaGallery.vue`），多出来的用于左栏标签云与筛选。
+ */
+const MAX_GALLERY_TAGS = 12;
+
+/** 抽 n 个比例：把池子洗成袋，抽完再续（保证同批内尽量不重复） */
+function pickRandomAspects(n) {
+  const bag = [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (!bag.length) bag.push(...GALLERY_ASPECTS);
+    out.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
+  }
+  return out;
+}
+
+// ── 体位池 ──────────────────────────────────────────────────
+
+/**
+ * 随机抽 n 个体位（**不重复优先**；池子不够才允许重复）。
+ * 全部来自 `src/data/sexPositions.js`（由 `tools/parse-sex-positions.mjs` 从
+ * 《体位生图参考.md》解析生成，源文件在只进不改库里，只读）。
+ */
+export function pickRandomPoses(n) {
+  const bag = [...SEX_POSITIONS];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (!bag.length) bag.push(...SEX_POSITIONS);
+    out.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
+  }
+  return out;
+}
+
+/** 每个 `[a / b / c]` 变体组随机取一项，并去掉方括号 */
+export function resolvePoseVariants(prompt) {
+  return String(prompt || '').replace(/\[([^\]]*)\]/g, (_, group) => {
+    const opts = group.split('/').map(s => s.trim()).filter(Boolean);
+    return opts.length ? opts[Math.floor(Math.random() * opts.length)] : '';
+  });
+}
+
+/**
+ * 把体位模板变成一条可直接生图的英文 image_prompt。
+ * @param {object} pose - SEX_POSITIONS 里的一条
+ * @param {object} [opts]
+ * @param {string} [opts.subject] - 女方的视觉指代（**英文**，如 'the girl with long black hair'）
+ * @param {string[]} [opts.girlRefs] - 多女体位按序的英文指代；缺项回落到 subject/泛称
+ * @param {{sentence:string}} [opts.envelope] - 环境层（`pickGalleryEnvelope` 的返回值）；
+ *        其 `sentence` 会被**追加**在体位描述之后 —— 它是正交的（管"在哪/什么光/什么镜头"），
+ *        **不改写**体位原文，所以逐字校准过的体位提示词不会被污染。
+ * @returns {{prompt:string, frame:string, negative:string}}
+ */
+export function buildPoseImagePrompt(pose, opts = {}) {
+  const frame = (pose.frames && pose.frames.length)
+    ? pose.frames[Math.floor(Math.random() * pose.frames.length)]
+    : 'cowboy shot';
+
+  let text = resolvePoseVariants(pose.prompt);
+
+  // 视觉指代替换：源模板里 `the girl` / `the girl 1` / `the girl 2` / `the boy`。
+  // ★ 必须**单遍**替完（编号与裸的一把正则），否则会级联：
+  //   若先替 `the girl 2` → `the girl with silver hair`，再替裸 `the girl`，
+  //   后一遍会命中刚插入的指代里的 `the girl`，把结果串成
+  //   `the girl with long black hair with silver hair`（已实测踩过）。
+  //   String.replace 的 /g 只扫原串、不回扫插入文本，所以单遍天然免疫级联。
+  const refs = Array.isArray(opts.girlRefs) ? opts.girlRefs : [];
+  const fallback = opts.subject || 'the girl';
+  const pickRef = (i) => refs[i - 1] || fallback;
+  text = text.replace(/\bthe girl(?: (\d))?\b/g, (_, d) => (d ? pickRef(Number(d)) : fallback));
+  // 男方保持泛称（图站匿名男性），不指派角色
+  text = text.replace(/\bthe boy(?: (\d))?\b/g, (_, d) => (d ? `the man ${d}` : 'the man'));
+
+  /*
+   * ★ 出镜条件（源文件标题里的「（小马限定）/（小车限定）」）——**被抱起/被驮的那一方**必须明显娇小。
+   *   方向由 `pose.limitOn` 决定：'male'（女方抱男方）／'female'（男方抱起或倒提女方）。
+   *   ⚠ 不能一律写成「男方娇小」：048/049/080 恰恰相反，写错会与前半句的
+   *     "the man is lifting the girl" 自相矛盾（画面必崩）。
+   *   源文件的「负向」只写 `muscular male/female`（压"别画壮"),生不出「明显小一圈」，
+   *   所以在提示词里补正向描述。图站男方是匿名的，这里只约束体型、不指派角色。
+   */
+  const positiveLimit = (pose.limitTags && pose.limitTags.length)
+    ? (pose.limitOn === 'male'
+      ? `The male is clearly smaller than the girl: ${pose.limitTags.join(', ')}.`
+      : `The girl is clearly smaller than the male: ${pose.limitTags.join(', ')}.`)
+    : '';
+
+  // 环境层插在**体位描述之后、画幅之前**：先讲清"人怎么摆"，再补"在哪/什么光/什么镜头"
+  const envSentence = String(opts.envelope?.sentence || '').trim();
+  const parts = [text.trim(), positiveLimit, envSentence, `${frame}.`];
+  return {
+    prompt: parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(),
+    frame,
+    negative: String(pose.negative || '').trim(),
+  };
+}
+
+/** 该体位需要几名女方（用于挑角色） */
+export function girlsNeeded(pose) {
+  return Math.max(1, Number(pose?.girls) || 1);
+}
+
+/**
+ * 出镜条件为「女方须娇小」时，优先从娇小档角色里挑。
+ *
+ * ★ 为什么不是「过滤成一个必空的分支」：
+ *   项目红线 —— 过滤后可能为空的分支**绝不能静默返回空**（用户只会看到"点了没反应"）。
+ *   所以这里是**优先 + 显式兜底**：有娇小档就用娇小档；一个都没有就退回全池，
+ *   宁可画面比例不完美，也不能把这一格图丢掉。
+ *
+ * @param {Array} pool 候选角色
+ * @param {object} pose 体位
+ * @returns {Array} 用于抽取的池子（永远非空，除非入参本身为空）
+ */
+export function preferPetitePool(pool, pose) {
+  const all = Array.isArray(pool) ? pool : [];
+  if (!all.length) return all;
+  if (pose?.limitOn !== 'female') return all;
+  const tiny = all.filter(c => {
+    try { return ['petite', 'short'].includes(deriveBuild(c)?.bucket); } catch { return false; }
+  });
+  return tiny.length ? tiny : all;
+}
+
+/**
+ * 由角色的**英文身体描述**提出一个英文画面指代，如
+ * `the girl with long black hair styled in twin tails`。
+ *
+ * ★ 为什么不能直接用 `display_name`：提示词是**纯英文**的（生图规则明写
+ *   "ALL text in English. No Chinese characters anywhere"），而角色名多为中文
+ *   （「海丽娜·格林特」）—— 直接塞进去会产生中英混排的坏提示词。
+ *   《体位生图参考》本身也建议用外观指代（`the white-haired girl`）来区分同框的多个女方。
+ *
+ * 取 `character_outfits.body`（该列本就是英文 danbooru 风格），截到第一个逗号为止。
+ * 读不到就退化为编号泛称（`the girl 2`），仍是合法英文。
+ */
+export function buildSubjectRef(character) {
+  if (!character) return null;
+  let body = '';
+  try {
+    body = String(listSceneOutfits(character.id)?.find(r => r.body && String(r.body).trim())?.body || '');
+  } catch { /* 无 DB / 无该行：走兜底 */ }
+  const firstClause = body.split(',')[0].trim();
+  if (firstClause && /hair/i.test(firstClause)) {
+    const phrase = firstClause.length > 64 ? `${firstClause.slice(0, 64).trim()}` : firstClause;
+    return `the girl with ${phrase.replace(/^with\s+/i, '')}`;
+  }
+  return null;
+}
+
+/**
+ * 图库条目的输出格式约束。
+ *
+ * ★ 本形态的**画面**由服务端决定，不由模型决定：
+ *   体位（84 条池子里随机抽）· 变体（每组随机取一）· 画幅比例（随机）· 画师串（收藏夹随机）
+ *   —— 这四样都是**确定性分配**，模型只负责给每条起个作品名与一句备注。
+ *
+ * 这样做的理由：
+ *   ① 体位提示词是**逐字校准过**的（含负向标签与「不可组合」约束），交给模型转写必然漂移；
+ *   ② 「随机」要真的随机 —— 模型在温度下会自我重复（同批十张都在同一个场景）；
+ *   ③ 模型只写 40 字标题 + 60 字备注，token 便宜且输出稳定。
+ */
+export function buildGalleryFormatPrompt(outlet, boards, plan) {
+  const boardNames = boards.map(b => b.name);
+  const boardRule = boardNames.length
+    ? `"board" 必须从这个站点的分区里选：${boardNames.map(x => `「${x}」`).join('、')}`
+    : `"board" 填 ""（本站点还没有分区）`;
+
+  // ★ 清单里**只给"画面是什么"，不给"里面是谁"**（用户口径：规则34 不许出现角色名）。
+  //   早先这里带 `｜出镜：某某`，模型便把它照抄进作品名 → 「爻光·毒龙 01」。
+  //   人数可以给（它是画面构成，不是身份），姓名一律不给。
+  const list = plan.map((it, i) =>
+    `${i + 1}. 体位：${it.pose.name}（${it.pose.frozen.slice(0, 60)}…）${it.girls >= 2 ? `（${it.girls} 名女性）` : ''}${it.pose.boys ? ` 与 ${it.pose.boys} 名匿名男性` : '（无男性）'}`
+  ).join('\n');
+
+  return `你是成人图片站「${outlet.name}」的目录编辑。下面 ${plan.length} 张图**画面已经定好了**，
+你只需要为每一张写**作品名**与**一句作者备注**，不要改动画面内容。
+
+【本批画面清单】（按顺序对应输出数组的下标）
+${list}
+
+请严格按照以下 JSON 格式输出，不要输出任何解释或 JSON 以外的文字：
+
+{
+  "posts": [
+    {
+      "board": "分区名（${boardRule}）",
+      "title": "作品名（≤30字）",
+      "content": "作者备注（20~50字，一句话）",
+      "author": "上传者网名",
+      "likes": 数字（收藏/点赞数）,
+      "views": 数字（浏览数，通常为 likes 的 10~40 倍）
+    }
+  ]
+}
+
+字段要求：
+- ${boardRule}。分区尽量分散，别整批都塞一个区。
+- ★ **作品名**：像图站的作品命名 —— 「动作/体位 + 一句视角或状态」，短、直、有检索感。
+  例：「后入跪位 03」「双人乳交」「颜面骑乘」「压墙站位 02」。**不要写成小说标题**，
+  不要用「禁忌」「秘密」这类空词。可以带编号（01/02/03）。
+- ⛔ **绝对禁止出现任何人名 / 角色名 / 出处名**：本站条目一律匿名，你看不到、也不许猜
+  画里的人是谁。作品名与备注里**一个字都不许点名**（不许出现「XX·后入」「XX 压墙式」
+  「XX×YY」这类写法）。要写就直接写动作与状态。
+- ★ **备注**：作者口吻的一句话，随口说点什么 —— 画了多久、为什么画这个、求不要求续作、
+  对画面的自嘲。**不要描述画面本身**（画面已定，你在重复劳动），更不要写小说段落，
+  同样不许出现任何人名/角色名。
+- ★ **同一批里的作品名必须互不相同**，别都用同一个句式。
+- "author" 填符合该站点气质的网名（可以是绘师名、收藏者马甲、无意义字符串）。
+- "likes"/"views"：likes 20~6000；views 相应放大。
+- 所有文本用**中文**。
+- 输出数组长度必须正好 ${plan.length}，顺序与上面的清单一一对应。`;
+}
+
+/**
+ * 规整图库条目。**画面不再是模型给的，而是 plan 里的确定性内容**。
+ * @param {object} raw - LLM 输出（只有 title/content/author/likes/views/board）
+ * @param {Array} boards
+ * @param {Array<{pose, artist, aspect, imagePrompt, negative, girls, girlNames}>} plan
+ */
+export function normalizeGalleryDraft(raw, boards, plan = [], opts = {}) {
+  const list = Array.isArray(raw?.posts) ? raw.posts : [];
+  const boardByName = new Map(boards.map(b => [b.name, b]));
+  const out = [];
+  // ★ 出口兜底：模型仍可能自己编出角色名（提示词里已经不给了）。
+  //   凡是进标题/正文/署名的文本都过一遍清洗（`stripCharacterNames`）。
+  const forbidden = Array.isArray(opts?.forbiddenNames) ? opts.forbiddenNames : [];
+
+  plan.forEach((it, i) => {
+    const item = list[i] || null;   // 按**下标**对齐，不靠模型自己排序
+    if (!it?.imagePrompt) return;
+
+    // 模型没写标题也不丢条目：用**体位名**兜底（图站常见「未命名」作品）。
+    // ⚠ 早先兜底是 `${角色名}·${体位名}` —— 那是角色名的另一个泄漏口，已去掉。
+    const title = stripCharacterNames(clampText(item?.title, 80), forbidden)
+      || it.pose.name;
+
+    const likesRaw = Number(item?.likes);
+    const viewsRaw = Number(item?.views);
+    const likes = Number.isFinite(likesRaw) && likesRaw >= 0 ? Math.floor(likesRaw) : randInt(20, 6000);
+
+    // ── 标签：以 NSFW 体位为主（用户口径：标签要重点在 NSFW 上）──
+    // 中文体位名 + 出镜人数 + 体位的核心英文 NSFW 标签（去重、限量）
+    //
+    // ★ 画面元信息（画幅比例等）**不进标签**（用户口径）。标签是**检索维度**，
+    //   比例只是这条的生成参数、不是题材；混进来会污染标签云与筛选。
+    //   比例另有正路：存 `payload.gallery.aspect/width/height`，前端贴在图片上展示。
+    //   这里加一道拦截，防止源文件/模型日后往 core 里写了 `1:1`、`4:3` 这类值。
+    const isAspectLike = (s) => /^\d+(?:\.\d+)?\s*[:：xX×]\s*\d+(?:\.\d+)?$/.test(s);
+
+    /*
+     * 标签组成（顺序 = 优先级，超出上限时从**尾部**截断）：
+     *   ① 体位中文名（检索主键，永远第一）
+     *   ② 人数（2女 / 3男 / 单人）
+     *   ③ 环境层 —— 场景/光影/视角/焦点/摄影效果/表情/状态/道具（**英文**，用户口径）
+     *   ④ 体位 core 的英文 NSFW 词（补足）
+     *
+     * ★ 上限为什么从 6 提到 12：6 是"只有体位"时代的值。环境层一上来就占 7~8 个，
+     *   还按 6 截会把 ③④ 整段砍掉 —— 那就等于白扩了。卡片上本来就只显示前 3 个
+     *   （`MediaGallery.vue` 的 `.slice(0, 3)`），多出来的用于左栏标签云与筛选。
+     */
+    const tags = [it.pose.name];
+    if (it.girls >= 2) tags.push(`${it.girls}女`);
+    if (it.pose.solo) tags.push('单人');
+    else if (it.pose.boys >= 2) tags.push(`${it.pose.boys}男`);
+
+    for (const e of (it.env || [])) {
+      if (e?.en && !tags.includes(e.en)) tags.push(e.en);
+    }
+
+    for (const t of (it.pose.core || [])) {
+      const clean = String(t).replace(/（[^）]*）/g, '').trim();
+      if (!clean) continue;
+      if (/^\d*girls?$|^\d*boys?$/.test(clean)) continue;   // 人数已单列
+      if (isAspectLike(clean)) continue;                     // ★ 比例尺绝不作为标签
+      if (tags.includes(clean)) continue;
+      tags.push(clean);
+      if (tags.length >= MAX_GALLERY_TAGS) break;
+    }
+
+    const boardName = clampText(item?.board, 16);
+    const board = boardByName.get(boardName) || null;
+
+    // ★ 标签也过一遍清洗（体位名/核心词理论上不含角色名，这里只做防御；
+    //   洗空的项直接丢弃，宁可少一个标签也不留一个名字）
+    const safeTags = tags.map(t => stripCharacterNames(t, forbidden)).filter(Boolean);
+
+    out.push({
+      board_id: board?.id ?? null,
+      title,
+      content: stripCharacterNames(clampText(item?.content, 300), forbidden) || `${it.pose.name}。`,
+      tags: safeTags.slice(0, MAX_GALLERY_TAGS),
+      author_type: 'anonymous',      // 图站上传者不是角色本人（角色是被画的对象）
+      character_id: null,
+      author_name: stripCharacterNames(clampText(item?.author, 24), forbidden) || '匿名用户',
+      author_avatar: null,
+      likes,
+      views: Number.isFinite(viewsRaw) && viewsRaw > 0 ? Math.floor(viewsRaw) : likes * randInt(10, 40),
+      comments: [],
+      image_prompt: it.imagePrompt,
+      payload: {
+        gallery: {
+          artist: it.artist || null,
+          aspect: it.aspect.key,
+          width: it.aspect.w,
+          height: it.aspect.h,
+          negative: it.negative || '',
+          pose: it.pose.name,
+          poseNo: it.pose.no,
+          frame: it.frame,
+          // 环境层（场景/光影/视角/焦点/摄影效果/表情/状态/道具）——
+          // 前端左栏**按维度分组**要用它，光看扁平的 tags 反推不出维度（会被体位名挤掉）。
+          env: (it.env || []).map(e => ({ dim: e.dim, en: e.en, cn: e.cn })),
+          // 出镜角色（生图挂 LoRA 用）；作者仍是匿名上传者
+          castIds: it.castIds || [],
+          castNames: it.girlNames || [],
+        },
+      },
+    });
+  });
+
+  if (!out.length) throw new Error('没有可用的图库条目（每条都必须有 image_prompt）');
+  return out;
+}
+
+/**
+ * 生成一批图库条目。
+ *
+ * 分工（这是本形态的关键设计）：
+ *   服务端 → 抽体位（不重复优先）· 抽角色（按体位需要的人数）· 选变体 · 抽画幅比例 · 抽画师串
+ *   模型   → 只写作品名 / 备注 / 上传者 / 热度
+ * 因此「画面」与「画风」都是**确定性随机**，不依赖模型自觉。
+ */
+async function generateGalleryBatch(outlet, count, withCharacters) {
+  const n = Math.max(1, Math.min(MAX_BATCH_SIZE, count));
+  const boards = listBoards(outlet.id);
+
+  // 能出镜的角色池（排除归档）—— 图库里角色是"被画的对象"
+  const castPool = withCharacters ? pickActiveCharacters(8) : [];
+  // 规则34 不许出现角色名：出口层按**全库名字**清洗作品名/备注/署名
+  const forbiddenNames = listCharacterDisplayNames();
+  const poses = pickRandomPoses(n);
+  const artists = pickRandomArtists(n);
+  const aspects = pickRandomAspects(n);
+
+  const plan = poses.map((pose, i) => {
+    // 该体位要几名女方（2 女体位需要两个不同角色）
+    const need = girlsNeeded(pose);
+    const picked = [];
+    // 「女方须娇小」的体位（048/049/080）：优先从娇小档里挑（无则退回全池，不空手）
+    const bag = [...preferPetitePool(castPool, pose)];
+    for (let k = 0; k < need && bag.length; k++) {
+      picked.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
+    }
+    // ★ 画面指代用**英文外观描述**（不能塞中文角色名 —— 提示词是纯英文的）
+    const refs = picked.map(c => buildSubjectRef(c));
+    const subject = refs[0] || 'the girl';
+
+    // 横躺类体位更可能配横幅：若抽到的比例方向与体位不合，就换一个同池的
+    const isLying = LYING_RE.test(pose.name) || LYING_RE.test(pose.frozen);
+    const wantWide = isLying;
+    const gotWide = aspects[i].w > aspects[i].h;
+    if (wantWide !== gotWide) {
+      const alt = GALLERY_ASPECTS.filter(a => (a.w > a.h) === wantWide);
+      if (alt.length) aspects[i] = alt[Math.floor(Math.random() * alt.length)];
+    }
+
+    // 环境层：场景/光影/视角/焦点/摄影效果/表情/状态/道具 —— 7 维各抽 1，带耦合约束。
+    // ★ 同一条 `env` 同时喂给提示词（`sentence`）与标签（`tags`），
+    //   所以"卡片上写的标签"与"画出来的画面"**同源**，不会漂移。
+    const envelope = pickGalleryEnvelope(pose);
+
+    const built = buildPoseImagePrompt(pose, { subject, girlRefs: refs, envelope });
+    return {
+      pose, artist: artists[i], aspect: aspects[i],
+      imagePrompt: built.prompt, negative: built.negative, frame: built.frame,
+      env: envelope.picks,
+      girls: need,
+      // 出镜角色的 id：**生图时要挂她们的 LoRA**，否则画面里的人根本不像那个角色。
+      // 注意这不等于「作者」—— 本站条目的上传者仍是匿名网名（author_type 保持 anonymous）。
+      castIds: picked.map(c => c.id),
+      // 给模型看的是**角色名**（它要写中文作品名），进提示词的是**英文外观指代**
+      girlNames: picked.map(c => c.display_name),
+    };
+  });
+
+  const msgs = [
+    { role: 'system', content: [getSystemRules({ roleplay: false }), getWorldSetting()].filter(Boolean).join('\n\n') },
+    { role: 'system', content: outlet.prompt },
+    { role: 'system', content: buildGalleryFormatPrompt(outlet, boards, plan) },
+    {
+      role: 'user',
+      content: `请为上述 ${plan.length} 张图各写一个作品名与一句备注。${outlet.tagline ? `站点定位：${outlet.tagline}` : ''}`,
+    },
+  ];
+
+  const raw = await chatSync(msgs, {
+    temperature: 1.0,
+    max_tokens: 4000,
+    response_format: { type: 'json_object' },
+    label: `media-gallery:${outlet.name}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  if (!jsonStr) throw new Error('LLM 未返回 JSON');
+  const drafts = normalizeGalleryDraft(JSON.parse(repairJson(jsonStr)), boards, plan, { forbiddenNames });
+  return insertDrafts(outlet, drafts, n);
+}
+
+/**
+ * 把已规整的草稿落库（三个批量形态共用）。
+ * @returns {Promise<{outletId:number, outletName:string, batchId:string, inserted:number}>}
+ */
+function insertDrafts(outlet, drafts, requested) {
+  const db = getDb();
+  const batchId = `mb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const ins = db.prepare(`
+    INSERT INTO media_posts (outlet_id, board_id, batch_id, title, content, tags_json,
+      author_type, character_id, author_name, author_avatar, likes, views, comments_json,
+      image_prompt, payload_json, image_status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  let inserted = 0;
+  const tx = db.transaction(() => {
+    for (const d of drafts) {
+      ins.run(
+        outlet.id, d.board_id, batchId, d.title, d.content, JSON.stringify(d.tags),
+        d.author_type, d.character_id, d.author_name, d.author_avatar, d.likes, d.views,
+        JSON.stringify(d.comments),
+        d.image_prompt || null,
+        d.payload ? JSON.stringify(d.payload) : null,
+        // 图库必须有图 → 直接进 pending 排队；其余形态无图时不排队（避免白跑一趟生图）
+        d.image_prompt ? 'pending' : 'none',
+      );
+      inserted++;
+    }
+  });
+  tx();
+  console.log(`[media] 「${outlet.name}」新增 ${inserted} 条（形态 ${outlet.layout}，请求 ${requested}）`);
+  broadcast('media_new_posts', { outletId: outlet.id, count: inserted });
+  // 只为刚生成的这一批补图（不 await：文字先上屏、图随后到）
+  fillPendingImages(inserted).catch(err => console.error('[media] 本批补图失败:', err.message));
+  return { outletId: outlet.id, outletName: outlet.name, batchId, inserted };
+}
+
+// ══════════════════════════════════════════
 // 周刊形态（狸狸通讯社）
 // ══════════════════════════════════════════
 
@@ -573,12 +1522,12 @@ function buildWeeklyFormatPrompt() {
 {
   "volume": 数字（本期卷号，比上一期大 1；我会告诉你上一期是几卷）,
   "kind": "刊别（特急刊 / 增刊 / 号外 / 常规刊 三选一）",
-  "headline": "大标题（震撼体，把最劲爆的事写进去，≤40字）",
-  "intro": "引言（一句话勾人，以《狸狸周刊》扒一扒……开头）",
+  "headline": "大标题（把最劲爆的事写进去，≤40字）",
+  "intro": "引言（一句话勾人，≤60字）",
   "preface": ["开场白第1段", "开场白第2段", "开场白第3段（可选）"],
   "columns": [
     {
-      "name": "栏目名（如「震撼首发：一手信息直播间」）",
+      "name": "栏目名（**自己现想**，不许沿用往期用过的）",
       "items": [
         {
           "asker": "提问人的网名（不带@）",
@@ -593,7 +1542,7 @@ function buildWeeklyFormatPrompt() {
   "tail": [
     {
       "kind": "rank",
-      "title": "榜单标题（如「幻月游戏谒者愿力排名」）",
+      "title": "榜单标题（自己拟，贴合本期内容）",
       "notice": "榜单前的声明（可空字符串）",
       "rows": [
         { "rank": "第一名", "mask": "面具名", "change": "▲0 / NEW / ▼1 / ▼2", "bearer": "持有者" }
@@ -611,15 +1560,19 @@ function buildWeeklyFormatPrompt() {
 }
 
 字段要求：
-- "preface"：2~3 段，先安抚读者情绪（排比句），再交代本期背景，最后用「那么，一如既往，《狸狸周刊》快问快答Time，冲冲冲！」收尾。
+- "preface"：2~3 段，交代本期背景。**不要固定的开场白与收尾口号** —— 每期口气可以不一样。
 - "columns"：**2~4 个栏目**，每个栏目 **3~5 组问答**，栏目主题彼此必须明显不同。
+  ★ 栏目名**每期必须重新想**，不许沿用往期用过的名字或句式。
   每个 Q 的 "answers" 要有 **2~5 个嘉宾分段作答**，这是本刊的笑点所在（互相吐槽、接梗、歪楼、突然@别人）。
-- "tail"：从 rank / threads 里挑 **1~2 个**输出（可以都出）。
+- "tail"：**可选**，不要每期都硬塞。需要时才从 rank / threads 里挑 **1~2 个**输出。
   rank 要 5~8 行，change 用 ▲▼NEW 表示名次变化，可以出现「？？」表示未公开。
   threads 的 "replies" 要 5~10 条，有队形刷屏、有人破坏队形、有官方号插入温馨提示、有歪楼。
+- ★ **不得形成固定栏目与固定版式**：连续两期出现同一个小标题（哪怕换个说法）就算失败。
 - "credits"：记者名/编辑名都要带「狸」字的刊物风格。
 - 所有文字字段用中文；image_prompt 用英文。
-- 内容必须符合 <world_setting>。${imageRules ? `\n\n生图规则（image_prompt 必须遵守）：\n${imageRules}` : ''}`;
+- 内容必须符合 <world_setting>。
+
+${buildAliasRuleBlock()}${imageRules ? `\n\n生图规则（image_prompt 必须遵守）：\n${imageRules}` : ''}`;
 }
 
 /**
@@ -942,7 +1895,9 @@ function buildSectionBodyPrompt(sectionName, sectionLead) {
 - **块数 3~8 个**，内容要扎实、具体、有梗，是「值得点开看」的量。
 - 沿用你本刊一贯的人称、语气、口癖与署名风格。
 - 所有文字用中文。至少含一个 "qa" 或 "caption" 块（保证有可读的对话感）。
-- 内容必须符合 <world_setting>，且不得与本期其它板块重复。`;
+- 内容必须符合 <world_setting>，且不得与本期其它板块重复。
+
+${buildAliasRuleBlock()}`;
 }
 
 /**
@@ -1394,6 +2349,9 @@ export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATC
     if (outlet.layout === 'portal') return await generatePortalIssue(outlet);
     if (outlet.layout === 'weekly') return await generateWeeklyIssue(outlet);
     if (outlet.layout === 'poster') return await generatePosterIssue(outlet);
+    // 论坛 / 图库是「一批帖子」的变体，但格式差异大到各走各的规整器
+    if (outlet.layout === 'forum') return await generateForumBatch(outlet, n, withCharacters);
+    if (outlet.layout === 'gallery') return await generateGalleryBatch(outlet, n, withCharacters);
 
     const boards = listBoards(outlet.id);
     // 角色数量受帖数限制：最多 3 个、且不超过总帖数的一半（否则整版都是角色帖，不像真实社区）
@@ -1404,7 +2362,7 @@ export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATC
     const msgs = [
       { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
       { role: 'system', content: outlet.prompt },
-      { role: 'system', content: buildFormatPrompt(outlet, boards, authors) },
+      { role: 'system', content: buildFormatPrompt(outlet, boards, authors, { usedAliases: recentUsedAliases(outlet.id) }) },
       { role: 'user', content: buildMaterialsPrompt(outlet, boards, authors, n) },
     ];
 
@@ -1455,16 +2413,36 @@ export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATC
 // 配图（文字先上线，后台逐张补）
 // ══════════════════════════════════════════
 
-async function generateMediaImage(prompt, character = null) {
+/**
+ * 生成一张媒体配图。
+ * @param {string} prompt
+ * @param {object|null} character - 有角色时用其 `artist_override` / LoRA
+ * @param {object} [opts]
+ * @param {string|null} [opts.artist] - **本条专用画师串**，优先级高于一切。
+ *        图库形态（规则34）靠它实现「每条画风都不一样」——
+ *        该值由 generateGalleryBatch 从收藏夹随机抽、存进 payload.gallery.artist。
+ * @param {number} [opts.width]  - 本条专用宽（图库随机比例）
+ * @param {number} [opts.height] - 本条专用高
+ * @param {string} [opts.negative] - 本条专用负向提示词（体位参考里的「负向」，
+ *        用来压制该体位最常见的畸形，如同手同脚、多肢、男脸）
+ */
+async function generateMediaImage(prompt, character = null, opts = {}) {
   const charArtist = charArtistOverrideWithFallback(character);
+  const ownArtist = typeof opts.artist === 'string' && opts.artist.trim() ? opts.artist.trim() : null;
   const loras = parseCharacterLoras(character?.loras);
+  // 优先级：本条专用（图库随机画师串） > 角色单独画师串 > 全局
+  const finalArtist = ownArtist !== null ? ownArtist : (charArtist !== null ? charArtist : config.comfyui.momentsArtist);
+  const w = Number(opts.width) > 0 ? Number(opts.width) : config.comfyui.momentsWidth;
+  const h = Number(opts.height) > 0 ? Number(opts.height) : config.comfyui.momentsHeight;
+  const neg = typeof opts.negative === 'string' && opts.negative.trim() ? opts.negative.trim() : null;
   const result = await generateImageRaw(prompt, {
     ragQuery: prompt,
-    artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
-    width: config.comfyui.momentsWidth,
-    height: config.comfyui.momentsHeight,
+    artist: finalArtist,
+    width: w,
+    height: h,
     scene: 'moments',
     priority: 'low',
+    ...(neg ? { negativePrompt: neg } : {}),
     ...(loras.length ? { customWorkflow: character?.custom_workflow || null, loras } : {}),
   });
   if (!result?.success || !result.images?.length) return null;
@@ -1473,7 +2451,7 @@ async function generateMediaImage(prompt, character = null) {
     url: saveBase64Image('media', `media_${Date.now()}_${img.filename || 'comfy.png'}`, img.base64),
     refinedPrompt: result.promptRefined || prompt,
     wfMode: result.wfMode,
-    artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
+    artist: finalArtist,
   };
 }
 
@@ -1506,10 +2484,21 @@ export async function fillPendingImages(limit = 6) {
       //   前一张文件就变成没人引用的孤儿（实测目录里 81 个文件只有 37 个被引用）。
       if (!claimPostForImage(p.id)) continue;
       try {
-        const character = p.character_id
-          ? db.prepare('SELECT loras, artist_override, custom_workflow FROM characters WHERE id = ?').get(p.character_id)
+        // 图库形态：画师串 / 画幅比例 / 负向提示词**随条目走**（存 payload.gallery）
+        // ——这是「每条画风与比例都不一样」的实现点，三者都是服务端确定性分配的。
+        const gal = safeParse(p.payload_json, null)?.gallery || null;
+        // ★ 出镜角色（图库条目里 author_type 是 anonymous，但画面里是这些角色）：
+        //   必须挂她们的 LoRA，否则画出来的人根本不像那个角色。
+        const castId = p.character_id || gal?.castIds?.[0] || null;
+        const character = castId
+          ? db.prepare('SELECT loras, artist_override, custom_workflow FROM characters WHERE id = ?').get(castId)
           : null;
-        const result = await generateMediaImage(p.image_prompt, character);
+        const result = await generateMediaImage(p.image_prompt, character, {
+          artist: gal?.artist || null,
+          width: gal?.width || null,
+          height: gal?.height || null,
+          negative: gal?.negative || null,
+        });
         if (!result) {
           updatePostImage(p.id, { status: 'failed', error: 'ComfyUI 未返回图片' });
           continue;
@@ -1531,7 +2520,7 @@ export async function fillPendingImages(limit = 6) {
           promptRefined: result.refinedPrompt,
           outputPaths: [result.url],
           style: result.artist,
-          resolution: `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`,
+          resolution: `${gal?.width || config.comfyui.momentsWidth}x${gal?.height || config.comfyui.momentsHeight}`,
           workflowTemplate: result.wfMode,
           db,
         });
@@ -1798,6 +2787,26 @@ export function regeneratePostImages(ids) {
   return { ok: true, requested: list.length, queued, clearedImages, failed: failedItems.length, failedItems: failedItems.slice(0, 20) };
 }
 
+/**
+ * 「下次自动抓帖时刻」的持久化键。
+ *
+ * ★ 为什么必须落库：调度器是**每分钟 tick**，而 3099 由启动器以 `node --watch` 跑 ——
+ *   改任何源码都会重启进程。若把下次时刻只放内存，每次重启都会重置，
+ *   要么立刻抓一批、要么永远抓不到，错峰也就无从谈起。
+ */
+export const MEDIA_NEXT_AUTO_AT_KEY = 'media_next_auto_at';
+
+function readNextAutoAt() {
+  try {
+    const raw = getSetting(MEDIA_NEXT_AUTO_AT_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch { return null; }
+}
+function writeNextAutoAt(ts) {
+  try { setSetting(MEDIA_NEXT_AUTO_AT_KEY, String(Math.round(ts))); } catch { /* 写不进去下轮再排 */ }
+}
+
 export function maybeAutoGenerate(now = Date.now()) {  // ⚠️ 这里**不再**每轮扫描补图。
   //
   // 原来每次 tick（1 分钟）都无条件调 `fillPendingImages(8)`，配合已被移除的橱窗预生成，
@@ -1805,14 +2814,41 @@ export function maybeAutoGenerate(now = Date.now()) {  // ⚠️ 这里**不再*
   // 现在改为**纯按需**：只在①生成新批次后立即补那一批 ②前端打开传媒页时兜底补一次。
   // 没有任何"后台定时扫描出图"的路径。
 
-  // 自动抓帖：间隔由用户设置的档位决定；0 = 关闭（只手动刷新）
-  const interval = autoIntervalMs();
-  if (interval === 0) return null;
+  /*
+   * 自动抓帖：**每晚 N 批 + 夜间窗口内错峰随机**（2026-10-05 改）。
+   *
+   * 与旧实现的区别：
+   *   · 旧：`now - lastAutoAt >= 固定间隔` → 24 小时均匀铺开，白天也在产内容；
+   *   · 新：把"下次时刻"落库（`media_next_auto_at`），到点且**落在夜间窗口内**才动手，
+   *        动完立刻排下一次（在窗口内随机）。
+   *
+   * 「先排下一次、再生成」是刻意的：生成可能失败或进程中途重启，
+   * 但排期已经推进，不会卡在同一个时刻上反复重试（那是"卡死重试"的典型成因）。
+   */
+  const perNight = autoPerNight();
+  if (perNight === 0) return null;
   if (generating) return null;
-  if (now - lastAutoAt < interval) return null;
+
+  const nextAt = readNextAutoAt();
+  if (nextAt == null) {
+    // 还没排过（刚开启 / 老库没有这个键）→ 先排一次，本轮不生成
+    writeNextAutoAt(nextAutoAt(now, perNight));
+    console.log(`[media] 自动抓帖已排期：每晚 ${perNight} 批，下次 ${new Date(readNextAutoAt()).toLocaleString()}`);
+    return null;
+  }
+  if (now < nextAt) return null;
+
+  // 到点了，但可能已经天亮（进程夜间没开机）→ 不补跑，直接排到下一个窗口
+  if (!isWithinNightWindow(now)) {
+    writeNextAutoAt(nextAutoAt(now, perNight));
+    return null;
+  }
+
   const hasOutlet = getDb().prepare('SELECT 1 FROM media_outlets WHERE enabled = 1 LIMIT 1').get();
   if (!hasOutlet) return null;
+
   lastAutoAt = now;
+  writeNextAutoAt(nextAutoAt(now, perNight));   // 先推进排期，再生成
   return generateMediaBatch({ count: AUTO_BATCH_SIZE })
     .then(r => console.log(`[media] 自动补充：「${r.outletName}」+${r.inserted} 条`))
     .catch(err => console.error('[media] 自动补充失败:', err.message));
@@ -1891,14 +2927,23 @@ export function cleanupOrphanMediaImages(maxAgeMs = 60 * 60 * 1000) {
  * 距下次自动抓帖还有多久（前端「下次约 X 后」倒计时用）。
  * 关闭时返回 null。
  */
+/**
+ * 自动抓帖状态（供设置页显示「下次大概什么时候」）。
+ *
+ * `nextInMs` 现在来自**落库的排期**（`media_next_auto_at`），不是"上次 + 固定间隔" ——
+ * 因为新模型是夜间窗口内错峰随机，没有固定间隔可言。
+ */
 export function getAutoState() {
-  const interval = autoIntervalMs();
-  const minutes = Number(config.features.mediaAutoMinutes ?? 0);
-  if (interval === 0) return { minutes: 0, nextInMs: null, generating: !!generating };
-  const nextAt = lastAutoAt + interval;
+  const perNight = autoPerNight();
+  if (perNight === 0) {
+    return { perNight: 0, nextInMs: null, nextAt: null, inNightWindow: isWithinNightWindow(Date.now()), generating: !!generating };
+  }
+  const nextAt = readNextAutoAt();
   return {
-    minutes,
-    nextInMs: Math.max(0, nextAt - Date.now()),
+    perNight,
+    nextAt: nextAt ? new Date(nextAt).toISOString() : null,
+    nextInMs: nextAt ? Math.max(0, nextAt - Date.now()) : null,
+    inNightWindow: isWithinNightWindow(Date.now()),
     generating: !!generating,
   };
 }
