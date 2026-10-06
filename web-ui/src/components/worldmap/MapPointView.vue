@@ -34,8 +34,32 @@
                车厢里才是房间"的三层结构会被压平成一行药丸，层级信息全丢。 -->
         <g v-if="!activeArea">
           <g v-for="g in overview.groups" :key="g.key">
+            <!-- ⓪ 幻月（二相乐园的月球）—— 居中偏上的独立区块。
+                 与双翼不同：它不是地面磁极，而是悬在上方的存在，故单独一种块型。 -->
+            <template v-if="g.type === 'moon'">
+              <rect :x="g.x" :y="g.y" :width="g.w" :height="g.h" rx="70"
+                    class="mpt-moon" />
+              <text :x="g.x + 16" :y="g.y + 26" class="mpt-wing-name is-moon">{{ g.key }}</text>
+              <text :x="g.x + g.w - 16" :y="g.y + 25" class="mpt-wing-pole" text-anchor="end">{{ g.pole }}</text>
+              <g v-for="s in g.spots" :key="s.name"
+                 :class="['mpt-spot', { 'is-clickable': !!s.raw }]"
+                 @click="s.raw && pick(s.raw)">
+                <circle
+                  :cx="s.px" :cy="s.py" :r="s.raw ? 7 : 6"
+                  class="mpt-mk" :class="[s.raw ? (s.poi ? 'is-poi' : 'is-empty') : 'is-todo',
+                                         { selected: s.raw && selectedId === s.raw.id }]"
+                >
+                  <title>{{ s.raw ? `${s.name} · ${s.count} ${s.unit}${s.count === s.poi ? '' : ' · POI ' + s.poi}` : s.name }}</title>
+                </circle>
+                <circle v-if="s.raw" :cx="s.px" :cy="s.py" r="2.6" class="mpt-mk-core" />
+                <text :x="s.tx" :y="s.ty" class="mpt-mk-label" :class="s.raw ? 'is-on' : 'is-todo'" :text-anchor="s.ta">
+                  {{ s.name }}
+                </text>
+              </g>
+            </template>
+
             <!-- ① 磁极（双翼，官方总览图坐标）-->
-            <template v-if="g.type === 'overview'">
+            <template v-else-if="g.type === 'overview'">
               <rect :x="g.x" :y="g.y" :width="g.w" :height="g.h" rx="14"
                     class="mpt-wing" :class="g.tone" />
               <text :x="g.x + 16" :y="g.y + 26" class="mpt-wing-name" :class="g.tone">{{ g.key }}</text>
@@ -243,14 +267,32 @@ const REGION_LAYOUT = {
     box: { x: 900, y: 300, w: 780, h: 690 },
     spots: [
       { n: '世界尽头酒馆', x: 1320, y: 352, place: 'l' },
-      { n: '寂灭空飨妖都', x: 1128, y: 634, place: 'r' },
-      { n: '幻月秘庭', x: 952, y: 688, place: 'r' },
       // 贴着翼框左侧、与「鸽川区」同高 —— 喜悲街与鸽川区相邻
       { n: '喜悲街', x: 908, y: 800, place: 'r' },
       { n: '渡画泉隐', x: 1612, y: 834, place: 'l' },
-      { n: '坠星的摇篮', x: 1500, y: 932, place: 'l' },
+      // ★ 2026-10-06 用户口径：「寂灭空飨妖都」「坠星的摇篮」两个点位**删除**
+      //   （库里节点已被用户删除，这里同步清掉登记，否则会渲染成 is-todo 灰点）。
+      //   同日：「幻月秘庭」**不在这里** —— 用户在幻月内部（二相乐园的月球），
+      //   已移到上方居中的独立「幻月」区块，见 MOON_LAYOUT。
     ],
   },
+}
+
+/**
+ * ★ 2026-10-06 新增：**幻月**（二相乐园的月球）—— 独立于双翼的居中偏上区块。
+ *
+ * 用户口径：「幻月秘庭实际上在幻月内部（二相乐园的月球），所以应该移动到居中靠上的位置」。
+ * 它不属于喜笑/悲泣任何一翼（那是地面上的两个磁极），而是一个**悬在上方**的存在，
+ * 所以单独给一个区块、居中排布；双翼随之下移让位。
+ *
+ * 坐标用**区块内相对比例**（0~1），不与双翼的官方总览图像素坐标混用 ——
+ * 月球不在那张总览图的坐标系里，硬套会把方位关系搞乱。
+ */
+const MOON_LAYOUT = {
+  pole: '二相乐园的月球',
+  spots: [
+    { n: '幻月秘庭', rx: 0.5, ry: 0.62, place: 'b' },
+  ],
 }
 
 /** 官方锚点名 → 本库子区名（不一致时在此登记，别散落到各处） */
@@ -335,14 +377,47 @@ const overview = computed(() => {
   const known = new Set(Object.keys(REGION_LAYOUT))
   const groups = []
 
-  // ── 行 1：磁极（左右并列）──
+  // ── 行 0：★ 幻月（二相乐园的月球）—— 居中偏上，独立于双翼 ──
+  //   用户口径：幻月秘庭在幻月内部，应「居中靠上」。双翼（喜笑/悲泣）随之下移。
+  const moonUsed = new Set()
+  const moonH = 150
+  const moonY = ROW1_Y
+  const moonW = Math.min(420, W - MARGIN * 2)
+  const moonX = (W - moonW) / 2
+  {
+    const used = moonUsed
+    const spots = MOON_LAYOUT.spots.map(sp => {
+      const node = allNodes.value.get(SPOT_ALIAS[sp.n] ?? sp.n) ?? null
+      const kids = node?.children ?? []
+      const isArea = kids.length > 0
+      used.add(node?.name ?? sp.n)
+      const poi = kids.reduce((a, c) => a + (c.pois?.length ?? 0), 0) + (node?.pois?.length ?? 0)
+      const p = PLACE[sp.place] ?? PLACE.b
+      // 区块内相对比例 → 屏幕坐标（月球不在官方总览图坐标系里，故用比例而非像素）
+      const px = moonX + 24 + sp.rx * (moonW - 48)
+      const py = moonY + 42 + sp.ry * (moonH - 42 - 20)
+      return {
+        name: sp.n, raw: node,
+        count: isArea ? kids.length : poi, unit: isArea ? '场景' : 'POI', poi,
+        px, py, tx: px + p.dx, ty: py + p.dy, ta: p.ta,
+      }
+    })
+    groups.push({
+      type: 'moon', key: '幻月', pole: MOON_LAYOUT.pole, tone: 'is-moon',
+      spots, extras: [], x: moonX, y: moonY, w: moonW, h: moonH, ey: moonY + moonH - 10,
+      plotScale: 1,
+    })
+  }
+
+  // ── 行 1：磁极（左右并列）—— 在幻月之下 ──
+  const WINGS_Y = moonY + moonH + GAP
   const poleRoots = roots.filter(r => known.has(r.name))
   const cols = Math.max(1, poleRoots.length)
   const colW = (W - MARGIN * 2 - GAP * (cols - 1)) / cols
   poleRoots.forEach((root, i) => {
     const cfg = REGION_LAYOUT[root.name]
     const x = MARGIN + i * (colW + GAP)
-    const plot = { x: x + 30, w: colW - 60, y: ROW1_Y + 54, h: WING_H - 54 - 56 }
+    const plot = { x: x + 30, w: colW - 60, y: WINGS_Y + 54, h: WING_H - 54 - 56 }
     const s = Math.min(plot.w / cfg.box.w, plot.h / cfg.box.h)
     const ox = plot.x + (plot.w - cfg.box.w * s) / 2
     const oy = plot.y + (plot.h - cfg.box.h * s) / 2
@@ -365,12 +440,15 @@ const overview = computed(() => {
         px, py, tx: px + p.dx, ty: py + p.dy, ta: p.ta,
       }
     })
-    // 同一磁极下、总览图上没画到的子区（本库自建）→ 收到翼框底部
-    const extras = areas.value.filter(a => a.pole === root.name && !used.has(a.name))
+    // 同一磁极下、总览图上没画到的子区（本库自建）→ 收到翼框底部。
+    // ★★ 必须**同时排除幻月区块已消费的节点**（`moonUsed`）——
+    //   否则「幻月秘庭」会既画在上方幻月区块里、又落进悲泣区底部「自建子区」药丸，
+    //   同一个节点渲染两次（实测踩到）。
+    const extras = areas.value.filter(a => a.pole === root.name && !used.has(a.name) && !moonUsed.has(a.name))
       .map(a => ({ name: a.name, raw: a.raw }))
     groups.push({
       type: 'overview', key: root.name, pole: cfg.pole, tone: i === 0 ? 'is-joy' : 'is-grief',
-      spots, extras, x, y: ROW1_Y, w: colW, h: WING_H, ey: ROW1_Y + WING_H - 34,
+      spots, extras, x, y: WINGS_Y, w: colW, h: WING_H, ey: WINGS_Y + WING_H - 34,
       // ★ 把「原始锚点 → 屏幕」的实际缩放率带出去：
       //   比例尺显示的必须是**屏幕上量到的距离**对应的真实公里数，
       //   直接用原始锚点差算会差一个 s 倍（这里是缩小过的）。
@@ -378,7 +456,7 @@ const overview = computed(() => {
     })
   })
 
-  let cursor = ROW1_Y + WING_H
+  let cursor = WINGS_Y + WING_H
   let bottom = cursor
 
   // ── 行 2：星穹列车（车厢条，通栏）──
@@ -451,7 +529,7 @@ const overview = computed(() => {
     refs.guanlan = eta(d2(o, pt('观览云岛站')))
   }
 
-  return { groups, height: Math.max(bottom + MARGIN + (scaleBar ? 44 : 0), ROW1_Y + WING_H + MARGIN), scaleBar, refs }
+  return { groups, height: Math.max(bottom + MARGIN + (scaleBar ? 44 : 0), WINGS_Y + WING_H + MARGIN), scaleBar, refs }
 })
 
 function pick(raw) { emit('select', raw) }
@@ -682,10 +760,19 @@ const plot = computed(() => {
 .mpt-wing.is-joy { fill: color-mix(in srgb, var(--fun-gold) 7%, transparent); stroke: color-mix(in srgb, var(--fun-gold) 42%, transparent); }
 .mpt-wing.is-grief { fill: color-mix(in srgb, var(--fun-blue) 7%, transparent); stroke: color-mix(in srgb, var(--fun-blue) 42%, transparent); }
 .mpt-wing.is-train { fill: color-mix(in srgb, var(--accent) 6%, transparent); stroke: color-mix(in srgb, var(--accent) 40%, transparent); }
+/* ★ 幻月（月球）：居中偏上的独立区块。用胶囊形（rx 70）与地面双翼的方角区分，
+   色调取中性偏紫（不是 joy 金 / grief 蓝 —— 它不属于任何一翼）。 */
+.mpt-moon {
+  fill: color-mix(in srgb, var(--accent) 9%, transparent);
+  stroke: color-mix(in srgb, var(--accent) 46%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 6 5;
+}
 .mpt-wing-name { font-size: 15px; font-weight: 700; }
 .mpt-wing-name.is-joy { fill: var(--fun-gold); }
 .mpt-wing-name.is-grief { fill: var(--fun-blue); }
 .mpt-wing-name.is-train { fill: var(--accent); }
+.mpt-wing-name.is-moon { fill: var(--accent); }
 .mpt-wing-pole { font-size: 10px; fill: var(--text-secondary); }
 
 /* ── 车厢条（星穹列车）── */
