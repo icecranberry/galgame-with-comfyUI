@@ -331,8 +331,8 @@ test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
 // 网络（媒体）页：产物形态
 // ─────────────────────────────────────────────────────────
 
-test('媒体形态：社交平台(feed) / 论坛(forum) / 图库(gallery) / 数字报刊(portal) / 海报(poster)，且各有说明', () => {
-  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'forum', 'gallery', 'portal', 'poster']);
+test('媒体形态：社交平台(feed) / 论坛(forum) / 图片站SFW(photos) / 图库(gallery) / 数字报刊(portal) / 海报(poster)，且各有说明', () => {
+  assert.deepEqual(OUTLET_LAYOUTS.map(l => l.key), ['feed', 'forum', 'photos', 'gallery', 'portal', 'poster']);
   for (const l of OUTLET_LAYOUTS) {
     assert.ok(l.label && l.hint, `${l.key} 应有 label 与 hint`);
   }
@@ -536,7 +536,7 @@ test('分类白名单与 service 同源：路由里不得再硬编码分类字�
   assert.match(s, /MEDIA_CATEGORIES/, '分类白名单必须来自 services/mediaService.js');
   assert.match(s, /MEDIA_CATEGORIES\.includes\(/, '应按 MEDIA_CATEGORIES 判定，而不是逐个字面量比较');
   // 分类是前后端共用的契约，缺一档就会整档不过滤
-  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'print', 'social']);
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'photos', 'print', 'social']);
 });
 
 // ─────────────────────────────────────────────────────────
@@ -603,10 +603,11 @@ test('每个形态都恰好归属一个分类（新增形态却忘记归类时�
     assert.equal(owners(k).length, 1, `形态 ${k} 应恰好属于一个分类，实际属于：${owners(k).join('、') || '（无）'}`);
   }
   // 分区本身也要与前端标签一一对上（前端 MediaView 的 CATEGORIES 就是这几档）
-  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'print', 'social']);
+  assert.deepEqual([...MEDIA_CATEGORIES].sort(), ['digital', 'forum', 'gallery', 'photos', 'print', 'social']);
   assert.deepEqual(CATEGORY_LAYOUTS.print, ['poster', 'weekly']);
   assert.deepEqual(CATEGORY_LAYOUTS.digital, ['portal'], '海报/周刊必须从「数字报刊」摘出去，否则同刊会同时在两档出现');
   assert.deepEqual(CATEGORY_LAYOUTS.forum, ['forum'], '论坛必须是独立一档（版聊帖不能混进瀑布流）');
+  assert.deepEqual(CATEGORY_LAYOUTS.photos, ['photos'], '哈托比亚（SFW 图片站）必须是独立一档 —— 不能与规则34 混排，否则全年龄内容会与成人内容出现在同一档');
   assert.deepEqual(CATEGORY_LAYOUTS.gallery, ['gallery'], '图库必须是独立一档');
 });
 

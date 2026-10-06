@@ -41,13 +41,30 @@ export function ratioFromAspect(s) {
 }
 
 /**
+ * ★ 图片条目的**画面元信息读取器（唯一真源）**。
+ *
+ * 现在有两个图片站形态，payload 键名不同但**结构一致**：
+ *   · `payload.gallery` —— 规则34（NSFW 图站）
+ *   · `payload.photos`  —— 哈托比亚（SFW 图片站）
+ * 宽度/高度/比例/画师串/负向这些字段两边同名，所以读法统一收在这里，
+ * **不要在组件里到处写 `payload.gallery || payload.photos`** ——
+ * 那是同一口径写多份的老毛病（漏一处就会出现"某个站的比例读不到"）。
+ *
+ * @param {object} post
+ * @returns {object|null} 画面元信息（含 width/height/aspect/…）
+ */
+export function imageMetaOf(post) {
+  return post?.payload?.gallery || post?.payload?.photos || null
+}
+
+/**
  * 该条目的图片宽高比（宽 / 高）。
  * 优先「真实像素」→ 次「aspect 字符串」→ 最后缺省 3:4。
  * @param {object} post - media_posts 行（前端 mapPostRow 后的对象）
  * @returns {number}
  */
 export function imageRatioOf(post) {
-  const g = post?.payload?.gallery
+  const g = imageMetaOf(post)
   const w = Number(g?.width)
   const h = Number(g?.height)
   if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) return clamp(w / h)

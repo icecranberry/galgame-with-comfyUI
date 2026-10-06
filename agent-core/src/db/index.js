@@ -3274,7 +3274,7 @@ function migrateMediaSchema(db) {
       //   实测踩过：《狸狸八卦》被用户删掉后，一次重启就以新 id 复活了。
       //   所以要再叠一层「删除墓碑」：`deleteOutlet()` 会把名字记进
       //   `system_settings.media_outlets_deleted`，这里跳过那些名字。
-      const LATE_SEEDED = ['狸狸八卦', '二相论坛', '规则34'];
+      const LATE_SEEDED = ['狸狸八卦', '二相论坛', '规则34', '哈托比亚'];
       try {
         const deletedRaw = db.prepare(
           `SELECT setting_value FROM system_settings WHERE setting_key = 'media_outlets_deleted'`

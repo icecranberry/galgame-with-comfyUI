@@ -42,6 +42,10 @@ import { SEX_POSITIONS } from '../data/sexPositions.js';
 import { stripCharacterNames } from '../utils/characterNameGuard.js';
 // 规则34：环境层（场景/光影/视角/景别/表情/状态/道具）—— 7 维随机 + 耦合约束
 import { pickGalleryEnvelope } from './galleryEnvelope.js';
+import {
+  PHOTO_CATEGORIES, CITYSCAPE_FRAMES, PHOTO_ATMOSPHERE, SELFIE_VIEWS,
+  FOOD_ITEMS, POSTER_TOPICS, PHOTO_ASPECTS, PHOTO_QUALITY_SUFFIX, PHOTO_NEGATIVE,
+} from '../data/photoScenes.js';
 import { listSceneOutfits } from './outfitScene.js';
 import { deriveBuild } from './characterBuild.js';
 
@@ -252,7 +256,7 @@ export function getOutlet(id) {
  * ⚠ 这张表也被 `routes/media.js` 用来做入参白名单 ——
  *   **别再在路由里硬编码分类字面量**（曾经因此漏掉 print，导致该分类不过滤、返回全部帖子）。
  */
-export const MEDIA_CATEGORIES = ['print', 'digital', 'social', 'forum', 'gallery'];
+export const MEDIA_CATEGORIES = ['print', 'digital', 'social', 'forum', 'photos', 'gallery'];
 
 /**
  * 分类 → 形态 的映射（**单一真源**）。
@@ -271,6 +275,7 @@ export const CATEGORY_LAYOUTS = {
   digital: ['portal'],           // 数字报刊：可点开板块的数字刊物
   social: [null],                // 社交平台：帖子流（NULL 与 feed 同义）
   forum: ['forum'],              // 网络论坛：版聊主题帖（文字为主、少量图片）
+  photos: ['photos'],            // 哈托比亚：**SFW 图片站**（城市风光/自拍/美食/海报；确定性画面，无 NSFW）
   gallery: ['gallery'],          // 规则34：成人图片站（1 排 4 张，随机画师串 + 随机题材）
 };
 
@@ -310,6 +315,7 @@ function categoryFilter(category, alias = 'o') {
 export const OUTLET_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
   { key: 'forum', label: '网络论坛', hint: '版聊主题帖（标题 + 正文 + 楼层回复）· 文字为主、少量图片' },
+  { key: 'photos', label: '图片站（SFW）', hint: 'SFW 图片站：城市风光 / 美少女自拍 / 美食打卡 / 宣传海报 · 画面确定性生成' },
   { key: 'gallery', label: '图片站', hint: '图集条目（1 排 4 张）· 每条随机画师串与题材组合' },
   { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
   { key: 'poster', label: '海报', hint: '一张只讲一个瓜：热点速报条 → 大标题 → 主图 → 爆点气泡 → 短文案 → 小图组' },
@@ -1228,6 +1234,135 @@ export function buildSubjectRef(character) {
  *   ② 「随机」要真的随机 —— 模型在温度下会自我重复（同批十张都在同一个场景）；
  *   ③ 模型只写 40 字标题 + 60 字备注，token 便宜且输出稳定。
  */
+/**
+ * 「哈托比亚」条目的输出格式约束。
+ *
+ * 与 `buildGalleryFormatPrompt` 的关键差别：**这里画面不由模型定**，所以清单里
+ * 只给"这一张拍的是什么"（题材 + 地点/食物名），**不给画面提示词原文**（那是英文、
+ * 又长又是给我们看的），也不给角色名（保持"图站匿名"的目录感）。
+ */
+export function buildPhotoFormatPrompt(outlet, boards, plan) {
+  const boardNames = boards.map(b => b.name);
+  const boardRule = boardNames.length
+    ? `"board" 必须从这个站点的分区里选：${boardNames.map(x => `「${x}」`).join('、')}`
+    : `"board" 填 ""（本站点还没有分区）`;
+
+  // ★ 只给"拍的是什么"，不给英文提示词、不给角色名。
+  const catLabel = Object.fromEntries(PHOTO_CATEGORIES.map(c => [c.key, c.label]));
+  const list = plan.map((it, i) => {
+    const parts = [`题材：${catLabel[it.category] || it.category}`];
+    if (it.category === 'cityscape' && it.placeName) parts.push(`地点：${it.placeName}`);
+    if (it.category === 'selfie' && it.castName) parts.push(`出镜：${it.castName}`);
+    if (it.tags?.length) parts.push(`关键词：${it.tags.filter(Boolean).join('/')}`);
+    return `${i + 1}. ${parts.join('｜')}`;
+  }).join('\n');
+
+  return `你是图片站「${outlet.name}」的目录编辑。下面 ${plan.length} 张图**画面已经拍好了**，
+你只需要为每一张写**作品名**与**一句简短描述**，不要改动画面内容。
+
+【本批图片清单】（按顺序对应输出数组的下标）
+${list}
+
+请严格按照以下 JSON 格式输出，不要输出任何解释或 JSON 以外的文字：
+
+{
+  "posts": [
+    {
+      "board": "分区名（${boardRule}）",
+      "title": "作品名（≤24字）",
+      "content": "一句描述（20~50字）",
+      "author": "上传者网名",
+      "likes": 数字（点赞数）,
+      "views": 数字（浏览数，通常为 likes 的 10~40 倍）
+    }
+  ]
+}
+
+字段要求：
+- ${boardRule}。分区尽量分散，别整批都塞一个区。
+- ★ **作品名**：像图片站的作品命名 —— 短、有画面感、可以带地点或时间（如「泊地站夜景 03」「雨天的天台」）。
+  **不要**写成小说标题或抒情诗；**不要**用「禁忌」「秘密」这类空词。
+- ★ **描述**：像上传者随口说的一句 —— 在哪拍的、什么心情、和谁去的、求不要求点评。
+  可以写地方与季节，**不要复述画面细节**（画面已定）。风格轻松、生活化。
+- ★ 这是**全年龄图片站**：描述里**不要出现性相关词汇**，也不要写心理分析长段落。
+- ★ **同一批里的作品名必须互不相同**，别都用同一个句式。
+- "author" 填符合该站点气质的网名（摄影师、美食博主、路人、无意义字符串都可以）。
+- "likes"/"views"：likes 20~8000；views 相应放大。
+- 所有文本用**中文**。
+- 输出数组长度必须正好 ${plan.length}，顺序与上面的清单一一对应。`;
+}
+
+/**
+ * 规整「哈托比亚」条目。**画面不再是模型给的，而是 plan 里的确定性内容**。
+ *
+ * 与 `normalizeGalleryDraft` 的差别：
+ *   · **不做角色名清洗**（本站鼓励出现角色名 —— 自拍的"作者"就是角色本人视角），
+ *     但自拍条的 `author` 仍用上传者网名（图站是第三方分享），出镜角色存 `payload.photos.castIds`。
+ *   · 标签是**题材词**（城市风光/地点/美食名…），**不含 NSFW 体位词、不含画面参数**。
+ */
+export function normalizePhotoDraft(raw, boards, plan = []) {
+  const list = Array.isArray(raw?.posts) ? raw.posts : [];
+  const boardByName = new Map(boards.map(b => [b.name, b]));
+  const out = [];
+  const catLabel = Object.fromEntries(PHOTO_CATEGORIES.map(c => [c.key, c.label]));
+  const isAspectLike = (s) => /^\d+(?:\.\d+)?\s*[:：xX×]\s*\d+(?:\.\d+)?$/.test(String(s));
+
+  plan.forEach((it, i) => {
+    const item = list[i] || null;
+    if (!it?.prompt) return;
+
+    // 模型没写标题也不丢条目：用**题材 + 地点/食物名**兜底（图站常见"未命名"作品）
+    const fallbackTitle = it.placeName || it.tags?.[0] || catLabel[it.category] || '随手拍';
+    const title = clampText(item?.title, 80) || fallbackTitle;
+
+    const likesRaw = Number(item?.likes);
+    const viewsRaw = Number(item?.views);
+    const likes = Number.isFinite(likesRaw) && likesRaw >= 0 ? Math.floor(likesRaw) : randInt(20, 8000);
+
+    // 标签：题材 + 关键词（**画面参数绝不进标签** —— 与规则34 同一口径）
+    const tags = [catLabel[it.category], ...(it.tags || [])]
+      .filter(Boolean).map(String)
+      .filter(t => !isAspectLike(t));
+    const uniqTags = [...new Set(tags)].slice(0, 10);
+
+    const boardName = clampText(item?.board, 16);
+    const board = boardByName.get(boardName) || null;
+
+    out.push({
+      board_id: board?.id ?? null,
+      title,
+      content: clampText(item?.content, 300) || `${fallbackTitle}。`,
+      tags: uniqTags,
+      author_type: 'anonymous',      // 图片站上传者是第三方分享者（与角色出镜与否无关）
+      character_id: null,
+      author_name: clampText(item?.author, 24) || '匿名用户',
+      author_avatar: null,
+      likes,
+      views: Number.isFinite(viewsRaw) && viewsRaw > 0 ? Math.floor(viewsRaw) : likes * randInt(10, 40),
+      comments: [],
+      image_prompt: it.prompt,
+      payload: {
+        photos: {
+          category: it.category,
+          categoryLabel: catLabel[it.category] || it.category,
+          placeName: it.placeName || '',
+          aspect: it.aspect.key,
+          width: it.aspect.w,
+          height: it.aspect.h,
+          negative: PHOTO_NEGATIVE,
+          artist: it.artist || null,
+          // 自拍条出镜的角色（生图挂 LoRA 用）；其余题材为空
+          castIds: it.castId ? [it.castId] : [],
+          castNames: it.castName ? [it.castName] : [],
+        },
+      },
+    });
+  });
+
+  if (!out.length) throw new Error('没有可用的图片条目（每条都必须有 image_prompt）');
+  return out;
+}
+
 export function buildGalleryFormatPrompt(outlet, boards, plan) {
   const boardNames = boards.map(b => b.name);
   const boardRule = boardNames.length
@@ -1389,6 +1524,177 @@ export function normalizeGalleryDraft(raw, boards, plan = [], opts = {}) {
 
   if (!out.length) throw new Error('没有可用的图库条目（每条都必须有 image_prompt）');
   return out;
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════
+ *  哈托比亚（`photos` 形态）—— **SFW 图片站**
+ * ══════════════════════════════════════════════════════════════
+ *
+ * 与 `gallery`（规则34）**同一套架构、不同的题材池**：
+ *   服务端 → 抽题材 · 决定画面 · 抽画幅 · 抽画师串
+ *   模型   → 只写作品名 / 一句备注 / 上传者 / 热度
+ *
+ * 画面之所以不让模型写，是规则34 验证过的理由（换到 SFW 站同样成立）：
+ *   ① 「随机」要真随机 —— 模型在温度下会自我重复（同批十张同一个场景）；
+ *   ② 画面提示词是逐字校准过的（含 no people / 视角 / 画幅），交给模型转写必然漂移；
+ *   ③ 出口可控 —— **SFW 站绝不能因为模型一时兴起就画出奇怪的东西**，
+ *      题材池里没有 NSFW 词，画面就不可能跑偏（这是"不使用 NSFW 内容"的技术保证）。
+ *
+ * ★ 城市风光的画面主体来自**世界地图** `world_map_places.scene_prompt`
+ *   （全库 101/101 已补齐），不是本文件里的泛泛街景 —— 见 `photoScenes.js` 文件头。
+ */
+
+/** 从数组里不重复地抽 n 个（池子不够则放回续抽）；返回浅拷贝数组 */
+function pickUnique(pool, n) {
+  const bag = [...pool];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    if (!bag.length) bag.push(...pool);
+    out.push(bag.splice(Math.floor(Math.random() * bag.length), 1)[0]);
+  }
+  return out;
+}
+
+/**
+ * 取地图上可用的场景（城市风光的画面源）。
+ * 只取 **lv3 场景**（最具体、画面描述最细），且 `scene_prompt` 非空。
+ * 读不到就返回 []（调用方会退化到"通用城市风光"包裹语，绝不因此不出图）。
+ */
+function listMapScenePrompts() {
+  try {
+    return getDb().prepare(`
+      SELECT p.name AS name, p.scene_prompt AS scene_prompt
+      FROM world_map_places p
+      WHERE p.level = 3 AND p.scene_prompt IS NOT NULL AND TRIM(p.scene_prompt) != ''
+    `).all().map(r => ({ name: String(r.name || '').trim(), prompt: String(r.scene_prompt || '').trim() }))
+      .filter(r => r.name && r.prompt);
+  } catch { return []; }
+}
+
+/**
+ * 城市风光取景：`{SCENE}` 用地图场景填充。
+ * 若地图无数据 → 退化为通用都市语，保证仍能出图（红线：绝不空手）。
+ */
+function buildCityscapeItem(frame, atmosphere, mapScenes) {
+  const picked = mapScenes.length ? mapScenes[Math.floor(Math.random() * mapScenes.length)] : null;
+  const sceneText = picked
+    ? picked.prompt
+    : 'a dense modern city at street level, glass towers, overhead signage, ambient glow';
+  const prompt = `${frame.en.replace('{SCENE}', sceneText)}, ${atmosphere.en}, ${PHOTO_QUALITY_SUFFIX}`;
+  return {
+    category: 'cityscape',
+    placeName: picked?.name || '',
+    sceneText,
+    prompt,
+    tags: [picked?.name, frame.cn, atmosphere.cn].filter(Boolean),
+  };
+}
+
+/** 美少女自拍：`{subject}` 用角色外观指代填充；无角色时退化为 the girl */
+function buildSelfieItem(view, atmosphere, cast) {
+  const ref = (cast && buildSubjectRef(cast)) || 'the girl';
+  const prompt = `${view.en.replace('{subject}', ref)}, ${atmosphere.en}, ${PHOTO_QUALITY_SUFFIX}`;
+  return {
+    category: 'selfie',
+    castId: cast?.id || null,
+    castName: cast?.display_name || '',
+    prompt,
+    tags: [view.cn, atmosphere.cn, '自拍'].filter(Boolean),
+  };
+}
+
+/** 美食打卡 */
+function buildFoodItem(food, atmosphere) {
+  return {
+    category: 'food',
+    prompt: `${food.en}, ${atmosphere.en}, ${PHOTO_QUALITY_SUFFIX}`,
+    tags: [food.cn, atmosphere.cn, '美食'].filter(Boolean),
+  };
+}
+
+/** 宣传海报（画面只留版位，文字由前端叠 —— 生图模型写字不可靠） */
+function buildPosterItem(topic) {
+  return {
+    category: 'poster',
+    prompt: `${topic.en}, ${PHOTO_QUALITY_SUFFIX}`,
+    tags: [topic.cn, '海报', '宣传'].filter(Boolean),
+  };
+}
+
+/** 按分类抽画幅（各题材的画幅倾向不同，见 photoScenes.PHOTO_ASPECTS） */
+function pickPhotoAspect(category) {
+  const pool = PHOTO_ASPECTS[category] || PHOTO_ASPECTS.cityscape;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * 生成「哈托比亚」的一批条目。
+ *
+ * @param {object} outlet
+ * @param {number} count
+ * @param {boolean} withCharacters 是否允许角色出镜（自拍题材需要）
+ */
+async function generatePhotoBatch(outlet, count, withCharacters) {
+  const n = Math.max(1, Math.min(MAX_BATCH_SIZE, count));
+  const boards = listBoards(outlet.id);
+
+  // ★ 题材配比：城市风光 + 自拍各约 1/4，美食 + 海报各约 1/4（保证四类都出现）。
+  //   自拍需要角色；若不允许角色出镜，把自拍份额让给城市风光。
+  const allowSelfie = withCharacters === true;
+  const planIdx = [];
+  const per = Math.max(1, Math.round(n / 4));
+  for (let i = 0; i < n; i++) {
+    const slot = i % 4;
+    if (slot === 0 || slot === 1) planIdx.push('cityscape');       // 城市风光权重最高（题材最具特色）
+    else if (slot === 2) planIdx.push(allowSelfie ? 'selfie' : 'cityscape');
+    else planIdx.push(i % 8 === 3 ? 'food' : 'poster');
+  }
+  // 用 per 做一次轻微打散（避免"前 n/4 全是风光"的机械感）
+  void per;
+
+  const mapScenes = listMapScenePrompts();
+  const castPool = allowSelfie ? pickActiveCharacters(8) : [];
+  const selfieCast = pickUnique(castPool, planIdx.filter(x => x === 'selfie').length);
+
+  const frames = pickUnique(CITYSCAPE_FRAMES, planIdx.filter(x => x === 'cityscape').length);
+  const atmos = pickUnique(PHOTO_ATMOSPHERE, n);
+  const views = pickUnique(SELFIE_VIEWS, planIdx.filter(x => x === 'selfie').length);
+  const foods = pickUnique(FOOD_ITEMS, planIdx.filter(x => x === 'food').length);
+  const topics = pickUnique(POSTER_TOPICS, planIdx.filter(x => x === 'poster').length);
+  const artists = pickRandomArtists(n);
+
+  let ci = 0, si = 0, fi = 0, pi = 0;
+  const plan = planIdx.map((cat, i) => {
+    let item;
+    if (cat === 'cityscape') item = buildCityscapeItem(frames[ci++], atmos[i], mapScenes);
+    else if (cat === 'selfie') item = buildSelfieItem(views[si++], atmos[i], selfieCast[si - 1]);
+    else if (cat === 'food') item = buildFoodItem(foods[fi++], atmos[i]);
+    else item = buildPosterItem(topics[pi++]);
+    const aspect = pickPhotoAspect(cat);
+    return { ...item, aspect, artist: artists[i] || null, frame: null };
+  });
+
+  const msgs = [
+    { role: 'system', content: [getSystemRules({ roleplay: false }), getWorldSetting()].filter(Boolean).join('\n\n') },
+    { role: 'system', content: outlet.prompt },
+    { role: 'system', content: buildPhotoFormatPrompt(outlet, boards, plan) },
+    {
+      role: 'user',
+      content: `请为上述 ${plan.length} 张图各写一个作品名与一句备注。${outlet.tagline ? `站点定位：${outlet.tagline}` : ''}`,
+    },
+  ];
+
+  const raw = await chatSync(msgs, {
+    temperature: 1.0,
+    max_tokens: 4000,
+    response_format: { type: 'json_object' },
+    label: `media-photos:${outlet.name}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  if (!jsonStr) throw new Error('LLM 未返回 JSON');
+  const drafts = normalizePhotoDraft(JSON.parse(repairJson(jsonStr)), boards, plan);
+  return insertDrafts(outlet, drafts, n);
 }
 
 /**
@@ -2351,6 +2657,7 @@ export async function generateMediaBatch({ outletId = null, count = DEFAULT_BATC
     if (outlet.layout === 'poster') return await generatePosterIssue(outlet);
     // 论坛 / 图库是「一批帖子」的变体，但格式差异大到各走各的规整器
     if (outlet.layout === 'forum') return await generateForumBatch(outlet, n, withCharacters);
+    if (outlet.layout === 'photos') return await generatePhotoBatch(outlet, n, withCharacters);
     if (outlet.layout === 'gallery') return await generateGalleryBatch(outlet, n, withCharacters);
 
     const boards = listBoards(outlet.id);
@@ -2486,7 +2793,10 @@ export async function fillPendingImages(limit = 6) {
       try {
         // 图库形态：画师串 / 画幅比例 / 负向提示词**随条目走**（存 payload.gallery）
         // ——这是「每条画风与比例都不一样」的实现点，三者都是服务端确定性分配的。
-        const gal = safeParse(p.payload_json, null)?.gallery || null;
+        // ★ 哈托比亚（photos 形态）同口径，只是键名不同（payload.photos）；
+        //   两者结构一致，这里合并读取，避免再复制一份补图逻辑。
+        const payload = safeParse(p.payload_json, null);
+        const gal = payload?.gallery || payload?.photos || null;
         // ★ 出镜角色（图库条目里 author_type 是 anonymous，但画面里是这些角色）：
         //   必须挂她们的 LoRA，否则画出来的人根本不像那个角色。
         const castId = p.character_id || gal?.castIds?.[0] || null;

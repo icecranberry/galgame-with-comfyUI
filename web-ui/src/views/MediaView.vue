@@ -269,7 +269,7 @@
 
     <!-- 板块筛选（选中某个媒体后才出现）。
          论坛/图库两档各自在版式内带了分区导航，这里不再重复出一条。 -->
-    <div v-if="boards.length && !activeIsPeriodical && !isForumCategory && !isGalleryCategory" class="board-bar">
+    <div v-if="boards.length && !activeIsPeriodical && !isForumCategory && !isGalleryCategory && !isPhotosCategory" class="board-bar">
       <linshe-button
         v-for="b in boardChips"
         :key="b.id ?? 'all'"
@@ -360,6 +360,20 @@
     <MediaGallery
       v-if="isGalleryCategory && galleryPosts.length"
       :posts="galleryPosts"
+      :outlets="filteredOutlets"
+      :active-outlet="activeOutlet"
+      :active-board-id="activeBoard"
+      :batch-mode="batchMode"
+      :selected-ids="selectedPostIds"
+      @open="openPost"
+      @board="onBoardChange"
+      @pick="togglePick"
+    />
+
+    <!-- ── 哈托比亚：SFW 图片站（与规则34 同一套图片站版式，只是内容全年龄）── -->
+    <MediaGallery
+      v-if="isPhotosCategory && photosPosts.length"
+      :posts="photosPosts"
       :outlets="filteredOutlets"
       :active-outlet="activeOutlet"
       :active-board-id="activeBoard"
@@ -573,6 +587,17 @@
             <b>画师串</b>{{ shortArtist(detailPost.payload.gallery.artist) }}
           </span>
         </div>
+        <!-- 哈托比亚（SFW 图片站）：同口径摊开「题材 / 取景地点 / 画幅 / 画师串」 -->
+        <div v-if="postKind(detailPost) === 'photos' && detailPost.payload?.photos" class="gallery-params">
+          <span class="gp-item"><b>题材</b>{{ detailPost.payload.photos.categoryLabel || '—' }}</span>
+          <span v-if="detailPost.payload.photos.placeName" class="gp-item"><b>取景</b>{{ detailPost.payload.photos.placeName }}</span>
+          <span class="gp-item"><b>画幅</b>{{ detailPost.payload.photos.aspect || '—' }}
+            <template v-if="detailPost.payload.photos.width">（{{ detailPost.payload.photos.width }}×{{ detailPost.payload.photos.height }}）</template>
+          </span>
+          <span class="gp-item gp-artist" :title="detailPost.payload.photos.artist || ''">
+            <b>画师串</b>{{ shortArtist(detailPost.payload.photos.artist) }}
+          </span>
+        </div>
         <!-- 环境层：本条随机到的场景/光影/视角/焦点/摄影效果/表情/状态/道具。
              与上面「体位 / 画幅 / 画师串」同一口径 —— 这几样都是服务端逐条随机分配的，
              摊开才看得出"随机"是真的（标签与画面同源，见后端 galleryEnvelope.js）。 -->
@@ -688,6 +713,7 @@ const CATEGORIES = [
   { key: 'digital', label: '数字报刊', icon: '📸', hint: '数字刊物 —— 门户网，可点开各板块看正文' },
   { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 帖子流，一屏看多条' },
   { key: 'forum', label: '网络论坛', icon: '🧵', hint: '版聊论坛 —— 主题帖 + 楼层回复，文字为主、少量图片' },
+  { key: 'photos', label: '哈托比亚', icon: '📷', hint: '图片分享站（全年龄）—— 城市风光 / 美少女自拍 / 美食打卡 / 宣传海报' },
   { key: 'gallery', label: '规则34', icon: '🔞', hint: '成人图片站 —— 一排 4 张；每条随机体位 + 随机画师串 + 随机比例' },
 ]
 const activeCategory = ref('social')   // 默认落在内容最多的社交平台
@@ -702,6 +728,8 @@ const activeCategoryLabel = computed(
 /** 论坛 / 图库档 —— 这两档的帖子不参与瀑布流（各自有专属版式） */
 const isForumCategory = computed(() => activeCategory.value === 'forum')
 const isGalleryCategory = computed(() => activeCategory.value === 'gallery')
+/** 哈托比亚（SFW 图片站）档 —— 与规则34 共用图片站版式 */
+const isPhotosCategory = computed(() => activeCategory.value === 'photos')
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -743,6 +771,11 @@ function isGalleryOutlet(o) {
   return (o.layout || 'feed') === 'gallery'
 }
 
+/** 「哈托比亚」= SFW 图片站形态（与规则34 版式同构，故共用 MediaGallery 渲染） */
+function isPhotosOutlet(o) {
+  return (o.layout || 'feed') === 'photos'
+}
+
 /**
  * 分类 → 「这个 outlet 属不属于这一档」的判定（**唯一一份**）。
  * 与后端 `CATEGORY_LAYOUTS` 一一对应；新增档位时只改这里与 CATEGORIES，
@@ -752,6 +785,7 @@ function isGalleryOutlet(o) {
 const CATEGORY_PICKERS = {
   social: o => (o.layout || 'feed') === 'feed',
   forum: isForumOutlet,
+  photos: isPhotosOutlet,
   gallery: isGalleryOutlet,
   print: isPrintOutlet,
   digital: isDigitalOutlet,
@@ -841,6 +875,7 @@ function postKind(p) {
   if (!pl) return 'feed'
   // ★ 先判两个新形态：它们的 payload 结构最独特，且都要从瀑布流里摘出去
   if (pl.gallery) return 'gallery'
+  if (pl.photos) return 'photos'
   if (pl.forum && Array.isArray(pl.forum.replies)) return 'forum'
   if (pl.portal && Array.isArray(pl.sections)) return 'portal'
   if (Array.isArray(pl.columns)) return 'weekly'
@@ -854,7 +889,7 @@ function postKind(p) {
  */
 function isLayoutPost(p) {
   const k = postKind(p)
-  return k === 'forum' || k === 'gallery' || k === 'portal' || k === 'weekly' || k === 'poster'
+  return k === 'forum' || k === 'gallery' || k === 'photos' || k === 'portal' || k === 'weekly' || k === 'poster'
 }
 /** 整幅版式（不是瀑布流卡片）：论坛 / 图库 / 门户 / 周刊 / 海报 */
 function isSpecialPost(p) {
@@ -866,6 +901,8 @@ const feedPosts = computed(() => posts.value.filter(p => postKind(p) === 'feed')
 const forumPosts = computed(() => posts.value.filter(p => postKind(p) === 'forum'))
 /** 规则34 图库条目（等宽多列瀑布流） */
 const galleryPosts = computed(() => posts.value.filter(p => postKind(p) === 'gallery'))
+/** 哈托比亚（SFW 图片站）条目 —— 与规则34 共用图片站版式 */
+const photosPosts = computed(() => posts.value.filter(p => postKind(p) === 'photos'))
 /** 整幅版式：门户 / 周刊 / 海报 */
 const specialPosts = computed(() => {
   const list = posts.value.filter(p => {
@@ -1281,6 +1318,9 @@ function outletLayoutLabel(o) {
   if (o?.layout === 'portal') return '数字报刊 · 按「期」出刊'
   if (o?.layout === 'poster') return '海报 · 一张只讲一个瓜'
   if (o?.layout === 'weekly') return '周刊（旧形态）'
+  if (o?.layout === 'forum') return '网络论坛 · 版聊主题帖'
+  if (o?.layout === 'photos') return '图片站 · 全年龄（城市风光/自拍/美食/海报）'
+  if (o?.layout === 'gallery') return '图片站 · 规则34（成人）'
   return '社交平台 · 一批帖子'
 }
 

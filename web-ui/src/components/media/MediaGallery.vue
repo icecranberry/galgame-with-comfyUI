@@ -61,7 +61,7 @@
             <div class="mg-thumb" :style="{ '--mg-ar': ratioOf(p) }">
               <img v-if="p.image" :src="p.image" alt="" loading="lazy" decoding="async" />
               <div v-else class="mg-thumb-ph">
-                <span class="mg-ph-icon">🔞</span>
+                <span class="mg-ph-icon">{{ isSfwStation ? '📷' : '🔞' }}</span>
                 <span class="mg-ph-text">{{ p.image_status === 'failed' ? '生成失败' : '排队生图中…' }}</span>
               </div>
               <!-- 批量模式：右上角勾选框。**整卡可点**（触屏也好用），这里只做视觉、不单独绑事件。
@@ -98,7 +98,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { colsForWidth, distributeColumns, imageRatioOf } from '../../utils/galleryMasonry.js'
+import { colsForWidth, distributeColumns, imageRatioOf, imageMetaOf } from '../../utils/galleryMasonry.js'
 import { buildTagGroups } from '../../utils/galleryEnvelopeLabels.js'
 
 const props = defineProps({
@@ -180,14 +180,18 @@ function onCellClick(p) {
 function ratioOf(p) {
   return imageRatioOf(p)
 }
-/** 该条目的体位名（服务端随机分配的，存在 payload.gallery.pose） */
+/** 该条目的**题材贴纸**（图片站随机分配的题材名，存在 payload 里）。
+ *  规则34 是体位名、哈托比亚是题材名（城市风光 / 美少女自拍 / 美食打卡 / 宣传海报）。 */
 function poseOf(p) {
-  return p?.payload?.gallery?.pose || ''
+  const m = imageMetaOf(p)
+  return m?.pose || m?.categoryLabel || ''
 }
 /** 该条目的画幅比例（服务端随机分配的） */
 function aspectOf(p) {
-  return p?.payload?.gallery?.aspect || ''
+  return imageMetaOf(p)?.aspect || ''
 }
+/** 是否 SFW 图片站（哈托比亚）—— 决定占位图标与文案，避免在无图时显示 🔞 */
+const isSfwStation = computed(() => props.posts.some(p => p?.payload?.photos) || false)
 function fmtNum(n) {
   const v = Number(n) || 0
   if (v >= 10000) return `${(v / 10000).toFixed(1)}w`

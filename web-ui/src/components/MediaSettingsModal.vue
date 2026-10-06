@@ -166,7 +166,8 @@ const form = ref(null)
 const FALLBACK_LAYOUTS = [
   { key: 'feed', label: '社交平台', hint: '一批独立帖子（瀑布流）· 一次生成多条' },
   { key: 'forum', label: '网络论坛', hint: '版聊主题帖（标题 + 正文 + 楼层回复）· 文字为主、少量图片' },
-  { key: 'gallery', label: '图片站', hint: '图集条目 · 每条随机画师串与题材组合' },
+  { key: 'photos', label: '图片站（全年龄）', hint: '城市风光 / 美少女自拍 / 美食打卡 / 宣传海报 · 画面确定性生成' },
+  { key: 'gallery', label: '图片站（成人）', hint: '图集条目 · 每条随机画师串与题材组合' },
   { key: 'portal', label: '数字报刊', hint: '按「期」出刊：门户版 + 板块正文（点开才生成）' },
   { key: 'poster', label: '海报', hint: '一张只讲一个瓜：热点速报条 → 大标题 → 主图 → 短文案' },
 ]

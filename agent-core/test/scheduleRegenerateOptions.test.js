@@ -45,7 +45,7 @@ test('nsfwRatio：非数字忽略；0 必须被保留（不能被当成「没传
 });
 
 test('sleepType：只认登记过的键，非法值忽略', () => {
-  assert.equal(readScheduleOptions({ sleepType: 'night_heavy' }).sleepType, 'night_heavy');
+  assert.equal(readScheduleOptions({ sleepType: 'stay_up' }).sleepType, 'stay_up');
   assert.equal('sleepType' in readScheduleOptions({ sleepType: '__nope__' }), false);
   assert.equal('sleepType' in readScheduleOptions({ sleepType: '' }), false);
   assert.equal('sleepType' in readScheduleOptions({ sleepType: 'constructor' }), false, '原型链上的键不算已登记');

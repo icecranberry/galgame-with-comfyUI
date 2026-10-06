@@ -120,12 +120,12 @@ test('区域块：软约束措辞；区域无场景时不出现空的地点行',
 });
 
 test('睡眠类型：固定后声明「睡眠时间个性化」不适用，但 replyDelay 仍为 -1', () => {
-  const s = buildScheduleConstraintBlock({ sleepType: 'night_heavy' });
-  assert.match(s, /夜猫子·重度/);
-  assert.match(s, /凌晨 3-4 点睡/);
+  const s = buildScheduleConstraintBlock({ sleepType: 'stay_up' });
+  assert.match(s, /熬夜型/);
+  assert.match(s, /凌晨 1-4 点睡/);
   assert.match(s, /replyDelay 仍必须是 -1/);
   assert.match(s, /睡眠时间个性化/);
-  assert.ok(SLEEP_TYPES.night_heavy.text.length > 0);
+  assert.ok(SLEEP_TYPES.stay_up.text.length > 0);
 });
 
 test('多选项同时生效：外层包裹 schedule_constraints 且声明冲突以本块为准', () => {
