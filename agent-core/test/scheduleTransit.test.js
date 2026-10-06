@@ -97,3 +97,38 @@ test('★ from behind 必须有 block 挡住 missionary（只靠 soft 降权不�
   assert.ok(fb.block.test('the girl is lying on her back ... missionary ...'), 'block 应命中 missionary');
   assert.ok(!fb.block.test('she is on all fours, doggystyle'), 'block 不该命中真正的后体位');
 });
+// ══════════════════════════════════════════════════════════
+// C. D1：全选多区域时「画面行」必须被配额压住（2026-10-06 用户裁定）
+// ══════════════════════════════════════════════════════════
+
+test('★ D1：画面行按区域数配额递减，勾满时总量被压到可控范围', async () => {
+  const { scenePromptCap } = await import('../src/services/scheduleGenerator.js');
+  // 配额随区域数递减（勾得越多、每区展开越少）
+  assert.ok(scenePromptCap(1) > scenePromptCap(4), '区域少时应给得更多');
+  assert.ok(scenePromptCap(4) > scenePromptCap(14), '区域多时应给得更少');
+  assert.ok(scenePromptCap(14) >= 1, '勾满时每区仍应至少给 1 条（不能退化成 0 —— 那就退回"只有裸地名"）');
+});
+
+test('★ D1：画面行只来自勾选区域（不得掺入未勾选区域的画面）', () => {
+  const scenesByArea = { 二维市: ['a', 'b'], 鸽川区: ['c', 'd'] };
+  const promptsByArea = {
+    二维市: [{ name: 'a', prompt: 'A-scene-prompt' }, { name: 'b', prompt: 'B-scene-prompt' }],
+    鸽川区: [{ name: 'c', prompt: 'C-scene-prompt' }, { name: 'd', prompt: 'D-scene-prompt' }],
+    未勾选区: [{ name: 'z', prompt: 'Z-SHOULD-NOT-APPEAR' }],
+  };
+  const s = buildScheduleConstraintBlock({ areas: ['二维市'], scenesByArea, promptsByArea });
+  assert.ok(s.includes('二维市'), '应含勾选区域');
+  assert.ok(!s.includes('Z-SHOULD-NOT-APPEAR'), '未勾选区域的画面行不得出现');
+});
+
+test('★ D1：被配额裁掉的画面行，其地名仍须列出（模型要知道有这个地点）', () => {
+  const names = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8'];
+  const oneArea = names.map(n => ({ name: n, prompt: `scene-${n}` }));
+  // 传很多区域把配额压到最低
+  const areaNames = ['二维市', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'];
+  const scenesByArea = {}, promptsByArea = {};
+  for (const a of areaNames) { scenesByArea[a] = names; promptsByArea[a] = oneArea; }
+  const s = buildScheduleConstraintBlock({ areas: areaNames, scenesByArea, promptsByArea });
+  assert.ok(s.includes('p8'), '被裁掉的 p8 地名仍应出现（只裁画面细节，不裁地名）');
+  assert.ok(s.includes('另有画面细节'), '应有"未展开"的说明，避免模型以为这些地点没画面');
+});

@@ -185,6 +185,24 @@ function buildOutfitZoneHints(options = {}) {
  * @param {string} [opts.sleepType]      SLEEP_TYPES 的键
  * @returns {string|null}
  */
+/**
+ * 每个区域最多给几条「画面行」—— 随勾选区域数递减（用户裁定 D1）。
+ *
+ * 背景：画面行只来自勾选区域（这点本来就对），但**勾满 14 区**时
+ * 78 条画面行 ≈ 1.9 万字符（≈1.26 万 token），在「黄金注意力 ~80K」下开销过大。
+ * 这里按区域数给一个**总配额**并均摊：勾得越多，每区展开的越少。
+ *
+ * ⚠ 简介行（`summary`）**不受配额限制** —— 它是"反八股"的核心素材且很短；
+ *   被裁的只是**长英文画面描述**，且裁掉后仍会列出地名（模型知道有这个地点）。
+ */
+export function scenePromptCap(areaCount) {
+  const n = Math.max(1, Number(areaCount) || 1);
+  if (n <= 2) return 8;    // 少量区域：尽量给全（单区实测 6~8 条）
+  if (n <= 4) return 5;
+  if (n <= 8) return 3;
+  return 2;                // 勾满时每区 2 条，总量约 28 条 ≈ 0.5 万字符
+}
+
 export function buildScheduleConstraintBlock(opts = {}) {
   const parts = [];
 
@@ -236,8 +254,31 @@ ${lines.join('\n')}
       const promptOf = new Map((masks[a] || []).map(p => [p.name, p.prompt]));
       const plain = sc.filter(n => !promptOf.has(n) && !sumOf.has(n));
       if (plain.length) sceneLines.push(`- ${a}：${plain.join('、')}`);
+      // ★★ 画面行**配额**（2026-10-06 用户裁定 D1：画面行只在勾选区域内给）。
+      //
+      //   现状：画面行本来就只来自**勾选区域**（`scenesByAreaFor` 按 names 循环），
+      //   但用户勾满 14 个区时一行一地点 = 78 行、**约 1.9 万字符（≈1.26 万 token）**，
+      //   在「黄金注意力 ~80K」的前提下这是笔大开销。
+      //   裁减口径（用户选②）：**每个区域最多给 N 条画面行**，超出部分不再逐条展开 ——
+      //   简介行（`summary`，短、是"反八股"的核心素材）**全部保留**，画面行（长英文）
+      //   按区域配额截断。这样：勾得越多、每区配额越少，总量被压在可控范围。
+      //
+      //   ★ 注意：不要改成"只给第一个区域的画面行" —— 那会让其余区域退回"只有裸地名"，
+      //     正是「世界尽头酒馆总是黄金马桶」的病根（简介与画面是两味药，删不得整味）。
+      const promptCapPerArea = scenePromptCap(areas.length);
+      let promptLeft = promptCapPerArea;
       for (const [n, sm] of sumOf) { withSummary++; sceneLines.push(`- ${a} · ${n}：${sm}`); }
-      for (const [n, pr] of promptOf) sceneLines.push(`- ${a} · ${n}（画面）：${pr}`);
+      for (const [n, pr] of promptOf) {
+        if (promptLeft > 0) {
+          sceneLines.push(`- ${a} · ${n}（画面）：${pr}`);
+          promptLeft--;
+        }
+      }
+      if (promptOf.size > promptCapPerArea) {
+        const rest = [...promptOf.keys()].slice(promptCapPerArea);
+        // 被裁掉的**仍列出地名**（模型知道有这地方、可挑，只是没拿到画面细节）
+        sceneLines.push(`- ${a}：${rest.join('、')}（以上地点另有画面细节，本次未展开）`);
+      }
     }
     if (sceneLines.length) {
       lines.push(`这些区域里**真实存在**的地点（location 优先从这里面挑，不要自造地名）：\n${sceneLines.join('\n')}`);
