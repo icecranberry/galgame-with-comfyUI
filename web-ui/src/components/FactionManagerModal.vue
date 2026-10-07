@@ -78,17 +78,32 @@
             <label class="fl-field"><span>当下目标</span>
               <linshe-input v-model="draft.goal" size="sm" placeholder="它现在想干什么 —— 对生成最有指导性" /></label>
             <div class="fl-field">
-              <span>权力支柱（点一下加上/取消）</span>
+              <span>权力支柱<span class="fl-opt">（输入后回车添加，点一下可移除）</span></span>
+              <!-- ★ 2026-10-07 用户口径：「不要有默认存在的标签，只留直接输入添加的输入框」。
+                   原先这里平铺一排**建议值**（武力威慑/财力雄厚…）供点选，用户认为那是
+                   系统预设的噪音 —— 这些词本就该由用户按世界观自己写（红线 12：
+                   引擎不该内置世界观专名，而通用词平铺也是干扰）。
+                   ⚠ 只去掉**建议值**；**已选中的标签仍要显示** ——
+                     否则用户看不到自己加过什么、也没法删（那是"改了却看不出"的坏体验）。 -->
               <div class="fl-tags">
                 <button
-                  v-for="t in allTagOptions"
+                  v-for="t in draft.tags"
                   :key="t"
                   type="button"
                   class="fl-tag"
-                  :class="{ 'is-on': draft.tags.includes(t) }"
-                  @click="toggleTag(t)"
-                >{{ t }}</button>
-                <input v-model="newTag" class="fl-tag-input" placeholder="＋自定义" @keyup.enter="addCustomTag" />
+                  :title="`点一下移除「${t}」`"
+                  @click="removeTag(t)"
+                >{{ t }}<em class="fl-tag-x">×</em></button>
+                <input
+                  v-model="newTag"
+                  class="fl-tag-input"
+                  :placeholder="draft.tags.length ? '＋再输入' : '＋直接输入'"
+                  @keyup.enter="addCustomTag"
+                />
+                <linshe-button
+                  v-if="newTag.trim()"
+                  size="sm" variant="ghost" @click="addCustomTag"
+                >添加</linshe-button>
               </div>
             </div>
             <label class="fl-field"><span>说明</span>
@@ -191,6 +206,8 @@
 // ★ 2026-10-07 用户反馈「过于发散，要足够简约」→ 本轮做减法：
 //   · 砍掉：配色 hex / 图标 / 上级组织 / 概述与详述的拆分（合并成一个「说明」）；
 //   · 权力支柱：从"顿号分隔文本框"改成**点选标签**（建议值一点即加，也能自定义）；
+//     ⚠ 2026-10-07 又一次调整（用户口径）：**去掉建议值**，只留"直接输入添加"的输入框 ——
+//       平铺一排预设词本身也是噪音，支柱该由用户按世界观自己写。已选中的标签仍显示（可点删）。
 //   · 成员改**图文**（头像 + 姓名 + 可直接改的职务）；添加走明确的「＋ 添加角色」按钮 + 头像网格 ——
 //     **不再有常驻的空选择框**（用户说的"多余的框"就是这么来的）。
 import { ref, reactive, computed, watch } from 'vue'
@@ -237,12 +254,13 @@ const otherFactionOptions = computed(() => items.value
   .filter(f => !current.value || f.id !== current.value.id)
   .map(f => ({ label: f.name, value: f.id })))
 
-/** 权力支柱候选 = 后端建议值 ∪ 已选中的自定义值 */
-const allTagOptions = computed(() => {
-  const out = [...meta.pillarSuggestions]
-  for (const t of draft.tags) if (!out.includes(t)) out.push(t)
-  return out
-})
+/**
+ * 「权力支柱」不再有建议值候选（用户口径 2026-10-07：不要默认存在的标签）。
+ * 因此这里不再需要 `allTagOptions` —— 标签完全由用户输入产生。
+ * ⚠ 后端的 `POWER_PILLAR_SUGGESTIONS` 仍保留（/meta 仍下发），
+ *   只是前端不再平铺它们；将来若要恢复"可选建议"无需改后端。
+ */
+const MAX_TAGS = 8
 
 const memberIds = computed(() => new Set((current.value?.members || []).map(m => m.character_id)))
 const pickList = computed(() => {
@@ -295,14 +313,14 @@ function resetDraft() {
   newTag.value = ''
 }
 
-function toggleTag(t) {
+/** 移除已选标签（点标签即移除 —— 与"输入即添加"对称，都能自查自删） */
+function removeTag(t) {
   const i = draft.tags.indexOf(t)
   if (i >= 0) draft.tags.splice(i, 1)
-  else if (draft.tags.length < 8) draft.tags.push(t)
 }
 function addCustomTag() {
   const t = newTag.value.trim().slice(0, 12)
-  if (t && !draft.tags.includes(t) && draft.tags.length < 8) draft.tags.push(t)
+  if (t && !draft.tags.includes(t) && draft.tags.length < MAX_TAGS) draft.tags.push(t)
   newTag.value = ''
 }
 
@@ -497,18 +515,23 @@ watch(open, v => { if (v) load() })
 .fl-row > * { flex: 1; min-width: 0; }
 .fl-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }
 
-/* 权力支柱：点选标签 */
+/* 权力支柱：只显示"已输入"的标签（可点删）+ 输入框。不再有建议值标签 —— 见模板注释 */
 .fl-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .fl-tag {
+  display: inline-flex; align-items: center; gap: 4px;
   font-size: var(--fs-xs); padding: 2px 9px; border-radius: 999px; cursor: pointer;
-  border: 1px solid var(--glass-border); background: transparent; color: var(--text-secondary);
+  border: 1px solid rgba(var(--accent-rgb), .5);
+  background: rgba(var(--accent-rgb), .16); color: var(--text-bright); font-weight: 600;
 }
-.fl-tag:hover { border-color: rgba(var(--accent-rgb), .5); }
-.fl-tag.is-on { background: rgba(var(--accent-rgb), .16); border-color: rgba(var(--accent-rgb), .5); color: var(--text-bright); font-weight: 600; }
+.fl-tag:hover { border-color: var(--accent); }
+.fl-tag-x { font-style: normal; opacity: .55; font-size: 11px; line-height: 1; }
+.fl-tag:hover .fl-tag-x { opacity: 1; }
+.fl-opt { font-weight: 400; opacity: .75; }
 .fl-tag-input {
-  font-size: var(--fs-xs); padding: 2px 9px; border-radius: 999px; width: 84px;
+  font-size: var(--fs-xs); padding: 2px 9px; border-radius: 999px; width: 96px;
   border: 1px dashed var(--glass-border); background: transparent; color: var(--text);
 }
+.fl-tag-input:focus { outline: none; border-color: var(--accent); border-style: solid; }
 
 .fl-actions { display: flex; gap: 8px; margin: 12px 0 4px; }
 .fl-sec { display: flex; align-items: center; gap: 10px; margin: 16px 0 8px; }
