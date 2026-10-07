@@ -87,6 +87,27 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 4. 调整弹窗风格只改 `LinsheModal.vue` 与 `tokens.css` 的 `--modal-*`，不要在各页面里覆盖组件皮肤
 
 
+## 图片预览（ImageLightbox）
+
+图片点击放大统一复用 `web-ui/src/components/ImageLightbox.vue`。从弹窗、日记等浮层打开时，参考 `NewspaperModal.vue` / `DiaryBookOverlay.vue`：
+
+1. 用 `<Teleport to="body">` 将灯箱移到全局，避免被父级层叠上下文压住；在 Teleport **内部**包一层 div 设置 `--vel-z-index`，让灯箱继承
+2. 层级由 CSS 变量 `--vel-z-index` 控制（默认 9998），不要只传 `:z-index`：当前底层灯箱不消费该 prop。按宿主层级选择值，例如日报用 11000，日记用 14000；不要在页面里覆盖全局 `.vel-modal` 样式
+3. `:visible` 控制显示、`:imgs` 传图片、`:index` 指定初始图片，`@hide` 将显示状态设为 false；只读图片按需传 `:show-regenerate="false"` / `:show-upscale="false"` / `:show-delete="false"`
+
+```vue
+<Teleport to="body">
+  <div style="--vel-z-index: 14000">
+    <ImageLightbox
+      :visible="lightboxVisible"
+      :imgs="images"
+      :index="lightboxIndex"
+      @hide="lightboxVisible = false"
+    />
+  </div>
+</Teleport>
+```
+
 ## LLM 请求分层（高缓存）
 
 编写新的 LLM 请求时，按「稳定前缀优先」分层：不随单次调用变化的内容尽量往前堆，变量内容靠后，user 永远最后。提供商的前缀缓存按 token 前缀命中，前面任何一层只要有一个字节变化，其后所有内容的缓存即全部失效，所以静态层必须逐字节稳定（严禁内插日期、时间戳、随机 id、用户名等每次变化的内容）。标准分层参考 `agent-core/src/services/town/townPromptBuilder.js` 头部注释（编号从 system0 数起；旧代码里也有从 1 数起的注释，以内容职责为准。中间层可按功能增删，原则不变——静态在前、变量靠后）：

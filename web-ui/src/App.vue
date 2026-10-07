@@ -33,6 +33,8 @@
   <InstallGuideDialog ref="guideDialog" />
   <ChangelogDialog ref="changelogDialog" @close="onChangelogClose" />
   <ImageEditTaskFloater />
+  <!-- 角色日记本：全局宿主，日程页入口 / 右下角生成提示的「查看」都打开它 -->
+  <DiaryBookOverlay />
 
   <!-- 手机端访问提示 Toast -->
   <Transition name="toast-slide">
@@ -63,6 +65,7 @@ import CharacterReactionHost from './components/CharacterReactionHost.vue'
 import InstallGuideDialog from './components/InstallGuideDialog.vue'
 import ChangelogDialog from './components/ChangelogDialog.vue'
 import ImageEditTaskFloater from './components/ImageEditTaskFloater.vue'
+import DiaryBookOverlay from './components/DiaryBookOverlay.vue'
 import { MAIBOT_AFTER_START_STEPS, MAIBOT_INSTALL_STEPS, MAIBOT_INTRO_TEXT } from './data/maibotTutorial.js'
 import { CHANGELOG_FLAG } from './data/changelog.js'
 

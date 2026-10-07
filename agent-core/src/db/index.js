@@ -31,6 +31,7 @@ import { migrateTownBuildingFeatureSchema } from './townBuildingFeatureSchema.js
 import { migrateExpressionStandings, recoverExpressionStandingJobs } from './expressionStandingSchema.js';
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
 import { migrateCharacterReactionPacksSchema } from './characterReactionPackSchema.js';
+import { migrateCharacterDiarySchema } from './diarySchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1060,6 +1061,8 @@ function initSchema(db) {
   migrateEmojiSetsSchema(db);
   // 迁移: 角色操作反馈短句包（每角色一份，保存完整 JSON 与人格指纹）
   migrateCharacterReactionPacksSchema(db);
+  // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
+  migrateCharacterDiarySchema(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);

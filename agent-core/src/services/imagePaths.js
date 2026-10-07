@@ -18,6 +18,7 @@ export const IMAGE_CATEGORIES = {
   avatargen: { dir: 'avatargen', label: '头像' },
   peek:      { dir: 'peek',      label: '日程' },
   mailbox:   { dir: 'mailbox',   label: '信箱' },
+  diary:     { dir: 'diary',     label: '日记' },
   chatbg:    { dir: 'chatbg',    label: '聊天背景' },
   emoji:     { dir: 'emoji',     label: '表情包' },
   items:     { dir: 'items',     label: '道具' },

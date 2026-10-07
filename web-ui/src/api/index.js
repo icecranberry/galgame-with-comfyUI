@@ -1311,6 +1311,26 @@ export async function deleteLetter(id) {
   return request(`/mailbox/${id}`, { method: 'DELETE' })
 }
 
+// ── 角色日记 ──
+
+/** 取某个角色某一天的日记（date 省略 = 今天） */
+export function getDiary(characterId, date) {
+  const q = date ? `?date=${encodeURIComponent(date)}` : ''
+  return request(`/diaries/${characterId}${q}`)
+}
+
+/** 历史日记简目（最新在前，供日记本翻页导航） */
+export function listDiaries(characterId, limit = 60) {
+  return request(`/diaries/${characterId}/history?limit=${limit}`)
+}
+
+/** 生成 / 重新生成某一天的日记（后台执行，进度走 SSE 与右下角生成提示） */
+export function generateDiary(characterId, date) {
+  const body = {}
+  if (date) body.date = date
+  return request(`/diaries/${characterId}/generate`, { method: 'POST', body })
+}
+
 // ── 《邻舍日报》预告报纸 ──
 
 export async function getTodayNewspaper() {

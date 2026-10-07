@@ -88,6 +88,12 @@ function _connect() {
     schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
     schedule_state_change: d => _dispatch('schedule_state_change', d),
     schedule_changed: d => _dispatch('schedule_changed', d),
+    // 角色日记（日程页入口 → 全屏日记本；生成走后台 + 右下角生成提示）
+    diary_start:       d => _dispatch('diary_start', d),
+    diary_progress:    d => _dispatch('diary_progress', d),
+    diary_text_ready:  d => _dispatch('diary_text_ready', d),
+    diary_done:        d => _dispatch('diary_done', d),
+    diary_error:       d => _dispatch('diary_error', d),
     image_compress_progress: d => _dispatch('image_compress_progress', d),
     group_message:     d => _dispatch('group_message', d),
     group_message_update: d => _dispatch('group_message_update', d),

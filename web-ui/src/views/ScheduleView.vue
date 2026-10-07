@@ -50,6 +50,7 @@
               :char="c"
               @select="onSelectChar(c.id)"
               @peek="onCardPeek(c.id)"
+              @diary="onOpenDiary(c)"
               @wake="onCardWake(c.id)"
               @pin="toggleCharPin(c)"
             />
@@ -119,6 +120,7 @@
       @wakePhone="onWakePhone"
       @wakeDoor="onWakeDoor"
       @updated="detailActs = $event"
+      @diary="onOpenDiary(detailChar)"
     />
 
     <!-- ═══ 日程设置弹窗 ═══ -->
@@ -373,6 +375,7 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
+import { useDiaryStore } from '../stores/diary.js'
 import { useSettingsStore } from '../stores/settings.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import * as api from '../api/index.js'
@@ -387,6 +390,7 @@ import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
 
 const store = useScheduleStore()
+const diaryStore = useDiaryStore()
 const settingsStore = useSettingsStore()
 const router = useRouter()
 
@@ -894,6 +898,16 @@ function onChat() {
   router.push(`/chat/${detailChar.value.id}`)
 }
 
+// ── 日记：翻开 ta 的日记本（封面 / 正文 / 三张配图 / 历史翻阅都在日记本里） ──
+function onOpenDiary(char: any) {
+  if (!char?.id) return
+  diaryStore.openBook({
+    characterId: char.id,
+    characterName: char.display_name || '',
+    characterAvatar: char.avatar_path || '',
+  })
+}
+
 // ── 卡片叫醒（镜像详情页当前按钮功能） ──
 async function onCardWake(id: number) {
   const c = enrichedChars.value.find(x => x.id === id)
@@ -1294,7 +1308,8 @@ function finishReset() {
   flex: 1; overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 12px; padding: 16px 20px;
+  /* 底部多留 24px：卡片下沿伸出的日记入口是绝对定位、不计入行高，不留白最后一行会被裁 */
+  gap: 12px; padding: 16px 20px 40px;
   align-content: start;
 }
 

@@ -64,6 +64,17 @@
                 <span>聊天</span>
               </linshe-button>
             </div>
+
+            <!-- Row 3: 日记入口单独占满一行 -->
+            <linshe-button
+              variant="secondary"
+              class="dr-diary-row"
+              :title="`翻开${char?.display_name || '角色'}的日记本`"
+              @click="$emit('diary')"
+            >
+              <diary-icon :size="15" :stroke-width="2" />
+              <span>日记</span>
+            </linshe-button>
           </div>
 
           <!-- 时间轴 -->
@@ -188,6 +199,7 @@ import { useTooltip } from '../composables/useTooltip.js'
 import { updateScheduleActivity } from '../api/index.js'
 import { emitScheduleAgreement } from '../utils/characterReactionProducers.js'
 import LinsheButton from './ui/LinsheButton.vue'
+import DiaryIcon from './DiaryIcon.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 
@@ -200,7 +212,7 @@ const props = defineProps<{
   regenerating?: boolean
 }>()
 
-const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt', 'updated'])
+const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt', 'updated', 'diary'])
 const toastFn = inject('toast', null) as any
 const notify = (msg: string, type?: string) => { try { toastFn?.(msg, type) } catch { /* toast 不可用时静默 */ } }
 
@@ -455,13 +467,20 @@ onUnmounted(() => {
 
 /* Row 2: action buttons */
 .dr-row2 {
-  display: flex; gap: 8px;
+  display: flex; gap: 8px; flex-wrap: wrap;
 }
 
 .dr-btn {
   display: inline-flex; align-items: center; gap: 5px;
 }
 .dr-btn svg { flex-shrink: 0; }
+
+/* 日记入口：单独一行、占满抽屉宽度 */
+.dr-diary-row {
+  width: 100%;
+  margin-top: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
 
 
 /* ── Body ── */

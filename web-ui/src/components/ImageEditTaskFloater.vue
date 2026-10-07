@@ -27,23 +27,30 @@
       </Transition>
 
       <div class="iet-cards">
-        <div v-for="task in cornerTasks" :key="task.id" class="iet-card" :class="{ 'is-error': task.status === 'failed' }">
+        <div v-for="task in cornerTasks" :key="task.id" class="iet-card" :class="{ 'is-error': task.status === 'failed', 'is-done': task.status === 'ready' }">
           <div class="iet-card-body">
-            <span v-if="task.status === 'running'" class="iet-spinner"></span>
+            <span v-if="isDiary(task)" class="iet-avatar">
+              <img v-if="diaryAvatar(task)" :src="diaryAvatar(task)" alt="" />
+              <span v-else>{{ (task.meta?.characterName || '角色').charAt(0) }}</span>
+            </span>
+            <span v-else-if="task.status === 'running'" class="iet-spinner"></span>
             <span v-else class="iet-state-icon">{{ task.status === 'failed' ? '!' : '✓' }}</span>
             <div class="iet-card-text">
-              <div class="iet-card-title">{{ cardTitleLabel(task.action) }}{{ cardStatusText(task) }}</div>
+              <div class="iet-card-title">{{ cardTitleLabel(task) }}{{ cardStatusText(task) }}</div>
               <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
                 <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
               </div>
               <div v-if="task.status === 'failed'" class="iet-error-text">{{ task.error }}</div>
               <div v-else-if="task.status === 'pending_confirm'" class="iet-error-text">等待确认</div>
+              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
             </div>
           </div>
-          <div v-if="task.status === 'failed' || task.status === 'pending_confirm'" class="iet-card-actions">
-            <linshe-button v-if="task.status === 'failed'" size="sm" @click="onRerun(task)">重试</linshe-button>
+          <div v-if="task.status === 'failed' || task.status === 'pending_confirm' || task.status === 'ready'" class="iet-card-actions">
+            <linshe-button v-if="task.status === 'failed' && isDiary(task)" size="sm" @click="onRetryDiary(task)">重试</linshe-button>
+            <linshe-button v-else-if="task.status === 'failed'" size="sm" @click="onRerun(task)">重试</linshe-button>
             <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
-            <linshe-button variant="icon" size="sm" @click="onDiscard(task)">关闭</linshe-button>
+            <linshe-button v-if="task.status === 'ready' && isDiary(task)" size="sm" @click="onViewDiary(task)">翻开看看</linshe-button>
+            <linshe-button variant="secondary" size="sm" :disabled="busy" @click="onDiscard(task)">关闭</linshe-button>
           </div>
         </div>
       </div>
@@ -54,10 +61,12 @@
 <script setup>
 import { computed, inject, ref, watch } from 'vue'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
+import { useDiaryStore } from '../stores/diary.js'
 import BeforeAfterSlider from './BeforeAfterSlider.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 
 const store = useImageEditTasksStore()
+const diaryStore = useDiaryStore()
 const toastFn = inject('toast', null)
 const busy = ref(false)
 const activeTaskId = ref(null)
@@ -80,17 +89,37 @@ store.connect()
 
 function actionLabel(action) {
   if (action === 'standing') return '立绘'
+  if (action === 'diary') return '日记'
   return action === 'upscale' ? 'HiresFix 细化' : '重新生成'
 }
 
-function cardTitleLabel(action) {
-  if (action === 'standing') return '生成立绘'
-  return actionLabel(action)
+function isDiary(task) {
+  return task?.action === 'diary'
+}
+
+function diaryAvatar(task) {
+  return task.meta?.characterAvatar || (
+    Number(task.meta?.characterId) === Number(diaryStore.characterId)
+      ? diaryStore.characterAvatar
+      : ''
+  )
+}
+
+/** 日记任务用角色名做标题（meta 由后端 startBackgroundTask 带过来） */
+function diaryTitle(task) {
+  const name = task?.meta?.characterName || '角色'
+  return `${name}的日记`
+}
+
+function cardTitleLabel(task) {
+  if (isDiary(task)) return diaryTitle(task)
+  return actionLabel(task.action)
 }
 
 function cardStatusText(task) {
   if (task.status === 'failed') return '失败'
   if (task.status === 'pending_confirm') return '待确认'
+  if (isDiary(task)) return task.status === 'ready' ? '写好了' : '生成中'
   return '中'
 }
 
@@ -147,6 +176,35 @@ async function onDiscard(task) {
     busy.value = false
   }
 }
+
+// ── 日记任务：没有「确认覆盖」这一步，写好了直接翻开日记本看 ──
+async function onViewDiary(task) {
+  const meta = task.meta || {}
+  if (!meta.characterId) return
+  await diaryStore.openBook({
+    characterId: meta.characterId,
+    characterName: meta.characterName || '',
+    characterAvatar: diaryAvatar(task),
+    date: meta.date,
+  })
+  store.discard(task).catch(() => {})
+}
+
+async function onRetryDiary(task) {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const meta = task.meta || {}
+    await diaryStore.generateFor(meta.characterId, meta.date)
+    toastFn?.('重新开始写日记', 'info')
+    await store.discard(task)
+  } catch (err) {
+    console.error('[ImageEditTaskFloater] diary retry failed:', err.message)
+    toastFn?.(err.message || '日记重试失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -174,8 +232,22 @@ async function onDiscard(task) {
 }
 
 .iet-card.is-error { border-color: rgba(var(--accent-rgb), 0.5); }
+.iet-card.is-done { border-color: rgba(var(--accent-rgb), 0.32); }
+.iet-card.is-done .iet-state-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
 
 .iet-card-body { display: flex; align-items: center; gap: 10px; }
+
+.iet-avatar {
+  width: 32px; height: 32px; flex: none;
+  align-self: flex-start;
+  display: grid; place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-size: 14px; font-weight: 700;
+}
+.iet-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
 .iet-spinner {
   width: 18px; height: 18px; flex: none;
