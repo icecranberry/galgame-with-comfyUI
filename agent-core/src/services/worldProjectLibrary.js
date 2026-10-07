@@ -32,7 +32,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_ROOT = path.resolve(__dirname, '../../data');
-export const WORLD_PROJECTS_DIR = path.join(DATA_ROOT, 'world-projects');
+/**
+ * 世界观项目库根目录。
+ * ⚠ `DATA_ROOT` 是**写死**的（跟着源码走），所以测试要隔离项目库时必须靠这个环境变量：
+ *   `LINSHE_WORLD_PROJECTS_DIR=<临时目录>` —— 不设时行为与从前逐字节一致。
+ */
+export const WORLD_PROJECTS_DIR = process.env.LINSHE_WORLD_PROJECTS_DIR
+  ? path.resolve(process.env.LINSHE_WORLD_PROJECTS_DIR)
+  : path.join(DATA_ROOT, 'world-projects');
 
 /** 项目库结构版本：将来加槽位时用它做迁移判据 */
 export const PROJECT_SCHEMA_VERSION = 1;
@@ -66,6 +73,16 @@ export const PROJECT_SLOTS = {
    *   那段代码里硬编码了某世界观的全部站名，属"数据跑进引擎"。
    */
   transitSeed: null,
+  /**
+   * 派系与组织（**数据，不是规则**）。
+   * 结构：`[{ slug, name, type, parent, summary, description, color, icon, sort_order,
+   *          members: [{ character, role, rank }], relations: [{ to, relation, strength }] }]`
+   * 空 = 该世界没有登记派系。
+   * ★ 2026-10-07：派系是**世界观实例专属**（二相乐园的派系 ≠ 武装JK世界的派系），
+   *   按红线 12 引擎不得内置 → 归这里；运行时真源在 DB（`factions` 三表），
+   *   本槽位是**镜像/可迁移载体**（每次写操作后由 `factionService` 回写，与 `world.md` 同口径）。
+   */
+  factions: [],
   /** 自由备注（给人看的，引擎不读） */
   notes: '',
 };
@@ -81,6 +98,7 @@ export function neutralProject() {
     vocabHints: [],
     clicheProps: [],
     transitSeed: null,
+    factions: [],
     notes: '',
     mapIds: [],
   };
@@ -139,6 +157,7 @@ export function readProject(slug, opts = {}) {
       lexicons: Array.isArray(raw.lexicons) ? raw.lexicons : [],
       vocabHints: Array.isArray(raw.vocabHints) ? raw.vocabHints.map(String) : [],
       clicheProps: Array.isArray(raw.clicheProps) ? raw.clicheProps.map(String) : [],
+      factions: Array.isArray(raw.factions) ? raw.factions : [],
       mapIds: Array.isArray(raw.mapIds) ? raw.mapIds.map(Number).filter(Number.isFinite) : [],
       exists: true,
     };

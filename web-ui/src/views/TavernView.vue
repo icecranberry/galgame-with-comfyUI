@@ -130,7 +130,8 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         入口卡片行：我的关系图 / 世界观设置（各占一半）
+         入口卡片行：我的关系图 / 世界观设置 / 派系与组织（三块，各占三分之一）
+         三块是**正交互补**的维度：人↔人 / 背景 / 势力↔势力·人↔势力
          《邻舍日报》已并入「传媒」页（见 NavBar 的传媒标签）
          ═══════════════════════════════════════════ -->
     <div class="relation-entry-row">
@@ -160,6 +161,20 @@
         <div class="relation-entry-text">
           <span class="relation-entry-title">世界观设置</span>
           <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
+        </div>
+        <span class="relation-entry-arrow">›</span>
+      </div>
+
+      <div class="relation-entry card" @click="openFactionManager">
+        <div class="relation-entry-icon faction-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/>
+            <line x1="12" y1="7.4" x2="6.2" y2="16.6"/><line x1="12" y1="7.4" x2="17.8" y2="16.6"/>
+          </svg>
+        </div>
+        <div class="relation-entry-text">
+          <span class="relation-entry-title">派系与组织</span>
+          <span class="relation-entry-hint">{{ factionHint }}</span>
         </div>
         <span class="relation-entry-arrow">›</span>
       </div>
@@ -806,6 +821,16 @@
     />
 
     <!-- ═══════════════════════════════════════════
+         派系与组织（酒馆页第三块，独立全屏弹窗）
+         势力↔势力、角色↔派系 —— 与人际关系图正交互补，不合并
+         ═══════════════════════════════════════════ -->
+    <FactionManagerModal
+      v-model="showFactionManager"
+      :characters="sortedCharacters"
+      @changed="refreshFactionCount"
+    />
+
+    <!-- ═══════════════════════════════════════════
           推演角色关系（AI 自动推理）
           ═══════════════════════════════════════════ -->
     <RelationshipDeductionModal
@@ -919,6 +944,7 @@ import BackpackModal from '../components/BackpackModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import StandingManagerModal from '../components/StandingManagerModal.vue'
 import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
+import FactionManagerModal from '../components/FactionManagerModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
@@ -1682,6 +1708,23 @@ const detailChar = ref(null)
 
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
+// ── 派系与组织：酒馆页第三块（2026-10-07）────────────────────
+// 与「我的关系图」「世界观设置」并列；看的是**势力格局**（派系↔派系、角色↔派系）。
+const showFactionManager = ref(false)
+const factionCount = ref(0)
+const factionHint = computed(() => (factionCount.value > 0
+  ? `${factionCount.value} 个派系 · 查看势力格局`
+  : '梳理这个世界的势力格局'))
+function openFactionManager() { showFactionManager.value = true }
+async function refreshFactionCount() {
+  try {
+    const r = await api.listFactions()
+    factionCount.value = (r.items || []).length
+  } catch {
+    // 后端未重启时新路由是 404：入口卡照常可用，只是数字暂不显示（不要打断整页）
+  }
+}
+onMounted(refreshFactionCount)
 const showDeductionModal = ref(false)
 const deductionMode = ref('character')
 const deductionUserName = ref('')
@@ -2274,7 +2317,7 @@ onMounted(async () => {
 /* 报纸 + 关系图同行两列；列间距沿用卡片纵向 20px 节奏 */
 .relation-entry-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
   margin-bottom: 20px;
 }
@@ -2327,6 +2370,11 @@ onMounted(async () => {
 .world-icon {
   background: rgba(var(--accent-rgb), 0.08);
   color: #c06a52;
+}
+/* 派系与组织：第三块入口（势力意象）—— 沿用同一尺寸/圆角，只换色，保持设计语言一致 */
+.faction-icon {
+  background: rgba(var(--accent-rgb), 0.08);
+  color: #6a4bbd;
 }
 
 /* ── 今日报纸入口卡片 ── */
@@ -3627,7 +3675,7 @@ onMounted(async () => {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
   }
-  /* 窄屏放不下两列入口：回退单行堆叠 */
+  /* 窄屏放不下三列入口：回退单行堆叠 */
   .relation-entry-row {
     grid-template-columns: 1fr;
     gap: 0;

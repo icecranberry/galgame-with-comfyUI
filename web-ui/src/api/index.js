@@ -2482,3 +2482,50 @@ export function refineWorldMapPlaceDraft({ placeId, mode = 'image', image = '', 
     body: { mode, image, brief, hints },
   })
 }
+
+// ── 派系与组织（酒馆页第三块，2026-10-07）──────────────────────
+// 词表（类型/关系/职务建议）也由后端给，前端不写死（红线 8）。
+
+export function getFactionMeta() {
+  return request('/factions/types')
+}
+
+export function listFactions() {
+  return request('/factions')
+}
+
+export function getFaction(id) {
+  return request(`/factions/${id}`)
+}
+
+export function createFaction(payload) {
+  return request('/factions', { method: 'POST', body: payload })
+}
+
+export function updateFaction(id, payload) {
+  return request(`/factions/${id}`, { method: 'PUT', body: payload })
+}
+
+export function deleteFaction(id) {
+  return request(`/factions/${id}`, { method: 'DELETE' })
+}
+
+export function addFactionMember(factionId, payload) {
+  return request(`/factions/${factionId}/members`, { method: 'POST', body: payload })
+}
+
+export function updateFactionMember(factionId, memberId, payload) {
+  return request(`/factions/${factionId}/members/${memberId}`, { method: 'PUT', body: payload })
+}
+
+export function removeFactionMember(factionId, memberId) {
+  return request(`/factions/${factionId}/members/${memberId}`, { method: 'DELETE' })
+}
+
+export function upsertFactionRelation(payload) {
+  return request('/factions/relations', { method: 'POST', body: payload })
+}
+
+export function removeFactionRelation(relationId) {
+  return request(`/factions/relations/${relationId}`, { method: 'DELETE' })
+}
