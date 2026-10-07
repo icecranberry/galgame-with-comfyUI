@@ -20,6 +20,8 @@ import {
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
 import { config, updateMediaAutoPerNight } from '../config.js';
+// T5/T7：媒体操作日志（查询删除/创建痕迹 —— 墓碑是给补种逻辑看的，此处流水是给人看的）
+import { listMediaOps, countMediaOps, MEDIA_OP_TYPES, MEDIA_TARGET_TYPES } from '../services/mediaOpLog.js';
 
 const router = Router();
 
@@ -296,6 +298,20 @@ router.post('/fill-images', (req, res) => {
       .then(c => c && console.log(`[media] 手动补图（门户）完成 ${c} 张`))
       .catch(err => console.error('[media] 手动补图（门户）失败:', err.message));
     res.json({ started: true });
+  } catch (err) { fail(res, err); }
+});
+
+// GET /api/media/op-log — 媒体操作日志（删除/创建/批量类的审计流水）
+// 放在其它字面路径之前无妨；参数路由是 /outlets/:id，这里没有冲突。
+router.get('/op-log', (req, res) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const targetType = MEDIA_TARGET_TYPES.includes(req.query.targetType) ? req.query.targetType : '';
+    const opType = MEDIA_OP_TYPES.includes(req.query.opType) ? req.query.opType : '';
+    res.json({
+      total: countMediaOps(),
+      ops: listMediaOps({ limit, targetType, opType }),
+    });
   } catch (err) { fail(res, err); }
 });
 

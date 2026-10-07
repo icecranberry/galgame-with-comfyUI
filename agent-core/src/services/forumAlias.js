@@ -25,29 +25,54 @@
  *   第三轴最容易被忽略 —— 名字再花、每条评论都是"路过说一句"，照样是塑料感。
  */
 
-/** 维度 A：语汇来源 —— 从二相乐园的哪些事物取材 */
-export const ALIAS_SOURCES = [
-  { id: 'wish', name: '愿力经济', hint: '愿力/愿宝是这里的硬通货，"被看见"能换钱', samples: ['愿宝余额不足', '打赏到手软', '被看见就是赢'] },
-  { id: 'phantom', name: '幻造种视角', hint: '幻造种靠被看见活着，语气略带讨好', samples: ['一只路过的幻造种', '求多看一眼', '今天被夸了吗'] },
-  { id: 'moon', name: '幻月游戏', hint: '押谒者的赛事圈，像看电竞的观众', samples: ['年年押错年年押', '谒者头号粉', '愿力榜钉子户'] },
-  { id: 'fool', name: '假面愚者', hint: '拱火乐子人，唯恐天下不乱', samples: ['乐子人本人', '拱火专业户', '剧本已写好'] },
-  { id: 'gechuan', name: '鸽川夜街', hint: '赌场、麻将馆、小酒馆的市井气', samples: ['三缺一叫我', '霓虹灯下', '小酒馆常客'] },
-  { id: 'academy', name: '绘世学院', hint: '学生气，逃课、占座、期末', samples: ['逃课第N天', '期末不挂科', '图书馆占座王'] },
-  { id: 'ar', name: 'AR 迷因', hint: '全息广告、巨型颜文字、@符号雕塑', samples: ['颜文字批发商', '@雕塑本人', '像素糊了'] },
-  { id: 'toilet', name: '黄金马桶', hint: '世界尽头酒馆那个黄金马桶主题厅', samples: ['马桶上吃饭', '黄金马桶体验官'] },
-  { id: 'official', name: '机构号', hint: '官方口吻与网民混在一起的反差', samples: ['异常防御部（温馨提示）', '星娱传媒小助手'] },
+/**
+ * 维度 A：语汇来源 —— 网民 ID 从**哪些方向**取材。
+ *
+ * ★★ 2026-10-07 架构修正：拆成**通用维度**（留这里）+ **世界观专属维度**（由该世界观的
+ *   项目库 `lexicons` 槽位提供）。
+ *   原先整张表都是某一个世界观的专属概念（愿力经济/幻造种/幻月游戏…）， // @world-agnostic-ok: 注释举例
+ *   而本文件自称"分类规则与去重的唯一真源" —— 引擎级的真源里内置了一个世界观。
+ *   现在：通用维度任何世界都成立；专属维度换世界观时自动跟着换。
+ */
+import { getActiveWorldSlots } from '../db/index.js';
+
+export const ALIAS_SOURCES_GENERIC = [
+  { id: 'official', name: '机构号', hint: '官方口吻与网民混在一起的反差', samples: ['XX小助手', '官方（温馨提示）'] },
   { id: 'plain', name: '市井日常', hint: '最普通的那种 ID，占比要最高', samples: ['楼下便利店', '通勤中', '今天也想躺平'] },
-]
+  { id: 'job', name: '职业身份', hint: '以自己在世界里的营生自称', samples: ['打工人', '值夜班的', '刚下班的'] },
+  { id: 'local', name: '住址街区', hint: '以自己常待的那片地方取名', samples: ['三号楼的', '老城区常客', '河对面'] },
+];
+
+/**
+ * 当前可用的取材维度 = 通用维度 + **该世界观项目库声明**的专属维度。
+ * 项目库读不到时退回通用维度（换世界观/存量库都不受影响）。
+ */
+export function aliasSourcesNow() {
+  let extra = [];
+  try {
+    extra = getActiveWorldSlots()?.lexicons || [];
+  } catch (err) {
+    // ★ 2026-10-07 教训：这里原先写的是空 catch —— 结果把 **ReferenceError**
+    //   （我漏了 import，`getActiveWorldSlots` 未定义）静默吞成了"没有项目库"，
+    //   表现为"专属取材维度神秘消失"，排查时才被发现。静默兜底必须能区分：
+    //     · 数据层不可用（还没 initWorldRepository）→ 正常回落，不刷日志；
+    //     · 其它异常（名字写错、逻辑错）→ **必须喊出来**。
+    const notReady = /not initialized|Cannot access|is not defined/.test(String(err?.message || ''));
+    if (!notReady) console.warn('[forumAlias] 读取世界观语汇维度失败，本次只用通用维度:', err?.message || err);
+  }
+  const seen = new Set(ALIAS_SOURCES_GENERIC.map(s => s.id));
+  return [...ALIAS_SOURCES_GENERIC, ...extra.filter(s => s && s.id && !seen.has(s.id))];
+}
 
 /** 维度 B：账号形态 —— ID 本身长什么样（与取材交叉搭配） */
 export const ALIAS_FORMS = [
   { id: 'realname', name: '真名流', hint: '姓+名 或 名+年份，像真名', samples: ['小林拓海', '佐藤2024'] },
   { id: 'nickname', name: '昵称流', hint: '短、无意义、偏可爱', samples: ['咪咪酱', '棉花糖'] },
-  { id: 'symbol', name: '符号流', hint: '用 _ · ° 等符号装饰', samples: ['_愿宝清零_', '°鸽川の风°'] },
+  { id: 'symbol', name: '符号流', hint: '用 _ · ° 等符号装饰', samples: ['_钱包清零_', '°夜风の味道°'] },
   { id: 'numeric', name: '数字流', hint: '词 + 数字后缀', samples: ['打工人2333', 'No.7'] },
   { id: 'latin', name: '全大写英文流', hint: '真实互联网常见，略带出戏感', samples: ['WP_Gamer', 'NeonCat'] },
   { id: 'sentence', name: '长句流', hint: '整句话当 ID，情绪直白', samples: ['今天也没有被看见'] },
-  { id: 'brand', name: '官方号', hint: 'XX官方 / 小助手 / 客服', samples: ['星娱传媒小助手'] },
+  { id: 'brand', name: '官方号', hint: 'XX官方 / 小助手 / 客服', samples: ['XX传媒小助手'] },
   { id: 'guest', name: '匿名流', hint: '游客或一串数字，低调路人', samples: ['游客', '路过的人'] },
 ]
 
@@ -59,7 +84,7 @@ export const ALIAS_STANCES = [
   { id: 'troll', name: '乐子人', hint: '只为看热闹，故意拱火' },
   { id: 'nerd', name: '技术党', hint: '冷静分析、抠细节、给数据' },
   { id: 'shill', name: '营销号', hint: '蹭热度、带货、说车轱辘话' },
-  { id: 'phantom', name: '幻造种', hint: '借楼求关注、求被看见' },
+  { id: 'seeker', name: '求关注型', hint: '借楼求关注、求被看见' },
   { id: 'admin', name: '官方号', hint: '出来压场、发温馨提示' },
 ]
 
@@ -68,7 +93,7 @@ export const ALIAS_STANCES = [
  * 各生成点用 buildAliasRuleBlock() 取，别直接拼这句 —— 那里还要接"已用名单"。
  */
 function aliasRuleBody() {
-  const sourceList = ALIAS_SOURCES.map(s => `${s.name}（${s.hint}）例：${s.samples.join('、')}`).join('\n  ')
+  const sourceList = aliasSourcesNow().map(s => `${s.name}（${s.hint}）例：${s.samples.join('、')}`).join('\n  ')
   const formList = ALIAS_FORMS.map(s => `${s.name}（${s.hint}）例：${s.samples.join('、')}`).join('\n  ')
   const stanceList = ALIAS_STANCES.map(s => `${s.name}（${s.hint}）`).join('\n  ')
 
@@ -77,7 +102,7 @@ function aliasRuleBody() {
   ${sourceList}
 【形态】ID 长什么样也要换：
   ${formList}
-  ★ 形态与取材要**错位搭配**（如"愿力"题材配"全大写英文流"= WILL_POWER_404），错位本身就是真实感的来源。
+  ★ 形态与取材要**错位搭配**（如某世界的特色题材配"全大写英文流" = COOL_THING_404），错位本身就是真实感的来源。
 【立场】名字之外，每条评论的说话人要有明确立场，并体现在内容里：
   ${stanceList}
 

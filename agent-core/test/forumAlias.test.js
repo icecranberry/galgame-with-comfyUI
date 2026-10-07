@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ALIAS_SOURCES,
+  ALIAS_SOURCES_GENERIC,
+  aliasSourcesNow,
   ALIAS_FORMS,
   ALIAS_STANCES,
   buildAliasRuleBlock,
@@ -19,11 +20,15 @@ import { normalizeMediaDraft } from '../src/services/mediaService.js'
  */
 
 test('三轴分类都有内容，且取材里保留了"市井日常"这一类', () => {
-  assert.ok(ALIAS_SOURCES.length >= 8, '取材轴条目太少，多样性会不够')
+  // ★ 2026-10-07：取材轴拆成「引擎通用维度 + 世界观项目库声明的专属维度」。
+  //   这里守通用部分 —— 它必须**独立成立**（不能因为换了世界观就没有取材方向了）。
+  assert.ok(ALIAS_SOURCES_GENERIC.length >= 3, '通用取材轴条目太少，换世界观后会无词可取')
   assert.ok(ALIAS_FORMS.length >= 6, '形态轴条目太少')
   assert.ok(ALIAS_STANCES.length >= 6, '立场轴条目太少')
   // 全是怪名的论坛是假的 —— 必须有"最普通的那种 ID"
-  assert.ok(ALIAS_SOURCES.some(s => s.id === 'plain'))
+  assert.ok(ALIAS_SOURCES_GENERIC.some(s => s.id === 'plain'))
+  // 合并入口必须能调用，且至少含通用维度（无项目库时也不空）
+  assert.ok(aliasSourcesNow().length >= ALIAS_SOURCES_GENERIC.length)
 })
 
 test('规则块把三轴都写进去了', () => {

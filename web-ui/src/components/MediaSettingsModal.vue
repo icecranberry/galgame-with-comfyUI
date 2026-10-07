@@ -7,7 +7,37 @@
         <button type="button" class="ms-cleanup" :disabled="cleaning" @click="doCleanup">
           {{ cleaning ? '清理中…' : '清理孤儿配图' }}
         </button>
+        <button type="button" class="ms-cleanup" @click="toggleOpLog">
+          {{ showOpLog ? '收起操作日志' : '操作日志' }}
+        </button>
       </p>
+
+      <!-- 操作日志（T5/T7）：删除/创建/批量类的审计流水，供追溯"东西什么时候没的" -->
+      <div v-if="showOpLog" class="ms-oplog">
+        <div class="ms-oplog-head">
+          <span class="ms-oplog-title">媒体操作日志</span>
+          <span class="ms-oplog-sub">共 {{ opLogTotal }} 条 · 只记删除/创建等破坏性操作，不记浏览</span>
+          <div style="flex:1"></div>
+          <button type="button" class="ms-oplog-refresh" :disabled="opLogLoading" @click="loadOpLog">
+            {{ opLogLoading ? '读取中…' : '刷新' }}
+          </button>
+        </div>
+        <div v-if="opLog.length" class="ms-oplog-list">
+          <div v-for="op in opLog" :key="op.id" class="ms-oplog-row" :class="'is-' + op.op_type">
+            <span class="ms-oplog-badge">{{ opBadge(op.op_type) }}</span>
+            <span class="ms-oplog-main">
+              <span class="ms-oplog-detail">{{ op.detail || op.target_name }}</span>
+              <span class="ms-oplog-meta">
+                {{ op.target_name }}
+                <template v-if="op.outlet_name && op.outlet_name !== op.target_name"> · {{ op.outlet_name }}</template>
+                <template v-if="op.count > 1"> · {{ op.count }} 条</template>
+              </span>
+            </span>
+            <span class="ms-oplog-time">{{ formatOpTime(op.created_at) }}</span>
+          </div>
+        </div>
+        <div v-else class="ms-oplog-empty">{{ opLogLoading ? '读取中…' : '还没有操作记录' }}</div>
+      </div>
 
       <div class="ms-layout">
         <!-- 左：媒体列表 -->
@@ -256,6 +286,47 @@ async function doCleanup() {
   }
 }
 
+// ── 操作日志（T5/T7）──
+// 删除/创建/批量类操作的审计流水。用于回答"某条内容/某个媒体是什么时候没的"。
+const showOpLog = ref(false)
+const opLog = ref([])
+const opLogTotal = ref(0)
+const opLogLoading = ref(false)
+
+const OP_BADGES = {
+  create: '新建', delete: '删除', batch_delete: '批量删',
+  batch_regenerate: '重生图', cleanup: '清理', unknown: '其他',
+}
+function opBadge(t) { return OP_BADGES[t] || t || '其他' }
+/** 时间显示：只到分钟，避免日志行过宽 */
+function formatOpTime(s) {
+  if (!s) return ''
+  // 后端存的是 SQLite CURRENT_TIMESTAMP（UTC），转成本地时区展示
+  try {
+    const d = new Date(String(s).replace(' ', 'T') + 'Z')
+    if (Number.isNaN(d.getTime())) return String(s)
+    const p = n => String(n).padStart(2, '0')
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  } catch { return String(s) }
+}
+async function loadOpLog() {
+  opLogLoading.value = true
+  try {
+    const d = await api.listMediaOpLog({ limit: 100 })
+    opLog.value = Array.isArray(d?.ops) ? d.ops : []
+    opLogTotal.value = Number(d?.total) || opLog.value.length
+  } catch (err) {
+    toastFn?.('读取操作日志失败：' + (err?.message || ''), 'error')
+    opLog.value = []
+  } finally {
+    opLogLoading.value = false
+  }
+}
+function toggleOpLog() {
+  showOpLog.value = !showOpLog.value
+  if (showOpLog.value && !opLog.value.length) loadOpLog()
+}
+
 async function selectOutlet(o) {
   if (!o) { editingId.value = null; form.value = null; boards.value = []; isNew.value = false; return }
   editingId.value = o.id
@@ -403,6 +474,45 @@ async function removeBoard(b) {
 }
 .ms-cleanup:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
 .ms-cleanup:disabled { opacity: 0.5; cursor: default; }
+
+/* 操作日志（T5/T7）—— 审计流水面板 */
+.ms-oplog {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-tertiary); border: 1px solid var(--glass-border);
+}
+.ms-oplog-head { display: flex; align-items: baseline; gap: 8px; }
+.ms-oplog-title { font-size: 12px; font-weight: 600; color: var(--text-bright); }
+.ms-oplog-sub { font-size: 10px; color: var(--text-secondary); }
+.ms-oplog-refresh {
+  border: 1px solid var(--glass-border); background: var(--bg-secondary);
+  color: var(--text-secondary); font-family: inherit; font-size: 11px;
+  padding: 2px 8px; border-radius: 6px; cursor: pointer;
+}
+.ms-oplog-refresh:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.ms-oplog-refresh:disabled { opacity: 0.5; cursor: default; }
+.ms-oplog-list { display: flex; flex-direction: column; gap: 3px; max-height: 220px; overflow-y: auto; }
+.ms-oplog-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 7px; border-radius: 7px;
+  background: var(--bg-secondary);
+  font-size: 11px;
+}
+.ms-oplog-badge {
+  flex-shrink: 0; padding: 1px 6px; border-radius: 4px;
+  font-weight: 600; font-size: 10px;
+  background: var(--glass-bg); color: var(--text-secondary);
+}
+/* 删除类用警示色，创建类用强调色 —— 一眼分清"是不是没了" */
+.ms-oplog-row.is-delete .ms-oplog-badge,
+.ms-oplog-row.is-batch_delete .ms-oplog-badge,
+.ms-oplog-row.is-cleanup .ms-oplog-badge { background: rgba(var(--danger-rgb, 220 60 60), 0.15); color: var(--danger, #c0392b); }
+.ms-oplog-row.is-create .ms-oplog-badge { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
+.ms-oplog-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ms-oplog-detail { color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-oplog-meta { color: var(--text-secondary); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ms-oplog-time { flex-shrink: 0; color: var(--text-secondary); font-size: 10px; }
+.ms-oplog-empty { padding: 14px 0; text-align: center; font-size: 11px; color: var(--text-secondary); opacity: 0.75; }
 
 .ms-layout { display: flex; gap: 14px; align-items: flex-start; }
 

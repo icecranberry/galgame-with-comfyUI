@@ -183,3 +183,157 @@ test('生成分派：photos 形态必须走 generatePhotoBatch（不能落进 fe
   const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
   assert.match(s, /outlet\.layout === 'photos'\) return await generatePhotoBatch/, '必须按形态分派到 generatePhotoBatch');
 });
+// ─────────────────────────────────────────────────────────
+// ④ ★ 禁止出现任何角色名（用户 2026-10-06 口径）
+// ─────────────────────────────────────────────────────────
+//
+// 事实基线：本站早先**刻意不清洗**（当时取舍是"自拍鼓励出现角色名"），提示词里还主动
+// 写了「出镜：某某」。模型于是把它当挡箭牌 —— 实测产出作品名「蓝调时刻·爻光」
+// 与上传者「爻光本人」（帖子 #585，author_type=anonymous 却带角色名）。
+// 用户口径变更：**图片站禁止出现任何角色名**（与规则34 同口径）。
+//
+// 本组测试钉两面：① 提示词层不再把名字交给模型（治本）
+//                 ② 出口层兜底清洗（模型仍可能自己编名字）
+
+const { normalizePhotoDraft, buildPhotoFormatPrompt } = await import(pathToFileURL(path.join(SRC_DIR, 'services/mediaService.js')).href);
+const { stripCharacterNames } = await import(pathToFileURL(path.join(SRC_DIR, 'utils/characterNameGuard.js')).href);
+
+const NAMES = ['爻光', '姬子', '真珠', '朽叶'];
+const BOARDS = [{ id: 1, name: '美少女自拍' }, { id: 2, name: '城市风光' }];
+const mkPlan = () => ([
+  { category: 'selfie', placeName: '', aspect: { key: '1:1', w: 1, h: 1 }, prompt: 'P1', tags: ['窗边'], castId: 9, castName: '爻光' },
+  { category: 'cityscape', placeName: '真珠办公室', aspect: { key: '16:9', w: 16, h: 9 }, prompt: 'P2', tags: ['倒影'], castId: null, castName: '' },
+]);
+
+test('★★ 提示词：自拍条不得把角色名交给模型（否则模型必然照抄进作品名）', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
+  const fn = s.slice(s.indexOf('export function buildPhotoFormatPrompt'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert.ok(!/出镜：\$\{it\.castName\}/.test(body), '提示词仍在用 `出镜：${it.castName}` —— 角色名会泄漏');
+  assert.match(body, /一名少女/, '自拍条应改为无名的"一名少女"');
+  // 作者名与备注同样要禁止
+  assert.match(fn.slice(0, fn.indexOf('return `')), /it\.castName|出镜/, '自拍条仍应说明"有一个人"（但不给名字）');
+});
+
+test('★★ 提示词：明确写「绝对禁止出现任何人名/角色名」', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
+  const fn = s.slice(s.indexOf('export function buildPhotoFormatPrompt'));
+  const body = fn.slice(0, fn.indexOf('`;\n}'));
+  assert.match(body, /绝对禁止出现任何人名/, '缺少禁止人名的显式规则');
+  // 并点明"地点可以照抄"的例外情形（否则模型会连地名一起不敢写）；
+  // ⚠ 断言只认概念不认措辞 —— 措辞会为"提示词里不出现具体人名"而反复微调
+  assert.match(body, /照抄\*\*地点\*\*不算违规/, '缺少"地名例外"的说明');
+});
+
+test('★★ 提示词正文里不得出现任何具体角色名（连反例也不行）', () => {
+  // 踩过的坑：反例写成「写「蓝调时刻·爻光」这类…是错的」—— 名字仍出现在提示词里，
+  // 模型照样可能被这个"名字样本"带偏。正确做法是反例也用无名占位。
+  const boards = [{ id: 1, name: '美少女自拍' }];
+  const plan = [{
+    category: 'selfie', placeName: '', tags: ['窗边'], castId: 9, castName: '爻光',
+    aspect: { key: '1:1', w: 1, h: 1 }, prompt: 'p',
+  }];
+  const prompt = buildPhotoFormatPrompt({ name: '哈托比亚', tagline: '' }, boards, plan);
+  for (const n of NAMES) {
+    assert.ok(!prompt.includes(n), `提示词正文里泄漏了角色名「${n}」`);
+  }
+  // 清单里自拍条必须用无名称呼
+  assert.match(prompt, /出镜：一名少女/, '自拍条应用无名占位');
+});
+
+test('★★ 出口兜底：normalizePhotoDraft 必须接 forbiddenNames 并清洗可见字段', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
+  const fn = s.slice(s.indexOf('export function normalizePhotoDraft'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  assert.match(fn.slice(0, 400), /opts = \{\}/, 'normalizePhotoDraft 应接受 opts');
+  assert.match(body, /forbiddenNames/, '必须读取 forbiddenNames');
+  assert.match(body, /stripCharacterNames/, '必须调 stripCharacterNames 清洗');
+});
+
+test('★★ 行为：可见字段（title/content/tags/author）零角色名', () => {
+  const raw = { posts: [
+    { board: '美少女自拍', title: '蓝调时刻·爻光', content: '今天心情不错，随手拍了一张。', author: '爻光本人', likes: 100, views: 900 },
+    { board: '城市风光', title: '真珠办公室 窗外', content: '下班路上拍的，天气很好。', author: '老陈拍城', likes: 50, views: 600 },
+  ] };
+  const out = normalizePhotoDraft(raw, BOARDS, mkPlan(), { forbiddenNames: NAMES });
+  assert.equal(out.length, 2);
+  for (const d of out) {
+    for (const [f, v] of [['title', d.title], ['content', d.content], ['author', d.author_name], ['tags', JSON.stringify(d.tags)]]) {
+      for (const n of NAMES) {
+        assert.ok(!String(v).includes(n), `${f} 仍含角色名「${n}」：${v}`);
+      }
+    }
+  }
+  // 具体断言：还原真实案例
+  assert.equal(out[0].title, '蓝调时刻', '「蓝调时刻·爻光」应洗成「蓝调时刻」');
+  assert.equal(out[0].author_name, '本人', '「爻光本人」应洗成「本人」');
+  // 地名含角色名时，"的"等虚词要一并收掉，不留残句
+  assert.equal(out[1].title, '办公室 窗外', '地名清洗后不应留下以虚词开头的残句');
+});
+
+test('★ 兜底标题（模型没写）也必须清洗 —— 地点名是另一个泄漏口', () => {
+  const plan = [{
+    category: 'cityscape', placeName: '姬子的个人房间', aspect: { key: '1:1', w: 1, h: 1 },
+    prompt: 'P', tags: [], castId: null, castName: '',
+  }];
+  const out = normalizePhotoDraft({ posts: [{}] }, BOARDS, plan, { forbiddenNames: NAMES });
+  assert.equal(out[0].title, '个人房间', '兜底标题「姬子的个人房间」应洗成「个人房间」');
+  for (const n of NAMES) assert.ok(!out[0].title.includes(n));
+});
+
+test('★ 全洗空时回落「随手拍」—— 标题绝不为空（红线：不静默丢内容）', () => {
+  const plan = [{
+    category: 'cityscape', placeName: '真珠', aspect: { key: '1:1', w: 1, h: 1 },
+    prompt: 'P', tags: [], castId: null, castName: '',
+  }];
+  const out = normalizePhotoDraft({ posts: [{ title: '朽叶' }] }, BOARDS, plan, { forbiddenNames: NAMES });
+  assert.ok(out[0].title && out[0].title.length > 0, '标题被清空了');
+  assert.equal(out[0].title, '随手拍');
+});
+
+test('★★ 内部字段必须保留角色名 —— 洗了会丢出镜身份（生图挂 LoRA 要用）', () => {
+  const out = normalizePhotoDraft({ posts: [{ title: '蓝调时刻·爻光', author: '爻光本人' }] }, BOARDS, mkPlan(), { forbiddenNames: NAMES });
+  // castNames 是内部字段、前端不展示，必须保留原名
+  assert.deepEqual(out[0].payload.photos.castNames, ['爻光'], 'castNames 不该被清洗');
+  assert.equal(out[0].payload.photos.castId ?? out[0].payload.photos.castIds?.[0], 9, 'castIds 不该被清洗');
+  // placeName 是地图地名，同样保留
+  assert.equal(out[1].payload.photos.placeName, '真珠办公室', 'placeName 是地名，不该被清洗');
+});
+
+test('★ 不传 forbiddenNames 时行为与上线前一致（默认不改行为）', () => {
+  const raw = { posts: [{ board: '美少女自拍', title: '蓝调时刻·爻光', content: '拍了一张。', author: '爻光本人', likes: 1, views: 9 }] };
+  const out = normalizePhotoDraft(raw, BOARDS, [mkPlan()[0]]);
+  assert.equal(out[0].title, '蓝调时刻·爻光', '不传清单时不应清洗');
+  assert.equal(out[0].author_name, '爻光本人');
+});
+
+test('★ 生成路径必须真的把 forbiddenNames 传下去（否则兜底形同虚设）', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
+  const fn = s.slice(s.indexOf('async function generatePhotoBatch'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  assert.match(body, /listCharacterDisplayNames\(\)/, 'generatePhotoBatch 必须取角色名清单');
+  // ⚠ 不能用 `normalizePhotoDraft\([^)]*forbiddenNames` —— 实参里有 `JSON.parse(...)`，
+  //   第一个 `)` 就会截断匹配。改为直接找含 forbiddenNames 的那次调用行。
+  assert.match(body, /normalizePhotoDraft\([\s\S]*?\{\s*forbiddenNames\s*\}/, '必须把 forbiddenNames 传给 normalizePhotoDraft');
+});
+
+test('★★ 历史数据清洗迁移：存在、带一次性标记、只洗可见字段、不碰 payload', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'db/index.js'), 'utf8');
+  assert.match(s, /media_photos_dename_v1/, '缺少哈托比亚去名迁移的一次性标记');
+  assert.match(s, /payload_json LIKE '%"photos"%'/, '迁移应只针对 photos 形态的帖子');
+  const i = s.indexOf('media_photos_dename_v1');
+  const seg = s.slice(Math.max(0, i - 3000), i + 2500);
+  assert.match(seg, /UPDATE media_posts SET title = \?, content = \?, author_name = \?/, '只洗这三个可见字段');
+  assert.ok(!/UPDATE media_posts SET[^?]*payload_json/.test(seg), 'payload_json 不该被改写（内含地名与 castNames）');
+});
+
+test('★ 与规则34 同口径：两站共用同一个清洗实现（单一真源）', () => {
+  const s = fs.readFileSync(path.join(SRC_DIR, 'services/mediaService.js'), 'utf8');
+  // 两个规整器都必须用 stripCharacterNames
+  const gal = s.slice(s.indexOf('export function normalizeGalleryDraft'));
+  const pho = s.slice(s.indexOf('export function normalizePhotoDraft'));
+  assert.match(gal.slice(0, 12000), /stripCharacterNames/, 'gallery 应使用统一清洗');
+  assert.match(pho.slice(0, 12000), /stripCharacterNames/, 'photos 应使用统一清洗');
+  // 不得自造第二套正则
+  assert.ok(!/function stripCharacterNames/.test(s), 'mediaService 不应另写一份清洗实现');
+});

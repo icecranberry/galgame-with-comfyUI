@@ -4,6 +4,8 @@ import path from 'path';
 import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule, getSetting, setSetting, repairFtsIndex } from '../db/index.js';
+import { listAppearanceTraitCatalog } from '../db/imagePromptTagKnowledgeData.js';
+import { normalizeTransitMode, TRANSIT_MODES } from '../services/characterTransitMode.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js'; // 出站已白名单化（见 webSearch.js assertAllowedOutboundUrl / toSafeMoegirlScrapeUrl）
@@ -32,6 +34,26 @@ import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { pickReactionMarker } from '../services/emojiService.js';
 
 const router = Router();
+
+/**
+ * ★ 2026-10-06 新增：GET /api/characters/appearance-trait-catalog
+ * 「外观特化」选择器的标签目录（section → group → tag+中文标签）。
+ *
+ * 用户口径：像真珠这类角色需要**常驻**种族/身体特征（`android, mechanical joints`），
+ * 但手打英文 tag 很别扭 —— 给一个点选框，从标签库里挑。
+ * ⚠ 必须注册在 `/:id` 之类的参数路由之前（本项目既有约定）。
+ */
+router.get('/appearance-trait-catalog', (req, res) => {
+  try {
+    // ★ mode=body（默认）只给「身体设计」类标签，供角色页用；
+    //   mode=draw 给全量，供绘图页用。两者共用同一份解析与分家配置（唯一真源）。
+    const mode = req.query?.mode === 'draw' ? 'draw' : 'body';
+    res.json({ sections: listAppearanceTraitCatalog({ mode }), mode });
+  } catch (err) {
+    console.error('[characters] appearance-trait-catalog error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/characters — 列出角色，含最近消息摘要
 router.get('/', (req, res) => {
@@ -372,19 +394,47 @@ router.post('/schedule-enabled-all', (req, res) => {
   res.json({ ok: true, schedule_enabled: enabled, changed: r.changes });
 });
 
-// POST /api/characters/archived-all — 批量归档 / 取消归档全体角色
+// POST /api/characters/archived-all — 批量归档 / 取消归档
+//
+// ★ 2026-10-07 用户口径：「全部不参与活动 / 全部恢复」的作用域应当是**当前分类下的角色**，
+//   而不是全库所有角色 —— 否则人类侧做"按文件夹批量调整"时，一点就把别的分组也带上了，
+//   批量操作实际意义不大。
+//
+// 作用域由 `scope` 指定（**不传 = 全库**，保持旧调用方行为不变）：
+//   · `{ scope: { type: 'folder', id } }`    → 该文件夹下的角色
+//   · `{ scope: { type: 'uncategorized' } }` → 未归类的角色
+//   · `{ scope: { type: 'ids', ids: [] } }`  → 明确的一批角色（前端已按搜索词过滤时用）
+//   · 缺省 / type='all'                       → 全库
+//
 // 与单个归档同一语义（独立拦截层，不改写四个细分开关）；取消归档时把刷新排期置空，
 // 后台会重新把角色排进日程队列。
 router.post('/archived-all', (req, res) => {
   const db = getDb();
   const archived = req.body?.archived ? 1 : 0;
-  const r = archived
-    ? db.prepare(`UPDATE characters SET archived = 1, next_schedule_refresh_at = NULL
-                  WHERE COALESCE(archived, 0) = 0`).run()
-    : db.prepare(`UPDATE characters SET archived = 0, next_schedule_refresh_at = NULL
-                  WHERE COALESCE(archived, 0) = 1`).run();
-  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${r.changes} character(s) in bulk`);
-  res.json({ ok: true, archived, changed: r.changes });
+  const scope = req.body?.scope || {};
+
+  // 组装作用域条件。**白名单式**：不认识的 type 一律回落到"全库"，
+  // 不静默变成"谁都不匹配"（那会让用户看到"已归档 0 个角色"却不知为什么）。
+  let where = '';
+  const params = [];
+  if (scope.type === 'folder' && scope.id != null && scope.id !== '') {
+    where = 'AND folder_id = ?'; params.push(Number(scope.id));
+  } else if (scope.type === 'uncategorized') {
+    where = 'AND (folder_id IS NULL OR folder_id = 0)';
+  } else if (scope.type === 'ids') {
+    const ids = (Array.isArray(scope.ids) ? scope.ids : []).map(Number).filter(Number.isFinite);
+    if (!ids.length) return res.json({ ok: true, archived, changed: 0, scope: 'ids(empty)' });
+    where = `AND id IN (${ids.map(() => '?').join(',')})`;
+    params.push(...ids);
+  }
+
+  const r = db.prepare(
+    `UPDATE characters SET archived = ?, next_schedule_refresh_at = NULL
+     WHERE COALESCE(archived, 0) = ? ${where}`
+  ).run(archived, archived ? 0 : 1, ...params);
+
+  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${r.changes} character(s) in bulk (scope=${scope.type || 'all'})`);
+  res.json({ ok: true, archived, changed: r.changes, scope: scope.type || 'all' });
 });
 
 // PUT /api/characters/:id/archived — 归档 / 取消归档
@@ -413,10 +463,20 @@ router.put('/:id/archived', (req, res) => {
 // PUT /api/characters/:id — 更新角色
 router.put('/:id', (req, res) => {
   const db = getDb();
-  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override, forum_alias, forum_persona } = req.body;
+  const { name, display_name, base_prompt, emotion_baseline, avatar_path, chat_bg_path, moments_disabled, proactive_disabled, events_disabled, custom_workflow, loras, artist_override, forum_alias, forum_persona, home_place, sleep_place, home_area, work_place, transit_mode } = req.body;
   const updates = [], params = [];
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (display_name !== undefined) { updates.push('display_name = ?'); params.push(display_name); }
+  // 固定居家/睡眠地点（人类侧指定）：存地名，空串 = 清空（= 未指定，日程不注入该段）
+  if (home_place !== undefined) { updates.push('home_place = ?'); params.push(String(home_place || '').trim() || null); }
+  if (sleep_place !== undefined) { updates.push('sleep_place = ?'); params.push(String(sleep_place || '').trim() || null); }
+  if (home_area !== undefined) { updates.push('home_area = ?'); params.push(String(home_area || '').trim() || null); }
+  // 工作地（台账豁免）：角色的常驻办公处。语义与 home_place 平行 —— 都是"我自己的地方"，
+  // 用于豁免"闯入受限地点"的误报（地图常把办公处标成 private）。
+  if (work_place !== undefined) { updates.push('work_place = ?'); params.push(String(work_place || '').trim() || null); }
+  // ★ 移动方式（超能力移动豁免）：走唯一真源规范化，非法值一律回落 `normal` ——
+  //   绝不把脏值写库（否则约束层与台账的判断会分叉）。空串等价于 `normal`。
+  if (transit_mode !== undefined) { updates.push('transit_mode = ?'); params.push(normalizeTransitMode(transit_mode)); }
   // 论坛马甲：与 display_name 不同，它**不参与**任何人称/人格裁剪 ——
   // 马甲只是论坛里显示的名字，改它不该触发 short_prompt 重裁或日程重生成。
   if (forum_alias !== undefined) { updates.push('forum_alias = ?'); params.push(String(forum_alias || '').trim() || null); }
@@ -2197,6 +2257,12 @@ router.post('/:id/outfits/generate', async (req, res) => {
 // PUT /api/characters/:id/outfits/scene — 批量保存场景外观（供界面"编辑后保存"）
 // Body: { body?: string, outfits: [{ scene, name, description }] }
 //   body = 该角色的身体描述（单一真源，写入时同步到全部行）
+//
+// ★★ 2026-10-07 用户实报：「人工修改了睡衣，保存后自动刷新为原文段」。
+//   根因是这里走的 `upsertSceneOutfits` 会对描述跑**脚部护栏**
+//   （睡衣=删掉所有含鞋的段并强制追加 ", barefoot"），把用户的手工编辑静默改写。
+//   → 本接口是**人工编辑**通道，必须传 `humanEdited: true` 绕过自动护栏。
+//   （护栏本身不删——它对「一键生成」的 AI 产出仍然必要，见 outfitScene.js 的说明。）
 router.put('/:id/outfits/scene', (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
@@ -2219,7 +2285,8 @@ router.put('/:id/outfits/scene', (req, res) => {
     .filter(o => o.scene && o.name);
   if (!clean.length) return res.status(400).json({ error: '没有有效的服装条目' });
 
-  const saved = upsertSceneOutfits(char.id, clean);
+  // ★ humanEdited: true —— 这是人工编辑通道，用户的文字原样落库
+  const saved = upsertSceneOutfits(char.id, clean, { humanEdited: true });
   if (body != null) setCharacterBody(char.id, body);
   res.json({ ok: true, saved, outfits: listSceneOutfits(char.id) });
 });

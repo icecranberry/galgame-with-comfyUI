@@ -48,6 +48,8 @@ import {
 } from '../data/photoScenes.js';
 import { listSceneOutfits } from './outfitScene.js';
 import { deriveBuild } from './characterBuild.js';
+// T5：媒体操作日志 —— 删除/创建类操作留审计痕迹（曾有一条真实产物消失无法追溯）
+import { recordMediaOp } from './mediaOpLog.js';
 
 /** 一次刷新默认抽多少条 */
 export const DEFAULT_BATCH_SIZE = 6;
@@ -354,6 +356,12 @@ export function createOutlet({ name, tagline = '', prompt = '', icon = '', layou
   `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, normalizeLayout(layout));
   // 用户又亲手把同名媒体建回来了 → 撤掉删除墓碑，语义才算一致
   forgetDeletedOutlet(nm);
+  // T5：留一条创建痕迹（谁建的、什么形态）
+  recordMediaOp({
+    opType: 'create', targetType: 'outlet', targetId: Number(r.lastInsertRowid),
+    targetName: nm, outletName: nm, detail: `新建媒体「${nm}」（形态 ${normalizeLayout(layout)}）`,
+    snapshot: { name: nm, layout: normalizeLayout(layout), tagline: clampText(tagline, 60) },
+  });
   return getOutlet(Number(r.lastInsertRowid));
 }
 export function updateOutlet(id, patch = {}) {
@@ -405,9 +413,22 @@ export function updateOutlet(id, patch = {}) {
  */
 export function deleteOutlet(id) {
   const db = getDb();
-  const row = db.prepare('SELECT name FROM media_outlets WHERE id = ?').get(id);
+  // 删之前先取一份快照（删完 CASCADE 子行就没了，事后无从追溯）
+  const row = db.prepare('SELECT name, tagline, layout, icon FROM media_outlets WHERE id = ?').get(id);
+  const postCount = db.prepare('SELECT COUNT(*) AS c FROM media_posts WHERE outlet_id = ?').get(id)?.c || 0;
+  const boardCount = db.prepare('SELECT COUNT(*) AS c FROM media_boards WHERE outlet_id = ?').get(id)?.c || 0;
   const changed = db.prepare('DELETE FROM media_outlets WHERE id = ?').run(id).changes > 0;
-  if (changed && row?.name) rememberDeletedOutlet(row.name);
+  if (changed && row?.name) {
+    rememberDeletedOutlet(row.name);
+    // T5：留一条删除痕迹 —— 曾有一条真实产物消失却查无实据
+    recordMediaOp({
+      opType: 'delete', targetType: 'outlet', targetId: id,
+      targetName: row.name, outletName: row.name,
+      count: postCount,
+      detail: `删除媒体「${row.name}」（连带 ${boardCount} 板块 / ${postCount} 帖）`,
+      snapshot: { name: row.name, tagline: row.tagline, layout: row.layout, icon: row.icon, boardCount, postCount },
+    });
+  }
   return changed;
 }
 
@@ -487,10 +508,22 @@ export function updateBoard(boardId, { name, desc }) {
 export function deleteBoard(boardId) {
   // 该板块下的帖子不删，只把 board_id 置空（避免用户删个板块连带丢内容）
   const db = getDb();
-  const cur = db.prepare('SELECT id FROM media_boards WHERE id = ?').get(boardId);
+  const cur = db.prepare('SELECT b.*, o.name AS outlet_name FROM media_boards b LEFT JOIN media_outlets o ON o.id = b.outlet_id WHERE b.id = ?').get(boardId);
   if (!cur) return false;
+  const detached = db.prepare('SELECT COUNT(*) AS c FROM media_posts WHERE board_id = ?').get(boardId)?.c || 0;
   db.prepare('UPDATE media_posts SET board_id = NULL WHERE board_id = ?').run(boardId);
-  return db.prepare('DELETE FROM media_boards WHERE id = ?').run(boardId).changes > 0;
+  const changed = db.prepare('DELETE FROM media_boards WHERE id = ?').run(boardId).changes > 0;
+  if (changed) {
+    // T5：板块删除留痕（帖子未删、仅转未分类，快照记下这个事实以免日后误解）
+    recordMediaOp({
+      opType: 'delete', targetType: 'board', targetId: boardId,
+      targetName: cur.name, outletName: cur.outlet_name || '',
+      count: 1,
+      detail: `删除板块「${cur.name}」（${detached} 帖转为未分类，未丢失）`,
+      snapshot: { name: cur.name, desc: cur.desc, outletId: cur.outlet_id, detachedPosts: detached },
+    });
+  }
+  return changed;
 }
 
 // ══════════════════════════════════════════
@@ -521,6 +554,14 @@ function mapPostRow(r) {
     // 周刊/海报的结构化正文（feed 形态为 null）
     payload: safeParse(r.payload_json, null),
     layout: r.layout || 'feed',
+    // ★ 这条内容**能否重新生图** —— 由后端同判据（`canRegenerateImage`）算好下发。
+    //
+    // 为什么在服务端算、而不是前端自己判断：`image_prompt` 恰恰是 `mapPostRow` **不下发**的字段，
+    // 前端拿不到它就无法本地判断。若为此额外下发整个 image_prompt，既多传数据，
+    // 又会把"什么算可生图"这条口径复制到第二处（红线 8）。
+    // 这里直接复用**重新生图端点用的同一个函数**，口径天然不漂。
+    // 用户 2026-10-06 实报：论坛是纯文字版面却还挂着「重新生图」按钮（点了只会报错）。
+    can_regenerate: canRegenerateImage(r),
     created_at: r.created_at,
   };
 }
@@ -1260,12 +1301,16 @@ export function buildPhotoFormatPrompt(outlet, boards, plan) {
     ? `"board" 必须从这个站点的分区里选：${boardNames.map(x => `「${x}」`).join('、')}`
     : `"board" 填 ""（本站点还没有分区）`;
 
-  // ★ 只给"拍的是什么"，不给英文提示词、不给角色名。
+  // ★ 只给"拍的是什么"，不给英文提示词、**也不给角色名**。
+  //
+  // ⚠ 自拍条曾经写「出镜：某某」把角色名交给模型 —— 模型于是照抄进作品名，
+  //   产出「蓝调时刻·爻光」这类标题（用户 2026-10-06 口径：图片站禁止出现任何角色名）。
+  //   现在与规则34 同一口径：**人数可以给**（那是画面构成，不是身份），**姓名一律不给**。
   const catLabel = Object.fromEntries(PHOTO_CATEGORIES.map(c => [c.key, c.label]));
   const list = plan.map((it, i) => {
     const parts = [`题材：${catLabel[it.category] || it.category}`];
     if (it.category === 'cityscape' && it.placeName) parts.push(`地点：${it.placeName}`);
-    if (it.category === 'selfie' && it.castName) parts.push(`出镜：${it.castName}`);
+    if (it.category === 'selfie') parts.push('出镜：一名少女（画面里只有她一个人）');
     if (it.tags?.length) parts.push(`关键词：${it.tags.filter(Boolean).join('/')}`);
     return `${i + 1}. ${parts.join('｜')}`;
   }).join('\n');
@@ -1293,10 +1338,17 @@ ${list}
 
 字段要求：
 - ${boardRule}。分区尽量分散，别整批都塞一个区。
-- ★ **作品名**：像图片站的作品命名 —— 短、有画面感、可以带地点或时间（如「泊地站夜景 03」「雨天的天台」）。
+- ★ **作品名**：像图片站的作品命名 —— 短、有画面感、可以带地点或时间（如「夜街雨景 03」「雨天的天台」）。
   **不要**写成小说标题或抒情诗；**不要**用「禁忌」「秘密」这类空词。
+- ⛔ **绝对禁止出现任何人名 / 角色名 / 出处名**：本站条目一律匿名，你看不到、也不许猜画里的人是谁。
+  **自拍条尤其注意** —— 出镜的少女只是"一个少女"，不是某某人。作品名只讲**画面**，不讲**身份**：
+  写「蓝调时刻·某人的名字」是**错的**，写「蓝调时刻」才对。要指人就写「她」「少女」「女孩」。
+  ⚠ 提示词里**不会出现任何角色名字**，你也**不要自己发明**一个 —— 全部用无名称呼。
+  ⚠ 注意：清单里给出的**地点名**本身就是地图地名，可能自带人名（「某人的办公室」这类）——
+  照抄**地点**不算违规；但**不要**因为地点名而顺带把那个人的名字写进作品名。
 - ★ **描述**：像上传者随口说的一句 —— 在哪拍的、什么心情、和谁去的、求不要求点评。
   可以写地方与季节，**不要复述画面细节**（画面已定）。风格轻松、生活化。
+  同样**不许出现任何人名/角色名**（同样用「她」「同行的人」这类说法）。
 - ★ 这是**全年龄图片站**：描述里**不要出现性相关词汇**，也不要写心理分析长段落。
 - ★ **同一批里的作品名必须互不相同**，别都用同一个句式。
 - "author" 填符合该站点气质的网名（摄影师、美食博主、路人、无意义字符串都可以）。
@@ -1309,16 +1361,50 @@ ${list}
  * 规整「哈托比亚」条目。**画面不再是模型给的，而是 plan 里的确定性内容**。
  *
  * 与 `normalizeGalleryDraft` 的差别：
- *   · **不做角色名清洗**（本站鼓励出现角色名 —— 自拍的"作者"就是角色本人视角），
- *     但自拍条的 `author` 仍用上传者网名（图站是第三方分享），出镜角色存 `payload.photos.castIds`。
  *   · 标签是**题材词**（城市风光/地点/美食名…），**不含 NSFW 体位词、不含画面参数**。
+ *   · 标签**不受 `MAX_GALLERY_TAGS` 限制**（那是规则34 为环境层扩的额度）。
+ *
+ * ★ 角色名清洗（2026-10-06 用户口径变更）：
+ *   本站**与规则34 同一口径 —— 禁止出现任何角色名**。
+ *   早先这里刻意"不清洗"（当时的取舍是"自拍鼓励出现角色名"），但实测模型把它当挡箭牌：
+ *   自拍条「出镜：爻光」→ 产出作品名「蓝调时刻·爻光」+ 上传者「爻光本人」。
+ *   用户明确要求禁止，故补上出口兜底（与 gallery 同源，复用 `stripCharacterNames`）。
+ *
+ * ⚠ 清洗**只作用于可见文本**（title / content / tags / author_name）。
+ *   `payload.photos.castIds / castNames` **保留原名** —— 那是给生图挂 LoRA 用的内部字段，
+ *   前端不展示（实测 `web-ui` 未读取 `castNames`），清了反而会丢出镜身份。
+ *   `payload.photos.placeName` 同理保留 —— 它是地图**地名**，可能本来就叫「真珠办公室」。
+ *
+ * @param {object} raw - LLM 输出（只有 title/content/author/likes/views/board）
+ * @param {Array} boards
+ * @param {Array} plan
+ * @param {{forbiddenNames?: string[]}} [opts] - 角色名清单（不传则不做清洗，保持向后兼容）
  */
-export function normalizePhotoDraft(raw, boards, plan = []) {
+export function normalizePhotoDraft(raw, boards, plan = [], opts = {}) {
   const list = Array.isArray(raw?.posts) ? raw.posts : [];
   const boardByName = new Map(boards.map(b => [b.name, b]));
   const out = [];
   const catLabel = Object.fromEntries(PHOTO_CATEGORIES.map(c => [c.key, c.label]));
   const isAspectLike = (s) => /^\d+(?:\.\d+)?\s*[:：xX×]\s*\d+(?:\.\d+)?$/.test(String(s));
+
+  // ★ 出口兜底：模型仍可能自己编出角色名（提示词里已经不给了）。与 gallery 同一实现。
+  const forbidden = Array.isArray(opts?.forbiddenNames) ? opts.forbiddenNames : [];
+
+  /**
+   * 显示用清洗：先走 `stripCharacterNames`，再收尾"被洗名字后残留的虚词/标点"。
+   *
+   * 为什么需要额外一步：地图地名里含角色名时（「姬子的个人房间」），
+   * 直接清洗会留下以虚词开头的残句「的个人房间」。这里把开头的
+   * 「的/之/·」等一并收掉 → 「个人房间」。
+   *
+   * ⚠ 只在本模块用，**不动共享的 `stripCharacterNames`**（它被 gallery 与迁移复用，
+   *   `的` 不在它的分隔符集合里是刻意的，改它会影响规则34 的既有行为）。
+   */
+  const cleanDisplay = (s, max) => {
+    const v = stripCharacterNames(clampText(s, max), forbidden);
+    if (!v) return '';
+    return v.replace(/^[\s·•×、|/]+/, '').replace(/^[的之]\s*/, '').trim();
+  };
 
   plan.forEach((it, i) => {
     const item = list[i] || null;
@@ -1326,7 +1412,10 @@ export function normalizePhotoDraft(raw, boards, plan = []) {
 
     // 模型没写标题也不丢条目：用**题材 + 地点/食物名**兜底（图站常见"未命名"作品）
     const fallbackTitle = it.placeName || it.tags?.[0] || catLabel[it.category] || '随手拍';
-    const title = clampText(item?.title, 80) || fallbackTitle;
+    // ⚠ 兜底标题也可能含角色名（地点名如「真珠办公室」）→ 与模型输出走同一道清洗
+    const title = cleanDisplay(item?.title, 80)
+      || cleanDisplay(fallbackTitle, 80)
+      || '随手拍';
 
     const likesRaw = Number(item?.likes);
     const viewsRaw = Number(item?.views);
@@ -1335,7 +1424,10 @@ export function normalizePhotoDraft(raw, boards, plan = []) {
     // 标签：题材 + 关键词（**画面参数绝不进标签** —— 与规则34 同一口径）
     const tags = [catLabel[it.category], ...(it.tags || [])]
       .filter(Boolean).map(String)
-      .filter(t => !isAspectLike(t));
+      .filter(t => !isAspectLike(t))
+      // 标签也过一遍清洗（洗空的直接丢弃，宁可少一个标签也不留一个名字）
+      .map(t => cleanDisplay(t, 40))
+      .filter(Boolean);
     const uniqTags = [...new Set(tags)].slice(0, 10);
 
     const boardName = clampText(item?.board, 16);
@@ -1344,11 +1436,11 @@ export function normalizePhotoDraft(raw, boards, plan = []) {
     out.push({
       board_id: board?.id ?? null,
       title,
-      content: clampText(item?.content, 300) || `${fallbackTitle}。`,
+      content: cleanDisplay(item?.content, 300) || `${title}。`,
       tags: uniqTags,
       author_type: 'anonymous',      // 图片站上传者是第三方分享者（与角色出镜与否无关）
       character_id: null,
-      author_name: clampText(item?.author, 24) || '匿名用户',
+      author_name: cleanDisplay(item?.author, 24) || '匿名用户',
       author_avatar: null,
       likes,
       views: Number.isFinite(viewsRaw) && viewsRaw > 0 ? Math.floor(viewsRaw) : likes * randInt(10, 40),
@@ -1364,7 +1456,8 @@ export function normalizePhotoDraft(raw, boards, plan = []) {
           height: it.aspect.h,
           negative: PHOTO_NEGATIVE,
           artist: it.artist || null,
-          // 自拍条出镜的角色（生图挂 LoRA 用）；其余题材为空
+          // 自拍条出镜的角色（生图挂 LoRA 用）；其余题材为空。
+          // ⚠ 保留**原名**：内部字段、前端不展示，清了会丢出镜身份。
           castIds: it.castId ? [it.castId] : [],
           castNames: it.castName ? [it.castName] : [],
         },
@@ -1706,7 +1799,9 @@ async function generatePhotoBatch(outlet, count, withCharacters) {
   });
   const jsonStr = extractFirstJson(raw);
   if (!jsonStr) throw new Error('LLM 未返回 JSON');
-  const drafts = normalizePhotoDraft(JSON.parse(repairJson(jsonStr)), boards, plan);
+  // ★ 角色名清单用于出口兜底清洗（与规则34 同口径：图片站禁止出现任何角色名）
+  const forbiddenNames = listCharacterDisplayNames();
+  const drafts = normalizePhotoDraft(JSON.parse(repairJson(jsonStr)), boards, plan, { forbiddenNames });
   return insertDrafts(outlet, drafts, n);
 }
 
@@ -3036,6 +3131,17 @@ export function deletePost(postId, { silent = false } = {}) {
   }
 
   console.log(`[media] 删除内容 #${postId}（清理图片 ${removed}/${urls.length}）`);
+  // T5：单条删除留痕（含标题快照；silent=true 是批量内部调用，由批量入口统一记一条）
+  if (!silent) {
+    recordMediaOp({
+      opType: 'delete', targetType: 'post', targetId: postId,
+      targetName: post.title || '',
+      outletName: '',
+      count: 1,
+      detail: `删除内容「${String(post.title || '').slice(0, 40)}」（清理图片 ${removed} 张）`,
+      snapshot: { title: post.title, outletId: post.outlet_id, boardId: post.board_id, author: post.author_name, image: !!post.image, removedImages: removed },
+    });
+  }
   return { ok: true, removedImages: removed };
 }
 
@@ -3082,6 +3188,16 @@ export function deletePosts(ids) {
     try { invalidateGalleryCache(); } catch { /* ignore */ }
   }
   console.log(`[media] 批量删除：请求 ${list.length} 条，成功 ${deleted}，失败 ${failedItems.length}，清理图片 ${removedImages} 张`);
+  // T5：批量删除记**一条汇总**（逐条记会刷屏，且批量入口才是用户看到的那次操作）
+  if (deleted > 0) {
+    recordMediaOp({
+      opType: 'batch_delete', targetType: 'post', targetId: null,
+      targetName: `批量删除 ${deleted} 条`,
+      count: deleted,
+      detail: `批量删除内容：成功 ${deleted} / 请求 ${list.length}，清理图片 ${removedImages} 张`,
+      snapshot: { requested: list.length, deleted, failed: failedItems.length, removedImages, ids: list.slice(0, 50) },
+    });
+  }
   return { ok: true, requested: list.length, deleted, removedImages, failed: failedItems.length, failedItems: failedItems.slice(0, 20) };
 }
 
@@ -3238,7 +3354,17 @@ export function cleanupOrphanMediaImages(maxAgeMs = 60 * 60 * 1000) {
         removed++;
       } catch { /* 单个失败不影响其余 */ }
     }
-    if (removed > 0) console.log(`[media] 清理孤儿配图 ${removed} 个（扫描 ${scanned}）`);
+    if (removed > 0) {
+      console.log(`[media] 清理孤儿配图 ${removed} 个（扫描 ${scanned}）`);
+      // T5：清理也是破坏性操作，留一条痕（含扫描规模，便于日后核对"是不是误清"）
+      recordMediaOp({
+        opType: 'cleanup', targetType: 'post', targetId: null,
+        targetName: `清理孤儿配图 ${removed} 个`,
+        count: removed,
+        detail: `清理孤儿配图：删除 ${removed} / 扫描 ${scanned} 个未被引用的文件`,
+        snapshot: { scanned, removed, maxAgeMs },
+      });
+    }
     return { scanned, removed };
   } catch (err) {
     console.error('[media] cleanupOrphanMediaImages 失败:', err.message);

@@ -200,9 +200,12 @@
         </button>
         <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
         <button
+          v-if="categoryHasImages"
           type="button" class="batch-btn"
-          :disabled="batchBusy || !selectedPostIds.size"
-          title="把这些内容的旧配图清掉并重新排队生成"
+          :disabled="batchBusy || !regenerableSelectedIds.length"
+          :title="regenerableSelectedIds.length
+            ? '把这些内容的旧配图清掉并重新排队生成'
+            : '选中的内容都没有配图（纯文字版面），无需重新生图'"
           @click="batchRegenerate"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -315,6 +318,7 @@
         <!-- 周刊/海报是整幅版式，不适合在图上贴按钮 → 操作放在版式下方 -->
         <div class="special-ops">
           <linshe-button
+            v-if="canRegenerate(p)"
             size="sm" variant="secondary"
             :loading="regeneratingId === p.id"
             :disabled="busyPostId !== null"
@@ -413,9 +417,11 @@
             </svg>{{ formatNum(p.likes) }}
           </span>
           <span v-if="p.board_name" class="cover-board">{{ p.board_name }}</span>
-          <!-- 悬浮操作：重新生图 / 删除（@click.stop 防止连带打开详情） -->
+          <!-- 悬浮操作：重新生图 / 删除（@click.stop 防止连带打开详情）
+               ⚠ 重新生图只在**这条内容真有配图**时才出（论坛纯文字，点了只会报错） -->
           <div class="cover-ops">
             <button
+              v-if="canRegenerate(p)"
               type="button" class="cover-op" title="重新生图"
               :disabled="busyPostId !== null"
               @click.stop="regenerateImage(p)"
@@ -501,9 +507,12 @@
       @close="detailPost = null"
     >
       <div v-if="detailPost" class="post-detail">
-        <!-- 顶部操作条：重新生图 / 删除（对三种形态都适用） -->
+        <!-- 顶部操作条：重新生图 / 删除。
+             ⚠ 「重新生图」只对**会有配图的形态**显示 —— 论坛是纯文字版面（后端强制
+             image_prompt 为空），对它点重新生图只会得到一句报错（用户 2026-10-06 实报）。 -->
         <div class="detail-ops">
           <linshe-button
+            v-if="canRegenerate(detailPost)"
             size="sm" variant="secondary"
             :loading="regeneratingId === detailPost.id"
             :disabled="busyPostId !== null"
@@ -730,6 +739,37 @@ const isForumCategory = computed(() => activeCategory.value === 'forum')
 const isGalleryCategory = computed(() => activeCategory.value === 'gallery')
 /** 哈托比亚（SFW 图片站）档 —— 与规则34 共用图片站版式 */
 const isPhotosCategory = computed(() => activeCategory.value === 'photos')
+
+/**
+ * ★ 这条内容**能不能重新生图** —— 只读后端下发的 `can_regenerate`。
+ *
+ * 用户 2026-10-06 实报：论坛是**纯文字版面**却还挂着「重新生图」按钮。
+ * 后端对此是明确的：生成论坛时强制把 `image_prompt` 置空（原文「论坛是纯文字版面，一律不配图」），
+ * 且 `/regenerate-image` 端点会直接拒绝 —— 点下去只弹一句报错。**按钮本就不该出现**。
+ *
+ * ⚠ 判据**不在前端重写**：`image_prompt` 是 `mapPostRow` 不下发的字段，前端根本拿不到；
+ *   若在此镜像一份 `canRegenerateImage` 逻辑，等于把同一条口径复制成两份（红线 8）。
+ *   后端已用**重新生图端点同一个函数**算好 `can_regenerate` 下发，这里只读。
+ */
+function canRegenerate(post) {
+  return !!post?.can_regenerate
+}
+
+/**
+ * 当前分类下**是否有可生图的内容** —— 只用于「批量重新生图」这个**没有单条对象**的入口。
+ * 逐条判定走 `canRegenerate()`（读后端下发的 can_regenerate）；此处只是决定批量按钮显不显示。
+ * 判据与后端 `CATEGORY_LAYOUTS` 对齐：目前只有论坛是纯文字档（其余都会配图）。
+ */
+const categoryHasImages = computed(() => activeCategory.value !== 'forum')
+
+/**
+ * 已选中项里**真正能重新生图**的 id（论坛这类纯文字内容会被自动排除）。
+ * 用于：① 批量按钮的计数与禁用态；② 提交时只送这些 id（免得后端逐条报"没有生图提示词"）。
+ */
+const regenerableSelectedIds = computed(() => {
+  const byId = new Map((posts.value || []).map(p => [p.id, p]))
+  return [...selectedPostIds.value].filter(id => canRegenerate(byId.get(id)))
+})
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -1139,15 +1179,18 @@ async function batchDelete() {
 }
 
 async function batchRegenerate() {
-  const ids = [...selectedPostIds.value]
+  // 只提交**真能生图**的选中项：论坛这类纯文字内容混在里面会被后端逐条拒绝
+  const ids = regenerableSelectedIds.value
   if (!ids.length || batchBusy.value) return
+  const skipped = selectedPostIds.value.size - ids.length
   batchBusy.value = true
   try {
     const r = await api.regenerateMediaPostImages(ids)
+    const skipNote = skipped > 0 ? `（${skipped} 条无配图，已跳过）` : ''
     if (r?.failed) {
-      toastFn?.(`已排队 ${r.queued} 条，${r.failed} 条失败`, 'warning')
+      toastFn?.(`已排队 ${r.queued} 条，${r.failed} 条失败${skipNote}`, 'warning')
     } else {
-      toastFn?.(`已排队重新生图 ${r?.queued ?? ids.length} 条，稍候…`, 'success')
+      toastFn?.(`已排队重新生图 ${r?.queued ?? ids.length} 条${skipNote}，稍候…`, skipped ? 'warning' : 'success')
     }
     exitBatchMode()
     await loadPage(0)
