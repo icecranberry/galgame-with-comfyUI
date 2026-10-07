@@ -361,3 +361,44 @@ test('★★★ 引擎词表里**不得**出现世界观专属的权力支柱（
   assert.ok(svc.POWER_PILLAR_SUGGESTIONS.length >= 5);
   assert.ok(svc.POWER_PILLAR_SUGGESTIONS.includes('武力威慑'));
 });
+
+// ─────────────────────────────────────────────────────────
+// 接入日程生成层（约束层，**默认关**）
+// ─────────────────────────────────────────────────────────
+
+test('★★★ 默认关闭：FEATURE_FACTION_PROMPT 未设 → 约束层里没有「势力态势」（= 行为与上线前一致）', async () => {
+  delete process.env.FEATURE_FACTION_PROMPT;
+  const { buildScheduleConstraintBlock } = await import('../src/services/scheduleGenerator.js');
+  svc.createFaction({ name: '默认不该出现帮', goal: '试一下' });
+  const layer = buildScheduleConstraintBlock({});
+  assert.ok(!layer || !layer.includes('势力态势'), '默认关时不得注入势力态势');
+});
+
+test('★★★ 开启后：约束层出现「势力态势」，且可用 factionsText 逐次覆盖', async () => {
+  process.env.FEATURE_FACTION_PROMPT = 'true';
+  try {
+    const { buildScheduleConstraintBlock } = await import('../src/services/scheduleGenerator.js');
+    svc.createFaction({ name: '态势注入帮', status: '困顿', stance: '冷淡', goal: '找新财源', tags: ['武力威慑'] });
+    const layer = buildScheduleConstraintBlock({});
+    assert.ok(layer && layer.includes('势力态势'), '开启后应注入');
+    assert.ok(layer.includes('态势注入帮'));
+    assert.match(layer, /<schedule_constraints priority="high">/, '仍要落在既有约束层里');
+
+    const off = buildScheduleConstraintBlock({ factionsText: '' });
+    assert.ok(!off || !off.includes('势力态势'), '显式传空串应本次不注入');
+  } finally {
+    delete process.env.FEATURE_FACTION_PROMPT;
+  }
+});
+
+test('★★★ 势力态势绝不进共享常量 scheduleInst（否则打穿前缀缓存 + 内置世界观知识）', () => {
+  const sg = fs.readFileSync(path.join(SRC, 'services/scheduleGenerator.js'), 'utf8');
+  const inst = sg.slice(sg.indexOf('const scheduleInst ='), sg.indexOf('const scheduleInst =') + 6000);
+  for (const t of ['势力态势', 'buildFactionPromptBlock', 'faction']) {
+    assert.ok(!inst.includes(t), `scheduleInst 里不得出现「${t}」`);
+  }
+  // 注入必须只在约束层函数体内
+  const cbi = sg.indexOf('export function buildScheduleConstraintBlock');
+  const body = sg.slice(cbi, sg.indexOf('\n}', sg.indexOf('if (!parts.length) return null;', cbi)));
+  assert.match(body, /isFactionPromptEnabled\(\)/, '注入判定必须在约束层里');
+});

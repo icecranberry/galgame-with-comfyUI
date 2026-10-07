@@ -73,6 +73,18 @@ export function activeWorldSlug() {
   return slugForWorld(active.name, active.id);
 }
 
+/**
+ * 势力态势是否注入提示词 —— **默认关闭**（红线 4）。
+ *
+ * 与 `memoryEvidenceGate` 同口径：纯 env 开关、无 UI、无 DB 设置项。
+ * 关闭时**一行都不进**，日程提示词与上线前逐字节一致。
+ *
+ * 开启：`FEATURE_FACTION_PROMPT=true`
+ */
+export function isFactionPromptEnabled() {
+  return process.env.FEATURE_FACTION_PROMPT === 'true';
+}
+
 function db() {
   return getDb();
 }

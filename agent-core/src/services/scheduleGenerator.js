@@ -19,6 +19,7 @@ import { isTransitExempt, transitModeLabel } from './characterTransitMode.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
+import { buildPromptBlock as buildFactionPromptBlock, isFactionPromptEnabled } from './factionService.js';
 
 /**
  * 该角色是否**禁止日程**。
@@ -447,6 +448,26 @@ ${sleepLine}
 
 本次就寝与起床时间固定为**${sleep.label}**：${sleep.text}。
 上文的「睡眠时间个性化」一节本次不适用（不要按角色气质另外挑一种）；但**睡眠 block 的 replyDelay 仍必须是 -1**，睡眠总时长仍要在 5~9 小时之间。`);
+  }
+
+  // ── 势力态势（**可选，默认关**：`FEATURE_FACTION_PROMPT=true`）──
+  //
+  // ★★ 为什么放在**约束层**而不是 scheduleInst：
+  //   内容是**每个世界观不同**的动态数据（派系、状态、目标），塞进跨角色共享的
+  //   `scheduleInst` 会（a）内置某个世界的知识（红线 12），（b）打穿 LLM 前缀缓存。
+  //   约束层本来就是"本次编排的附加信息"，且**没有内容时整层不出现** ——
+  //   于是「默认不改行为」天然成立。
+  //
+  // ★ 数据一律来自 DB/项目库（`factionService.buildPromptBlock()`），引擎不认识任何派系名。
+  //   调用方可用 `opts.factionsText` 覆盖（传空串 = 本次不注入）。
+  if (isFactionPromptEnabled()) {
+    const override = opts.factionsText;
+    const text = override === undefined || override === null ? buildFactionPromptBlock() : String(override);
+    if (text) {
+      parts.push(`【势力态势（供你把握这个世界的力量格局）】
+
+${text}`);
+    }
   }
 
   if (!parts.length) return null;
