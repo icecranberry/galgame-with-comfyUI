@@ -658,6 +658,7 @@ import AppearanceRefineModal from './AppearanceRefineModal.vue'
 import PersonaRefineModal from './PersonaRefineModal.vue'
 import AppearanceTraitPicker from './AppearanceTraitPicker.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
+import { splitBodyGarment } from '../utils/appearanceSplit.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
 
@@ -1655,36 +1656,10 @@ function isTabFilled(o) {
   return !!String(o?.description || '').trim()
 }
 
-const CLOTHING_HINT = /\b(dress|skirt|pants|trousers|shirt|blouse|jacket|coat|hoodie|sweater|cardigan|kimono|yukata|robe|shorts|jeans|stockings?|socks?|shoes?|boots?|slippers?|heels?|gloves?|bra|panties|camisole|nightgown|blazer|uniform|apron|sash|obi|scarf|hat|beret|headwear|choker|necklace|earrings?|goggles|mask|armor|suit)\b/i
-const BODY_HINT = /\b(hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?)\b/i
-
-function splitBodyGarment(text) {
-  const raw = String(text || '').trim()
-  if (!raw) return { body: '', garment: '' }
-
-  // ① 去掉「角色名 (作品名) has 」/「角色名 has 」前缀
-  let t = raw.replace(/^[^,]{0,70}?\bhas\s+/i, '').trim()
-
-  // ② 按 wearing 拆点（提示词固定的连接词）
-  // ⚠ 逗号后**可能没有空格** —— 实测后端产出过 `fair skin,wearing a ...`，
-  //   所以这里是 `[,;]?\s*` 而不是 `\s+`（用 \s+ 会整个匹配失败，导致整段被当成身体）。
-  const m = t.match(/^(.*?)[,;]?\s*\b(?:wearing|wears|dressed in)\s+(.*)$/i)
-  if (m) {
-    const left = m[1].replace(/[,\s]+$/, '').trim()
-    const right = m[2].replace(/^[,\s]+/, '').trim()
-    // 「wearing no clothing / nothing」这类 = 没穿衣服，右半边不算服装
-    if (/^(n(o|othing)|no clothing|nothing)\b/i.test(right)) return { body: left, garment: '' }
-    return { body: left, garment: right }
-  }
-
-  // ③ 没有 wearing：判断这段是身体还是衣服
-  const looksBody = BODY_HINT.test(t) && !CLOTHING_HINT.test(t)
-  if (looksBody) return { body: t, garment: '' }
-  const looksCloth = CLOTHING_HINT.test(t)
-  if (looksCloth) return { body: '', garment: t }
-  // ④ 都判不出来 → 当身体（身体缺失的代价更大：五套都会丢身体）
-  return { body: t, garment: '' }
-}
+// ★ 2026-10-07 拆分逻辑搬到 utils/appearanceSplit.js（可单测），并修掉"身份前缀被丢弃"的缺陷：
+//   旧实现把开头的「角色名 (作品名) has 」整段删掉 → body 只剩头发/眼睛，
+//   生图丢角色 TAG、长相与原设定不一致（用户实报）。
+//   ⚠ CLOTHING_HINT / BODY_HINT 已随逻辑一起移走（需要时从 util 导入）。
 
 async function onAppearanceRefined({ basePrompt }) {
   // 弹窗返回整卡：只取外观段

@@ -1261,6 +1261,14 @@ export function preferPetitePool(pool, pose) {
  *
  * 取 `character_outfits.body`（该列本就是英文 danbooru 风格），截到第一个逗号为止。
  * 读不到就退化为编号泛称（`the girl 2`），仍是合法英文。
+ *
+ * ★ 2026-10-07：`body` 现在可能带「角色名 (作品名)」身份前缀（拆分修复后**保留**该前缀，
+ *   供生图识别角色）。取外观指代时**必须先剥掉它**，否则两种坏法都出现过：
+ *     · 前缀独占第一段（`Stelle (Honkai: Star Rail), short hair…`）→ 第一段不含 hair
+ *       → 本函数直接返回 null，**发型描述整段丢失**；
+ *     · 前缀与特征同段（`Stelle (…) has short hair…`）→ 拼出
+ *       `the girl with Stelle (Honkai: Star Rail) has short hair…` 这种病句。
+ *   剥前缀后**扫描所有分段找含 hair 的那一段**（不再只看第一段），两难都解。
  */
 export function buildSubjectRef(character) {
   if (!character) return null;
@@ -1268,9 +1276,18 @@ export function buildSubjectRef(character) {
   try {
     body = String(listSceneOutfits(character.id)?.find(r => r.body && String(r.body).trim())?.body || '');
   } catch { /* 无 DB / 无该行：走兜底 */ }
-  const firstClause = body.split(',')[0].trim();
-  if (firstClause && /hair/i.test(firstClause)) {
-    const phrase = firstClause.length > 64 ? `${firstClause.slice(0, 64).trim()}` : firstClause;
+  // 剥掉开头的身份前缀：「角色名 (作品名) [has/is/with]」
+  const stripped = body
+    .replace(/^\s*[^,()]{1,60}\s*\([^()]{1,60}\)\s*(?:has|have|is|with)?\s*[,]?\s*/i, '')
+    // 裸名形态（原创角色，无作品名括号）：仅当该段不像外观特征词时才剥（避免误吃 "short hair has…"）
+    .replace(/^\s*([^,]{1,60}?)\s+(?:has|have|is)\s+/i, (all, name) =>
+      /hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?|dress|skirt|shirt|jacket|coat|uniform/i.test(name)
+        ? all : '')
+    .trim();
+  // 扫描所有分段找含发型的那一段（前缀可能是独立一段，也可能与特征同段）
+  const hairClause = stripped.split(',').map(c => c.trim()).find(c => /hair/i.test(c));
+  if (hairClause) {
+    const phrase = hairClause.length > 64 ? hairClause.slice(0, 64).trim() : hairClause;
     return `the girl with ${phrase.replace(/^with\s+/i, '')}`;
   }
   return null;

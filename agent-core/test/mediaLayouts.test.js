@@ -371,6 +371,37 @@ test('buildSubjectRef：无英文身体描述时返回 null（由调用方回落
   assert.equal(buildSubjectRef(noBody), null);
 });
 
+// ── ★ 2026-10-07：body 现在可能带「角色名 (作品名)」身份前缀（前端拆分修复后保留该前缀），
+//    这里必须能剥掉它并找到发型段。旧实现只认"首段含 hair"，两种形态都会坏：
+//      · 前缀独立成段 → 首段不含 hair → 直接 null（发型全丢）
+//      · 前缀与特征同段 → 拼出 "the girl with Stelle (…) has short hair" 病句
+//    因为 buildSubjectRef 要走 DB，这里用**与实现同一口径**的纯逻辑镜像来钉判据；
+//    真正的接线由 mediaLayouts 的端到端用例覆盖。
+test('buildSubjectRef：身份前缀必须被剥掉，且不得产出病句（2026-10-07 修复）', () => {
+  const mirror = body => {
+    const stripped = String(body || '')
+      .replace(/^\s*[^,()]{1,60}\s*\([^()]{1,60}\)\s*(?:has|have|is|with)?\s*[,]?\s*/i, '')
+      .replace(/^\s*([^,]{1,60}?)\s+(?:has|have|is)\s+/i, (all, name) =>
+        /hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?|dress|skirt|shirt|jacket|coat|uniform/i.test(name) ? all : '')
+      .trim();
+    const hairClause = stripped.split(',').map(c => c.trim()).find(c => /hair/i.test(c));
+    if (!hairClause) return null;
+    const phrase = hairClause.length > 64 ? hairClause.slice(0, 64).trim() : hairClause;
+    return `the girl with ${phrase.replace(/^with\s+/i, '')}`;
+  };
+  // 前缀独立成段（新口径）：仍要拿到发型，且不得出现角色名
+  const a = mirror('Stelle (Honkai: Star Rail), short choppy silver-grey hair with uneven bangs, golden eyes');
+  assert.match(a, /silver-grey hair/);
+  assert.ok(!/Stelle/.test(a), `不该把角色名塞进外观指代：${a}`);
+  assert.ok(!/\bhas\b/.test(a), `不该出现病句 has：${a}`);
+  // 前缀与特征同段（防御旧数据/旧产出）：同样要剥干净
+  const b = mirror('Stelle (Honkai: Star Rail) has short choppy silver-grey hair, golden eyes');
+  assert.match(b, /silver-grey hair/);
+  assert.ok(!/Stelle/.test(b) && !/\bhas\b/.test(b), `同段形态没剥干净：${b}`);
+  // 只有服装 → null（由调用方回落泛称）
+  assert.equal(mirror('wearing a red dress'), null);
+});
+
 test('pickRandomPoses：不重复优先，池子够时不出现重复', () => {  const got = pickRandomPoses(10);
   assert.equal(got.length, 10);
   assert.equal(new Set(got.map(p => p.no)).size, 10, '同批出现重复体位');
