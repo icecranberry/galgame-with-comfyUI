@@ -97,6 +97,21 @@
         <span class="nav-label">相册</span>
       </router-link>
 
+      <!-- 绘图：生图 TAG 自由组合的创意工坊。
+           ★ 与「相册」分开 —— 那边是**看已有作品**，这边是**造新作品**；
+             标签库的全量词库（含动作/表情/瞬时状态）只在页内，角色页只留常驻身体特征。 -->
+      <router-link to="/draw" data-nav="draw" class="nav-item" :class="{ active: $route.path.startsWith('/draw') }" title="绘图">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+            <path d="M2 2l7.586 7.586"/>
+            <circle cx="11" cy="11" r="2"/>
+          </svg>
+        </div>
+        <span class="nav-label">绘图</span>
+      </router-link>
+
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">

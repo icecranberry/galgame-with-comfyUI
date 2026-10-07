@@ -110,8 +110,18 @@ export async function setCharacterArchived(characterId, archived) {
 }
 
 // 批量归档 / 取消归档全体角色
-export async function setAllCharactersArchived(archived) {
-  return request('/characters/archived-all', { method: 'POST', body: { archived } })
+/**
+ * 批量归档 / 取消归档。
+ *
+ * ★ 2026-10-07：新增 `scope` —— 「全部不参与活动 / 全部恢复」的作用域应当是**当前分类**，
+ *   而不是全库所有角色（否则按文件夹批量调整时会把别组一起带上，批量操作就失去意义）。
+ *   scope 形态：`{type:'folder',id}` | `{type:'uncategorized'}` | `{type:'ids',ids:[]}`；
+ *   **不传 = 全库**（保持旧行为）。
+ */
+export async function setAllCharactersArchived(archived, scope = null) {
+  const body = { archived }
+  if (scope) body.scope = scope
+  return request('/characters/archived-all', { method: 'POST', body })
 }
 
 // ── 角色文件夹（单层分类）──
@@ -180,6 +190,19 @@ export function getCurrentSceneOutfit(characterId) {
  */
 export function generateSceneOutfits(characterId, save = false, extra = {}) {
   return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save, ...extra } })
+}
+
+/**
+ * 「外观特化」选择器的标签目录（section → group → tag + 中文标签）。
+ *
+ * @param {'body'|'draw'} [mode]
+ *   · `body`（默认）＝只给**角色常驻身体特征**（种族/机械义体/体型/生理），供角色形象弹窗点选；
+ *   · `draw` ＝给**全量词库**，供「绘图」页自由组合（动作、表情、瞬时状态都在里面）。
+ *   分家判定收口在服务端唯一真源 `appearanceTagPartition.js`，前端**不另抄名单**。
+ */
+export function getAppearanceTraitCatalog(mode) {
+  const q = mode === 'draw' ? '?mode=draw' : ''
+  return request(`/characters/appearance-trait-catalog${q}`)
 }
 
 /**
@@ -1455,6 +1478,12 @@ export function regenerateSchedule(characterId, direction, options = {}) {
     }
     if (options.nsfwRatio !== undefined && options.nsfwRatio !== null) body.nsfwRatio = options.nsfwRatio
     if (options.sleepType && options.sleepType !== 'auto') body.sleepType = options.sleepType
+    // 固定居家/睡眠地点（人类侧指定）：跟随本次生成
+    if (options.homePlace) {
+      body.homePlace = options.homePlace
+      if (options.homeArea) body.homeArea = options.homeArea
+      if (options.sleepPlace) body.sleepPlace = options.sleepPlace
+    }
   }
   return request(`/schedule/${characterId}/regenerate`, { method: 'POST', body })
 }
@@ -2253,6 +2282,18 @@ export function cleanupMediaImages() {
   return request('/media/cleanup-images', { method: 'POST' })
 }
 
+/**
+ * 媒体操作日志（T5/T7）—— 删除/创建/批量类的审计流水。
+ * 用途：查「某条内容/某个媒体是什么时候没的」，弥补"删了查无实据"的空白。
+ */
+export function listMediaOpLog({ limit = 100, targetType = '', opType = '' } = {}) {
+  const q = new URLSearchParams()
+  q.set('limit', String(limit))
+  if (targetType) q.set('targetType', targetType)
+  if (opType) q.set('opType', opType)
+  return request(`/media/op-log?${q.toString()}`)
+}
+
 // ── 数据清理（按时间清理图片与内容记录）──
 
 /** 可清理项定义（界面据此渲染分组与说明） */
@@ -2365,4 +2406,46 @@ export function deleteWorldMapPlace(placeId) {
 /** ② 逐区展开（L3 场景 + 每场景 POI；重复调用 = 换一批） */
 export function expandWorldMapPlace(placeId) {
   return request(`/worldmap/places/${placeId}/expand`, { method: 'POST' })
+}
+
+/**
+ * 依据「名称 / 类型 / 一句话简介」让 AI 生成一条英文画面描述（scene_prompt）。
+ * **不落库** —— 只返回预览，用户可改可重掷，确认后随 updateWorldMapPlace 保存。
+ */
+export function generateWorldMapScenePrompt(input) {
+  return request('/worldmap/places/scene-prompt', { method: 'POST', body: input })
+}
+
+/**
+ * ★ AI **追加**生活地点（不落库）—— 给这个地点补几个店/设施，**不建新的一级**。
+ *
+ * 与 `expandWorldMapPlace` 的区别：那个会删掉该地点下全部子节点后整体替换，
+ * 这个只往当前节点的 POI 里追加，不碰任何子节点。
+ * 生成器出口已有两道闸门（与已有条目去重 / 全重复时抛错而非返回空），
+ * 所以这里**不需要**前端再去重。
+ *
+ * @param {object} p
+ * @param {number|string} p.placeId
+ * @param {number} [p.count] 想要几条（服务端夹 1~8）
+ * @param {string} [p.hint]  特别要求，如「多来点深夜路边摊」
+ * @param {string[]} [p.excludeNames] 当前表单里已有的 POI 名（**含未保存的手改条目**）——
+ *   只查库会漏掉用户刚打完还没保存的名字，去重会失败。
+ */
+export function expandWorldMapPois({ placeId, count, hint, excludeNames }) {
+  return request(`/worldmap/places/${placeId}/poi-draft`, {
+    method: 'POST',
+    body: { count, hint, excludeNames },
+  })
+}
+
+/**
+ * 修正地点（不落库）——照「角色 → 修正外观」的同一套契约做。
+ * `mode: 'image'` 传 `image`（dataURL）；`mode: 'text'` 传 `brief`（要点）。
+ * 产出 `{kind, summary, scenePrompt}` 草稿，由前端填进编辑表单，用户可再手改。
+ */
+export function refineWorldMapPlaceDraft({ placeId, mode = 'image', image = '', brief = '', hints = '' }) {
+  return request(`/worldmap/places/${placeId}/refine-draft`, {
+    method: 'POST',
+    body: { mode, image, brief, hints },
+  })
 }

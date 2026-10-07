@@ -30,6 +30,7 @@ import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
 import WorldMapView from './views/WorldMapView.vue'
+import DrawView from './views/DrawView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -43,6 +44,7 @@ const routes = [
   { path: '/worldmap', component: WorldMapView },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
+  { path: '/draw', component: DrawView },
   { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },

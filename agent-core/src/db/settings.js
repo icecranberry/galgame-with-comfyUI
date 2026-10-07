@@ -39,6 +39,8 @@ const DB_ONLY_KEYS = new Set([
   'novelai_api_key',
   // 宝箱橱窗的分页配置（由导入道具清单工具写入，运行时只读，不进 config）
   'loot_pages',
+  // 媒体删除墓碑（用户删过的媒体名清单，补种逻辑据此跳过）—— 只经 getSetting 直读，不走 config
+  'media_outlets_deleted',
 ]);
 
 /** 写入单条系统设置 */

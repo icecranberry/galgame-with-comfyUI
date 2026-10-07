@@ -308,23 +308,37 @@ test('生成头像：显式固定「常服」，不再沿用会随时间变化�
 // 提示词质量：世界观例句段裁剪
 // ─────────────────────────────────────────────────────────
 
-test('adaptWorldText：裁掉「## 人们的行为」整段，保留规则性章节', () => {
+// ★★ 2026-10-07 架构修正：裁剪**不再认死章节名**，改由「该世界观项目库声明的氛围节」驱动。
+//   旧断言假设"不传参就会裁掉「人们的行为」"——那是引擎内置某个世界观知识的旧行为，
+//   现在默认**不裁**（未声明 = 原样返回，保证存量世界观行为不变）。
+//   行为级测试已迁到 `worldProjectLibrary.test.js`，这里只守接口契约与本回归的原始意图。
+test('adaptWorldText：未声明氛围节时**原样返回**（保守默认，不误伤任何世界观）', () => {
   const src = [
     '# 世界', '',
     '## 深层逻辑', '这条规则必须保留。', '',
     '## 人们的行为', '锅比我会撑，你比我敢写。', '报数报到三十七了。', '',
-    '## 社会基调', '这条也要保留。',
   ].join('\n');
-  const out = adaptWorldText(src);
-  assert.ok(!out.includes('锅比我会撑'), '例句段应被裁掉');
-  assert.ok(!out.includes('报数报到'), '例句段应被裁掉');
-  assert.ok(out.includes('这条规则必须保留'), '规则章节应保留');
-  assert.ok(out.includes('这条也要保留'), '社会基调应保留');
+  assert.equal(adaptWorldText(src), src, '没声明就不该动一个字');
+  assert.equal(adaptWorldText(src, 'strip', { ambienceSections: [] }), src);
 });
 
-test('adaptWorldText：没有该段时原样返回（不误伤）', () => {
+test('adaptWorldText：声明了才裁，且只裁声明的那一节', () => {
+  const src = [
+    '# 世界', '',
+    '## 深层逻辑', '这条规则必须保留。', '',
+    '## 人们的行为', '锅比我会撑，你比我敢写。', '报数报到三十七了。', '',
+    '## 另一节', '这条也要保留。',
+  ].join('\n');
+  const out = adaptWorldText(src, 'strip', { ambienceSections: ['人们的行为'] });
+  assert.ok(!out.includes('锅比我会撑'), '声明的节应被裁掉');
+  assert.ok(!out.includes('报数报到'), '声明的节应被裁掉');
+  assert.ok(out.includes('这条规则必须保留'), '未声明的规则章节应保留');
+  assert.ok(out.includes('这条也要保留'), '其他节应保留');
+});
+
+test('adaptWorldText：声明的节不存在时原样返回（不误伤）', () => {
   const src = '# 世界\n\n## 深层逻辑\n只这一节。\n';
-  assert.equal(adaptWorldText(src), src);
+  assert.equal(adaptWorldText(src, 'strip', { ambienceSections: ['没有的节'] }), src);
 });
 
 // ─────────────────────────────────────────────────────────

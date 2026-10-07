@@ -173,27 +173,28 @@
       <div class="char-toolbar-right">
         <div
           class="char-archive-all"
-          :title="archivedCount > 0
-            ? `已归档 ${archivedCount} 个角色：它们不参与任何主动活动，你找它们聊天仍会回复`
-            : '一键让所有角色不参与任何主动活动（主动聊天、朋友圈、奇遇、日程生成、拉群）'"
+          :title="scopeArchivedCount > 0
+            ? `${scopeLabel}已归档 ${scopeArchivedCount} 个：它们不参与任何主动活动，你找它们聊天仍会回复`
+            : `一键让${scopeLabel}不参与任何主动活动（主动聊天、朋友圈、奇遇、日程生成、拉群）`"
         >
-          <span class="char-archive-all-label">全部不参与活动</span>
-          <span v-if="archivedCount > 0" class="char-archive-all-count">{{ archivedCount }}/{{ chat.characters.length }}</span>
+          <!-- ★ 2026-10-07：作用域是**当前分类**，不再是全库 —— 标签里显式写出范围，避免误操作 -->
+          <span class="char-archive-all-label">本分类不参与活动</span>
+          <span v-if="scopeArchivedCount > 0" class="char-archive-all-count">{{ scopeArchivedCount }}/{{ scopeCount }}</span>
           <linshe-switch
             :model-value="allArchived"
-            :disabled="archiveAllToggling"
+            :disabled="archiveAllToggling || scopeCount === 0"
             size="sm"
             @change="toggleAllArchived"
-            aria-label="全部不参与活动"
+            :aria-label="`让${scopeLabel}不参与活动`"
           />
           <!-- 部分归档时开关键得点两下才能全恢复，给个直达入口 -->
           <linshe-button
-            v-if="archivedCount > 0 && !allArchived"
+            v-if="scopeArchivedCount > 0 && !allArchived"
             variant="link"
             size="sm"
             :disabled="archiveAllToggling"
             @click="toggleAllArchived(false)"
-          >全部恢复</linshe-button>
+          >本分类全部恢复</linshe-button>
         </div>
         <div class="char-search">
           <linshe-input
@@ -1066,23 +1067,68 @@ watch(() => chat.characters.length, () => folderStore.load())
 // 批量归档（工具栏的「全部不参与活动」）
 // ═══════════════════════════════════════
 const archiveAllToggling = ref(false)
-const archivedCount = computed(() => chat.characters.filter(c => c.archived).length)
-// 全部归档才算「开」；部分归档时开关显示为关，点一下 = 把剩下的也归档
+
+/**
+ * ★ 2026-10-07 用户口径：批量归档的作用域是**当前分类下的角色**，不是全库。
+ *   理由：人类侧做批量调整是按文件夹分组的；若一次点下去把别的分组也带上，
+ *   这个开关就失去意义（要重新一个个改回来）。
+ *
+ *   作用域 = 当前视图（文件夹筛选）内、且**通过当前搜索词**的角色 ——
+ *   与用户"看到的这一批"完全一致（所见即所改）。
+ */
+const batchScopeCharacters = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  const base = folderScopedCharacters.value
+  if (!base.length) return []
+  return kw
+    ? base.filter(c => (c.display_name || '').toLowerCase().includes(kw))
+    : base
+})
+const scopeCount = computed(() => batchScopeCharacters.value.length)
+const scopeArchivedCount = computed(() => batchScopeCharacters.value.filter(c => c.archived).length)
+// 该作用域内全部归档才算「开」；部分归档时开关显示为关，点一下 = 把剩下的也归档
 const allArchived = computed(() =>
-  chat.characters.length > 0 && archivedCount.value === chat.characters.length
+  scopeCount.value > 0 && scopeArchivedCount.value === scopeCount.value
 )
+/** 当前作用域的人话描述（用于标题与提示，避免用户不知道会动到谁） */
+const scopeLabel = computed(() => {
+  if (folderFilter.value === 'archived') return '「归档管理」里的角色'
+  if (folderFilter.value === 'uncategorized') return '「未分类」里的角色'
+  if (folderFilter.value === 'all') return '全部角色'
+  const f = (folderStore.folders || []).find(x => String(x.id) === String(folderFilter.value))
+  return f ? `「${f.name}」里的角色` : '当前分类里的角色'
+})
+
+/** 把当前作用域转成后端认识的 scope */
+function currentScope() {
+  if (folderFilter.value === 'uncategorized') return { type: 'uncategorized' }
+  if (folderFilter.value === 'archived') return { type: 'ids', ids: batchScopeCharacters.value.map(c => c.id) }
+  if (folderFilter.value === 'all') {
+    // 带搜索词时也按 ids 精确限定，保证"所见即所改"
+    return charSearch.value.trim()
+      ? { type: 'ids', ids: batchScopeCharacters.value.map(c => c.id) }
+      : { type: 'all' }
+  }
+  return { type: 'folder', id: Number(folderFilter.value) }
+}
 
 async function toggleAllArchived(next) {
   if (archiveAllToggling.value) return
+  const targets = batchScopeCharacters.value
+  if (!targets.length) {
+    showToast(`当前${scopeLabel.value}没有角色`, 'error')
+    return
+  }
   archiveAllToggling.value = true
   try {
-    const r = await api.setAllCharactersArchived(next)
-    // 本地同步：省一次整表拉取，也避免网格整体重排的抖动
-    chat.characters.forEach(c => { c.archived = next ? 1 : 0 })
+    const r = await api.setAllCharactersArchived(next, currentScope())
+    // 本地同步：只改本次作用域内的角色，作用域外的一律不动
+    const ids = new Set(targets.map(c => c.id))
+    chat.characters.forEach(c => { if (ids.has(c.id)) c.archived = next ? 1 : 0 })
     showToast(
       next
-        ? `已归档 ${r?.changed ?? 0} 个角色，它们不再参与任何主动活动`
-        : `已恢复 ${r?.changed ?? 0} 个角色参与活动`,
+        ? `已归档 ${r?.changed ?? 0} 个角色（${scopeLabel.value}），它们不再参与任何主动活动`
+        : `已恢复 ${r?.changed ?? 0} 个角色参与活动（${scopeLabel.value}）`,
       'success'
     )
   } catch (err) {
