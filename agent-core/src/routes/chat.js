@@ -19,6 +19,8 @@ import {
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
+// 剧情大纲（「面」）注入文本；开关关闭时不会被调用
+import { outlineInjectionForNow } from '../services/story/outlineService.js';
 import { buildCastBodySummary } from '../services/characterBuild.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { getWorldStateBlock, getCharacterEventBlockFor } from '../services/newspaperService.js';
@@ -939,6 +941,18 @@ ${coreRules}
           dynamicBlocks.push(`<rag_memories>\n${memoryLines}\n</rag_memories>`);
         }
       } catch (err) { console.error('[chat] memory search failed:', err.message); }
+    }
+
+    // 11.5 剧情大纲（「面」）注入
+    //
+    // ★★ 这是**动态内容**（每轮随游标变化），必须放在这里（`dynamicBlocks`），
+    //   **绝不能进跨角色共享的 `scheduleInst`** —— 那会打穿 LLM 前缀缓存（调研 §2.5 记的冲突点）。
+    // ★ 开关默认关（`FEATURE_STORY_OUTLINE`）：关闭时本块**完全不执行**，提示词逐字节不变。
+    if (config.features.storyOutline) {
+      try {
+        const outlineBlock = outlineInjectionForNow();
+        if (outlineBlock) dynamicBlocks.push(`<story_outline>\n${outlineBlock}\n</story_outline>`);
+      } catch (err) { console.error('[chat] outline injection failed:', err.message); }
     }
 
     // 12. 重逢提示（streak ≥ 2 时注入；低好感时改为冷淡不满版，避免"珍惜感"要求与关系深度档位打架）

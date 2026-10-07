@@ -15,13 +15,64 @@
       <span class="sv-sub">跨天演进的剧情线 · 与「奇遇」无关（那是单次事件）</span>
       <span class="sv-spacer"></span>
       <div class="sv-tabs" role="group" aria-label="视图">
+        <button type="button" class="sv-tab" :class="{ active: tab === 'outline' }" @click="tab = 'outline'">大纲</button>
         <button type="button" class="sv-tab" :class="{ active: tab === 'lines' }" @click="tab = 'lines'">线列表</button>
         <button type="button" class="sv-tab" :class="{ active: tab === 'graph' }" @click="tab = 'graph'">节点图</button>
       </div>
-      <linshe-button variant="primary" size="sm" @click="openCreate">+ 新建线</linshe-button>
+      <linshe-button v-if="tab === 'lines'" variant="primary" size="sm" @click="openCreate">+ 新建线</linshe-button>
+      <linshe-button v-else-if="tab === 'outline'" variant="primary" size="sm" :loading="outlineBusy" @click="openOutlineGenerate">✨ 生成大纲</linshe-button>
     </div>
 
     <div v-if="loading" class="sv-empty">加载中…</div>
+
+    <!-- ── 「面」= 剧情大纲：Beat 序列 + 游标 ──
+         节点=大纲的节拍（时间/标题/类型/所属线/结果 + Scene/Subtext/Think）。
+         游标所在节点高亮；可人工改 Scene / 删节点 / 重定位；判定通过才自动推进。 -->
+    <div v-else-if="tab === 'outline'" class="sv-body">
+      <template v-if="outline && outline.beatCount">
+        <div class="sv-ol-bar">
+          <span class="sv-ol-prog">进度：第 {{ outline.cursor }} / {{ outline.beatCount }} 个节点</span>
+          <span v-if="outline.pin" class="sv-pin" title="已锁定：不参与自动推进">已锁定</span>
+          <span class="sv-flex"></span>
+          <linshe-button variant="secondary" size="sm" :disabled="outlineBusy" @click="advanceOutline">判定是否推进</linshe-button>
+          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="toggleOutlinePin">{{ outline.pin ? '解锁' : '锁定' }}</linshe-button>
+          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="openOutlineGenerate">重新生成</linshe-button>
+          <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeOutline">清空</linshe-button>
+        </div>
+        <p v-if="outline.basisNote" class="sv-ol-note">依据：{{ outline.basisNote }}</p>
+        <ol class="sv-beats">
+          <li
+            v-for="(b, i) in outline.beats" :key="i"
+            class="sv-beat" :class="{ 'is-current': outline.cursor === i + 1 }"
+          >
+            <div class="sv-beat-head">
+              <span class="sv-beat-idx">{{ i + 1 }}</span>
+              <span v-if="outline.cursor === i + 1" class="sv-beat-cur">当前</span>
+              <span class="sv-beat-time">{{ b.time || '未定' }}</span>
+              <h3 class="sv-beat-title">{{ b.title }}</h3>
+              <span v-if="b.type" class="sv-beat-type">{{ b.type }}</span>
+              <span v-if="b.line" class="sv-beat-line">{{ b.line }}</span>
+              <span class="sv-flex"></span>
+              <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="setCursor(i + 1)">定位</linshe-button>
+              <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeBeat(i)">删除</linshe-button>
+            </div>
+            <div class="sv-beat-body">
+              <div v-if="b.scene" class="sv-beat-field">
+                <span class="sv-beat-k">Scene</span>
+                <span class="sv-beat-v">{{ b.scene }}</span>
+                <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="editScene(i, b.scene)">改</linshe-button>
+              </div>
+              <p v-if="b.subtext" class="sv-beat-sub">「{{ b.subtext }}」</p>
+              <p v-if="b.think" class="sv-beat-think"><b>Think</b>：{{ b.think }}</p>
+              <p v-if="b.outcome" class="sv-beat-out"><b>结果</b>：{{ b.outcome }}</p>
+            </div>
+          </li>
+        </ol>
+      </template>
+      <p v-else class="sv-empty">
+        还没有大纲。点右上「✨ 生成大纲」，邻舍会参考<strong>近期剧情</strong>与<strong>已铺开的故事线</strong>铺出一条 Beat 序列。
+      </p>
+    </div>
 
     <div v-else-if="tab === 'lines'" class="sv-body">
       <p v-if="!lines.length" class="sv-empty">
@@ -173,6 +224,47 @@
       :name-of-id="nameOfCharacter"
       @applied="onDraftApplied"
     />
+
+    <!-- AI 生成剧情大纲（只出草稿；确认后点「保存」才落库） -->
+    <linshe-modal v-model="outlineGenOpen" title="生成剧情大纲" wide>
+      <div class="sv-form">
+        <p class="sv-ol-hint">
+          邻舍会参考<strong>近期剧情</strong>与<strong>已铺开的故事线</strong>，铺一条可推进的节点序列。
+          节点代表<strong>阶段跨度</strong>（不是单镜头），宁可少而完整。
+        </p>
+        <div class="sv-field">
+          <label>走向提示<span class="sv-opt">（可选；留空则完全按已有剧情材料推演）</span></label>
+          <linshe-input v-model="outlineDirection" placeholder="如：让这条线在两周内收束，中间加一次意外" />
+        </div>
+        <div v-if="outlineDraft" class="sv-ol-draft">
+          <p class="sv-ol-draft-head">生成结果（{{ outlineDraft.beats.length }} 个节点，可直接保存）</p>
+          <ol class="sv-beats">
+            <li v-for="(b, i) in outlineDraft.beats" :key="i" class="sv-beat">
+              <div class="sv-beat-head">
+                <span class="sv-beat-idx">{{ i + 1 }}</span>
+                <span class="sv-beat-time">{{ b.time || '未定' }}</span>
+                <h3 class="sv-beat-title">{{ b.title }}</h3>
+                <span v-if="b.type" class="sv-beat-type">{{ b.type }}</span>
+                <span v-if="b.line" class="sv-beat-line">{{ b.line }}</span>
+              </div>
+              <div class="sv-beat-body">
+                <div v-if="b.scene" class="sv-beat-field"><span class="sv-beat-k">Scene</span><span class="sv-beat-v">{{ b.scene }}</span></div>
+                <p v-if="b.subtext" class="sv-beat-sub">「{{ b.subtext }}」</p>
+                <p v-if="b.think" class="sv-beat-think"><b>Think</b>：{{ b.think }}</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </div>
+      <template #footer>
+        <span class="sv-gen-hint">生成后点「保存」才会落库</span>
+        <div style="flex:1"></div>
+        <linshe-button variant="secondary" :loading="outlineBusy" @click="runOutlineGenerate">
+          {{ outlineDraft ? '重新生成' : '生成' }}
+        </linshe-button>
+        <linshe-button variant="primary" :disabled="!outlineDraft || outlineBusy" @click="saveOutlineDraft">保存</linshe-button>
+      </template>
+    </linshe-modal>
   </div>
 </template>
 
@@ -198,6 +290,12 @@ const graphTotal = ref(0)
 const graphTruncated = ref(0)
 const canvasRef = ref(null)
 const generateOpen = ref(false)
+/** 「面」= 剧情大纲 */
+const outline = ref(null)
+const outlineBusy = ref(false)
+const outlineGenOpen = ref(false)
+const outlineDirection = ref('')
+const outlineDraft = ref(null)
 /** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
 const stages = ref([])
 /** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
@@ -257,11 +355,95 @@ async function load() {
     participantOptions.value = Array.isArray(opts?.participants) ? opts.participants : []
     placeOptions.value = Array.isArray(opts?.places) ? opts.places : []
     await loadGraph()
+    await loadOutline()
   } catch (err) {
     toastFn?.('读取事件线失败：' + (err?.message || ''), 'error')
   } finally {
     loading.value = false
   }
+}
+
+// ── 「面」= 剧情大纲 ──────────────────────────────────────
+async function loadOutline() {
+  try {
+    const r = await api.getStoryOutline()
+    outline.value = r?.outline || null
+  } catch { outline.value = null }
+}
+
+function openOutlineGenerate() {
+  outlineDirection.value = ''
+  outlineDraft.value = null
+  outlineGenOpen.value = true
+}
+
+/** 生成**草稿**（不落库）—— 与「修正地点」「AI 生成事件线」同一范式 */
+async function runOutlineGenerate() {
+  if (outlineBusy.value) return
+  outlineBusy.value = true
+  try {
+    const r = await api.generateStoryOutline({ direction: outlineDirection.value.trim() })
+    outlineDraft.value = r?.draft || null
+    if (!outlineDraft.value?.beats?.length) toastFn?.('没生成出可用节点', 'warning')
+  } catch (err) {
+    toastFn?.('生成失败：' + (err?.message || ''), 'error')
+  } finally { outlineBusy.value = false }
+}
+
+/** 保存草稿（用户确认后才落库） */
+async function saveOutlineDraft() {
+  if (!outlineDraft.value || outlineBusy.value) return
+  outlineBusy.value = true
+  try {
+    await api.saveStoryOutline({ raw: outlineDraft.value.raw, basisNote: outlineDraft.value.basisNote })
+    outlineGenOpen.value = false
+    outlineDraft.value = null
+    await loadOutline()
+    toastFn?.('大纲已保存', 'success')
+  } catch (err) {
+    toastFn?.('保存失败：' + (err?.message || ''), 'error')
+  } finally { outlineBusy.value = false }
+}
+
+async function setCursor(n) {
+  try { outline.value = (await api.setStoryOutlineCursor(n))?.outline || outline.value }
+  catch (err) { toastFn?.('操作失败：' + (err?.message || ''), 'error') }
+}
+async function toggleOutlinePin() {
+  try {
+    outline.value = (await api.setStoryOutlinePin(!outline.value?.pin))?.outline || outline.value
+  } catch (err) { toastFn?.('操作失败：' + (err?.message || ''), 'error') }
+}
+async function editScene(i, cur) {
+  const v = window.prompt('改这个节点的 Scene（阶段会发生什么）', cur || '')
+  if (v == null) return
+  try { outline.value = (await api.updateStoryOutlineBeat(i, v))?.outline || outline.value }
+  catch (err) { toastFn?.('保存失败：' + (err?.message || ''), 'error') }
+}
+async function removeBeat(i) {
+  if (!window.confirm(`删除第 ${i + 1} 个节点？`)) return
+  try { outline.value = (await api.deleteStoryOutlineBeat(i))?.outline || outline.value }
+  catch (err) { toastFn?.('删除失败：' + (err?.message || ''), 'error') }
+}
+async function removeOutline() {
+  if (!window.confirm('清空整份大纲？')) return
+  try { await api.clearStoryOutline(); outline.value = null } catch (err) { toastFn?.('清空失败：' + (err?.message || ''), 'error') }
+}
+
+/**
+ * 判定是否推进（半自动）。
+ * ★ 后端在「已锁定」或「已是最后节点」时**不会发起 LLM 调用**，直接返回原因。
+ */
+async function advanceOutline() {
+  if (outlineBusy.value) return
+  outlineBusy.value = true
+  try {
+    const r = await api.advanceStoryOutline('')
+    if (r?.outline) outline.value = r.outline
+    toastFn?.(r?.advanced ? '已推进到下一节点' : `未推进（${r?.reason || ''}）`, r?.advanced ? 'success' : 'info')
+  } catch (err) {
+    toastFn?.('判定失败：' + (err?.message || ''), 'error')
+  } finally { outlineBusy.value = false }
 }
 
 /**
@@ -457,6 +639,39 @@ onMounted(load)
   background: var(--bg-tertiary);
   overflow: hidden;
 }
+/* ── 「面」= 剧情大纲 ──
+   节点列表按"编号 + 时间 + 标题 + 类型/线"排；游标所在节点高亮（当前进度） */
+.sv-ol-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.sv-ol-prog { font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright); }
+.sv-ol-note { margin: 0 0 10px; font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-ol-hint { margin: 0; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); }
+.sv-ol-draft { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sv-ol-draft-head { margin: 0 0 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright); }
+
+.sv-beats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sv-beat {
+  padding: 10px 12px; border-radius: var(--radius-lg);
+  border: var(--border-strong); background: var(--glass-bg);
+}
+.sv-beat.is-current { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12); }
+.sv-beat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sv-beat-idx {
+  min-width: 20px; height: 20px; border-radius: 999px; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--bg-tertiary); color: var(--text-secondary); font-size: 11px; font-weight: 600;
+}
+.sv-beat.is-current .sv-beat-idx { background: var(--accent-solid); color: #fff; }
+.sv-beat-cur { padding: 1px 7px; border-radius: 999px; font-size: 10px; background: var(--accent-solid); color: #fff; }
+.sv-beat-time { font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-beat-title { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.sv-beat-type, .sv-beat-line { padding: 1px 7px; border-radius: 999px; font-size: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
+.sv-beat-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.sv-beat-field { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-sm); line-height: 1.7; }
+.sv-beat-k { flex-shrink: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); letter-spacing: .04em; }
+.sv-beat-v { flex: 1; min-width: 0; }
+.sv-beat-sub { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); font-style: italic; }
+.sv-beat-think, .sv-beat-out { margin: 0; font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.7; }
+
 .sv-form { display: flex; flex-direction: column; gap: 12px; }
 /* AI 生成入口：只在「新建」时出现（编辑已有线时用不着） */
 .sv-gen-bar {

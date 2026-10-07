@@ -17,6 +17,12 @@ import {
   setEventLinePin, buildLineGraph, listParticipantOptions, listPlaceOptions,
   generateEventLineDraft,
 } from '../services/story/eventLineService.js';
+// 「面」= 剧情大纲（构画「点线面」的第三块）
+import {
+  getOutline, saveOutline, setOutlineCursor, setOutlinePin,
+  updateBeatScene, deleteBeat, clearOutline,
+  generateOutlineDraft, judgeOutlineAdvance,
+} from '../services/story/outlineService.js';
 
 const router = Router();
 
@@ -126,6 +132,98 @@ router.post('/generate', async (req, res) => {
   } catch (err) {
     const code = err.statusCode || (/请先写下/.test(err.message) ? 400 : 502);
     res.status(code).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// 「面」= 剧情大纲（构画「点线面」第三块）
+//
+// ★ 与「线」的关系：线是"某条线索怎么走"，面是"整个故事往哪走"。
+//   面的 Beat 里有「所属故事线」一栏可指向线名 —— **用名字不用外键**（线可删，大纲是历史产物）。
+// ══════════════════════════════════════════════════════════
+
+/** 读当前大纲（含 Beat 序列与游标） */
+router.get('/outline', (req, res) => {
+  try {
+    res.json({ outline: getOutline() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * AI 生成大纲草稿（**只出草稿不落库** —— 与「修正地点」「AI 生成事件线」同一范式）。
+ * 响应里同时给 `raw` 与解析后的 `beats`，前端可先展示再由用户决定保存。
+ */
+router.post('/outline/generate', async (req, res) => {
+  try {
+    const draft = await generateOutlineDraft(req.body || {});
+    res.json({ ok: true, draft });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** 保存大纲（首次生成或整体替换） */
+router.put('/outline', (req, res) => {
+  try {
+    res.json({ ok: true, outline: saveOutline(req.body || {}) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** 人工改游标（重定位到第 N 个节点） */
+router.put('/outline/cursor', (req, res) => {
+  try {
+    res.json({ ok: true, outline: setOutlineCursor(req.body?.cursor) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** 人工锁定：锁上后不参与自动推进（构画的人工锁线保护） */
+router.put('/outline/pin', (req, res) => {
+  try {
+    res.json({ ok: true, outline: setOutlinePin(req.body?.pin === true || req.body?.pin === 1) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** 改某个节点（Beat）的 Scene */
+router.put('/outline/beats/:index', (req, res) => {
+  try {
+    res.json({ ok: true, outline: updateBeatScene(Number(req.params.index), req.body?.scene) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** 删某个节点 */
+router.delete('/outline/beats/:index', (req, res) => {
+  try {
+    res.json({ ok: true, outline: deleteBeat(Number(req.params.index)) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/** 清空大纲（人工显式操作） */
+router.delete('/outline', (req, res) => {
+  res.json(clearOutline());
+});
+
+/**
+ * 判定"剧情是否已推进到下一节点"。
+ * ★ 半自动：判定通过才把游标 +1；人工锁定（pin）或已是最后一节点时**不发起调用**。
+ */
+router.post('/outline/advance', async (req, res) => {
+  try {
+    const r = await judgeOutlineAdvance({ recentText: req.body?.recentText || '' });
+    res.json({ ok: true, ...r, outline: getOutline() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

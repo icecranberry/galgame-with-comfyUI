@@ -40,6 +40,9 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_proactiveChatFreq: '1',
   feature_events: 'true',
   feature_eventFreq: '1',
+  // 剧情大纲（「面」）注入：默认关。只管"是否把大纲注入聊天提示词"，
+  // 不影响"生成大纲"本身（那是用户点按钮触发的）。
+  feature_storyOutline: 'false',
   // 朋友圈发帖频率：0 = 关闭自动发帖（默认）。用户想自动补内容时在设置页手动开启。
   feature_momentFreq: '0',
   // 传媒自动抓帖：0 = 关闭（默认）。>0 = 每晚几批，在夜间窗口内错峰随机（见 config.features.mediaAutoPerNight）。

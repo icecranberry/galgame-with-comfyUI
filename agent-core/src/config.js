@@ -145,6 +145,15 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
+    /**
+     * 剧情大纲（「面」）注入：把「当前节点 + 隐约方向」注入聊天 prompt。
+     *
+     * ★ 默认**关**（红线 4）。理由：它会改聊天提示词的内容，
+     *   而"长驻功能默认关"是本项目既定做法 —— 用户想看效果再开。
+     * ⚠ 生成大纲本身不受此开关限制（那是用户显式点按钮触发的），
+     *   本开关只管**是否自动注入**。
+     */
+    storyOutline: process.env.FEATURE_STORY_OUTLINE === 'true',
     // 朋友圈发帖频率 0~24：1=基准（角色 2~8 小时一条），越大越快，24=最快（5~20 分钟）。
     // **默认 0 = 关闭**：自动发帖要调 LLM + 生图，属于「用户想看时才看」的内容，
     // 默认开启会在后台持续消耗额度与显卡。想自动补内容可在设置页「朋友圈发帖频率」里开启。

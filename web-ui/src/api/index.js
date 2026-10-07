@@ -1479,6 +1479,45 @@ export function generateStoryLine(data) {
   return request(`/story/generate`, { method: 'POST', body: data })
 }
 
+// ── 「面」= 剧情大纲（构画「点线面」第三块）────────────────────
+
+/** 读当前大纲（Beat 序列 + 游标） */
+export function getStoryOutline() {
+  return request(`/story/outline`)
+}
+/** AI 生成大纲草稿（**只出草稿不落库**） */
+export function generateStoryOutline(data = {}) {
+  return request(`/story/outline/generate`, { method: 'POST', body: data })
+}
+/** 保存大纲（首次生成或整体替换） */
+export function saveStoryOutline(data) {
+  return request(`/story/outline`, { method: 'PUT', body: data })
+}
+/** 人工改游标（重定位到第 N 个节点） */
+export function setStoryOutlineCursor(cursor) {
+  return request(`/story/outline/cursor`, { method: 'PUT', body: { cursor } })
+}
+/** 人工锁定（锁上后不参与自动推进） */
+export function setStoryOutlinePin(pin) {
+  return request(`/story/outline/pin`, { method: 'PUT', body: { pin } })
+}
+/** 改某个节点的 Scene */
+export function updateStoryOutlineBeat(index, scene) {
+  return request(`/story/outline/beats/${index}`, { method: 'PUT', body: { scene } })
+}
+/** 删某个节点 */
+export function deleteStoryOutlineBeat(index) {
+  return request(`/story/outline/beats/${index}`, { method: 'DELETE' })
+}
+/** 清空大纲 */
+export function clearStoryOutline() {
+  return request(`/story/outline`, { method: 'DELETE' })
+}
+/** 判定剧情是否已推进到下一节点（半自动：判定通过才 +1） */
+export function advanceStoryOutline(recentText = '') {
+  return request(`/story/outline/advance`, { method: 'POST', body: { recentText } })
+}
+
 export function getCharacterScheduleLedger(characterId) {
   return request(`/schedule/ledger/${characterId}`)
 }
