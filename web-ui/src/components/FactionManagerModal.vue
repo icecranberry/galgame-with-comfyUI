@@ -42,7 +42,7 @@
           <div class="faction-form">
             <label class="faction-field">
               <span>名称</span>
-              <linshe-input v-model="draft.name" size="sm" placeholder="如：幻月秘庭 / 共愿帮" />
+              <linshe-input v-model="draft.name" size="sm" placeholder="例：市政厅 / 商会 / 同乡会" />
             </label>
             <label class="faction-field">
               <span>类型</span>
@@ -54,7 +54,7 @@
             </label>
             <label class="faction-field faction-field--wide">
               <span>一句话概述</span>
-              <linshe-input v-model="draft.summary" size="sm" placeholder="如：本地帮派，幻月游戏入场券的来源" />
+              <linshe-input v-model="draft.summary" size="sm" placeholder="一句话定位：它是什么、在做什么" />
             </label>
           </div>
           <div class="faction-actions">

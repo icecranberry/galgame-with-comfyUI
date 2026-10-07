@@ -325,3 +325,70 @@ test('★ 同类兜底：scheduleLedger 也得真 import，不能靠 catch 兜',
   const sl = fs.readFileSync(path.join(SRC, 'services/scheduleLedger.js'), 'utf8');
   assert.match(sl, /^import \{ getActiveWorldSlots \}/m, 'scheduleLedger 依赖必须真的 import');
 });
+
+// ─────────────────────────────────────────────────────────
+// 前端护栏（2026-10-07 补）
+// ─────────────────────────────────────────────────────────
+// ⚠ 上面那条护栏只扫 `agent-core/src` 的 `.js` —— 于是**前端**成了缺口：
+//   我在「派系与组织」的输入框里写了「如：幻月秘庭 / 共愿帮」（某世界观的专名），
+//   构建、全部测试**都是绿的**，但那句话对任何别的世界观都是错的 —— 用户当场指出。
+//   这里把**同一份词表**扩展到 `web-ui/src`（`.vue` + `.js`）。
+//   存量违规列成**具名豁免**（文件 → 允许的词集合）：棘轮式，只许减少不许增加。
+
+const WEB_UI_SRC = path.resolve(__dirname, '../../web-ui/src');
+
+/**
+ * 前端**存量**违规豁免：文件（相对 `web-ui/src`）→ 允许出现的词集合。
+ * 只放"本次修复时已存在、且不宜顺手机械改"的；**新增违规一律不要补进这里**。
+ */
+const FRONTEND_LEGACY_ALLOW = {
+  // 该地图功能的点位/坐标表：属"某个具体地图"的数据，待迁到数据层（同 transitSeed 的做法）
+  'components/worldmap/MapPointView.vue': ['二相乐园', '二维市', '鸽川', '绘世学院', '珠星', '海原电视塔', '幻月秘庭', '世界尽头酒馆', '喜悲街', '喜笑区', '悲泣区', '泊地站'],
+  // 报纸入口副标题写死了世界观名 —— 存量文案，宜改由数据/设置驱动
+  'views/MediaView.vue': ['二相乐园'],
+  // 媒体持牌人称谓（该世界观的词汇）—— 存量文案
+  'components/media/MediaWeekly.vue': ['谒者'],
+  // 故事页占位符举例 —— 另一个会话正在改该文件，暂不介入
+  'views/StoryView.vue': ['鸽川', '嬉步街'],
+};
+
+function walkFrontend(dir, acc = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) walkFrontend(p, acc);
+    else if (/\.(vue|js)$/.test(e.name)) acc.push(p);
+  }
+  return acc;
+}
+
+test('★★★ 前端（web-ui）也不得内置世界观专有名词（存量已在豁免表内，新增即失败）', () => {
+  const offenders = [];
+  for (const file of walkFrontend(WEB_UI_SRC, [])) {
+    const rel = path.relative(WEB_UI_SRC, file).replace(/\\/g, '/');
+    const allowed = new Set(FRONTEND_LEGACY_ALLOW[rel] || []);
+    fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+      if (line.includes(EXEMPT_MARK)) return;
+      // 模板注释 <!-- --> 与脚本注释同等对待
+      if (/^\s*(\/\/|\*|\/\*|<!--)/.test(line)) return;
+      for (const t of BANNED_TERMS) {
+        if (!line.includes(t) || allowed.has(t)) continue;
+        offenders.push(`web-ui/src/${rel}:${i + 1} 含「${t}」`);
+      }
+    });
+  }
+  assert.deepEqual(
+    offenders, [],
+    `前端出现了世界观专有名词（换世界观后这些文案就是错的）：\n  ${offenders.join('\n  ')}\n` +
+    `\n→ 修法：① 改通用表述（占位符/示例尤其容易犯）；② 从数据层/项目库读取；③ 确属必要的，行尾加「${EXEMPT_MARK}: 理由」` +
+    `（⚠ 存量豁免见本文件 FRONTEND_LEGACY_ALLOW，只许减少，不要往里加）`
+  );
+});
+
+test('★★ 护栏本身有效：前端占位符里塞专名必须被抓到（防"豁免表写太宽导致永远绿"）', () => {
+  // 直接验判据：造一行前端占位符，应命中；且豁免表里没有它
+  const fakeLine = 'placeholder="如：幻月秘庭 / 共愿帮"';
+  const hit = BANNED_TERMS.filter(t => fakeLine.includes(t));
+  assert.ok(hit.includes('幻月秘庭'), '词表应能命中占位符里的专名');
+  assert.ok(!Object.keys(FRONTEND_LEGACY_ALLOW).some(f => f.endsWith('FactionManagerModal.vue')),
+    '我刚修好的组件不该在豁免表里');
+});
