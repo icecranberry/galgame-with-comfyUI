@@ -31,6 +31,7 @@ import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
 import WorldMapView from './views/WorldMapView.vue'
 import DrawView from './views/DrawView.vue'
+import StoryView from './views/StoryView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -45,6 +46,8 @@ const routes = [
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
   { path: '/draw', component: DrawView },
+  // 「故事」（T2）：跨天演进的剧情线。⚠ 与 /events（奇遇，一次性事件）是两层东西。
+  { path: '/story', component: StoryView },
   { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },

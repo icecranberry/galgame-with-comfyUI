@@ -8,6 +8,14 @@ const BASE = '/api'
  *   而不是我们约定的 JSON `{ error }`。这类 404 极容易被误当成功能 bug。
  *   这里统一识别并补一句人话提示，省得每个调用点各写一遍
  *   （已踩三次：日报删除 / 传媒批量操作 / 外观扩写）。
+ *
+ * ⚠⚠ **测试契约**：本函数读的是 `res.text()`（不是 `res.json()`），因为要拿原始文本
+ *   才能分辨「合法 JSON 错误」与「Express 默认 HTML 错误页」。凡是用
+ *   `t.mock.method(globalThis, 'fetch', ...)` 伪造响应的测试，**必须同时给出 `text()`**；
+ *   只给 `json()` 的旧写法会抛 `res.text is not a function`，测试全红（2026-10-07 已
+ *   修 4 个文件：characterPinSort / groupLastSeen / newspaperUnread / githubUpdate）。
+ *   注意本文件另有一个专供 AI 小镇链路、仍用 `res.json()` 的 `jsonRequest()`——
+ *   两套基元不要搞混。
  */
 async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -1430,6 +1438,31 @@ export function getScheduleOverview() {
 // 日程台账（长期观测：八股/稳定性/风险）
 export function getScheduleLedger() {
   return request(`/schedule/ledger`)
+}
+
+// ── 故事（T2 事件线）────────────────────────────────────────
+// 阶段与容量的**唯一真源在后端**（`GET /story/meta`），前端只渲染不自建（项目红线 8）。
+export function getStoryMeta() {
+  return request(`/story/meta`)
+}
+export function listStoryLines() {
+  return request(`/story/lines`)
+}
+/** 节点图数据：节点=事件线，边由后端**自动算**（结构性关联，非 AI 生成） */
+export function getStoryGraph() {
+  return request(`/story/graph`)
+}
+export function createStoryLine(data) {
+  return request(`/story/lines`, { method: 'POST', body: data })
+}
+export function updateStoryLine(id, data) {
+  return request(`/story/lines/${id}`, { method: 'PUT', body: data })
+}
+export function setStoryLinePin(id, pin) {
+  return request(`/story/lines/${id}/pin`, { method: 'PUT', body: { pin } })
+}
+export function deleteStoryLine(id) {
+  return request(`/story/lines/${id}`, { method: 'DELETE' })
 }
 
 export function getCharacterScheduleLedger(characterId) {

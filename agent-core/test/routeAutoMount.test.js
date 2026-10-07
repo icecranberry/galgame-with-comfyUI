@@ -145,7 +145,13 @@ test('★★ 实际挂载：base 集合与基准一致，且不含下划线工�
   const r = await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
 
   assert.deepEqual([...r.legacy].sort(), BASELINE, '实际挂载的存量 base 应等于基准');
-  assert.deepEqual(r.convention, [], '当前没有约定式新路由（_autoMount.js 应被忽略）');
+  // ★ 2026-10-07 更新：约定式路由**已经有真实用户了** —— T2「故事」页的 `story.js`
+  //   （挂载 /api/story）。这正是本机制要支持的场景，所以不再断言"约定式必为空"。
+  //   ⚠ 但"下划线开头的工具模块不得被挂载"这条仍然必须守。
+  assert.ok(!r.convention.includes('/api/_auto-mount'), '_autoMount.js 不该被自动挂载');
+  for (const b of r.convention) {
+    assert.ok(!b.includes('_'), `约定式挂载点不应含下划线：${b}`);
+  }
 
   const actual = collectMountedBases(app);
   for (const b of BASELINE) {
@@ -157,10 +163,12 @@ test('★★ 实际挂载：base 集合与基准一致，且不含下划线工�
 
 test('★ 挂载的每个 base 上确实有路由（不是空壳）', async () => {
   const app = express();
-  await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
+  const r = await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
   const stack = app._router?.stack || [];
   const routers = stack.filter(l => l.handle && Array.isArray(l.handle.stack));
-  assert.equal(routers.length, BASELINE.length, '挂载的 router 数量应与基准一致');
+  // ★ 2026-10-07：期望值 = 存量 + 约定式（后者新增了 story.js），不再写死 BASELINE.length
+  assert.equal(routers.length, BASELINE.length + r.convention.length,
+    '挂载的 router 数量应 = 存量 + 约定式');
   for (const l of routers) {
     assert.ok(l.handle.stack.length > 0, `${l.path || '(regexp)'} 是空 router`);
   }
@@ -178,7 +186,10 @@ test('★ 约定式新路由会被发现（用真实临时文件验证）', asyn
   try {
     const app = express();
     const r = await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
-    assert.deepEqual(r.convention, ['/api/zz-probe'], '自定义 mount 应被采用');
+    // ⚠ 2026-10-07：不能断言 convention **精确等于** ['/api/zz-probe'] ——
+    //   仓库里已有真实的约定式路由（`story.js` → /api/story）。
+    //   改为"包含"语义，才是对本机制的**正确**断言（它本来就该同时发现多个）。
+    assert.ok(r.convention.includes('/api/zz-probe'), '自定义 mount 应被采用');
     assert.ok(collectMountedBases(app).has('/api/zz-probe'));
 
     // 且必须排在存量之后（存量优先，新路由不抢既有路径）
@@ -200,7 +211,8 @@ test('★ 新路由默认挂载点 = /api/<kebab>（不写 mount 也能挂）', 
   try {
     const app = express();
     const r = await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
-    assert.deepEqual(r.convention, ['/api/zzprobe2-route']);
+    // 同上：用"包含"而非"精确相等"
+    assert.ok(r.convention.includes('/api/zzprobe2-route'), '默认挂载点应为 /api/<kebab>');
   } finally {
     fs.unlinkSync(tmpFile);
   }
@@ -212,7 +224,9 @@ test('★ 文件名以下划线开头 → 不自动挂载（工具模块留在�
   try {
     const app = express();
     const r = await autoMountRoutes(app, { wrapRouterAsync, logger: silent() });
-    assert.deepEqual(r.convention, []);
+    // 下划线开头的模块（含既有的 _autoMount.js）一律不出现在挂载列表里
+    assert.ok(!r.convention.includes('/api/zzhelper'), '下划线开头不应被挂载');
+    assert.ok(!r.convention.some(b => b.includes('_auto-mount')), '_autoMount.js 不应被挂载');
   } finally {
     fs.unlinkSync(tmpFile);
   }

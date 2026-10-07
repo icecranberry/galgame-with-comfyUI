@@ -13,7 +13,7 @@ import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 import { snapshotTodaySchedule, isScheduleForbidden } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
-import { getLocalDateKey } from '../utils/localDate.js';
+import { getLocalDateKey, shiftDateKey } from '../utils/localDate.js';
 import { onCharacterWake } from './dreamService.js';
 import { extendEventSchedule, reapplyActiveEventSchedule } from './eventSchedule.js';
 
@@ -73,8 +73,15 @@ export function initialize() {
   const now = new Date();
   const today = getLocalDateKey(now);
 
-  // 全量清理超过 2 天的旧日程快照
-  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', 'localtime', '-2 days')`).run();
+  // 全量清理超过 2 天的旧日程快照。
+  // ⚠ 基准必须用**上面同一个 `today`**（由 getLocalDateKey 算出），
+  //   不能写 SQL 的 `DATE('now','localtime','-2 days')` —— 那是**另一套时间源**：
+  //   日期键走 JS 的 Date（测试里会被 mock），SQL 的 now 读真实时钟，
+  //   两者跨零点/被 mock 时会不一致。实测：真实日期比 JS 日期快 3 天时，
+  //   刚插入的当天快照会被判成"过期两天以上"当场删掉
+  //   （`eventSchedule.test.js` 的「daily refresh and next-day snapshot fallback」整项失败）。
+  //   ★ 同一处口径在 `scheduleGenerator.js:1265` 早已修正，这里当时漏了 —— 现补齐。
+  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < ?`).run(shiftDateKey(today, -2));
 
   /*
    * 检查所有角色：日程数据的存废由 daily_schedules 自身决定，**不看 schedule_enabled**。
@@ -221,10 +228,12 @@ function getTodayScheduleRaw(characterId) {
         VALUES (?, ?, ?)
       `).run(characterId, today, template.schedule_json);
       reapplyActiveEventSchedule(characterId, db);
-      // 清理超过 2 天的旧快照
+      // 清理超过 2 天的旧快照。
+      // ⚠ 与 `initialize()` 同一口径：基准用 JS 算出的 `today`，不用 SQL 的 `DATE('now')`
+      //   —— 那是另一套时间源，测试 mock 时间时会把刚插入的快照误删（详见 initialize 的注释）。
       db.prepare(
-        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', 'localtime', '-2 days')`
-      ).run(characterId);
+        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < ?`
+      ).run(characterId, shiftDateKey(today, -2));
       row = db.prepare('SELECT schedule_json FROM daily_schedules WHERE character_id = ? AND schedule_date = ?')
         .get(characterId, today);
     }

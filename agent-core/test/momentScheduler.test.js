@@ -8,8 +8,33 @@ const sched = await import('../src/services/momentScheduler.js');
 
 config.dbPath = ':memory:';
 
+/**
+ * ★★ 前置：把发帖频率闸门打开（2026-10-07 本地修复）。
+ *
+ * ── 为什么必须显式设（这是上游测试自身的缺陷）────────────────
+ * `seedData.js` 的 `feature_momentFreq` 默认值是 **`'0'`（关闭）** ——
+ * 这符合本项目「长驻功能默认值一律关闭」的红线，是**正确**的产品行为。
+ * 但 `momentScheduler.tick()` 的第一道门就是：
+ *     `if (momentFreq <= 0) return;`
+ * 于是**默认配置下调度器根本不派单**，而本文件的三条测试都没打开它 →
+ * 测得 `charCalls.length = 0`，永远失败。
+ *
+ * ★ 修法取舍：**补上测试缺失的前提**，而不是 skip 掉测试。
+ *   调度器的行为是对的，缺的只是"测试该声明自己依赖的开关"。
+ *   （同理：本文件已对 `features.town` 做过显式开关操作，只是漏了这一个。）
+ *
+ * ⚠⚠ **必须在 `getDb()` 之后才能设** —— `system_settings` 里的 `feature_momentFreq='0'`
+ *   会在 DB 初始化（seed + 应用 settings）时**回灌 config**，把先设的值覆盖掉。
+ *   实测：在模块顶层设 1，进 tick 前读到的仍是 0（探针验证过）。
+ *   所以下面每条测试都在拿到 db 之后重新设一次。
+ */
+function enableMomentScheduling() {
+  config.features.momentFreq = 1;
+}
+
 test('scheduler dispatches the earlier-due author and keeps characters and townsfolk in one queue', async t => {
   const db = getDb();
+  enableMomentScheduling();   // ⚠ 必须在 getDb() 之后（settings 会回灌 config）
   t.after(() => closeDb());
 
   db.prepare(`INSERT INTO characters (name, display_name, base_prompt) VALUES ('lin', '林小姐', '旅客')`).run();
@@ -51,6 +76,7 @@ test('scheduler dispatches the earlier-due author and keeps characters and towns
 
 test('townsfolk are limited to one post per rolling 24 hours', async t => {
   const db = getDb();
+  enableMomentScheduling();   // ⚠ 必须在 getDb() 之后（settings 会回灌 config）
   t.after(() => closeDb());
 
   db.prepare(`INSERT INTO town_npcs (map_id, display_name, job, town_enabled) VALUES (1, '面包师傅', '面包师', 1)`).run();
@@ -82,6 +108,7 @@ test('townsfolk are limited to one post per rolling 24 hours', async t => {
 
 test('npcMomentsDisabled stops townsfolk scheduling while characters keep posting', async t => {
   const db = getDb();
+  enableMomentScheduling();   // ⚠ 必须在 getDb() 之后（settings 会回灌 config）
   t.after(() => closeDb());
 
   db.prepare(`INSERT INTO town_npcs (map_id, display_name, job, town_enabled) VALUES (1, '店员小周', '店员', 1)`).run();

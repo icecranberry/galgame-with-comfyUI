@@ -318,7 +318,8 @@ test('getAppVersion：本地版本号问后端要，前端不写死', async t =>
     configurable: true,
     value: async (url, options) => {
       calls.push({ url: String(url), options })
-      return { ok: true, status: 200, json: async () => ({ version: '3.4.2' }) }
+      // ⚠ 必须给出 text()：request() 用 res.text() 读原始体后自行 JSON.parse。
+      return { ok: true, status: 200, text: async () => JSON.stringify({ version: '3.4.2' }), json: async () => ({ version: '3.4.2' }) }
     },
   })
   t.after(() => {
@@ -333,7 +334,7 @@ test('getAppVersion：后端没给版本号时返回空串（调用方据此跳�
   const original = Object.getOwnPropertyDescriptor(globalThis, 'fetch')
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
-    value: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    value: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({}), json: async () => ({}) }),
   })
   t.after(() => {
     if (original) Object.defineProperty(globalThis, 'fetch', original)

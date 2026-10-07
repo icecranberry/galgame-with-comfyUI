@@ -112,6 +112,21 @@
         <span class="nav-label">绘图</span>
       </router-link>
 
+      <!-- 故事（T2，2026-10-07）：跨天演进的剧情线。
+           ★ 与「奇遇」（/events）刻意分开 —— 那是**一次性事件**（到期即失效），
+             这里是**跨多天演进**的线（起线→延展→成形→收束/淡出）。
+             用户口径：不要碰奇遇，两套并存、各管各的。 -->
+      <router-link to="/story" data-nav="story" class="nav-item" :class="{ active: $route.path.startsWith('/story') }" title="故事">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <path d="M9 7h7M9 11h5"/>
+          </svg>
+        </div>
+        <span class="nav-label">故事</span>
+      </router-link>
+
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
