@@ -484,3 +484,180 @@ export function absorbLineDraft(raw) {
 function safeParseJson(text) {
   try { return JSON.parse(text); } catch { return null; }
 }
+
+// ═══════════════════════════════════════════════════════════
+// 六、注入（「线」→ prompt）—— 2026-10-07 用户裁定
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 注入上限（条数）。**必须限制**：54 个角色 × N 条线全塞进去会淹没正文，
+ * 而且每条线都带 desc/next，token 会失控。
+ */
+export const LINE_INJECT_MAX = 5;
+
+/**
+ * 挑出**与这个角色相关**的线，供注入。
+ *
+ * ── 相关性判据（必须是结构性事实，不做语义推断）────────────
+ * 只认一种**明确的结构关系**：该角色是这条线的**参与角色**
+ * （`participantIds` 含 ta）—— 线才会演到 ta 头上，ta 该知道。
+ *
+ * ⚠ 刻意**不做两种扩展**：
+ *   ① **不按"提到名字"模糊匹配** —— 名字出现在 desc 里不等于这条线跟 ta 有关，
+ *      那会把无关的线全塞进来（与红线 12 同源的"不要瞎猜"）；
+ *   ② **不把全部 `agency='player'` 的线都算进来** —— 用户推动的线若与 ta 无关，
+ *      对 ta 而言同样只是噪音。
+ *   **宁少勿滥**：注入错了线，比少注入一条更糟（AI 会对着无关的事做反应）。
+ *
+ * ⚠ 终态线（收束/淡出）**照样保留** —— 让 AI 知道"这事已经翻篇了"，
+ *   语气上就不会再当成进行中的事。拼文本时对终态线只给一句状态（见 buildLineInjectionText）。
+ *
+ * @param {number} characterId
+ * @param {Array} allLines listEventLines() 的结果（由调用方传入，便于单测）
+ * @returns {Array} 命中的线（已按阶段排序、已截到上限）
+ */
+export function pickLinesForCharacter(characterId, allLines = []) {
+  const cid = Number(characterId);
+  if (!Number.isFinite(cid)) return [];
+  const list = Array.isArray(allLines) ? allLines : [];
+  const hit = list.filter(l => Array.isArray(l.participantIds) && l.participantIds.map(Number).includes(cid));
+  // ⚠ 超限由调用方用 meta.total 显式告知（红线 0），这里只截不断言
+  return hit.slice(0, LINE_INJECT_MAX);
+}
+
+/**
+ * 拼「线」的注入文本（构画归一化注入口径）。
+ *
+ * ★★ 与「面」注入同一纪律：**只给"当下状态 + 隐约方向"，明令不要直接点破**。
+ *   「线」和「面」是两层：面是"整个故事往哪走"，线是"具体某条线索演进到哪"。
+ *   两者都只是**方向参考**，绝不是让 AI 照念的剧本 —— 照念会让对话变成剧情汇报。
+ *
+ * ⚠ 这是**纯函数**（便于单测）；调用方（`routes/chat.js`）负责放进 `dynamicBlocks`。
+ *
+ * @param {Array} lines 已筛选的线
+ * @param {{ total?: number }} [meta] total = 筛选前的命中总数（用于超限告知）
+ * @returns {string} 空串 = 不注入
+ */
+export function buildLineInjectionText(lines, meta = {}) {
+  const list = Array.isArray(lines) ? lines : [];
+  if (!list.length) return '';
+
+  const alive = list.filter(l => !isTerminalStage(l.stage));
+  const ended = list.filter(l => isTerminalStage(l.stage));
+
+  const fmt = l => {
+    const bits = [`《${l.name}》`, `（${normalizeLineStage(l.stage)}）`];
+    if (l.when) bits.push(`时间：${l.when}`);
+    let line = bits.join('');
+    if (l.desc) line += `\n  ${l.desc}`;
+    if (l.next) line += `\n  下一步走向：${l.next}`;
+    return line;
+  };
+
+  const parts = [
+    '【进行中的剧情线·仅供你把握自己这条线的走向，切勿直接引用或点破】',
+    '下面这些线索里，有一部分牵着你自己。把它们当成"你正在经历的事"的背景，',
+    '自然地体现在你的反应、情绪与言行里 —— 不要主动向对方汇报、不要逐条交代、更不要说出"剧情线"这种词。',
+  ];
+
+  if (alive.length) {
+    parts.push('你牵涉其中、仍在推进的线索：');
+    parts.push(alive.map(fmt).join('\n'));
+  }
+  if (ended.length) {
+    parts.push('已经了结/淡出的（可作"那件事过去了"的语气底色，不必再提起）：');
+    parts.push(ended.map(l => `《${l.name}》（${normalizeLineStage(l.stage)}）`).join('、'));
+  }
+
+  const total = Number(meta.total);
+  if (Number.isFinite(total) && total > list.length) {
+    parts.push(`（另有 ${total - list.length} 条与你相关的线索未列出 —— 只挑最紧要的这些给你。）`);
+  }
+  return parts.join('\n');
+}
+
+/**
+ * 供路由直接调用：读出该角色的线并拼注入文本。
+ * @param {number} characterId
+ * @returns {string} 空串 = 不注入
+ */
+export function lineInjectionForCharacter(characterId) {
+  try {
+    const all = listEventLines();
+    const picked = pickLinesForCharacter(characterId, all);
+    if (!picked.length) return '';
+    const cid = Number(characterId);
+    const total = all.filter(l => Array.isArray(l.participantIds) && l.participantIds.map(Number).includes(cid)).length;
+    return buildLineInjectionText(picked, { total });
+  } catch {
+    // ⚠ 与 outlineInjectionForNow 同口径：注入失败**不能拖垮聊天**，退化为"不注入"。
+    return '';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 七、「面 → 线」弱关联（2026-10-07 用户裁定）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 找出大纲里**引用了指定线名**的 Beat（供"改线名时提示同步"用）。
+ *
+ * ★★ 保持"**名字不用外键**"的设计（用户裁定：线可删，大纲是历史产物，
+ *   不该因线被删就残缺）。但"不用外键"不等于"放任孤儿" ——
+ *   改线名时**必须让用户知道**有哪些 Beat 会变成孤儿引用，由用户决定是否同步。
+ *
+ * ⚠ 只做**精确名称匹配**（trim 后全等），不做模糊匹配 —— 否则「线A」会误命中「线A·分部」。
+ *
+ * @param {Array} beats 大纲 Beat 数组
+ * @param {string} lineName 目标线名
+ * @returns {number[]} 引用了该名字的 Beat 下标（0 基）
+ */
+export function findBeatsReferencingLine(beats, lineName) {
+  const target = String(lineName || '').trim();
+  if (!target) return [];
+  return (Array.isArray(beats) ? beats : [])
+    .map((b, i) => (String(b?.line || '').trim() === target ? i : -1))
+    .filter(i => i >= 0);
+}
+
+/**
+ * 把大纲 raw_text 里所有 `所属线` 字段的旧名替换为新名（供"一键同步"用）。
+ *
+ * ★★ **不重新序列化**（构画 `editOutlineScene` 同源纪律）：只动 `Beat:` 行的第 4 段，
+ *   保留未知字段、原始包装与所有其他行。改成"解析→重建"会吃掉模型将来新增的字段。
+ *
+ * 格式：`Beat: 推演时间|标题|类型|所属故事线|结果`（第 4 段是所属线）。
+ *
+ * @param {string} raw 大纲原文
+ * @param {string} oldName
+ * @param {string} newName
+ * @returns {{ raw: string, changed: number }}
+ */
+export function renameLineInOutlineRaw(raw, oldName, newName) {
+  const from = String(oldName || '').trim();
+  const to = String(newName || '').trim();
+  const src = String(raw || '');
+  if (!from || !to || from === to) return { raw: src, changed: 0 };
+
+  let changed = 0;
+  const out = src.split('\n').map(line => {
+    // 只认 Beat 行（允许 > # * - 等装饰前缀，与 parseOutline 同宽容度）
+    if (!/^\s*(?:[>#*\-\s]*)Beat\s*[:：]/i.test(line)) return line;
+    const m = line.match(/^(\s*(?:[>#*\-\s]*)Beat\s*[:：]\s*)(.*)$/i);
+    if (!m) return line;
+    const segs = m[2].split(/[|｜]/);
+    if (segs.length < 4) return line;
+    if (String(segs[3] || '').trim() !== from) return line;
+    // ⚠ 只换"去掉首尾空白后的内容"，**原样保留该段两侧的空格** ——
+    //   图省事写成 `segs[3] = ' ' + to + ' '` 会平白多出空格（实测踩过），
+    //   让"改名"变成"改格式"，也破坏了"最小改动"这条原则。
+    const seg = segs[3];
+    const lead = seg.match(/^\s*/)[0];
+    const trail = seg.match(/\s*$/)[0];
+    segs[3] = lead + to + trail;
+    changed++;
+    return m[1] + segs.join('|');
+  }).join('\n');
+
+  return { raw: out, changed };
+}

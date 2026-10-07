@@ -16,6 +16,8 @@ import {
   listEventLines, getEventLine, createEventLine, updateEventLine, deleteEventLine,
   setEventLinePin, buildLineGraph, listParticipantOptions, listPlaceOptions,
   generateEventLineDraft,
+  // 「面 → 线」弱关联（2026-10-07）
+  findBeatsReferencingLine, renameLineInOutlineRaw,
 } from '../services/story/eventLineService.js';
 // 「面」= 剧情大纲（构画「点线面」的第三块）
 import {
@@ -224,6 +226,68 @@ router.post('/outline/advance', async (req, res) => {
     res.json({ ok: true, ...r, outline: getOutline() });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 「面 → 线」弱关联 · 查询（2026-10-07 用户裁定）。
+ *
+ * 大纲 Beat 的「所属线」刻意**用名字不用外键**（线可删，大纲是历史产物不该残缺），
+ * 但"不用外键"不等于"放任孤儿"。本接口让前端能：
+ *   ① 点 Beat 上的线名 → 跳到线列表并定位（`matched` 给命中的线 id）；
+ *   ② 名字对不上任何线时**明确告知**（`matched: null`），由前端标成"未匹配"，
+ *      而不是点下去没反应（红线 0）。
+ *
+ * ⚠ 只做**精确名称匹配**（trim 后全等）—— 模糊匹配会让「线A」误命中「线A·分部」。
+ */
+router.get('/outline/line-refs', (req, res) => {
+  try {
+    const outline = getOutline();
+    const lines = listEventLines();
+    const byName = new Map(lines.map(l => [String(l.name || '').trim(), l]));
+    const refs = (outline?.beats || []).map((b, index) => {
+      const name = String(b?.line || '').trim();
+      if (!name) return { index, name: '', matched: null };
+      const hit = byName.get(name);
+      return { index, name, matched: hit ? { id: hit.id, stage: hit.stage, terminal: !!hit.terminal } : null };
+    });
+    // 只回有名字的引用（空的不必占位）
+    res.json({ refs: refs.filter(r => r.name) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * 「面 → 线」弱关联 · 改名同步（2026-10-07 用户裁定）。
+ *
+ * 改某条线的名字时，大纲里引用了**旧名**的 Beat 会变成孤儿引用。本接口：
+ *   · `dryRun=true`（默认）→ 只**回报**会改几处（供前端提示"有 N 个节点引用了旧名"）；
+ *   · `dryRun=false` → 真的同步（仍走「不重新序列化」，只动 `Beat:` 行的第 4 段）。
+ *
+ * ★ 由**用户显式决定**是否同步 —— 不自动改（红线 L10：人工编辑不受自动护栏约束）。
+ */
+router.post('/outline/rename-line-ref', (req, res) => {
+  try {
+    const oldName = String(req.body?.oldName || '').trim();
+    const newName = String(req.body?.newName || '').trim();
+    if (!oldName || !newName) return res.status(400).json({ error: '需要 oldName 与 newName' });
+    const outline = getOutline();
+    if (!outline) return res.json({ ok: true, changed: 0, indices: [], outline: null });
+
+    const indices = findBeatsReferencingLine(outline.beats, oldName);
+    // dryRun 默认 true：不改库，只回答"会改几处"
+    if (req.body?.dryRun !== false) {
+      return res.json({ ok: true, dryRun: true, changed: indices.length, indices, outline });
+    }
+    if (!indices.length) return res.json({ ok: true, changed: 0, indices: [], outline });
+
+    const { raw, changed } = renameLineInOutlineRaw(outline.raw, oldName, newName);
+    // 复用 saveOutline 的落库路径（它内部会重新解析并校验"一个 Beat 都没有就抛错"）
+    const saved = saveOutline({ raw, basisNote: outline.basisNote, cursor: outline.cursor });
+    res.json({ ok: true, changed, indices, outline: saved });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 

@@ -1518,6 +1518,18 @@ export function advanceStoryOutline(recentText = '') {
   return request(`/story/outline/advance`, { method: 'POST', body: { recentText } })
 }
 
+/** 「面 → 线」弱关联：查大纲里引用了哪些线名（含是否匹配到真实线） */
+export function getStoryOutlineLineRefs() {
+  return request(`/story/outline/line-refs`)
+}
+
+/** 「面 → 线」弱关联：改名同步。dryRun=true 只回报会改几处，false 才真写库 */
+export function renameStoryOutlineLineRef(oldName, newName, dryRun = true) {
+  return request(`/story/outline/rename-line-ref`, {
+    method: 'POST', body: { oldName, newName, dryRun },
+  })
+}
+
 export function getCharacterScheduleLedger(characterId) {
   return request(`/schedule/ledger/${characterId}`)
 }

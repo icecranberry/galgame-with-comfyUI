@@ -51,7 +51,16 @@
               <span class="sv-beat-time">{{ b.time || '未定' }}</span>
               <h3 class="sv-beat-title">{{ b.title }}</h3>
               <span v-if="b.type" class="sv-beat-type">{{ b.type }}</span>
-              <span v-if="b.line" class="sv-beat-line">{{ b.line }}</span>
+              <!-- ★ 2026-10-07 「面 → 线」弱关联：线名可点，跳到线列表并定位。
+                   大纲的「所属线」刻意用名字不用外键（线可删，大纲是历史产物），
+                   但名字对不上任何线时必须**明确告知**（标"未匹配"），
+                   而不是点下去没反应（红线 0）。 -->
+              <button
+                v-if="b.line" type="button" class="sv-beat-line sv-beat-line--link"
+                :class="{ 'is-unmatched': !lineRefOf(i) }"
+                :title="lineRefOf(i) ? `跳到「${b.line}」` : `「${b.line}」在当前线列表里找不到（可能已删除或改过名）`"
+                @click="jumpToLine(i, b.line)"
+              >{{ b.line }}<i v-if="!lineRefOf(i)" class="sv-beat-line-warn">未匹配</i></button>
               <span class="sv-flex"></span>
               <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="setCursor(i + 1)">定位</linshe-button>
               <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeBeat(i)">删除</linshe-button>
@@ -312,6 +321,8 @@ const sceneEditOpen = ref(false)
 const sceneEdit = ref(null)
 const sceneBusy = ref(false)
 const sceneError = ref('')
+/** 「面 → 线」弱关联：Beat 下标 → 匹配到的线（null=未匹配）；见 loadLineRefs */
+const lineRefs = ref({})
 /** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
 const stages = ref([])
 /** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
@@ -385,6 +396,44 @@ async function loadOutline() {
     const r = await api.getStoryOutline()
     outline.value = r?.outline || null
   } catch { outline.value = null }
+  await loadLineRefs()
+}
+
+/**
+ * 「面 → 线」弱关联：拉取每个 Beat 的「所属线」是否匹配到真实线。
+ *
+ * ★ 这是**弱关联**（名字不用外键），所以必须容忍"匹配不到" ——
+ *   但**匹配不到要看得到**（界面标"未匹配"），否则用户只会在点了没反应时困惑。
+ * ⚠ 读失败**不能拖垮大纲渲染**：退化为空表（此时统一按"未匹配"显示，且有 tooltip 说明）。
+ */
+async function loadLineRefs() {
+  try {
+    const r = await api.getStoryOutlineLineRefs()
+    const map = {}
+    for (const ref of (r?.refs || [])) map[ref.index] = ref.matched || null
+    lineRefs.value = map
+  } catch { lineRefs.value = {} }
+}
+
+/** 某个 Beat 的线名匹配到的线（null = 没匹配到） */
+function lineRefOf(index) {
+  return lineRefs.value[index] || null
+}
+
+/**
+ * 点 Beat 上的线名 → 跳到「线列表」并定位到那条线。
+ *
+ * ★ 匹配不到时**必须说出来**（红线 0），而不是静默切页 —— 用户会以为"点了没反应"。
+ */
+function jumpToLine(index, name) {
+  const hit = lineRefOf(index)
+  if (!hit) {
+    toastFn?.(`线列表里找不到「${name}」——可能已删除或改过名`, 'warning')
+    return
+  }
+  tab.value = 'lines'
+  const target = lines.value.find(l => l.id === hit.id)
+  if (target) openEdit(target)
 }
 
 function openOutlineGenerate() {
@@ -561,6 +610,8 @@ function onDraftApplied(patch = {}) {
 async function save() {
   if (busy.value) return
   busy.value = true
+  // 记下改名前的名字（用于「改名同步」询问）—— 必须在 update 之前取
+  const oldName = form.id ? String(lines.value.find(l => l.id === form.id)?.name || '') : ''
   try {
     const payload = {
       name: form.name.trim(),
@@ -579,11 +630,47 @@ async function save() {
     if (form.id) await api.updateStoryLine(form.id, payload)
     else await api.createStoryLine(payload)
     editorOpen.value = false
+    // ★ 2026-10-07「面 → 线」弱关联：改了线名后，大纲里引用**旧名**的 Beat 会成为孤儿引用。
+    //   ⚠ 由**用户显式决定**是否同步 —— 不自动改（LB10：人工编辑不受自动护栏约束）。
+    //   但必须**问一句**（红线 0：不能让引用悄悄烂掉）。
+    if (form.id && oldName && oldName !== payload.name) {
+      await offerRenameSync(oldName, payload.name)
+    }
     await load()
     toastFn?.('已保存', 'success')
   } catch (err) {
     toastFn?.('保存失败：' + (err?.message || ''), 'error')
   } finally { busy.value = false }
+}
+
+/**
+ * 改线名后询问是否同步大纲里的引用。
+ *
+ * ★ 先 dryRun 问后端"会改几处"：**没有引用就完全不打扰**（静默跳过）。
+ *   有引用才弹确认，并把数量说清楚。用户拒绝也完全合理 —— 那名字可能是他有意写的旧称。
+ */
+async function offerRenameSync(oldName, newName) {
+  let changed = 0
+  try {
+    const r = await api.renameStoryOutlineLineRef(oldName, newName, true)
+    changed = Number(r?.changed) || 0
+  } catch { return }   // 查询失败不该拦住保存
+  if (!changed) return  // 大纲里没引用旧名 → 不打扰
+  const ok = window.confirm(
+    `大纲里有 ${changed} 个节点的「所属线」还写着旧名「${oldName}」。\n\n要一并改成「${newName}」吗？`
+    + `\n（选“取消”则保留旧名，那些引用不会自动跟随）`
+  )
+  if (!ok) {
+    toastFn?.(`大纲里的 ${changed} 处旧名未同步（保留「${oldName}」）`, 'info')
+    return
+  }
+  try {
+    const r = await api.renameStoryOutlineLineRef(oldName, newName, false)
+    await loadOutline()
+    toastFn?.(`已同步大纲里的 ${Number(r?.changed) || changed} 处引用`, 'success')
+  } catch (err) {
+    toastFn?.('引用同步失败：' + (err?.message || ''), 'error')
+  }
 }
 
 async function togglePin(l) {
@@ -702,6 +789,16 @@ onMounted(load)
 .sv-beat-time { font-size: var(--fs-xs); color: var(--text-secondary); }
 .sv-beat-title { margin: 0; font-size: var(--fs-md); font-weight: 600; }
 .sv-beat-type, .sv-beat-line { padding: 1px 7px; border-radius: 999px; font-size: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
+/* ★ 「面 → 线」弱关联：线名做成可点（跳线列表定位）。
+   匹配不到时压暗 + 标「未匹配」—— 让"引用烂了"看得见（红线 0 同源）。 */
+.sv-beat-line--link {
+  border: 1px solid transparent; cursor: pointer; font-family: inherit;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.sv-beat-line--link:hover { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), .08); }
+.sv-beat-line--link.is-unmatched { opacity: .7; border-style: dashed; border-color: var(--glass-border); }
+.sv-beat-line--link.is-unmatched:hover { color: var(--text-bright); border-color: var(--text-secondary); }
+.sv-beat-line-warn { font-style: normal; margin-left: 5px; opacity: .85; }
 .sv-beat-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .sv-beat-field { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-sm); line-height: 1.7; }
 .sv-beat-k { flex-shrink: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); letter-spacing: .04em; }

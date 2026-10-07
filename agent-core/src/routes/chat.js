@@ -21,6 +21,8 @@ import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 // 剧情大纲（「面」）注入文本；开关关闭时不会被调用
 import { outlineInjectionForNow } from '../services/story/outlineService.js';
+// 事件线（「线」）注入文本；开关关闭时不会被调用
+import { lineInjectionForCharacter } from '../services/story/eventLineService.js';
 import { buildCastBodySummary } from '../services/characterBuild.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { getWorldStateBlock, getCharacterEventBlockFor } from '../services/newspaperService.js';
@@ -953,6 +955,22 @@ ${coreRules}
         const outlineBlock = outlineInjectionForNow();
         if (outlineBlock) dynamicBlocks.push(`<story_outline>\n${outlineBlock}\n</story_outline>`);
       } catch (err) { console.error('[chat] outline injection failed:', err.message); }
+    }
+
+    // 11.6 事件线（「线」）注入
+    //
+    // ★ 与上面的「面」是**两层**：面=整个故事往哪走；线=某条具体线索演进到哪。
+    //   这里只给**该角色牵涉其中**的线（结构性判据，见 pickLinesForCharacter），
+    //   且同样只是"隐约方向"，明令不要点破 —— 照念会让对话变成剧情汇报。
+    //
+    // ★★ 与「面」一样属**动态内容**，必须放 `dynamicBlocks`，
+    //   **绝不能进跨角色共享的 `scheduleInst`**（会打穿 LLM 前缀缓存，红线见调研 §2.5）。
+    // ★ 开关默认关（`FEATURE_STORY_LINES`）：关闭时本块完全不执行，提示词逐字节不变（红线 4）。
+    if (config.features.storyLines) {
+      try {
+        const lineBlock = lineInjectionForCharacter(characterId);
+        if (lineBlock) dynamicBlocks.push(`<story_lines>\n${lineBlock}\n</story_lines>`);
+      } catch (err) { console.error('[chat] event line injection failed:', err.message); }
     }
 
     // 12. 重逢提示（streak ≥ 2 时注入；低好感时改为冷淡不满版，避免"珍惜感"要求与关系深度档位打架）
