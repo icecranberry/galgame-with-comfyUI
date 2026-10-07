@@ -10,10 +10,12 @@
  *   - 手动强制：API POST /api/schedule/:id/regenerate
  */
 
-import { getDb, getWorldSetting, getSystemRules } from '../db/index.js';
+import { getDb, getWorldSetting, getSystemRules, listTransitEdges } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { getLocalDateKey, shiftDateKey } from '../utils/localDate.js';
+import { normalizeActivityTitle } from '../utils/activityTitle.js';
+import { isTransitExempt, transitModeLabel } from './characterTransitMode.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
@@ -83,7 +85,10 @@ function normalizeTags(tags) {
  */
 export const NSFW_BANDS = [
   { at: 0, label: '关闭', sexCount: 0, explicitMin: 0, explicitMax: 0, hint: '本次日程完全不含性内容' },
-  { at: 25, label: '少量', sexCount: '1~2', explicitMin: 0, explicitMax: 1, hint: '点到为止，不刻意安排' },
+  // ⚠ 少量档的「性时段」必须与「实质行为」同口径（0~1）：曾写 1~2，与下方
+  //    「实质行为 0~1 个」并列显示时自相矛盾（用户 2026-10-06 指出）。
+  //    「少量」= 点到为止，性时段与实质行为都按 0~1 计，不虚增时段数。
+  { at: 25, label: '少量', sexCount: '0~1', explicitMin: 0, explicitMax: 1, hint: '点到为止，不刻意安排；允许只做 1 次' },
   {
     at: 50, label: '标准', sexCount: '3~5', explicitMin: 0, explicitMax: 2, hint: '与当前默认一致',
     // ★ explicitFloor：**文案下限**，与上面「区间」是两回事，别合并。
@@ -208,10 +213,15 @@ export function buildScheduleConstraintBlock(opts = {}) {
 
   // ── 准入禁令（问题 2 的完整落点）──
   //
-  // 为什么单独成段、且**不依赖 areas**：用户不勾任何区域时，上文那段硬编码散文
-  // （`不写进去的地方：珠星总部、海原电视塔…`）仍然是唯一依据 —— 而它在地图数据
-  // 之外，改地图不会改它。这里把地图里**真实标注过**的受限地点列出来，就补上了
-  // 「改地图即生效」这条链路。
+  // 为什么单独成段、且**不依赖 areas**：用户不勾任何区域时，上文 `scheduleInst` 里
+  // 只说"不要凭记忆给某地加限制"、**不含任何具体地名** —— 而它又在跨角色共享前缀里
+  // （改它会打穿 LLM 缓存）。这里把地图里**真实标注过**的受限地点列出来，就补上了
+  // 「改地图即生效」这条链路，且清单始终与地图一致。
+  //
+  // ★ 2026-10-06 T6 修复：原散文写「不写进去的地方：珠星集团CBD区、海原电视塔…」——
+  //   与地图矛盾（CBD 在地图里是 public，且其下的车站还是线路 A 的车站）。
+  //   照散文执行会把车站也排除掉。2026-10-07 起散文**彻底不列举任何地名**，
+  //   一律以本条（地图实时数据）为准。
   //
   // ⚠ 只在真的有标注时才出现：地图里没标注过任何 access 时本段不生成，
   //    于是 `buildScheduleConstraintBlock()` 仍然返回 null ——「默认不改行为」不破。
@@ -224,7 +234,7 @@ export function buildScheduleConstraintBlock(opts = {}) {
 下列地点**不是随便能去的**，本次日程里出现它们时必须带上限制语，且不要安排不合身份的角色前往：
 ${lines.join('\n')}
 
-若与上文「不写进去的地方」那一段有出入，**以本条为准**（地图数据是最新的）。`);
+若与上文「**是否受限以地图数据为准**」那句的示例有出入，**以本条为准**（本条是地图当前的真实标注）。`);
   }
 
   // ── 主要活动区域 ──
@@ -299,7 +309,7 @@ ${lines.join('\n')}
     lines.push(opts.areaStrict
       ? '**约束强度：硬约束。** 每个时段的 location 都必须落在上述区域内；通勤与过场也尽量在区域内部消化，不要跑出区域。'
       : '**约束强度：软约束。** 以上述区域为主（占全天时段的 2/3 以上），允许因剧情需要短暂离开。');
-    lines.push('若上文「地点必须来自<world_setting>」一节里写有「不写进去的地方」，而本次指定的区域与其冲突，**以本条的本次指定为准**（用户显式指令优先）。');
+    lines.push('若上文「地点必须来自<world_setting>」一节里的示例与本次指定区域有出入，**以本条的本次指定为准**（用户显式指令优先）。');
     parts.push(`【主要活动区域（本次限定）】\n${lines.join('\n')}`);
   }
 
@@ -324,13 +334,23 @@ ${lines.join('\n')}
     }
     // 跨翼提示：两翼在图上不共享坐标系，只能查表 —— 让模型知道这条线的"长"是有依据的
     const hasWater = transit.some(e => e.mode === 'water');
+    // ★ 移动方式（超能力移动豁免）：默认 `normal` 时**输出逐字节不变** —— 见下方断言与测试。
+    //   对豁免角色，附表保留（他还是住在这个世界里、多数时候仍正常走动），
+    //   但把"不得小于"的硬口径改写成"可压缩，但必须交代怎么到的"。
+    const exempt = isTransitExempt(opts.transitMode);
+    const constraintLine = exempt
+      ? `这张角色**具有超常移动能力（${transitModeLabel(opts.transitMode)}）**，因此**上表的分钟数不构成硬性限制** ——
+跨区换场可以压缩到几分钟甚至瞬时完成。但**不要写成"凭空出现"**：
+每次靠能力换场时，用半句话交代是怎么到的（"一个闪身落进巷口""顺着风滑过河面"这类），
+让读者跟得上。同一个地点内部移动无需交代。`
+      : `你的日程里**两段相邻活动的换场时间不得明显小于上表数值**。上一段在 A、下一段在 B 时，
+中间要么留出通勤时间，要么**合并成同一段**（写成"在 A 收拾后前往 B"）。
+不要出现"刚在城东吃完早饭、下一段立刻出现在城西"这种瞬移。`;
     parts.push(`【区域通勤基线（后端已算好，不是实时路线；含进站/靠泊）】
 
 ${tl.join('\n')}
 ${hasWater ? '\n⚠ 水路线是**长线**：跨翼航段单程可占半天以上（例：海原站→渡画泉隐全程约 5.5 小时）。安排水路出行时，当天那一段前后不要再塞跨区活动。\n' : ''}
-你的日程里**两段相邻活动的换场时间不得明显小于上表数值**。上一段在 A、下一段在 B 时，
-中间要么留出通勤时间，要么**合并成同一段**（写成"在 A 收拾后前往 B"）。
-不要出现"刚在城东吃完早饭、下一段立刻出现在城西"这种瞬移。`);
+${constraintLine}`);
   }
 
   // ── 居住 / 活动分区 → 服装联动（问题 5）──
@@ -370,6 +390,33 @@ ${hasWater ? '\n⚠ 水路线是**长线**：跨翼航段单程可占半天以�
 ${userName} 住在「${userHome}」。日程里凡是涉及"回家 / 顺路经过 / 去找 Ta"的时段，
 地点请用这个真实落点（可写成「${userHome}」或更具体的门牌/房间），**不要含糊写成"公寓"**。
 注意这是**${userName} 的**住处，不是角色自己的家 —— 角色自己的住处另有其地。`);
+  }
+
+  // ── 角色的固定居家/睡眠地点（人类侧指定）──
+  //
+  // 为什么给模型这条：日程里"回家 / 睡觉 / 换衣服 / 起床"这些 anchor 时段如果没落点，
+  // 模型会自由发挥（今天住宿舍、明天住酒店、甚至睡街上）。用户希望像选衣服一样在地图上
+  // 替角色钉死一个落点 —— 这条就是那个钉子的注入。
+  //
+  // ⚠ 与上方【${userName} 的住处】是**两回事**：那是"人类（玩家）住哪"，这是"角色自己住哪"，
+  //   必须并列交代清楚，否则模型会把两者混为一谈（把角色写成住在玩家家）。
+  // ⚠ **未指定就不出现**（空串 = 不猜、不编）——「默认不改行为」的落实点。
+  const homePlace = String(opts.homePlace || '').trim();
+  if (homePlace) {
+    const homeArea = String(opts.homeArea || '').trim();
+    const sleepPlace = String(opts.sleepPlace || '').trim() || homePlace;
+    const placePart = homeArea ? `「${homeArea} · ${homePlace}」` : `「${homePlace}」`;
+    const sleepLine = sleepPlace === homePlace
+      ? `**睡觉就在这个落点**（作息与睡眠 block 都写在这里，不要睡到别处）。`
+      : `**睡觉固定在「${sleepPlace}」**（若与居家地点不同，按此为准）。`;
+    parts.push(`【${opts.characterName || '该角色'} 的固定住处（本次由设定给定）】
+
+该角色的**家**固定在 ${placePart}。日程里凡是"起床 / 回家 / 换衣服 / 休息 / 洗漱 / 就寝"这类
+**锚点时段**，地点一律用这个落点，**不要每次换地方**（不要今天宿舍、明天酒店地漂）。
+${sleepLine}
+所有发生在该住处内的时段，着装一律按「住所内」处理（居家服 / 睡衣），不要标外出服。
+
+⚠ 这是**角色自己的**住处，不是${opts.userName || '用户'}的家 —— 两者可能不同，别混。`);
   }
 
   // ── NSFW 强度 ──
@@ -443,6 +490,19 @@ async function generateScheduleImpl(character, direction, options = {}) {
   if (character?.id && isScheduleForbidden(character.id)) {
     return { schedule_json: null, version: 0, skipped: true, reason: 'archived' };
   }
+  // ★ 固定居家/睡眠地点（人类侧指定）：只在**本次没被 area 约束覆盖**时兜底补上。
+  //   日程弹窗里若能选（前端会把当前选择放进 options.homePlace），就以那个为准；
+  //   否则从 characters 读库里的持久值 —— 自动生成路径（调度器/新建角色）也要吃到。
+  //   ⚠ 空值 = 未指定 → 整段不出现（红线：默认不改行为）。
+  if (character?.id && options && options.homePlace === undefined) {
+    try {
+      const row = db.prepare('SELECT home_place, sleep_place, home_area FROM characters WHERE id = ?').get(character.id);
+      if (row) {
+        if (row.home_place) options = { ...options, homePlace: row.home_place, homeArea: row.home_area || '' };
+        if (row.sleep_place) options = { ...options, sleepPlace: row.sleep_place };
+      }
+    } catch { /* 取不到就不加这一段 */ }
+  }
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
 
@@ -479,30 +539,45 @@ async function generateScheduleImpl(character, direction, options = {}) {
 但「是日常」**不等于**「随便套一个色情场景上去」——**每个性活动都必须由这个角色自己的处境推出来，读者要能看懂它为什么发生。**
 
 ### 1. 严禁照抄（<world_setting> 的例句、角色人格里的句子，都不行）
-<world_setting>「人们的行为」一节（嬉步街折叠凳、滨河道石栏、泊地站车厢、酒馆后段、馋嘴胡同桌边、直播机位、学院末排、旧仓段触手……）写的是**世界的氛围**，不是给当前角色用的剧本。
+<world_setting> 里那些**氛围例句**（生动描写"这里平时是什么样"的句子）写的是**世界的氛围**，不是给当前角色用的剧本。
 角色 base_prompt 里那些写得漂亮的句子（如「对着屏幕极轻地笑一下」「把那点成就感收好」）**同样不能搬**。
 
 **判断标准（一条就够）**：写完一句，问自己「**把角色名换掉，这句能不能直接放回 <world_setting> 或人格卡当例句？**」
 ——**能，就是照抄，删掉重写。**
 
-**下面这些是 <world_setting> 与人格卡里的原文，已经写过了，一律不许再出现**（拆成氛围词用也不行）：
-把阴茎吃进小穴／旁边的人报数／笑着喊价，不躲／往包口塞愿宝／看一眼一个价／价从嘴里说出来／射进来才算钱／取出来就当没这回事／
-巡逻艇的灯扫过／岸上的人散一散／裙子被掀起来又放下／手指先隔着内裤摸，再拨到一边／她咬着手／
-持假面的人一句一句往耳朵里送／自己认那句话／自己坐到底／邻座的叫声比她先出来／吧台照常擦杯子／
-她跪在凳上／龟头蹭过鼻梁再射／白的淌到眼皮、嘴角／邻桌捞菜，头都不抬／有人替她报数，报一下笑一阵／
-打赏口一下一下塞进愿宝／弹幕往上跳／弹幕刷过屏幕／听见提示音也不停／红灯对着高脚凳／
-裙子撩到腰上，器具先送进半截／点到她的名字，她应一声／袖口里探出的触手／看摊的隔着帘子答价／
-「精液落在…」（落在小腹／大腿／脸上／衣服上，换哪个部位都算）／「…抹开」／极轻地笑一下／把那点成就感收好。
-收尾写体液时**换个写法**：擦掉／咽下去／蹭在大腿上／顺着腿根淌下来／拿纸巾拭过，都行——就是别再用「落在…抹开」这一句。
+**不要再列出 <world_setting> 里已经写过的原句** —— 把上面的判断标准逐一过一遍即可。
+（★ 刻意**不在这里列举"被禁的词"**：一旦列出，模型反而会照着这些词复读，是负向 priming。
+这条经验来自朋友圈口吻规则的同一次实测，两边口径必须一致。）
 
-**也不要照搬它的场景组合**：旧仓段＋触手补画／泊地站＋车厢被摸／滨河道＋石栏报价／胡同＋锅边报数／酒馆后段＋假面送话／直播＋高脚凳红灯／看摊＋隔帘答价。
-要写性，**另找属于这个角色自己的场合与方式**——宁可朴素（锁门、拉上帘子、钻进被窝、把设备收好），也不要借原文的场面。
-**换个说法代替**：要表达「她收钱」，写「把愿宝收进围裙口袋」「让熟客记在账上」「按小时算」，
-而不是原文那套行话。
+**唯一要单独点出的一条**：收尾写体液时**每次换个写法**（擦掉／咽下去／蹭在大腿上／顺着腿根淌下来／拿纸巾拭过都行），
+不要每个角色、每个时段都用同一句收尾 —— 这是跨日程的自我重复，与照抄无关。
+
+### 1.5 ★ 世界观的"特色事物"不是每日仪式（**通用规则，不针对任何具体世界观**）
+每个世界的<world_setting>里，通常都有几样**这个世界独有的东西**（会动的造物、特殊的货币、
+独有的机构、标志性的地标……）。<world_setting>往往给它们写了"这里的人看见了会怎样"——
+**那不是每个角色的每日必修课。**
+
+**为什么必须点这一条**：这类事物在 <world_setting> 里被写得具体又生动，
+模型于是给了它们**远超其真实分量的出场率**，而且**句式高度雷同**——
+同一个反应（被多看一眼、亮一下、抖一下）在一份日程里反复出现，就成了谁都绕不开的仪式。
+
+**同一份日程里，任何一项"世界特色事物"最多出现 1 次**（一次都不出现完全可以 ——
+**多数角色就是不该出现**）。
+- **只有当这个角色的谋生/兴趣真的和它有关时才写**（做这行的、研究它的、靠它吃饭的）。
+- 其余角色若只是"路上碰见"，**要么删掉这半句，要么换成这个世界别的普通细节**；
+  寻常的街景、光线、声音、气味、天气，永远是**同样成立**的世界感来源。
+- 同一个反应词**不许在一份日程里重复使用**；真要继续写，换个说法。
+
+**也不要照搬 <world_setting> 里的场景组合**。那些成对的"场合＋行为"（某地＋某事）看多了会变成模板；
+要写性，**另找属于这个角色自己的场合与方式**——宁可朴素（锁门、拉上帘子、钻进被窝、把设备收好），
+也不要借原文的场面。
+**换个说法代替**：要表达「她收钱」，写「收进围裙口袋」「让熟客记在账上」「按小时算」，
+而不是<world_setting>里那套现成行话。
 一时想不出新写法时，用**最直白的动词**（坐下去、让他进来、擦干净、穿回去、关灯），不要回头去借 <world_setting> 的句子。
 
 还有三条同级禁令：
-- 摊位 / 街头性交易的**行话与流程**（报数、喊价、往包口塞愿宝、看一眼一个价），只有角色**确实在做这行**时才能用；学院行政、绘师、学生、赌客说出来，一眼就是硬套。
+- <world_setting>里**某行业专有的行话与流程**，只有角色**确实在做那行**时才能用；
+  别的角色（做行政的、教书的、念书的）说出来，一眼就是硬套。
 - **把性塞给别人当背景的写法，一次都不要**：凡是「邻桌／邻座／旁边／对面／远处／那边有人在做到一半、在抽送、在叫」
   这类**别人在做而她只是路过或旁观**的句子，一律删掉 —— 要么是角色**自己在做**，要么这个时段干脆不写性。
 - 人格卡里的**心理描写、金句与标志性小动作**也不要搬
@@ -516,7 +591,7 @@ async function generateScheduleImpl(character, direction, options = {}) {
 - **为什么是这个人**：独自、跟恋人、跟常客、跟陌生人、还是跟一群互不相识的人——写清关系。
   营业场合（直播、摊位、舞台）有观众是自然的；但**私人场合（宿舍、家里、休息间）不要凭空出现一群男人**。
 
-✗ 错（无逻辑）：「学院行政在滨河道石栏边说『射进来才算钱』」——她不做这行，这句台词不属于她，场景也和她的生活没有关系。
+✗ 错（无逻辑）：「做行政的她在街边石栏旁说『射进来才算钱』」——她不做这行，这句行话不属于她，场景也和她的生活没有关系。
 ✓ 对（有逻辑）：「她连轴转了一整天工单，锁上休息间的门用器具解决一下，擦干净再回去开会」——地点是她的，动机是她的。
 
 ### 3. 一天里的性活动（每个角色都要有，总数 3~6 个）
@@ -541,7 +616,8 @@ async function generateScheduleImpl(character, direction, options = {}) {
 - 可以**单独占一个时段**，也可以**与工作/进食/社交同处一个时段**（直播中、饭桌上、下班路上）。
 
 ### 4. 用词与态度
-- 口径与<world_setting>一致：男器叫**阴茎**（画到龟头）；女器写**阴唇、阴蒂、小穴、乳头、乳房**；体液写**精液**，水从穴口淌下来。不写马赛克、黑条或遮挡。
+- **用词以 <world_setting> 的用词口径为准**（若它给了身体部位/行为的叫法，就照它的；没给则用中文通用直白说法）。
+- 身体部位**写具体、不回避**，不写马赛克、黑条或遮挡类的模糊词。体液同理，写清楚是什么。
 - 角色对性**不羞耻**：脸红可以是情趣，但不是底色。**但「不羞耻」不等于「无理由」**——她可以毫不避讳，可这个行为仍要有个来由。
 
 ## 人类日常骨架（不可打破）
@@ -561,9 +637,11 @@ async function generateScheduleImpl(character, direction, options = {}) {
 - **不要每次都从头解释**：写成「她」在过日子，不是每段都在介绍这个角色。
 
 ## 地点必须来自<world_setting>
-地点只能写这个世界真实存在的地方：二维市、绘世学院、鸽川区、世界尽头酒馆（含后段卡座 / 二楼包厢）、馋嘴胡同、嬉步街、滨河道、泊地站、娱乐广场、旧仓段、喜悲街、喜笑区、悲泣区、宿舍、教室、直播间等。
-**禁止**不带世界观归属的裸通用地点（如光写「公寓书房」「办公室」）；必须带上归属，写成「二维市公寓卧室」「绘世学院行政处办公室」「绘世学院宿舍单人房」这种。
-不写进去的地方：珠星集团CBD区、海原电视塔、非仪式期的幻月秘庭。娱乐广场深夜场、旧仓段要有时段或受邀才展开。
+- **有「主要活动区域」一节时，只从那一节列出的地点里挑** —— 那是从当前世界观的地图数据取的，**以它为准**。
+- **没有那一节时**，从 <world_setting> 里明确出现过的地点中挑，不要自造地名。
+- 两种情况下都**禁止不带归属的裸通用地点**（光写「公寓书房」「办公室」这种）—— 必须带上归属，写成「<区域>·<具体地点>」。
+- **不要凭记忆给某地加限制**：某处是否「受限／私有」、是否只在某时段开放，都由地图数据决定；
+  清单或 <world_setting> 没写受限的，一律视为可去。
 
 ## 睡眠时间个性化（极其重要）
 **角色之间睡眠时间必须高度多样化，不要让所有角色都遵循朝九晚五的社畜作息。** 根据角色个性大胆决定就寝和起床时间，以下为参考类型：
@@ -604,12 +682,25 @@ async function generateScheduleImpl(character, direction, options = {}) {
 {
   "startTime": "HH:MM",
   "endTime": "HH:MM",
-  "activity": "简短活动名（含上下文），如「深夜直播——假面剧场的即兴演出」「性服务——口交」「群交派对」",
-  "location": "地点，必须取自<world_setting>，如「鸽川区·世界尽头酒馆后段卡座」",
+  "activity": "简短活动名（4~10 字，不写解释、不用破折号），如「深夜直播」「口交」「群交派对」",
+  "location": "地点，写成「<区域>·<具体地点>」的归属式写法（具体有哪些可去的地点见上文区域说明）",
   "replyDelay": 数字（0 / -1）,
   "tags": ["标签1", "标签2"],
   "description": "小场景式描述（20~45 字），第三人称用角色名，不出现「我」「你」「她」「他」"
 }
+
+## activity 的写法（重要：它是标题，不是句子）
+「activity」是日程列表里**一行标题**，扫一眼就知道这个人在干什么；
+**所有细节一律交给「description」，不要挂到活动名上。**
+- 长度 **4~10 字**，**最多不超过 14 字**。越短越好。
+- **禁止用破折号「——」引出补充说明**，也禁止用冒号、括号、顿号去挂解释。
+  ❌「深夜直播——即兴演出」「清点收成——顺带对账」「补觉——通宵后的长睡」
+  ✅「深夜直播」「清点收成」「补觉」
+- **需要交代的上下文，要压进名字本身**，而不是用破折号另起一句。
+  想写「后段卡座——被熟客叫去坐一会儿」→ 写成「后段卡座陪熟客」；
+  想写「深夜直播——顶楼露台的红灯机位」→ 写成「露台深夜直播」。
+- 可以写成动宾短语（「深夜散步」「夜间值班」「给熟客调酒」）、
+  带修饰的名词短语（「泡面加蛋的午饭」）。**就是不要「A——B」这种解说式标题。**
 
 ## description 必须写成一个小场景（20~45 字，宁短勿长）
 每条 description 只写**看得见的东西**：谁在做什么 + 身体/对象/环境的具体描写 + 角色的态度（不躲、不赶、自己坐下去）。
@@ -627,13 +718,16 @@ async function generateScheduleImpl(character, direction, options = {}) {
   也不用那些标志性台词（「射进来才算钱」「报数」）和人格卡的金句（「极轻地笑一下」）
 
 完整 JSON 结构示例（示例仅 3 个活动，实际必须输出 8~15 个活动；下例里的「角色名」请替换成当前角色的名字）：
-{"activities":[{"startTime":"00:00","endTime":"02:30","activity":"深夜直播——假面剧场的即兴演出","location":"鸽川区·世界尽头酒馆后段卡座","replyDelay":0,"tags":["直播","露骨"],"description":"角色名坐在舞台中央，举着装满精液的大啤酒杯往嘴里灌，台下的人往她脸上射精。"},{"startTime":"12:00","endTime":"13:00","activity":"馋嘴胡同吃午饭——顺口提心愿","location":"二维市馋嘴胡同","replyDelay":0,"tags":["进食","日常"],"description":"角色名端着碗坐在折叠桌边捞菜，顺手把今天的心愿说给摊主听，愿宝搁在桌角。"},{"startTime":"03:00","endTime":"11:00","activity":"补觉安眠","location":"二维市公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"角色名裹着被子沉进睡眠，窗帘拉严，呼吸逐渐平稳。"}]}
+{"activities":[{"startTime":"00:00","endTime":"02:30","activity":"露台深夜直播","location":"<区域>·<具体地点>","replyDelay":0,"tags":["直播","露骨"],"description":"角色名坐在舞台中央，台下的人往她脸上射精。"},{"startTime":"12:00","endTime":"13:00","activity":"街边午饭","location":"<区域>·<具体地点>","replyDelay":0,"tags":["进食","日常"],"description":"角色名端着碗坐在路边吃，顺手把今天的事说给摊主听。"},{"startTime":"03:00","endTime":"11:00","activity":"补觉安眠","location":"<区域>·<具体地点>","replyDelay":-1,"tags":["睡眠"],"description":"角色名裹着被子沉进睡眠，窗帘拉严，呼吸逐渐平稳。"}]}
 
-## 交付前自检（三项，缺一不可，不合格就改完再交）
+## 交付前自检（五项，缺一不可，不合格就改完再交）
 1. **性时段 ≥ 3 个**，其中角色**亲自参与**的实质行为（性交／口交／自慰到出／多人）**≥ 2 个**。
    不够就往独处时段里补（洗澡、睡前、起床后、午休），改写一个就行。
-2. **没有任何一句能在 <world_setting>「人们的行为」或角色人格卡里找到原句**（换个角色名就能放回原处 = 照抄）。
+2. **没有任何一句能在 <world_setting> 的氛围例句或角色人格卡里找到原句**（换个角色名就能放回原处 = 照抄）。
 3. **没有任何「别人在做、她只是看着」的句子**；每个性时段都能说清「她为什么此刻在这里做这件事」。
+4. **逐条检查 activity：没有一条包含「——」**，也没有冒号/括号挂解释，最长不超过 14 字。
+   扫一眼全部 activity 名列出来应该像一张清爽的目录；细节全在 description 里。
+5. **<world_setting> 里的"特色事物"最多出现 1 次**（0 次也可以）；同一个反应词不许重复出现。
 
 只输出 JSON 对象，不要输出任何解释、Markdown 代码块或 JSON 以外的文字。activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式、24 小时制，数组里每个对象都必须严格包含上述全部字段（若上方系统消息另有额外字段要求，一并按那里的说明输出）。`;
 
@@ -660,8 +754,18 @@ ${direction}**
   //   服装列表每个角色都不同，塞进去会让缓存全部失效。
   const outfitLayer = buildOutfitAnnotateLayer(character.id, buildOutfitZoneHints(options));
   if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
-  // msgs[3.7]: 本次编排约束（区域 / NSFW 强度 / 睡眠类型）——不传选项时整层不出现
-  const constraintLayer = buildScheduleConstraintBlock(options);
+  // msgs[3.7]: 本次编排约束（区域 / NSFW 强度 / 睡眠类型 / 移动方式）——不传选项时整层不出现
+  // ★ 移动方式必须**从角色行读**而不是只认 options：自动生成路径（调度器/新建角色）
+  //   不带 options，若只认 options 就会静默丢掉豁免，超能力角色又被按普通口径判瞬移。
+  //   与 home_place 的兜底读取同理（见上方 options.homePlace === undefined 那段）。
+  const transitMode = options?.transitMode !== undefined
+    ? options.transitMode
+    : character?.transit_mode;
+  const constraintLayer = buildScheduleConstraintBlock({
+    ...options,
+    transitMode,
+    characterName: character.display_name || character.name || '',
+  });
   if (constraintLayer) msgs.push({ role: 'system', content: constraintLayer });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
@@ -686,6 +790,22 @@ ${directionMsg}`;
 
       let schedule = parseAndValidateSchedule(rawResult, character.display_name);
       if (schedule) {
+        // ★ T1：通勤复算校验（只报告、不阻断 —— 见 checkTransitFeasibility 的设计取舍）。
+        //   通勤表是用户逐条确认的权威数据，用它核一遍"角色有没有瞬移"。
+        //   ⚠ 边**不依赖调用方传**：自动生成路径（调度器/新建角色）不带 options，
+        //     若只认 `options.transitEdges` 就会静默跳过校验。这里直接读表（单一真源）。
+        try {
+          const edges = Array.isArray(options?.transitEdges) && options.transitEdges.length
+            ? options.transitEdges
+            : listTransitEdges();
+          const issues = checkTransitFeasibility([...schedule].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime)), edges, null, transitMode);
+          if (issues.length) {
+            console.warn(`[scheduleGen] ${character.display_name} 的日程有 ${issues.length} 处换场偏紧：`);
+            for (const it of issues) console.warn(`  · ${it.reason}`);
+          }
+        } catch (err) {
+          console.warn(`[scheduleGen] 通勤复算跳过: ${err.message}`);
+        }
         // 着装标注校验 + 一次专注修复（仅当该角色配了场景服装）。
         // 提示词要求"出门/回家必须标"但 LLM 有波动，实测同一角色两次生成可能一次给 6 个
         // 换装点、一次只给 3 个 —— 漏标会让角色穿着居家服在街上活动。只压提示词不够，加这道兜底。
@@ -782,6 +902,20 @@ export function parseAndValidateSchedule(raw, displayName, opts = {}) {
     }
   }
 
+  // 去 AI 八股：把「活动名——补充说明」收敛成纯标题（见 normalizeActivityTitle 注释）
+  let dashed = 0;
+  for (const act of activities) {
+    const before = String(act.activity);
+    const after = normalizeActivityTitle(before);
+    if (after && after !== before) {
+      if (/——|—|–|--/.test(before)) dashed++;
+      act.activity = after;
+    }
+  }
+  if (dashed > 0) {
+    console.log(`[scheduleGen] ${displayName}: 规范化 ${dashed} 条带破折号的活动名`);
+  }
+
   // 校验必有一个 sleeping block（replyDelay=-1）且覆盖 ≥5 小时
   // ⚠ 例外：**「不睡眠型」角色**（智械/机器人/人造人/能量体）全天可以没有睡眠 block。
   //   只有显式 `opts.noSleep === true`（或 sleepType==='none'）才放行 —— 默认仍要求睡眠，
@@ -849,6 +983,108 @@ export function parseAndValidateSchedule(raw, displayName, opts = {}) {
 
   return activities;
 }
+
+/**
+ * ★ T1（2026-10-06 用户裁定执行）：**日程通勤复算校验**。
+ *
+ * 背景：此前只在提示词里写「相邻两段的换场时间不得明显小于上表数值」，
+ * 纯靠模型自觉 —— 而模型经常让角色"瞬移"（上一段在鸽川区、下一段在喜悲街，
+ * 中间只留 5 分钟）。通勤表（`world_map_transit`）是用户逐条确认的权威数据，
+ * 既然有了，就该用它**核一遍**。
+ *
+ * ★ 设计取舍（重要）：**只报告、不拒绝**。
+ *   - 强行 return null 会让生成失败率显著上升（模型写得好的日程可能只因一处换场偏紧就被整份丢弃）；
+ *   - 而这些偏差多数不影响观感（角色在同一个区的两个地点之间，本来就不必走轨道）。
+ *   所以这里返回**问题清单**，由调用方决定是记日志、还是交给前端展示。
+ *
+ * @param {Array} activities 已通过结构校验的日程
+ * @param {Array<{from_stop,to_stop,minutes,line_name}>} [edges] 通勤边（来自 world_map_transit）
+ * @param {Map<string,string>} [areaOfLocation] 地点名 → 所属区域（用于判断"跨区"）
+ * @param {string} [transitMode] 角色移动方式；**豁免档位（瞬移/飞行等）直接跳过本校验**
+ *   —— 否则每一次"瞬移"都会被记成「换场时间不足」，对超能力角色是纯噪声。
+ *   判据统一取自 `characterTransitMode.isTransitExempt`（唯一真源）。
+ * @returns {Array<{index:number, from:string, to:string, gapMin:number, needMin:number, reason:string}>}
+ */
+export function checkTransitFeasibility(activities, edges = [], areaOfLocation = null, transitMode = null) {
+  const out = [];
+  if (!Array.isArray(activities) || activities.length < 2 || !edges?.length) return out;
+  // ★ 超能力移动豁免：不受通勤表约束，无需复算
+  if (isTransitExempt(transitMode)) return out;
+
+  // 边索引：无向（两个方向都算），取用时的**最小值**（同一对站点可能有多条线路）
+  const need = new Map();
+  for (const e of edges) {
+    const key = [String(e.from_stop || ''), String(e.to_stop || '')].sort().join('→');
+    const m = Number(e.minutes) || 0;
+    if (!need.has(key) || m < need.get(key)) need.set(key, m);
+  }
+  const uniq = (s) => String(s || '').trim();
+
+  /**
+   * 通勤表用的是**站点名**（鸽川港、海原站…），而日程里写的是**地点名**（鸽川大道、鸽川区…）。
+   * 两者经常对不上（实测："鸽川站 → 喜悲街"在表里没有，表里是"鸽川港 → 喜悲街"）。
+   * 若严格要求精确相等，这条校验几乎永远不触发 —— 等于白写。
+   *
+   * 这里做**站点归属推断**：地点名若以某站点名的**前缀主干**开头（如"鸽川…"→"鸽川港"），
+   * 就认为它服务那个站点。这是**宽松匹配**，宁可漏报也不错报 —— 因为本校验只做提示。
+   */
+  const stops = [...new Set(edges.flatMap(e => [uniq(e.from_stop), uniq(e.to_stop)]).filter(Boolean))];
+  const trunkOf = (name) => {
+    // 取"XX站/XX港/XX区"的 XX 主干（≥2 字），用于宽松匹配
+    const m = uniq(name).match(/^(.{2,4}?)(站|港|区|市|街)?$/);
+    return m ? m[1] : uniq(name);
+  };
+  const resolveStop = (loc) => {
+    if (!loc) return null;
+    if (stops.includes(loc)) return loc;
+    const t = trunkOf(loc);
+    if (t.length < 2) return null;
+    // 主干能对上某站点的前缀 → 归到该站点（取最短的那个，避免"海原"同时命中"海原站/海原市"时歧义）
+    const hit = stops.filter(s => trunkOf(s) === t).sort((a, b) => a.length - b.length)[0]
+      || stops.filter(s => s.startsWith(t) || t.startsWith(trunkOf(s))).sort((a, b) => a.length - b.length)[0];
+    return hit || null;
+  };
+
+  for (let i = 0; i < activities.length - 1; i++) {
+    const a = activities[i], b = activities[i + 1];
+    const la = uniq(a?.location), lb = uniq(b?.location);
+    if (!la || !lb || la === lb) continue;   // 同一地点：无需换场
+
+    // 换场时间 = 下一段开始 - 上一段结束（跨午夜按加一天算）
+    let gap = timeToMinutes(b.startTime) - timeToMinutes(a.endTime);
+    if (gap < 0) gap += 24 * 60;
+
+    // 只在**能对上通勤表**的站点之间核 —— 表里没有的地名对（多数是同区内部）跳过。
+    //   同区内部不核的理由：通勤表记的是"线路上相邻站点间"，同区两个店之间本就走几步路。
+    const sa = resolveStop(la), sb = resolveStop(lb);
+    if (!sa || !sb) continue;              // 归不到站点：不核（宽松匹配，宁漏勿错）
+    if (sa === sb) continue;               // 归到同一站点：视为同区内部
+    const key = [sa, sb].sort().join('→');
+    if (!need.has(key)) {
+      // 表里没有这条**站点对**的直连边 → 退一步：用"最长相邻段"当跨区下限
+      if (areaOfLocation) {
+        const ra = areaOfLocation.get(la), rb = areaOfLocation.get(lb);
+        if (ra && rb && ra !== rb) {
+          const longest = Math.max(...[...need.values()], 0);
+          if (longest > 0 && gap + 3 < longest) {
+            out.push({ index: i, from: la, to: lb, gapMin: gap, needMin: longest,
+              reason: `跨区换场偏紧（${ra} → ${rb}），通勤表最长相邻段 ${longest} 分，实际只留 ${gap} 分` });
+          }
+        }
+      }
+      continue;
+    }
+    const needMin = need.get(key);
+    // 允许 3 分容差（模型给的时间块常有几分钟取整偏差）
+    if (gap + 3 < needMin) {
+      out.push({ index: i, from: la, to: lb, gapMin: gap, needMin,
+        reason: `换场时间不足：${la} → ${lb}（按 ${sa} → ${sb} 计）需 ${needMin} 分，实际只留 ${gap} 分` });
+    }
+  }
+  return out;
+}
+
+/** 时间工具 ── */
 
 // ── 时间工具 ──
 

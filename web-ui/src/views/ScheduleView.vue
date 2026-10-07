@@ -164,6 +164,7 @@
       @chat="onChat"
       @wakePhone="onWakePhone"
       @wakeDoor="onWakeDoor"
+      @clear-schedule="onClearFromDrawer"
       @updated="detailActs = $event"
       @diary="onOpenDiary(detailChar)"
     />
@@ -226,16 +227,25 @@
             </span>
           </div>
 
+          <div class="ledger-filters">
+            <linshe-switch
+              v-model="ledgerShowArchived" size="sm"
+              :on-text="`显示归档角色（${ledgerArchivedCount}）`"
+              off-text="归档角色已折叠"
+            />
+          </div>
+
           <div class="ledger-list">
             <div
               v-for="c in ledgerRows"
               :key="c.character.id"
               class="ledger-row"
-              :class="{ 'is-open': ledgerExpanded === c.character.id }"
+              :class="{ 'is-open': ledgerExpanded === c.character.id, 'is-archived': c.character.archived }"
               @click="ledgerExpanded = ledgerExpanded === c.character.id ? 0 : c.character.id"
             >
               <div class="ledger-row-head">
                 <span class="ledger-name">{{ c.character.name }}</span>
+                <span v-if="c.character.archived" class="ledger-archived-tag">归档</span>
                 <span v-if="c.cliche.measurable === false" class="ledger-metric is-na" title="只有一份日程快照，无可比对象（需积累多天才可量化）">复读 不可测</span>
                 <span v-else class="ledger-metric" :class="repeatClass(c.cliche.repeat4gram)">复读 {{ c.cliche.repeat4gram }}%</span>
                 <span class="ledger-metric">地点集中 {{ c.cliche.topPlaceShare }}%</span>
@@ -251,10 +261,13 @@
                 </div>
                 <div v-if="c.riskByCode?.length" class="ledger-detail-line">
                   <b>风险：</b>{{ c.riskByCode.map(r => `${riskLabel(r.code)}×${r.count}`).join('、') }}
+                  <span class="ledger-dim">（已按「同类问题+同一对象」去重）</span>
                 </div>
                 <div v-if="c.latest?.issues?.length" class="ledger-detail-line ledger-issues">
                   <b>最近一次问题：</b>
-                  <div v-for="(it, i) in c.latest.issues" :key="i" class="ledger-issue">{{ issueText(it) }}</div>
+                  <div v-for="(it, i) in c.latest.issues" :key="i" class="ledger-issue">
+                    {{ issueText(it) }}<span v-if="it.occurrences > 1" class="ledger-dim">（×{{ it.occurrences }}）</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -365,7 +378,13 @@
     <!-- ═══ 改变日程方向输入弹窗（含地图联动 / NSFW 强度 / 睡眠类型）═══ -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="showRegenerateModal" class="reset-overlay" @click.self="showRegenerateModal = false">
+        <!-- ★ 2026-10-07 用户实报「编排日程的弹窗总是自己弹掉」。
+             实测复现：点遮罩（overlay 空白处）即关 —— 这个弹窗**很高**（5 个 section，
+             内容区还要滚动），滚轮/滑动时手指很容易落到遮罩上，于是"填了一半就没了"。
+             ★ 现在改为**必须显式关闭**（右上角关闭按钮 / Esc），点遮罩不再关闭。
+             理由：本弹窗里全是用户手填的选项，误关的代价远大于"少一个快捷关闭方式"；
+             而且进去极易误触。Esc 仍保留（主动按键不会误触）。 -->
+        <div v-if="showRegenerateModal" class="reset-overlay">
           <div class="reset-dialog regen-dialog" @click.stop>
             <div class="reset-dialog-header">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -373,8 +392,12 @@
                 <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
               </svg>
               <span>为 {{ detailChar?.display_name || '...' }} 编排日程</span>
-              <linshe-button class="reset-header-clear" variant="icon" size="sm" tone="danger" title="清空日程" @click="onClearFromModal">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <!-- ★ 2026-10-07 用户口径：右上角要有**关闭按钮**。
+                   此前这里是个垃圾桶（清空日程）—— 用户认为那个功能放在这个位置没有意义，
+                   而且弹窗**没有任何显式关闭入口**（只能点遮罩，极易误触 → "自己弹掉"）。
+                   现在：关闭按钮守右上角；「清空日程」移到侧边栏角色日程右上角（见下）。 -->
+              <linshe-button class="reset-header-close" variant="icon" size="sm" title="关闭（不生成，已填内容保留到下次打开）" @click="closeRegenModal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </linshe-button>
             </div>
 
@@ -493,6 +516,54 @@
                   <span class="regen-sec-note">不选「自动」即固定作息</span>
                 </div>
                 <linshe-select v-model="regenSleepType" :options="regenSleepOptions" size="sm" />
+              </section>
+
+              <!-- ── 移动方式（超能力移动豁免）──
+                   有角色在设定上会瞬移/飞行，通勤表对ta不构成限制。默认「普通」=
+                   受通勤约束，与改动前行为一致；选其他档位即豁免换场校验与台账告警。
+                   档位列表来自后端 regenerate-options（单一真源），前端不另抄。 -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">移动方式</span>
+                  <span class="regen-sec-note">超能力移动可豁免通勤约束</span>
+                </div>
+                <linshe-select v-model="regenTransitMode" :options="regenTransitOptions" size="sm" />
+                <p class="regen-sec-note regen-cadence-hint" v-if="regenTransitExempt">
+                  该角色将**不受通勤表限制**：跨区换场可压缩甚至瞬时完成，但生成时仍会要求交代"怎么到的"，
+                  不会写成凭空出现。该选择会保存到角色资料，之后自动生成也沿用。
+                </p>
+              </section>
+
+              <!-- ── 固定居家 / 睡眠地点（人类侧指定）── -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">固定住处</span>
+                  <span class="regen-sec-note">钉死"回家/睡觉"的落点，避免模型每次换地方</span>
+                </div>
+                <div class="regen-cadence">
+                  <!-- ★ 2026-10-07 用户口径：原来的单层搜索下拉"难以查找地点"（115 条平铺、
+                       只有名字没有归属），改为**多级级联**、层级按地图自动匹配。
+                       层级不写死：选项自带 region/area，组件只做分组收敛。 -->
+                  <div class="regen-cadence-col">
+                    <span class="regen-cadence-label is-block">居家地点</span>
+                    <PlaceCascadeSelect
+                      v-model="regenHomePlace"
+                      :options="regenCadenceOptions"
+                    />
+                  </div>
+                  <div class="regen-cadence-col">
+                    <span class="regen-cadence-label is-block">睡眠地点<span class="regen-sec-note">（不选则睡在居家地点）</span></span>
+                    <PlaceCascadeSelect
+                      v-model="regenSleepPlace"
+                      :options="regenCadenceOptions"
+                    />
+                  </div>
+                  <p v-if="regenHomePlace" class="regen-sec-note regen-cadence-hint">
+                    已指定：日程里的起床 / 回家 / 换装 / 就寝等锚点时段将固定落在
+                    <b>{{ regenHomeArea ? regenHomeArea + ' · ' : '' }}{{ regenHomePlace }}</b>。
+                    该选择会一并保存到角色资料，之后自动生成也沿用。
+                  </p>
+                </div>
               </section>
             </div>
 
@@ -628,6 +699,8 @@ import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
+// 固定住处的多级级联选择（大地区 → 子地区 → 地点）。层级按地图自动匹配，本文件不写死。
+import PlaceCascadeSelect from '../components/ui/PlaceCascadeSelect.vue'
 
 const store = useScheduleStore()
 const diaryStore = useDiaryStore()
@@ -697,11 +770,18 @@ const ledgerLoading = ref(false)
 const ledgerError = ref('')
 const ledgerData: any = ref({ characters: [], summary: {} })
 const ledgerExpanded = ref(0)
+/** 归档角色默认折叠（与左侧栏同一口径）：归档＝不参与主动行为，其日程只是历史留痕，不该占满台账 */
+const ledgerShowArchived = ref(false)
 
 const ledgerRows = computed(() => {
-  const list = Array.isArray(ledgerData.value?.characters) ? [...ledgerData.value.characters] : []
+  let list = Array.isArray(ledgerData.value?.characters) ? [...ledgerData.value.characters] : []
+  if (!ledgerShowArchived.value) list = list.filter(c => !c.character?.archived)
   return list.sort((a, b) => (b.cliche?.repeat4gram || 0) - (a.cliche?.repeat4gram || 0))
 })
+/** 台账里被折叠的归档角色数量（用于按钮文案，避免"点了没反应"的困惑） */
+const ledgerArchivedCount = computed(() =>
+  (ledgerData.value?.characters || []).filter(c => c.character?.archived).length
+)
 
 const ledgerRisk = computed(() => {
   const m = new Map<string, number>()
@@ -727,8 +807,8 @@ const RISK_LABELS: Record<string, string> = {
 function riskLabel(code: string) { return RISK_LABELS[code] || code }
 function riskTitle(code: string) {
   return ({
-    'unreachable-place': '日程里出现不在交通网上的孤立地点（如幻月秘庭、世界尽头酒馆）却未交代如何抵达',
-    'forbidden-place': '进入 restricted/private 的地点',
+    'unreachable-place': '日程里出现「孤立地点」却未交代如何抵达（注：通勤表只是干线网，本项判定从严，通常不报）',
+    'forbidden-place': '进入 restricted/private 的地点（角色回到自己的固定住处已豁免）',
     'no-location': '该条活动没有填写 location',
     'thin-desc': '活动描述字数过少，信息量不足',
     'sleep-short': '睡眠时长低于合理下限（<5h）',
@@ -918,6 +998,31 @@ const regenAreas = ref<string[]>([])
 const regenAreaStrict = ref(false)
 const regenNsfw = ref(50)
 const regenSleepType = ref('auto')
+// ── 固定居家/睡眠地点（人类侧指定）──
+// 让日程的"回家/睡觉"有稳定锚点，而不是每次由模型自由发挥（今天宿舍、明天酒店）。
+// 候选来自 regenerate-options 的 cadenceOptions；值随生成请求带给后端，并落库到角色。
+const regenCadenceOptions = ref<any[]>([])
+const regenHomePlace = ref('')
+const regenSleepPlace = ref('')
+
+// ── 移动方式（超能力移动豁免）──
+// 档位列表**只来自后端** regenerate-options（单一真源，前端不另抄一份）。
+// 默认 'normal' = 受通勤表约束，与改动前行为一致。
+const regenTransitModes = ref<any[]>([])
+const regenTransitMode = ref('normal')
+const regenTransitOptions = computed(() =>
+  regenTransitModes.value.map((m: any) => ({ label: m.label, value: m.key }))
+)
+/** 是否属于豁免档位（非 normal）—— 用于显示说明文案 */
+const regenTransitExempt = computed(() => regenTransitMode.value !== 'normal')
+
+/** 选中的居家地点所属子区（随请求带给后端，注入时交代"在哪个区"） */
+const regenHomeArea = computed(() =>
+  regenCadenceOptions.value.find(p => p.name === regenHomePlace.value)?.area || ''
+)
+// ⚠ 原先这里还有 regenCadenceSelectOptions / regenSleepSelectOptions 两个"平铺下拉"的候选构造。
+//   2026-10-07 用户要求改成多级级联后，分组与排序由 PlaceCascadeSelect 负责（层级按地图自动匹配），
+//   这两个 computed 已无消费者 —— 已删除，避免同一件事有两份实现（项目红线 8）。
 
 // ── 地点级排除（问题 1「排除通道」）──────────────────────
 //
@@ -982,6 +1087,9 @@ const regenHasAnySetting = computed(() =>
   || regenAreas.value.length > 0
   || regenNsfw.value !== regenDefaults.value.nsfwRatio
   || regenSleepType.value !== regenDefaults.value.sleepType
+  || !!regenHomePlace.value
+  || regenTransitExempt.value
+  || !!regenSleepPlace.value
 )
 
 /** 展开中的区域对象（模板里直接用，别在模板里内联 flatMap 长表达式） */
@@ -1062,7 +1170,13 @@ function buildPickedPayload() {
   return out
 }
 
-/** 记住上次选择（按角色区分），下次打开弹窗自动恢复 */
+/**
+ * 记住上次选择（按角色区分），下次打开弹窗自动恢复。
+ *
+ * ⚠ `saveRegenPrefs` 是**整体覆盖**这个角色的记录（不是 merge）。
+ *   所以任何"额外想记住的字段"必须走 `extra` 参数，**不能**在调用它前后单独写 localStorage
+ *   —— 那样会被这次覆盖冲掉（2026-10-07 实测踩到：先写 direction、再调本函数，direction 直接丢）。
+ */
 const REGEN_LS = 'linshe.schedule.regeneratePrefs'
 function loadRegenPrefs(charId: number) {
   try {
@@ -1070,7 +1184,7 @@ function loadRegenPrefs(charId: number) {
     return all[String(charId)] || null
   } catch { return null }
 }
-function saveRegenPrefs(charId: number) {
+function saveRegenPrefs(charId: number, extra: Record<string, unknown> = {}) {
   if (!charId) return
   try {
     const all = JSON.parse(localStorage.getItem(REGEN_LS) || '{}')
@@ -1079,6 +1193,11 @@ function saveRegenPrefs(charId: number) {
       areaStrict: regenAreaStrict.value,
       nsfwRatio: regenNsfw.value,
       sleepType: regenSleepType.value,
+      transitMode: regenTransitMode.value,
+      homePlace: regenHomePlace.value,
+      sleepPlace: regenSleepPlace.value,
+      // 额外字段（如 direction）与上面一起写入，保证不会被覆盖掉
+      ...extra,
     }
     localStorage.setItem(REGEN_LS, JSON.stringify(all))
   } catch { /* 隐私模式等，忽略 */ }
@@ -1092,6 +1211,8 @@ async function ensureRegenOptions() {
     regenDefaults.value = d.defaults || { nsfwRatio: 50, sleepType: 'auto' }
     regenNsfwBands.value = Array.isArray(d.nsfwBands) ? d.nsfwBands : []
     regenSleepOptions.value = Array.isArray(d.sleepTypes) ? d.sleepTypes.map((s: any) => ({ label: s.label, value: s.value })) : []
+    regenCadenceOptions.value = Array.isArray(d.cadenceOptions) ? d.cadenceOptions : []
+    regenTransitModes.value = Array.isArray(d.transitModes) ? d.transitModes : []
     regenAccessLabel.value = d.accessLabel || {}
     regenZoneLabel.value = d.zoneLabel || {}
     const groups: Array<{ region: string; areas: any[] }> = []
@@ -1118,9 +1239,50 @@ watch(showRegenerateModal, (v) => {
   regenAreaStrict.value = !!prefs?.areaStrict
   regenNsfw.value = typeof prefs?.nsfwRatio === 'number' ? prefs.nsfwRatio : regenDefaults.value.nsfwRatio
   regenSleepType.value = prefs?.sleepType || regenDefaults.value.sleepType
+  // 固定住处：优先用**角色资料里已存的值**（这是持久设定），其次上一次的记忆
+  const dc: any = detailChar.value || {}
+  regenHomePlace.value = dc.home_place || prefs?.homePlace || ''
+  regenSleepPlace.value = dc.sleep_place || prefs?.sleepPlace || ''
+  // 移动方式：同样以**角色资料里已存的值**为准（持久设定），其次上一次的记忆
+  regenTransitMode.value = dc.transit_mode || prefs?.transitMode || 'normal'
+  // ★ 2026-10-07 用户口径「重新打开没有任何已操作部分的记忆留痕」——
+  //   方向输入框此前**从不恢复**（每次打开都被 onRegenerate 清空）。
+  //   它是用户花时间写的正文，必须记住；只在用户**成功生成过**或**主动关闭过**时才有值，
+  //   所以不会出现"上次的方向赖着不走"的困扰（点「完全随机」仍不带走它）。
+  regenerateDirection.value = String(prefs?.direction || '')
   ensureRegenOptions()
   nextTick(() => regenerateTextareaRef.value?.focus())
 })
+
+/**
+ * 关闭编排弹窗 —— **显式入口**（右上角关闭按钮 / Esc）。
+ *
+ * ★ 2026-10-07 用户口径：需要右上角关闭按钮，且抱怨"弹窗总是自己弹掉"、
+ *   "重新打开没有任何已操作部分的记忆留痕"。
+ *   两件事一并处理：
+ *   ① 点遮罩不再关闭（见模板注释），关闭必须显式触发，避免滚轮误触；
+ *   ② **关掉时把当前填写全部存进 prefs** —— 用户要的"留痕"就是这个。
+ *      此前只在「按以上设定生成」路径里 saveRegenPrefs，中途关掉等于白填。
+ */
+function closeRegenModal() {
+  const charId = detailChar.value?.id
+  if (charId) {
+    // ⚠ 方向必须走 extra 一起写：saveRegenPrefs 是整体覆盖，
+    //   先单独写 localStorage 再调它 = 被冲掉（实测踩过）
+    saveRegenPrefs(charId, { direction: regenerateDirection.value })
+  }
+  showRegenerateModal.value = false
+}
+
+/** 弹窗打开期间的 Esc 监听（挂在 document 上：v-if 的元素未必有焦点，@keydown.esc 不可靠） */
+function onRegenEsc(e: KeyboardEvent) {
+  if (e.key !== 'Escape' || !showRegenerateModal.value) return
+  // ⚠ 下拉面板自己也用 Esc 关闭 —— 让给它，别把整个弹窗一起关掉
+  if (document.querySelector('.ls-select-dropdown')) return
+  closeRegenModal()
+}
+onMounted(() => document.addEventListener('keydown', onRegenEsc))
+onUnmounted(() => document.removeEventListener('keydown', onRegenEsc))
 const resetProgressPct = computed(() => {
   const rt = store.resetTask
   if (!rt || rt.total === 0) return 0
@@ -1414,8 +1576,10 @@ function onPeekAt(act: any) {
 
 async function onRegenerate() {
   if (!detailChar.value || detailRegenerating.value) return
+  // ⚠ **不要**在这里清空 regenerateDirection：用户在 watch(showRegenerateModal) 里
+  //   按 prefs 恢复了上次写的方向，这里清空会让"留痕"白做（2026-10-07 用户口径）。
+  //   清空只发生在用户**成功发起生成**之后（见 confirmRegenerateWithDirection）。
   showRegenerateModal.value = true
-  regenerateDirection.value = ''
 }
 
 async function doRegenerate(direction, options) {
@@ -1442,10 +1606,47 @@ function regenOptionsPayload() {
     areaStrict: regenAreaStrict.value,
     nsfwRatio: regenNsfw.value,
     sleepType: regenSleepType.value,
+    // 移动方式（超能力移动豁免）：仅豁免档位才传，`normal` 不传 ——
+    // 与「不设置该字段 = 上线前行为」保持一致（后端也会从角色行读，这里是本次意图）
+    ...(regenTransitExempt.value ? { transitMode: regenTransitMode.value } : {}),
+    // 固定居家/睡眠地点（人类侧指定）：随请求带去后端注入 + 落库到角色
+    ...(regenHomePlace.value ? { homePlace: regenHomePlace.value, homeArea: regenHomeArea.value } : {}),
+    ...(regenSleepPlace.value ? { sleepPlace: regenSleepPlace.value } : {}),
     // 问题 1：地点级排除（划掉不合适的那几个）
     ...(Object.keys(excluded).length ? { excludedByArea: excluded } : {}),
     // 问题 2：用户显式放行的受限地点（后端会标注原因后放行）
     ...(picked.length ? { pickedPlaces: picked } : {}),
+  }
+}
+
+/**
+ * 固定住处是**持久设定**（存角色资料），不是只对这一次生成有效 ——
+ * 所以提交时要顺手落库，之后自动生成（调度器/新建）也沿用。
+ * ⚠ 落库失败不阻断生成（和"日志写失败不阻断删除"同一取向），只提示。
+ */
+async function persistCadenceIfChanged() {
+  const c: any = detailChar.value
+  if (!c?.id) return
+  const nextHome = regenHomePlace.value || ''
+  const nextSleep = regenSleepPlace.value || ''
+  const nextArea = regenHomeArea.value || ''
+  const nextTransit = regenTransitMode.value || 'normal'
+  const transitChanged = (c.transit_mode || 'normal') !== nextTransit
+  if ((c.home_place || '') === nextHome && (c.sleep_place || '') === nextSleep
+      && (c.home_area || '') === nextArea && !transitChanged) return
+  try {
+    await api.updateCharacter(c.id, {
+      home_place: nextHome, sleep_place: nextSleep, home_area: nextArea,
+      // 移动方式同样是**持久设定**：落库后自动生成路径也会读到（从角色行兜底）
+      transit_mode: nextTransit,
+    })
+    // 就地更新本地对象，避免详情面板显示旧值
+    c.home_place = nextHome || null
+    c.sleep_place = nextSleep || null
+    c.home_area = nextArea || null
+    c.transit_mode = nextTransit
+  } catch (err) {
+    console.warn('[schedule] 保存固定住处/移动方式失败:', err)
   }
 }
 
@@ -1454,8 +1655,12 @@ async function confirmRegenerateWithDirection() {
   const charId = detailChar.value?.id
   if (charId) saveRegenPrefs(charId)
   const direction = regenerateDirection.value.trim()
+  const payload = regenOptionsPayload()
   showRegenerateModal.value = false
-  doRegenerate(direction || undefined, regenOptionsPayload())
+  // ⚠ 必须先落库再生成：生成时后端会读角色的 home_place 兜底，
+  //   若"本次没传 homePlace"（典型是用户清空了选择）而库还没更到，就会注入旧值。
+  await persistCadenceIfChanged()
+  doRegenerate(direction || undefined, payload)
 }
 
 /** 完全随机：不加方向、不带任何约束（与功能上线前的行为一致） */
@@ -1627,7 +1832,16 @@ async function onWakeDoor() {
   }
 }
 
-async function onClearFromModal() {
+/**
+ * 清空该角色的全部日程（破坏性操作，需二次确认）。
+ *
+ * ★ 2026-10-07 用户口径：入口从「编排日程」弹窗头部**移到侧边栏角色日程的右上角**。
+ *   原因：① 那个位置是关弹窗时最容易误点的角落，却放了个破坏性操作；
+ *        ② 它是对"这个角色的整份日程"的操作，作用域属于角色面板，不属于"这次怎么生成"。
+ *   ⚠ 清空后**关掉抽屉与编排弹窗**：日程已经没了，留着抽屉显示旧时间轴只会让人困惑。
+ * 该函数同时服务抽屉与（保留的）旧调用点 —— 单一实现，避免两处漂移。
+ */
+async function onClearSchedule() {
   if (!detailChar.value) return
   const name = detailChar.value.display_name || '该角色'
   const ok = await confirm({
@@ -1647,10 +1861,16 @@ async function onClearFromModal() {
       store.characters[idx].current_activity = '未设置日程'
       store.characters[idx].is_sleeping = false
     }
+    drawerOpen.value = false
     toastFn?.('已清空日程')
   } catch (err: any) {
     toastFn?.('清空失败: ' + (err.message || '未知错误'))
   }
+}
+
+/** 抽屉右上角「清空日程」的入口（见 onClearSchedule 的口径说明） */
+function onClearFromDrawer() {
+  onClearSchedule()
 }
 
 function retryPeek() {
@@ -1805,6 +2025,14 @@ function finishReset() {
 .ledger-risk-label { color: var(--text-secondary, #888); }
 .ledger-risk-chip { padding: 2px 8px; border-radius: 999px; background: rgba(192,57,43,0.10); color: #c0392b; font-variant-numeric: tabular-nums; cursor: help; }
 .ledger-list { display: flex; flex-direction: column; gap: 6px; }
+/* 归档角色默认折叠：给一个显式开关 + 行内「归档」标记，避免"有些角色怎么不见了" */
+.ledger-filters { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px; }
+.ledger-archived-tag {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 999px; font-size: 11px;
+  background: rgba(127,127,127,0.14); color: var(--text-secondary, #888);
+}
+.ledger-row.is-archived { opacity: .62; }
+.ledger-row.is-archived:hover { opacity: 1; }
 .ledger-row { border-radius: 10px; border: 1px solid var(--border-color, rgba(0,0,0,0.08)); overflow: hidden; cursor: pointer; transition: background .15s; }
 .ledger-row:hover { background: var(--bg-secondary, rgba(0,0,0,0.02)); }
 .ledger-row.is-open { background: var(--bg-secondary, rgba(0,0,0,0.03)); }
@@ -1818,6 +2046,7 @@ function finishReset() {
 .ledger-records { margin-left: auto; color: var(--text-tertiary, #aaa); font-variant-numeric: tabular-nums; }
 .ledger-row-detail { padding: 4px 12px 12px 112px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary, #666); line-height: 1.7; }
 .ledger-detail-line b { color: var(--text-primary, #333); }
+.ledger-dim { color: var(--text-tertiary, #999); font-size: 11px; }
 .ledger-issues { display: flex; flex-direction: column; }
 .ledger-issue { padding-left: 4px; color: var(--text-tertiary, #999); }
 .schedule-view {
@@ -2382,6 +2611,18 @@ function finishReset() {
   font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
+/* 固定住处（居家/睡眠地点）—— ★ 2026-10-07 改为多级级联（大地区→子地区→地点），
+   每级一行竖排；标题改为块级小标签。原来的横向 row 布局已由级联组件内部承担。 */
+.regen-cadence { display: flex; flex-direction: column; gap: 12px; }
+.regen-cadence-col { display: flex; flex-direction: column; gap: 6px; }
+.regen-cadence-label {
+  flex: 0 0 64px;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.regen-cadence-label.is-block { flex: none; font-weight: 600; color: var(--text-primary); }
+.regen-cadence-hint { line-height: 1.6; }
+.regen-cadence-hint b { color: var(--text-primary); }
 .regen-sec-empty {
   margin: 0;
   font-size: var(--fs-xs);
@@ -2529,7 +2770,8 @@ function finishReset() {
 .reset-btn-bg {
   flex: 1;
 }
-.reset-header-clear {
+/* 右上角关闭（原为垃圾桶"清空日程"，2026-10-07 用户要求换成关闭） */
+.reset-header-close {
   margin-left: auto;
 }
 

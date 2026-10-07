@@ -81,6 +81,41 @@ test('explicitTextOf：50 档拼「≥ 2」（兼容原文），其余拼区间'
   assert.doesNotMatch(s, /0~2 个/, '50 档不能出现 0~2 的文案 —— 那会教模型把下限当 0');
 });
 
+/**
+ * ★★ 「性时段」与「实质行为」两个数字**必须自洽**（用户 2026-10-06 指出）。
+ *
+ * 用户截图里的病：少量档写着「性时段 1~2 个」，紧接着又写「实质行为 0~1 个」——
+ * 两个数字并排却对不上，用户认为这是没改干净。
+ *
+ * ⚠ 注意两者是**不同单位**（时段 = 时间块，实质行为 = 角色亲自参与的性行为），
+ *   所以不能要求数字相等。唯一**结构性**约束是：实质行为的数量装不进"性时段总数"里就是错的
+ *   —— 即 性时段上界 ≥ 实质行为上界。这条对每个档都成立且必须成立。
+ */
+test('★★ 性时段与实质行为自洽：总时段上界不得小于实质行为上界（装不下就是错的）', () => {
+  const nums = (v) => (String(v).match(/\d+/g) || []).map(Number);
+  for (const b of NSFW_BANDS) {
+    if (b.sexCount === 0) continue;                    // 关闭档：都是 0
+    const sexRange = nums(b.sexCount);
+    if (!sexRange.length) continue;
+    const sexHigh = sexRange[sexRange.length - 1];
+    const expHigh = Number.isFinite(b.explicitFloor)
+      ? Math.max(b.explicitFloor, b.explicitMax || 0)
+      : b.explicitMax;
+    assert.ok(sexHigh >= expHigh,
+      `${b.label} 档矛盾：性时段上界 ${sexHigh} < 实质行为上界 ${expHigh} —— 实质行为装不下`);
+  }
+});
+
+test('NSFW 少量档(25)：性时段与实质行为都按 0~1（用户 2026-10-06 裁定，禁回退成 1~2）', () => {
+  const b = NSFW_BANDS.find(x => x.at === 25);
+  assert.equal(b.sexCount, '0~1', '少量档性时段必须是 0~1 —— 曾写 1~2，与「实质行为 0~1」并列对不上');
+  assert.equal(explicitTextOf(b), '0~1');
+  const s = buildScheduleConstraintBlock({ nsfwRatio: 25 });
+  assert.match(s, /性时段数量以本条为准：\*\*0~1 个\*\*/);
+  assert.match(s, /0~1 个/);
+  assert.doesNotMatch(s, /1~2 个/, '不许残留 1~2');
+});
+
 test('NSFW 关闭档：必须显式声明覆盖上文的「≥3 个」下限与自检第 1 条', () => {
   const s = buildScheduleConstraintBlock({ nsfwRatio: 0 });
   assert.ok(s);
@@ -137,6 +172,9 @@ test('多选项同时生效：外层包裹 schedule_constraints 且声明冲突�
   assert.match(s, /^<schedule_constraints priority="high">/);
   assert.match(s, /<\/schedule_constraints>$/);
   assert.match(s, /本块没提到的部分，上文要求全部照常执行/);
-  assert.match(s, /1~2 个/);
+  // ★ 少量档：性时段与实质行为必须同口径（0~1）。曾写「1~2 个」，与「实质行为 0~1 个」并列
+  //   显示时自相矛盾（用户 2026-10-06 指出）——这里钉死不许回退。
+  assert.match(s, /0~1 个/);
+  assert.doesNotMatch(s, /性时段数量以本条为准：\*\*1~2 个\*\*/, '少量档不应再出现 1~2 个');
   assert.match(s, /早睡早起型/);
 });

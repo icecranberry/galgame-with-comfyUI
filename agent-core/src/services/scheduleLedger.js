@@ -9,7 +9,7 @@
  *  ① **稳定性** —— 同一角色反复生成，结果是否收敛成同一套模板？
  *     指标：跨次相似度（地点集合重合率、时段结构重合率）。太高＝没变化，太低＝不可控。
  *  ② **八股度** —— 是否反复复读同样的画面/句式/道具？
- *     指标：地点集中度（Top-N 地点占比）、n-gram 复读率、道具词（愿宝等）每篇出现次数。
+ *     指标：地点集中度（Top-N 地点占比）、n-gram 复读率、道具词（如「愿宝」这类世界专名）每篇出现次数。 // @world-agnostic-ok: 注释举例
  *  ③ **合理性** —— 生成的日程是否违反了已建立的约束？
  *     指标：受限地点闯入次数、跨区瞬移（换场时间 < 通勤基线）、服装与 zone 矛盾、
  *          睡眠时长越界、时段空档/重叠。
@@ -19,6 +19,7 @@
  */
 
 import { getDb } from '../db/index.js';
+import { isTransitExempt } from './characterTransitMode.js';
 
 // ══════════════════════════════════════════════════════════
 // 基础工具
@@ -47,7 +48,13 @@ function toMin(t) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
   if (!m) return null;
   const h = Number(m[1]), mi = Number(m[2]);
-  if (h > 23 || mi > 59) return null;
+  if (mi > 59) return null;
+  // ★ `24:00` 是**合法写法**（LLM 常用来表示"到当天午夜"），必须接受。
+  //   实测「22:00-24:00 夜间安睡」这类条目被旧规则判成 `bad-time`（error 级），
+  //   而它其实完全正常 —— 那是两个角色的真实日程被误报警。
+  //   归一到 1439（当天最后一分钟），与 `minToTime` 的封顶口径一致。
+  if (h === 24 && mi === 0) return 1439;
+  if (h > 23) return null;
   return h * 60 + mi;
 }
 
@@ -86,8 +93,30 @@ function jaccard(a, b) {
   return inter / (a.size + b.size - inter);
 }
 
-/** 道具/货币等"容易变成口头禅"的词。出现频次过高＝八股信号 */
-const CLICHE_PROPS = ['愿宝', '心愿', '黄金马桶', '餐盘', '石桌', '内袋', '尾款', '结算表', '酒杯', '账单'];
+/**
+ * 道具/货币等"容易变成口头禅"的词。出现频次过高＝八股信号。
+ *
+ * ★★ 2026-10-07 架构修正：拆成**引擎通用词**与**世界观专有词**两部分。
+ *   原先是一张混合表，里面既有「心愿/餐盘/酒杯」（任何世界观都适用的通用词），
+ *   也有「愿宝/黄金马桶」（**某一个世界观的专名**）—— 后者属"数据跑进引擎"。
+ *   现在：通用词留在这里；专有词由该世界观的**项目库**（`clicheProps` 槽位）提供。
+ *   这样换世界观时，检测表会自动跟着换，不会再把别的世界的词当成"口头禅"。
+ */
+import { getActiveWorldSlots } from '../db/index.js';
+
+/** 本次检测用的道具词表 = 引擎通用词 + **当前世界观**项目库声明的专有词。
+ *  ★ 专有词归项目库（换世界观自动跟着换），不写死在引擎里。 */
+function clichePropsNow() {
+  let extra = [];
+  try {
+    extra = getActiveWorldSlots()?.clicheProps || [];
+  } catch { /* 项目库读不到就只用通用词 */ }
+  return [...CLICHE_PROPS_GENERIC, ...extra];
+}
+
+const CLICHE_PROPS_GENERIC = [
+  '心愿', '餐盘', '石桌', '内袋', '尾款', '结算表', '酒杯', '账单', '围裙', '账本', '小费',
+];
 
 /** 取某角色的全部日程记录（模板 + 每日快照），按时间排序 */
 function loadSchedules(characterId) {
@@ -112,8 +141,20 @@ function loadSchedules(characterId) {
 
 /**
  * 体检一份日程，产出**结构化问题清单**（每条都可指向一个具体调优点）。
+ *
+ * ★ 关于「自己的住处」的豁免（2026-10-06 用户口径）：
+ *   角色的**专属住处**在地图上常被标成 `restricted`/`private`（"谢绝外人"说的是别人进不去，
+ *   住户自己当然能回），也常不在公共交通网上（私宅没站）。若一律按"闯入受限地点/不可直达"报错，
+ *   就会把**回家/睡觉**误报成风险 —— 用户实报：这类告警其实是"角色进入限定的个人空间"导致的假阳性。
+ *   故 ctx 支持传 `ownPlaces`（该角色自己的居家/睡眠地点与所属区），命中即豁免这两项检查。
+ *
+ * ★ 关于「超能力移动」的豁免（2026-10-06 用户口径，二档"按能力分级"）：
+ *   设定上会瞬移/飞行的角色，换场本来就不受通勤表限制。若照旧报 `teleport`，
+ *   台账会持续输出"假阳性"—— 用户裁定：**有能力即不报该项**，其余审计项照常。
+ *   判据统一取自 `characterTransitMode.isTransitExempt`（唯一真源）。
+ *
  * @param {Array} acts 活动数组
- * @param {object} ctx { forbiddenPlaces:Set, transferForbidden:Set, areaOf:Map }
+ * @param {object} ctx { forbiddenPlaces:Set, noTransferPlaces:Set, areaOf:Map, ownPlaces:Set, transitMode:string }
  */
 export function auditSchedule(acts, ctx = {}) {
   const issues = [];
@@ -122,6 +163,10 @@ export function auditSchedule(acts, ctx = {}) {
 
   const FORBIDDEN = ctx.forbiddenPlaces instanceof Set ? ctx.forbiddenPlaces : new Set();
   const NO_TRANSFER = ctx.noTransferPlaces instanceof Set ? ctx.noTransferPlaces : new Set();
+  // ★ 该角色自己的住处（含所属区名）：回家/睡觉不算"闯入受限地点"，也不受"不可直达"约束
+  const OWN = ctx.ownPlaces instanceof Set ? ctx.ownPlaces : new Set();
+  // ★ 超能力移动：豁免「跨区瞬移」这一项（有能力就不报，避免假阳性）
+  const TRANSIT_EXEMPT = isTransitExempt(ctx.transitMode);
 
   for (const a of acts) {
     const span = spanMinutes(a);
@@ -134,19 +179,25 @@ export function auditSchedule(acts, ctx = {}) {
 
     const txt = `${a.activity || ''} ${a.location || ''} ${a.description || ''}`;
     const { area, place } = splitLocation(a.location);
+    // 这条活动是否落在该角色自己的住处（命中即豁免下面两项，避免"回家=闯禁区"的假阳性）
+    const isOwn = (place && OWN.has(place)) || (area && OWN.has(area));
 
-    // ① 受限地点闯入
-    for (const f of FORBIDDEN) {
-      if (f && (place === f || area === f)) {
-        issues.push({ code: 'forbidden-place', level: 'warn', detail: `去了受限地点「${f}」`, activity: a.activity, startTime: a.startTime });
-        break;
+    // ① 受限地点闯入（自己的住处不算闯入）
+    if (!isOwn) {
+      for (const f of FORBIDDEN) {
+        if (f && (place === f || area === f)) {
+          issues.push({ code: 'forbidden-place', level: 'warn', detail: `去了受限地点「${f}」`, activity: a.activity, startTime: a.startTime });
+          break;
+        }
       }
     }
-    // ② 不可直接抵达
-    for (const f of NO_TRANSFER) {
-      if (f && (place === f || area === f)) {
-        issues.push({ code: 'unreachable-place', level: 'warn', detail: `去了不可直接抵达的「${f}」`, activity: a.activity, startTime: a.startTime });
-        break;
+    // ② 不可直接抵达（自己的住处不受此限 —— 私宅本就不在交通网）
+    if (!isOwn) {
+      for (const f of NO_TRANSFER) {
+        if (f && (place === f || area === f)) {
+          issues.push({ code: 'unreachable-place', level: 'warn', detail: `去了不可直接抵达的「${f}」`, activity: a.activity, startTime: a.startTime });
+          break;
+        }
       }
     }
     // ③ 内容空泛
@@ -184,18 +235,22 @@ export function auditSchedule(acts, ctx = {}) {
   if (sleepMin > 660) issues.push({ code: 'sleep-long', level: 'info', detail: `睡眠 ${Math.round(sleepMin / 60 * 10) / 10} 小时（>11h）` });
 
   // ⑦ 跨区瞬移（相邻两段换区，但中间没有留出通勤时间）
+  //   ★ 超能力角色豁免：设定上会瞬移/飞行，换场本来就不受通勤表限制 ——
+  //     照旧报就是假阳性（用户裁定：按能力分级、不报该项）。其余审计项不受影响。
   const TRANSFER = ctx.transferMinutes instanceof Map ? ctx.transferMinutes : new Map();
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = sorted[i - 1].a, cur = sorted[i].a;
-    const pa = splitLocation(prev.location).area, ca = splitLocation(cur.location).area;
-    if (!pa || !ca || pa === ca) continue;
-    const need = TRANSFER.get(`${pa}→${ca}`) ?? TRANSFER.get(`${ca}→${pa}`);
-    if (need == null) continue;
-    const gap = Math.max(0, (toMin(cur.startTime) ?? 0) - (toMin(prev.endTime) ?? 0));
-    // 换场时间通常并入其中一段，所以用「上一段尾 + 本段头」的可疑度判断：
-    // 若两段都写得"满"（本段一开始就在新地点做事），视为瞬移。
-    if (gap === 0 && need > 20) {
-      issues.push({ code: 'teleport', level: 'warn', detail: `${pa} → ${ca} 无换场时间（该区通勤约 ${need} 分）`, startTime: cur.startTime });
+  if (!TRANSIT_EXEMPT) {
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = sorted[i - 1].a, cur = sorted[i].a;
+      const pa = splitLocation(prev.location).area, ca = splitLocation(cur.location).area;
+      if (!pa || !ca || pa === ca) continue;
+      const need = TRANSFER.get(`${pa}→${ca}`) ?? TRANSFER.get(`${ca}→${pa}`);
+      if (need == null) continue;
+      const gap = Math.max(0, (toMin(cur.startTime) ?? 0) - (toMin(prev.endTime) ?? 0));
+      // 换场时间通常并入其中一段，所以用「上一段尾 + 本段头」的可疑度判断：
+      // 若两段都写得"满"（本一开始就在新地点做事），视为瞬移。
+      if (gap === 0 && need > 20) {
+        issues.push({ code: 'teleport', level: 'warn', detail: `${pa} → ${ca} 无换场时间（该区通勤约 ${need} 分）`, startTime: cur.startTime });
+      }
     }
   }
 
@@ -221,15 +276,37 @@ export function auditSchedule(acts, ctx = {}) {
  */
 export function auditCharacter(characterId, ctx = {}) {
   const db = getDb();
-  const char = db.prepare('SELECT id, display_name, COALESCE(archived,0) AS archived FROM characters WHERE id = ?').get(characterId);
+  const char = db.prepare('SELECT id, display_name, COALESCE(archived,0) AS archived, home_place, sleep_place, home_area, work_place, transit_mode FROM characters WHERE id = ?').get(characterId);
   if (!char) return null;
+
+  // ★ 该角色的**自有场所**（居家/睡眠/**工作地** + 所属区）：从角色资料读，并入本次体检的豁免集
+  //   —— 避免"回家/睡觉/在自家办公室办公"被误报成"闯入受限地点/不可直达"。
+  //   ⚠ 工作地必须一并纳入：地图常把办公处标成 private（"谢绝外人"说的是别人进不去），
+  //     实测「真珠办公室」被连报 8 次受限闯入 —— 那是她在**自己办公室上班**。
+  //   ⚠ 这三者语义相同（"这是我自己的地方"），故合并进**同一个**豁免集，
+  //     不做来源区分 —— 审计只需要知道"该不该放行"，不需要知道是家还是办公室。
+  const ownPlaces = new Set();
+  for (const v of [char.home_place, char.sleep_place, char.home_area, char.work_place]) {
+    const s = String(v || '').trim();
+    if (s) ownPlaces.add(s);
+    // 地点名常以「区 · 地点」或带书名号记录，做一次宽松归一，保证能命中 splitLocation 的结果
+    if (s) ownPlaces.add(s.replace(/[「」《》\s]/g, ''));
+  }
+  // ★ 超能力移动：从角色资料读移动方式并入 ctx（豁免「跨区瞬移」审计项）。
+  //   即便 ownPlaces 为空也要带上 —— 两个豁免条件彼此独立。
+  const charCtx = {
+    ...ctx,
+    transitMode: char.transit_mode,
+    ...(ownPlaces.size ? { ownPlaces: new Set([...(ctx.ownPlaces || []), ...ownPlaces]) } : {}),
+  };
 
   const records = loadSchedules(characterId);
   const perRecord = [];
+  const clicheProps = clichePropsNow();   // 通用词 + 当前世界观专有词（每次审计算一次）
   for (const r of records) {
     const acts = parseSchedule(r.json);
     if (!acts.length) continue;
-    const audit = auditSchedule(acts, ctx);
+    const audit = auditSchedule(acts, charCtx);
     const places = new Set(), locSet = new Set();
     let propHits = 0;
     const allText = [];
@@ -238,7 +315,7 @@ export function auditCharacter(characterId, ctx = {}) {
       if (loc) { places.add(loc); locSet.add(splitLocation(loc).place); }
       const t = `${a.activity || ''} ${a.description || ''}`;
       allText.push(t);
-      for (const p of CLICHE_PROPS) if (t.includes(p)) propHits++;
+      for (const p of clicheProps) if (t.includes(p)) propHits++;
     }
     perRecord.push({
       kind: r.kind, date: r.date, generated_at: r.generated_at,
@@ -288,8 +365,23 @@ export function auditCharacter(characterId, ctx = {}) {
   }
 
   // ── 风险累积 ──
+  // ⚠ 按 **(code, 对象)** 去重后再计数 —— 用户实报「点开全是重复」的直接原因就是不去重：
+  //   实测「真珠办公室」被连报 8 次受限闯入，那是**同一个问题在同一份日程里重复出现**
+  //   （她的一天里有 8 个时段都在自己办公室），展开后 8 条一模一样，完全淹没真信号。
+  //   现在同 code + 同对象只计 1 次，并记下 `occurrences` 供参考（不参与排序）。
+  const agg = new Map();   // key = code|对象  → { code, detail, occurrences }
+  for (const r of perRecord) {
+    for (const i of r.issues) {
+      // 对象 = 受限地点名 / 涉及活动名；取不到则退化为 code 本身（同 code 全部合并）
+      const obj = pickIssueObject(i);
+      const key = `${i.code}|${obj}`;
+      const hit = agg.get(key);
+      if (hit) hit.occurrences++;
+      else agg.set(key, { code: i.code, detail: i.detail, occurrences: 1 });
+    }
+  }
   const byCode = new Map();
-  for (const r of perRecord) for (const i of r.issues) byCode.set(i.code, (byCode.get(i.code) || 0) + 1);
+  for (const v of agg.values()) byCode.set(v.code, (byCode.get(v.code) || 0) + 1);
 
   return {
     character: { id: char.id, name: char.display_name, archived: !!char.archived },
@@ -298,13 +390,42 @@ export function auditCharacter(characterId, ctx = {}) {
     hasTemplate: !!tmpl,
     cliche,
     stability,
+    // 去重后的**问题种类数**（不再是重复条数）——这才是"该有信号"的口径
     riskByCode: [...byCode.entries()].map(([code, n]) => ({ code, count: n })).sort((a, b) => b.count - a.count),
+    // 去重后的问题明细（供前端展开），最多 40 条
+    risks: [...agg.values()]
+      .sort((a, b) => b.occurrences - a.occurrences)
+      .slice(0, 40)
+      .map(v => ({ code: v.code, detail: v.detail, occurrences: v.occurrences })),
     latest: perRecord.length ? {
+      // ⚠ 最新一期的明细也去重（同 code + 同对象只留一条），否则展开后又是 8 条一样的话
       date: perRecord[perRecord.length - 1].date || '(模板)',
-      issues: perRecord[perRecord.length - 1].issues.slice(0, 12),
+      issues: dedupeIssues(perRecord[perRecord.length - 1].issues).slice(0, 12),
       stats: perRecord[perRecord.length - 1].stats,
     } : null,
   };
+}
+
+/** 从 issue 里取「问题对象」（受限地点 / 活动名），取不到返回空串 */
+function pickIssueObject(i) {
+  const d = String(i?.detail || '');
+  // 受限/不可达：detail 形如「去了受限地点「真珠办公室」」
+  const quoted = d.match(/「([^」]+)」/);
+  if (quoted) return quoted[1];
+  // 其余用活动名兜底（同一活动只算一次）
+  return String(i?.activity || '');
+}
+
+/** 按 (code, 对象) 去重，保留首次出现并累计 occurrences */
+function dedupeIssues(list) {
+  const seen = new Map();
+  for (const i of (list || [])) {
+    const key = `${i.code}|${pickIssueObject(i)}`;
+    const hit = seen.get(key);
+    if (hit) hit.occurrences = (hit.occurrences || 1) + 1;
+    else seen.set(key, { ...i, occurrences: 1 });
+  }
+  return [...seen.values()];
 }
 
 /** 全角色台账总览（按八股度/风险排序，便于一眼看出该先调谁） */

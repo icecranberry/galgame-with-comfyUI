@@ -26,8 +26,9 @@ import {
   scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule, SLEEP_TYPES, NSFW_BANDS } from '../services/scheduleGenerator.js';
+import { TRANSIT_MODES, DEFAULT_TRANSIT_MODE, isTransitExempt, normalizeTransitMode } from '../services/characterTransitMode.js';
 import { ledgerOverview, auditCharacter } from '../services/scheduleLedger.js';
-import { listMaps, getMap, listAreasForSchedule, pickSchedulePlaces, normalizeAccess, accessReason, ACCESS_LABEL, ZONE_LABEL } from '../services/worldMapService.js';
+import { listMaps, getMap, listAreasForSchedule, pickSchedulePlaces, resolveEffectiveAccess, normalizeAccess, accessReason, ACCESS_LABEL, ZONE_LABEL } from '../services/worldMapService.js';
 import { updateScheduleActivity } from '../services/scheduleEditor.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
@@ -223,16 +224,21 @@ function loadScheduleAreas(mapId) {
  *   附带信息走**并列的独立字段**（notesByArea / promptsByArea / zonesByArea），
  *   不要把它们塞进 names 里。
  */
-function scenesByAreaFor(names, mapId, excludedByArea = {}) {
+function scenesByAreaFor(names, mapId, excludedByArea = {}, pickedPlaces = []) {
   const { areas } = loadScheduleAreas(mapId);
   const out = {}, notes = {}, prompts = {}, zones = {}, placeZones = {}, summaries = {};
+  // ★ 用户显式勾选的受限地点：**必须真的进候选集**（`pickSchedulePlaces` 的 picked 参数）。
+  //   曾经只把它拼成一句给模型看的"注释行"（forcedPlaces），地点名不进清单 →
+  //   用户勾了完全没用（2026-10-07 用户实报）。名字在全图内唯一性由地图层保证（`uniqueKey`）。
+  const picked = new Set(Array.isArray(pickedPlaces) ? pickedPlaces : []);
   for (const n of names) {
     const area = areas.find(a => a.name === n);
     if (!area) { out[n] = []; continue; }
     const excluded = new Set(Array.isArray(excludedByArea[n]) ? excludedByArea[n] : []);
     // ⚠ 把**子区自身的 access** 传下去：`幻月秘庭` 是 lv2 子区且 restricted，
     //   只管子项的话整区会被放行（实测踩过）。
-    const { included } = pickSchedulePlaces(area.places || [], excluded, area.access || '');
+    //   ⚠ 但 private **不继承**（见 pickSchedulePlaces 的说明）。
+    const { included } = pickSchedulePlaces(area.places || [], excluded, area.access || '', picked);
     out[n] = included.map(p => p.name);
     const ns = included.filter(p => p.note).map(p => ({ name: p.name, note: p.note }));
     if (ns.length) notes[n] = ns;
@@ -281,6 +287,23 @@ export function readScheduleOptions(body = {}) {
       out.userName = String(config.user?.nickname || '').trim();
     }
   } catch { /* 忽略 */ }
+  // ── ★ 角色固定居家/睡眠地点（人类侧指定）──
+  //   前端弹窗选择后随请求带来；未传则由 generateSchedule 从 characters 表兜底读。
+  //   ⚠ 只在非空时写入 options（空串 = 用户主动清空 → 传空串也能覆盖库里的旧值？不：
+  //     这里语义是"本次指定"，清空应通过 API 落库为空来体现，故空串按未传处理）。
+  // ★ 移动方式（超能力移动豁免）：只在真的传了**豁免档位**时才写入 options。
+  //   传 `normal` 不写 —— 与「未设置 = 上线前行为」一致（省略即默认）。
+  //   非法值经唯一真源规范化后回落 normal，同样不写。
+  const transitMode = normalizeTransitMode(body.transitMode);
+  if (isTransitExempt(transitMode)) out.transitMode = transitMode;
+  const homePlace = typeof body.homePlace === 'string' ? body.homePlace.trim() : '';
+  if (homePlace) {
+    out.homePlace = homePlace;
+    const homeArea = typeof body.homeArea === 'string' ? body.homeArea.trim() : '';
+    if (homeArea) out.homeArea = homeArea;
+    const sleepPlace = typeof body.sleepPlace === 'string' ? body.sleepPlace.trim() : '';
+    if (sleepPlace) out.sleepPlace = sleepPlace;
+  }
   // ── ★ 区域通勤基线（问题 6）：后端从 `world_map_transit` 读表注入，**不让 LLM 猜距离**。──
   //   没落库的图返回空数组 → 整段不出现（行为与上线前一致）。
   try {
@@ -306,7 +329,7 @@ export function readScheduleOptions(body = {}) {
     out.areas = areas;
     out.areaStrict = !!body.areaStrict;
     try {
-      const r = scenesByAreaFor(areas, body.mapId, excludedByArea);
+      const r = scenesByAreaFor(areas, body.mapId, excludedByArea, pickedPlaces);
       out.scenesByArea = r.scenesByArea;
       if (Object.keys(r.notesByArea).length) out.notesByArea = r.notesByArea;
       if (Object.keys(r.promptsByArea).length) out.promptsByArea = r.promptsByArea;
@@ -314,16 +337,23 @@ export function readScheduleOptions(body = {}) {
       if (Object.keys(r.placeZonesByArea).length) out.placeZonesByArea = r.placeZonesByArea;
       if (Object.keys(r.summariesByArea).length) out.summariesByArea = r.summariesByArea;
     } catch { out.scenesByArea = {}; }
-    // 显式点选的受限地点：补回候选清单（并在注入时标注原因）
+    // 显式点选的受限地点。
+    // ★ 2026-10-07：这些点**已经在 `scenesByAreaFor` 里随 picked 进池了**（正确的做法），
+    //   所以这里只作**兜底** —— 补那些因区域没被勾选、未被 scenesByArea 覆盖到的点。
+    //   ⚠ 不能整份都塞进 `forcedPlaces`：那会让同一个地点同时出现在"地点清单"和
+    //     "准入标注"两处，模型会以为这是两个不同的地方（曾在测试里被断言到）。
     if (pickedPlaces.length) {
       try {
         const { areas: allAreas } = loadScheduleAreas(body.mapId);
         const want = new Set(pickedPlaces);
+        const covered = new Set();
+        for (const a of areas) for (const n of (out.scenesByArea?.[a] || [])) covered.add(n);
         const forced = [];
         for (const a of allAreas) {
           if (!areas.includes(a.name)) continue;
           for (const p of a.places || []) {
-            if (want.has(p.name) && !normalizeAccess(p.access).match(/^$|^public$|^time_window$/)) {
+            if (!want.has(p.name) || covered.has(p.name)) continue;
+            if (!normalizeAccess(p.access).match(/^$|^public$|^time_window$/)) {
               forced.push({ name: p.name, area: a.name, note: accessReason(p) || '仅限特定对象' });
             }
           }
@@ -346,9 +376,10 @@ export function readScheduleOptions(body = {}) {
 /**
  * 全图**受限地点清单** —— 补上「改地图即生效」这条链路。
  *
- * 过去「谢绝外人」只写在 `scheduleInst` 的散文常量里（贺星总部/海原电视塔/幻月秘庭），
+ * 过去「谢绝外人」只写在 `scheduleInst` 的散文常量里（珠星总部/海原电视塔/幻月秘庭），
  * 在地图数据之外；用户在地图里给某个地点标了 access=restricted 也不会影响日程。
  * 这里把标注过的全列出来，**无论用户勾没勾区域**都注入 → 地图即真源。
+ * （T6 2026-10-06：散文已同步改为"以地图数据为准"，不再列举会漂移的清单。）
  */
 function collectAccessNotes(mapId) {
   try {
@@ -383,25 +414,29 @@ router.get('/regenerate-options', (req, res) => {
     // 用户可能住在某个子区（"二维市"）也可能住在具体某处（"旧川里"），两种都给。
     const allPlaces = [];
     for (const a of areas) {
-      allPlaces.push({ name: a.name, region: a.region, area: a.name, kind: a.kind || '' });
+      allPlaces.push({ name: a.name, region: a.region, area: a.name, kind: a.kind || '', zone: a.zone || '' });
       for (const p of (a.places || [])) {
         // 受限地点也能住（"谢绝外人"说的是别人进不去，住户自己当然能回）
-        allPlaces.push({ name: p.name, region: a.region, area: a.name, kind: p.category || '' });
+        allPlaces.push({ name: p.name, region: a.region, area: a.name, kind: p.category || '', zone: p.zone || '' });
       }
     }
     // 每个地点的**准入结果**也在服务端算好给前端（前端只负责渲染灰显与理由，
-    // 不自己判断 access 语义 —— 否则前后端会漂移，项目红线 8）
+    // 不自己判断 access 语义 —— 否则前后端会漂移，项目红线 8）。
+    // ★★ 2026-10-07：判据改用**唯一真源** `resolveEffectiveAccess`。
+    //   这里原本自己写了一份"父级受限就继承"的逻辑（`areaBlocked` 同时含 private），
+    //   与 `pickSchedulePlaces` 构成**同一口径的第二份实现** —— 而两份已经漂移：
+    //   界面按旧逻辑把「翡翠的私人生态舰」下的舱室显示为不可去，
+    //   生成侧却（修好后）认为可去。用户会看到"界面说不能去"的错觉。
     const decorated = areas.map(a => {
-      // ★ 子区自身的 access：`幻月秘庭` 整个区就是 restricted，不能只标子项
       const areaAccess = normalizeAccess(a.access);
+      // 区域**自己**受限时才给区域行显示理由（private 也显示，因为"这整块是某人的"仍是事实）
       const areaBlocked = areaAccess === 'restricted' || areaAccess === 'private';
       return {
         ...a,
         areaAccess,
         areaReason: areaBlocked ? (accessReason({ access: areaAccess }) || '仅限特定对象') : '',
         places: (a.places || []).map(p => {
-          const own = normalizeAccess(p.access);
-          const eff = own === 'public' ? own : (areaBlocked && own === '' ? areaAccess : own);
+          const { access: eff, inherited } = resolveEffectiveAccess(p.access, a.access);
           const accessible = eff === '' || eff === 'public' || eff === 'time_window';
           return {
             name: p.name, category: p.category || p.kind || '', access: eff || '',
@@ -409,7 +444,8 @@ router.get('/regenerate-options', (req, res) => {
             // 继承来的受限：**只写「所在区域受限」**（用户口径，2026-10-05）——
             // 原来会拼成「所在区域受限（谢绝外人／需身份）」，把父级的原因塞进子项的标签里，
             // 又长又容易让人以为是这个地点自己的问题。父级原因在区域那一行已经有地方显示了。
-            reason: p.reason || (areaBlocked && own === '' ? '所在区域受限' : ''),
+            // ⚠ `inherited` 来自唯一真源，不要自己再判一次"是不是继承的"（那就又是第二份实现）。
+            reason: p.reason || (inherited ? '所在区域受限' : ''),
             // 默认是否勾选：不可达的默认不勾（用户可手动勾回来 = 显式放行）
             defaultChecked: accessible,
           };
@@ -425,9 +461,15 @@ router.get('/regenerate-options', (req, res) => {
       // ★ 人类侧居住地：当前值 + 可选地点（供设置页选择；空 = 未指定）
       userHome: String(config.user?.home || ''),
       homeOptions: allPlaces.map(p => ({ name: p.name, region: p.region, area: p.area, kind: p.kind || '' })),
+      // ★ 角色固定居家/睡眠地点：候选地点里**优先列居住性质（zone=residence）的**，
+      //   其余作为可选兜底（角色可能住非标注为住宅的地方）。当前值随角色 id 查询。
+      cadenceOptions: allPlaces.map(p => ({ name: p.name, region: p.region, area: p.area, kind: p.kind || '', zone: p.zone || '' })),
       nsfwBands: NSFW_BANDS,
       sleepTypes: Object.entries(SLEEP_TYPES).map(([value, v]) => ({ value, label: v.label, text: v.text })),
-      defaults: { nsfwRatio: 50, sleepType: 'auto' },
+      // ★ 移动方式（超能力移动豁免）：**只在后端定义一份**，前端只渲染不另抄 ——
+      //   否则前后端档位迟早漂移（项目红线 8）。默认 `normal` = 受通勤约束。
+      transitModes: TRANSIT_MODES,
+      defaults: { nsfwRatio: 50, sleepType: 'auto', transitMode: DEFAULT_TRANSIT_MODE },
     });
   } catch (err) {
     console.error('[schedule] GET /regenerate-options error:', err.message);
@@ -443,7 +485,25 @@ router.get('/regenerate-options', (req, res) => {
 // ⚠ 必须注册在 `/:characterId` **之前**，否则会被参数路由吃掉（本项目已有约定）。
 // ═══════════════════════════════════════════════════════════
 
-/** 台账的观测上下文：受限地点、不可直接抵达、跨区通勤分钟 */
+/**
+ * 台账的观测上下文：受限地点、不可直接抵达、跨区通勤分钟。
+ *
+ * ★★ 2026-10-06 修正「不可直达」—— 该判据原先是**硬编码** `['幻月秘庭','世界尽头酒馆']`，
+ *    实测两条全是误报（用户实报）。深挖后确认根因是**判据本身不成立**：
+ *
+ *    `world_map_transit` 只是 **10 个站点的干线网**（城际线/环线/水路线，用于跨区通勤计时），
+ *    **不是**"所有可达地点"的清单 —— 绝大多数地点（二维市、鸽川区、馋嘴胡同…）
+ *    本就不在表里，却完全可达。
+ *
+ *    实测两种写法都会误报：
+ *      · 硬编码 2 个名字 → 「世界尽头酒馆」被 66 角色累计误报 99 次
+ *        （它在地图里是 **public 的 lv2**，且另有独立的「世界尽头酒馆传送门」节点 ⇒ 明明可达）；
+ *      · 改成"凡不在通勤网即孤立" → 误报 **532** 次（把二维市都算成到不了）。
+ *
+ *    ⇒ 结论：**不能拿稀疏干线网反推可达性**。本项**默认不报**（集合为空），
+ *      只在地图**未来显式提供孤立标记**时才填 —— 宁可漏报，也不要用假阳性淹没真风险。
+ *      真正需要拦的"谢绝外人"由 `forbiddenPlaces`（access=restricted/private）负责，那条是准的。
+ */
 function buildLedgerCtx() {
   const forbiddenPlaces = new Set();
   const noTransferPlaces = new Set();
@@ -457,11 +517,7 @@ function buildLedgerCtx() {
     }
   } catch { /* 地图取不到就不做这两项检查 */ }
   try {
-    // 不可直接抵达：不在任何线路上的孤立地点（幻月秘庭、世界尽头酒馆）
     const edges = listTransitEdges();
-    const onNet = new Set();
-    for (const e of edges) { onNet.add(e.from_stop); onNet.add(e.to_stop); }
-    for (const n of ['幻月秘庭', '世界尽头酒馆']) if (!onNet.has(n)) noTransferPlaces.add(n);
     for (const e of edges) transferMinutes.set(`${e.from_stop}→${e.to_stop}`, e.minutes);
   } catch { /* ignore */ }
   return { forbiddenPlaces, noTransferPlaces, transferMinutes };
@@ -547,12 +603,14 @@ router.put('/:characterId/activity', (req, res) => {
       return res.status(404).json({ error: 'character not found' });
     }
 
-    const { index, startTime, endTime, activity, location, description } = req.body || {};
+    // ★ tags 必须一并透传：`sanitizeActivityInput` 会清洗并保留 tags，
+//   但若这里不解构出来，手改的小标签会在保存时被静默丢掉（用户 2026-10-06 要求可改标签）。
+    const { index, startTime, endTime, activity, location, description, tags } = req.body || {};
     if (typeof index !== 'number' || index < 0) {
       return res.status(400).json({ error: 'invalid index' });
     }
 
-    const result = updateScheduleActivity(characterId, index, { startTime, endTime, activity, location, description });
+    const result = updateScheduleActivity(characterId, index, { startTime, endTime, activity, location, description, tags });
     if (!result.ok) {
       return res.status(400).json({ error: result.error });
     }
