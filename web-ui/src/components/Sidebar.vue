@@ -880,11 +880,8 @@ function formatTime(iso) {
   animation: jelly-pop 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.35);
 }
 
-/* 《邻舍日报》未读点：与信箱数字徽标同皮肤，收成小圆点落到图标左上位 */
+/* 《邻舍日报》未读点：与信箱数字徽标同皮肤，收成小圆点 */
 .nav-dot-daily {
-  top: -6px;
-  right: auto;
-  left: -10px;
   width: 12px;
   min-width: 12px;
   height: 12px;
@@ -924,6 +921,20 @@ function formatTime(iso) {
 }
 .more-menu-item:hover { background: var(--tint-subtle); }
 .more-menu-item svg { flex-shrink: 0; }
+
+/* 菜单徽标统一贴图标左上角；数字变宽时向左延展，避免遮挡图标。 */
+.more-menu-item .nav-dot {
+  top: -6px;
+  right: calc(100% - 2px);
+  left: auto;
+  width: 12px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 6px;
+  line-height: 9px;
+}
 
 /* 弹窗动画 */
 .menu-slide-enter-active, .menu-slide-leave-active {

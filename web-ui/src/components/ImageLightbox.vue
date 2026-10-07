@@ -293,10 +293,10 @@ async function onDownload() {
     if (bridge && typeof bridge.saveImage === 'function') {
       const res = bridge.saveImage(filename, await blobToDataURL(blob))
       if (res === 'ok') {
-        toastFn?.('已保存到相册', 'success')
+        toastFn?.('已保存到相册「邻舍」', 'success')
       } else if (res === 'permission_pending') {
         // 权限待授权不算完成，也不发 saved
-        toastFn?.('已请求存储权限，授权后将自动保存', 'info')
+        toastFn?.('已请求相册权限，授权后将自动保存到「邻舍」', 'info')
       } else {
         toastFn?.('保存失败: ' + (res || '未知错误'), 'error')
       }

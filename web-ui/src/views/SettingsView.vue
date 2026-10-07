@@ -685,175 +685,6 @@ type="range" min="0" max="1" step="0.1"
         </div>
       </div>
 
-      <!-- 角色通知（右下角轻通知） -->
-      <div class="card">
-        <h3>角色通知</h3>
-        <p class="fd">你与角色有关的操作（下载她分享的图、置顶、点赞动态、换外观、重开旧回信）后，右下角偶尔出现一句角色反应。不依赖立绘小窗，也不占用聊天消息。</p>
-
-        <div class="toggle-row">
-          <div style="flex:1">
-            <div class="tl">启用角色通知</div>
-            <div class="td">关闭后停止采集与派生计时，不再弹出新的通知</div>
-          </div>
-          <linshe-button
-            v-if="reactions.config.enabled"
-            size="sm"
-            variant="ghost"
-            class="ct-preview-btn"
-            @click="previewReaction()"
-          >
-预览一条
-          </linshe-button>
-          <linshe-switch
-            :model-value="reactions.config.enabled"
-            title="启用角色通知"
-            aria-label="启用角色通知"
-            @change="reactions.updateConfig({ enabled: $event })"
-          />
-        </div>
-
-        <template v-if="reactions.config.enabled">
-          <div class="toggle-row ct-slider-row">
-            <div>
-              <div class="tl">显示时长</div>
-              <div class="td">单条通知停留多久后渐出，悬停或键盘焦点在卡片内时暂停计时</div>
-            </div>
-            <div class="ct-slider-control">
-              <linshe-slider
-                :model-value="reactions.config.displayDuration"
-                :min="3000"
-                :max="10000"
-                :step="500"
-                aria-label="角色通知显示时长"
-                @update:model-value="reactions.updateConfig({ displayDuration: $event })"
-              />
-              <span class="ct-slider-val">{{ (reactions.config.displayDuration / 1000).toFixed(1) }} 秒</span>
-            </div>
-          </div>
-
-          <div class="toggle-row">
-            <div style="flex:1">
-              <div class="tl">提示音</div>
-              <div class="td">新通知出现时播放一声很轻的提示音，页面在后台时不响</div>
-            </div>
-            <linshe-switch
-              :model-value="reactions.config.soundEnabled !== false"
-              title="提示音"
-              aria-label="提示音"
-              @change="reactions.updateConfig({ soundEnabled: $event })"
-            />
-          </div>
-
-          <div class="toggle-row ct-slider-row">
-            <div>
-              <div class="tl">通知频率</div>
-              <div class="td">两次通知之间的最短间隔，越大越安静</div>
-            </div>
-            <div class="ct-slider-control">
-              <linshe-slider
-                :model-value="reactions.config.globalGapMs"
-                :min="5000"
-                :max="120000"
-                :step="5000"
-                aria-label="角色通知最短间隔"
-                @update:model-value="reactions.updateConfig({ globalGapMs: $event })"
-              />
-              <span class="ct-slider-val">{{ Math.round(reactions.config.globalGapMs / 1000) }} 秒</span>
-            </div>
-          </div>
-
-          <div class="ct-category-block">
-            <div class="ct-block-title">按类别开关</div>
-            <div v-for="cat in reactionCategoryOptions" :key="cat.key" class="toggle-row ct-category-row">
-              <div>
-                <div class="tl">{{ cat.label }}</div>
-                <div class="td">{{ cat.desc }}</div>
-              </div>
-              <linshe-switch
-                :model-value="reactions.config.categoryEnabled[cat.key] !== false"
-                :aria-label="cat.label"
-                @change="reactions.setCategoryEnabled(cat.key, $event)"
-              />            </div>
-          </div>
-
-          <div class="toggle-row">
-            <div style="flex:1">
-              <div class="tl">即时生成反应</div>
-              <div class="td">小概率由模型结合人设与本次事实现写一句，未命中不弹通知（配置了专属短句包的角色会改用短句包）；命中与否不影响操作结果</div>
-            </div>
-            <linshe-switch
-              :model-value="reactions.config.llmEnabled"
-              title="即时生成反应"
-              aria-label="即时生成反应"
-              @change="reactions.updateConfig({ llmEnabled: $event })"
-            />
-          </div>
-
-          <template v-if="reactions.config.llmEnabled">
-            <div class="toggle-row ct-slider-row">
-              <div>
-                <div class="tl">即时反应概率</div>
-                <div class="td">只对已经通过冷却与去重的候选抽签一次，命中就请求模型；未命中不弹通知，配置了专属短句包的角色改用短句包</div>
-              </div>
-              <div class="ct-slider-control">
-                <linshe-slider
-                  :model-value="Math.round(reactions.config.llmProbability * 100)"
-                  :min="0"
-                  :max="100"
-                  :step="5"
-                  aria-label="即时反应概率"
-                  @update:model-value="reactions.updateConfig({ llmProbability: $event / 100 })"
-                />
-                <span class="ct-slider-val">{{ Math.round(reactions.config.llmProbability * 100) }}%</span>
-              </div>
-            </div>
-          </template>
-
-          <!-- 短句包（M2）：用户主动生成，生成后反复使用，不再产生模型调用 -->
-          <div class="ct-pack-block">
-            <div class="ct-block-title">专属短句包</div>
-            <p class="td ct-pack-intro">按角色生成一整套短反馈（每类 3 条），之后未命中即时生成时优先用它。不会自动生成，也不会因为人设改动自动重写。</p>
-            <div v-for="c in packTargets" :key="c.id" class="ct-pack-row">
-              <span class="ct-pack-name" :title="c.name">{{ c.name }}</span>
-              <span class="ct-pack-status" :class="'is-' + (packStatusOf(c.id).tone)">{{ packStatusOf(c.id).label }}</span>
-              <linshe-button
-                size="sm"
-                variant="secondary"
-                :loading="packStatusOf(c.id).generating"
-                @click="onGeneratePack(c)"
-              >
-{{ packStatusOf(c.id).loaded ? '重新生成' : '生成' }}
-              </linshe-button>
-              <linshe-button
-                v-if="packStatusOf(c.id).loaded"
-                size="sm"
-                variant="ghost"
-                @click="onTogglePack(c)"
-              >
-{{ packStatusOf(c.id).disabled ? '启用' : '停用' }}
-              </linshe-button>
-              <linshe-button
-                v-if="packStatusOf(c.id).loaded"
-                size="sm"
-                variant="ghost"
-                @click="onEditPack(c)"
-              >
-编辑
-              </linshe-button>
-              <linshe-button
-                v-if="packStatusOf(c.id).loaded"
-                size="sm"
-                variant="ghost"
-                @click="onDeletePack(c)"
-              >
-删除
-              </linshe-button>
-            </div>
-            <p v-if="packTargets.length === 0" class="td">还没有角色，先创建角色再来生成短句包。</p>
-          </div>
-        </template>
-      </div>
-
       <!-- 生图服务连接 -->
       <div class="card image-connection-card">
         <h3>图片生成服务</h3>
@@ -1239,25 +1070,6 @@ type="range" min="0" max="1" step="0.1"
       </template>
     </linshe-modal>
 
-    <!-- 短句包手动编辑：结构固定（每类 3 条），保存走同一套严格校验 -->
-    <linshe-modal v-model="packEditor.show" :title="`编辑「${packEditor.name}」的短句包`" wide>
-      <p class="disturb-dialog-hint">每类固定 3 条，通常 12～32 个汉字，最多 40 个可见字符。清空某条会按不合法处理，保存失败时旧包保持可用。</p>
-      <div v-for="item in packEditor.items" :key="item.eventType" class="ct-editor-block">
-        <div class="ct-editor-title">{{ item.eventType }}</div>
-        <linshe-input
-          v-for="(line, index) in item.lines"
-          :key="index"
-          v-model="line.text"
-          class="fi ct-editor-line"
-          :maxlength="40"
-          :placeholder="`第 ${index + 1} 条台词`"
-        />
-      </div>
-      <template #footer>
-        <linshe-button variant="ghost" @click="packEditor.show = false">取消</linshe-button>
-        <linshe-button variant="primary" :loading="packEditor.saving" @click="onSavePack">保存</linshe-button>
-      </template>
-    </linshe-modal>
     <!-- 工作流模式弹窗 -->
     <linshe-modal v-model="showWfModeDialog" title="工作流模式" wide>
       <div class="wf-mode-options">
@@ -1326,8 +1138,6 @@ import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue
 import { useRouter } from 'vue-router'
 import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
-import { useCharacterReactionsStore } from '../stores/characterReactions.js'
-import { useChatStore } from '../stores/chat.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import BeforeAfterSlider from '../components/BeforeAfterSlider.vue'
@@ -1355,104 +1165,6 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
 const confirmFn = inject('confirm')
 const showChangelogFn = inject('showChangelog', null)
-
-// ── 角色通知（右下角轻通知）：配置与预览都走 store，设置页只做入口 ──
-const reactions = useCharacterReactionsStore()
-const chat = useChatStore()
-const previewReaction = () => {
-  const first = chat.characters?.[0]
-  reactions.preview(first ? `character:${first.id}` : 'character:1')
-}
-const reactionCategoryOptions = [
-  { key: 'character', label: '角色资料', desc: '置顶、更换头像、修改显示名，或改动与角色的关系时的反应' },
-  { key: 'moment', label: '点赞动态', desc: '点赞角色朋友圈，翻到很久以前的动态会用另一种语气' },
-  { key: 'appearance', label: '外观道具', desc: '给角色使用外观类道具、或主动换回原外观后的反应' },
-  { key: 'letter', label: '重开旧回信', desc: '再次打开角色写来、且已经读过很久的回信' },
-  { key: 'schedule', label: '日程互动', desc: '瞄一眼角色此刻在做什么时的反应' },
-]
-
-// ── 短句包（M2）：只在用户点击时生成，生成后反复使用，不再产生模型调用 ──
-const packTargets = computed(() => (chat.characters || []).map(c => ({
-  id: c.id,
-  name: c.display_name || c.name || `角色 ${c.id}`,
-})))
-const packGenerating = ref(null)
-
-function packStatusOf(characterId) {
-  const entry = reactions.packEntry(`character:${characterId}`)
-  if (packGenerating.value === characterId) {
-    return { label: '生成中…', tone: 'busy', generating: true, loaded: !!entry?.overrides, disabled: false }
-  }
-  if (!entry?.overrides) return { label: '未生成', tone: 'idle', generating: false, loaded: false, disabled: false }
-  if (entry.disabled) return { label: '已停用', tone: 'idle', generating: false, loaded: true, disabled: true }
-  if (entry.stale) return { label: '可更新（人设已变）', tone: 'warn', generating: false, loaded: true, disabled: false }
-  return { label: '已生成', tone: 'ok', generating: false, loaded: true, disabled: false }
-}
-
-async function onGeneratePack(character) {
-  if (packGenerating.value !== null) return
-  packGenerating.value = character.id
-  const result = await reactions.generatePack(`character:${character.id}`)
-  packGenerating.value = null
-  if (result.ok) toastFn?.(`「${character.name}」的短句包已生成`, 'success')
-  else toastFn?.(result.error || '短句包生成失败', 'error')
-}
-
-async function onDeletePack(character) {
-  const ok = confirmFn
-    ? await confirmFn({ message: `删除「${character.name}」的短句包？删除后该角色未命中概率时将不再弹通知。`, okText: '删除', danger: true })
-    : window.confirm('确定删除这份短句包吗？')
-  if (!ok) return
-  const result = await reactions.deletePack(`character:${character.id}`)
-  if (result.ok) toastFn?.('已删除短句包', 'success')
-  else toastFn?.(result.error || '删除失败', 'error')
-}
-
-function onTogglePack(character) {
-  const entry = reactions.packEntry(`character:${character.id}`)
-  reactions.setPackEnabled(`character:${character.id}`, !!entry?.disabled)
-}
-
-// 手动编辑：结构固定为「每类 3 条」，只允许改台词文本
-const packEditor = reactive({ show: false, saving: false, characterId: null, name: '', items: [] })
-
-function onEditPack(character) {
-  const entry = reactions.packEntry(`character:${character.id}`)
-  const overrides = entry?.overrides
-  if (!overrides) return
-  packEditor.characterId = character.id
-  packEditor.name = character.name
-  packEditor.items = Object.entries(overrides).map(([eventType, lines]) => ({
-    eventType,
-    lines: lines.map(line => ({ text: line.text, emotion: line.emotion })),
-  }))
-  packEditor.show = true
-}
-
-async function onSavePack() {
-  if (packEditor.saving || packEditor.characterId === null) return
-  packEditor.saving = true
-  const result = await reactions.savePack(`character:${packEditor.characterId}`, {
-    schemaVersion: 1,
-    characterId: packEditor.characterId,
-    reactions: packEditor.items.map(item => ({
-      eventType: item.eventType,
-      lines: item.lines.map(line => ({ text: line.text, emotion: line.emotion })),
-    })),
-  })
-  packEditor.saving = false
-  if (result.ok) {
-    packEditor.show = false
-    toastFn?.('短句包已保存', 'success')
-  } else {
-    toastFn?.(result.error || '短句包保存失败', 'error')
-  }
-}
-
-onMounted(() => {
-  // 只读取已有状态，不触发生成
-  for (const target of packTargets.value) reactions.loadPack(`character:${target.id}`)
-})
 
 // ── 更新说明入口：显示最新版本号与条目数，点击重新打开弹窗 ──
 const changelogLatest = computed(() => CHANGELOG_ENTRIES[0] || null)
@@ -2866,7 +2578,7 @@ function resetTestPrompts() {
 </script>
 
 <style scoped>
-.settings-view { padding: 32px; overflow-y: auto; overflow-x: hidden; height: 100vh; height: 100dvh; flex: 1; }
+.settings-view { padding: 32px; overflow-y: auto; overflow-x: hidden; height: 100vh; height: 100dvh; flex: 1; min-width: 0; width: 100%; container-type: inline-size; }
 .page-header {
   margin-bottom: 28px;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -3178,84 +2890,6 @@ function resetTestPrompts() {
 }
 .freq-val {
   font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
-}
-
-/* ── 角色通知（右下角轻通知）设置 ── */
-.ct-preview-btn { flex-shrink: 0; margin-right: 4px; }
-.ct-slider-row { align-items: flex-start; }
-.ct-slider-control {
-  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-  width: 200px;
-}
-.ct-slider-control :deep(.ls-slider) { flex: 1; min-width: 0; }
-.ct-slider-val {
-  font-size: 13px; font-weight: 600; color: var(--accent);
-  min-width: 56px; text-align: right; white-space: nowrap;
-}
-.ct-category-block {
-  padding-top: 12px;
-  border-top: 1px solid var(--glass-border);
-}
-.ct-block-title {
-  font-size: 13px; font-weight: 600; color: var(--text-bright);
-  margin-bottom: 2px;
-}
-.ct-category-row { padding: 10px 0; }
-.ct-category-row .td { max-width: 46ch; }
-
-/* ── 短句包（M2）── */
-.ct-pack-block {
-  padding-top: 14px;
-  margin-top: 4px;
-  border-top: 1px solid var(--glass-border);
-}
-.ct-pack-intro { margin: 4px 0 10px; max-width: 62ch; line-height: 1.55; }
-.ct-pack-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--glass-border);
-}
-.ct-pack-row:last-of-type { border-bottom: none; }
-.ct-pack-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text-bright);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ct-pack-status {
-  flex-shrink: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-  min-width: 96px;
-  text-align: right;
-}
-.ct-pack-status.is-ok { color: var(--success); }
-.ct-pack-status.is-warn { color: var(--warning); }
-.ct-pack-status.is-busy { color: var(--accent); }
-.ct-pack-status.is-idle { color: var(--text-secondary); }
-
-/* 短句包编辑弹窗 */
-.ct-editor-block { margin-bottom: 14px; }
-.ct-editor-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-  font-family: var(--font-mono, monospace);
-}
-.ct-editor-line { margin-bottom: 6px; }
-@media (max-width: 767px) {
-  .ct-pack-row { flex-wrap: wrap; }
-  .ct-pack-status { min-width: 0; }
-}
-@media (max-width: 767px) {
-  .ct-slider-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .ct-slider-control { width: 100%; }
 }
 
 /* ── 防打扰模式 ── */
@@ -3698,10 +3332,15 @@ function resetTestPrompts() {
 .style-preview-img:hover { transform: scale(1.03); }
 
 
-/* ── 平板竖屏（768~1023）：双列太挤，卡片改单列 ── */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .settings-grid { grid-template-columns: 1fr; }
+/* 按扣除导航与会话侧栏后的正文宽度切换，兼容平板横屏和分屏。 */
+@container (max-width: 960px) {
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .fr, .free-scene-row { flex-direction: column; align-items: stretch; }
+  .sa { flex-wrap: wrap; }
 }
+.settings-grid > * { min-width: 0; }
+.style-preview-img { display: block; }
+
 
 /* ── 移动端：卡片单列 + 间距收缩 ── */
 @media (max-width: 767px) {

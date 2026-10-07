@@ -2,7 +2,7 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -465,13 +465,14 @@ const isMobile = inject('isMobile')
 const imageEditTasks = useImageEditTasksStore()
 
 // ── 布局口径：主面板 880px + 左立绘(300) + 右浮窗(228) 三栏并排至少要 1532px 视口 ──
-// 手机（≤767）走 isMobile；平板横屏等「放不下侧栏」的宽度同样收进正文流，
+// 手机、触屏平板及放不下侧栏的视口统一收进正文流，
 // 否则左右两块悬浮窗会被截掉一截（平板上「两边看不全」的根因）。
 const SIDE_LAYOUT_MIN = 1532
-const hasSideRoom = ref(typeof window === 'undefined' || window.innerWidth >= SIDE_LAYOUT_MIN)
-function syncSideRoom() { hasSideRoom.value = window.innerWidth >= SIDE_LAYOUT_MIN }
-onMounted(() => window.addEventListener('resize', syncSideRoom))
-onUnmounted(() => window.removeEventListener('resize', syncSideRoom))
+const sideRoomQuery = typeof window === 'undefined' ? null : window.matchMedia(`(min-width: ${SIDE_LAYOUT_MIN}px) and (hover: hover) and (pointer: fine)`)
+const hasSideRoom = ref(sideRoomQuery?.matches ?? false)
+function syncSideRoom() { hasSideRoom.value = sideRoomQuery?.matches ?? false }
+onMounted(() => { syncSideRoom(); sideRoomQuery?.addEventListener('change', syncSideRoom) })
+onUnmounted(() => sideRoomQuery?.removeEventListener('change', syncSideRoom))
 const inlineLayout = computed(() => isMobile.value || !hasSideRoom.value)
 
 // ── 详情编辑状态 ──
@@ -1555,49 +1556,49 @@ const standingPanel = reactive({
 }
 
 /* ═══ 移动端 ═══
-   几何与 LinsheModal 的移动端段落同口径：遮罩只收留白（8px + 安全区），面板保留
-   圆角 / 描边 / 白内衬的浮层观感 —— 不要再退回 100vw/100dvh + border-radius:0 的全屏面板。
-   正文改成「内容优先」的纵向流：头像 → 内容卡 → 更多设置，底部操作区固定。 */
-@media (max-width: 767px) {
-  .modal-overlay {
-    padding: calc(8px + env(safe-area-inset-top, 0px))
-             calc(8px + env(safe-area-inset-right, 0px))
-             calc(8px + env(safe-area-inset-bottom, 0px))
-             calc(8px + env(safe-area-inset-left, 0px));
-  }
-  .modal-panel, .modal-wide { width: 100%; max-width: 100%; max-height: 100%; }
-  .detail-panel { height: 100%; max-height: 100%; }
+ 几何与 LinsheModal 的移动端段落同口径：遮罩只收留白（8px + 安全区），面板保留
+ 圆角 / 描边 / 白内衬的浮层观感 —— 不要再退回 100vw/100dvh + border-radius:0 的全屏面板。
+ 正文改成「内容优先」的纵向流：头像 → 内容卡 → 更多设置，底部操作区固定。 */
 
-  /* 安全区由上方的遮罩留白让出，头部 / 底部不再各自叠加 */
-  .modal-header { padding: 12px 16px; }
-  .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
-  .modal-close { flex-shrink: 0; }
-  .modal-body { padding: 4px 14px 14px; }
-  .modal-footer { padding: 10px 14px 14px; }
-
-  .modal-body-detail { overflow-y: auto; }
-  .modal-body-detail .preview-card { flex: none; padding: 14px; border-radius: 12px; }
-  .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
-  .modal-wide .fi, .modal-wide .prompt-textarea { font-size: 16px; }
-
-  /* 头像行：允许换行，誓约徽章不再把「更换头像 / 移除」挤出屏幕 */
-  .detail-avatar-row { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 0 2px; }
-  .detail-avatar { width: 56px; height: 56px; font-size: 24px; }
-
-  /* 角色关系：标题独占一行，入口按钮并排平分（原先是标题被两个按钮挤成两行） */
-  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
-  .detail-rel-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 10px; }
-  .detail-rel-btns, .detail-rel-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .detail-rel-btn { width: 100%; justify-content: center; }
-
-  /* 角色名 / 英文名：窄屏改单列，别把两个输入框挤进半屏 */
-  .detail-name-row { flex-direction: column; gap: 10px; }
-
-  /* 底部操作区：说明独占一行，删除 / 保存分列两端 */
-  .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
-  .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
-
-  .form-group .fl { font-size: 12px; }
-  .form-hint { font-size: 10px; }
+.detail-inline {
+  padding: calc(8px + env(safe-area-inset-top, 0px))
+           calc(8px + env(safe-area-inset-right, 0px))
+           calc(8px + env(safe-area-inset-bottom, 0px))
+           calc(8px + env(safe-area-inset-left, 0px));
 }
+.detail-inline .modal-panel, .detail-inline .modal-wide { width: 100%; max-width: 100%; max-height: 100%; }
+.detail-inline .detail-panel { height: 100%; max-height: 100%; }
+
+/* 安全区由上方的遮罩留白让出，头部 / 底部不再各自叠加 */
+.detail-inline .modal-header { padding: 12px 16px; }
+.detail-inline .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+.detail-inline .modal-close { flex-shrink: 0; }
+.detail-inline .modal-body { padding: 4px 14px 14px; }
+.detail-inline .modal-footer { padding: 10px 14px 14px; }
+
+.detail-inline .modal-body-detail { overflow-y: auto; }
+.detail-inline .modal-body-detail .preview-card { flex: none; padding: 14px; border-radius: 12px; }
+.detail-inline .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
+.detail-inline .modal-wide .fi, .detail-inline .modal-wide .prompt-textarea { font-size: 16px; }
+
+/* 头像行：允许换行，誓约徽章不再把「更换头像 / 移除」挤出屏幕 */
+.detail-inline .detail-avatar-row { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 0 2px; }
+.detail-inline .detail-avatar { width: 56px; height: 56px; font-size: 24px; }
+
+/* 角色关系：标题独占一行，入口按钮并排平分（原先是标题被两个按钮挤成两行） */
+.detail-inline .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+.detail-inline .detail-rel-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 10px; }
+.detail-inline .detail-rel-btns, .detail-inline .detail-rel-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.detail-inline .detail-rel-btn { width: 100%; justify-content: center; }
+
+/* 角色名 / 英文名：窄屏改单列，别把两个输入框挤进半屏 */
+.detail-inline .detail-name-row { flex-direction: column; gap: 10px; }
+
+/* 底部操作区：说明独占一行，删除 / 保存分列两端 */
+.detail-inline .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.detail-inline .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
+
+.detail-inline .form-group .fl { font-size: 12px; }
+.detail-inline .form-hint { font-size: 10px; }
+
 </style>

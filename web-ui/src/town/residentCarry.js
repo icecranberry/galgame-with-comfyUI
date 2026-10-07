@@ -1,3 +1,5 @@
+import { createClientRequestId } from '../utils/clientRequestId.js'
+
 export const CARRY_PRESS_MS = 450
 const MOVE_SLOP = 8
 // 手指没有鼠标稳：触摸长按的位移容差放宽，轻微抖动不算「已经拖走了」
@@ -5,7 +7,7 @@ const TOUCH_MOVE_SLOP = 18
 
 /** Pointer gesture + cancellable async lease. Rendering and HTTP stay in adapters. */
 export function createResidentCarry({ request, scope, dropCell, changed = () => {}, started = () => {},
-  settled = () => {}, error = () => {}, now = Date.now, token = () => crypto.randomUUID() }) {
+  settled = () => {}, error = () => {}, now = Date.now, token = createClientRequestId }) {
   let gesture = null, pressTimer = null, renewal = null, landingTimer = null
   const counts = new Map()
   const emit = () => changed(gesture?.phase === 'waiting' ? null : gesture && { ...gesture })

@@ -4,10 +4,9 @@
  * 这一层只做判断，不碰 DOM、不碰网络、不读 Pinia：
  *   · 事件目录（哪些语义事件允许弹、谁生产、事实边界）
  *   · 目标角色与去重键解析
- *   · 资源级 / 日级去重、全局与角色冷却、类别开关
+ *   · 资源级 / 日级去重；不同事实之间无展示冷却
  *   · 一次概率抽签（命中即请求模型，无额度 / 间隔 / 并发限制）
- *   · 角色级短句（短句包 / 手动编辑）：仅未命中且该角色配置了短句时显示，否则静默；
- *     内置基础短句已移除（§18）
+ *   · 未命中概率时静默，旧短句包不参与通知展示
  *
  * 时钟（now）与随机源（random）由调用方注入，便于测试固定边界；
  * 见 docs/character-reaction-notification-plan.md §2.2 / §5.4 / §6 / §7.1。
@@ -21,11 +20,8 @@ export const DEFAULT_CONFIG = {
   maxPerScreen: 1,
   maxStack: 3,
   soundEnabled: true,
-  displayDuration: 5000,
+  displayDuration: 8000,
   mergeWindowMs: 400,
-  globalGapMs: 20_000,
-  perActorGapMs: 60_000,
-  perCategoryGapMs: 300_000,
   blockedCandidateTtlMs: 8_000,
   llmEnabled: true,
   llmProbability: 0.15,
@@ -357,9 +353,6 @@ export function createReactionEngine(options = {}) {
     config.categoryEnabled = { ...DEFAULT_CONFIG.categoryEnabled, ...options.config.categoryEnabled }
   }
 
-  let lastShownAt = 0
-  const lastShownByActor = new Map()
-  const lastShownByCategory = new Map()
   const dedupe = new Map()      // key -> { until, day }
   const llmDedupe = new Map()   // key -> { until }：抽签结果绑定去重键，重挂载不重抽
   const pendingLlm = new Map()  // key -> until：已发起但尚未落地的模型请求，防止重复请求
@@ -433,7 +426,7 @@ export function createReactionEngine(options = {}) {
 
   function dedupeTtlFor(event) {
     const spec = CATALOG[event.type]
-    return Number(spec?.dedupeTtlMs) > 0 ? Number(spec.dedupeTtlMs) : config.perCategoryGapMs
+    return Number(spec?.dedupeTtlMs) > 0 ? Number(spec.dedupeTtlMs) : 300_000
   }
 
   function markShown(event, t = now()) {
@@ -442,7 +435,7 @@ export function createReactionEngine(options = {}) {
     const spec = CATALOG[event.type]
     const dayScoped = spec?.dedupeScope === 'resource-day' || spec?.dedupeScope === 'actor-day'
     dedupe.set(key, dayScoped
-      ? { day: localDayKey(t), until: t + config.perCategoryGapMs }
+      ? { day: localDayKey(t), until: t + 300_000 }
       : { until: t + dedupeTtlFor(event) })
     if (dedupe.size > config.maxDedupeEntries) pruneDedupe(t)
   }
@@ -513,20 +506,6 @@ export function createReactionEngine(options = {}) {
     return t - occurred > config.eventTtlMs
   }
 
-  function displayGapBlocked(t) {
-    return t - lastShownAt < config.globalGapMs
-  }
-
-  function actorGapBlocked(event, t) {
-    return t - (lastShownByActor.get(event.actorKey) || 0) < config.perActorGapMs
-  }
-
-  function categoryGapBlocked(event, t) {
-    const spec = CATALOG[event.type]
-    if (!spec) return true
-    return t - (lastShownByCategory.get(spec.cooldownKey) || 0) < config.perCategoryGapMs
-  }
-
   /**
    * 一次判定的结果：
    *  { action: 'ignore' | 'silent', reason }
@@ -535,7 +514,6 @@ export function createReactionEngine(options = {}) {
    * @param {object} event 标准化事件
    * @param {number} [t] 判定时刻
    * @param {object} [opts] `{ llmForced, overrides }`；`llmForced` 强制视为命中抽签（仅供测试与手动调试），
-   *   `overrides` 为该角色的缓存短句覆盖（短句包 / 手动编辑），仅用于未命中时的回退。
    */
   function decide(event, t = now(), opts = {}) {
     if (!event || !isKnownEventType(event.type)) {
@@ -555,12 +533,7 @@ export function createReactionEngine(options = {}) {
     if (isDuplicate(event, t)) return { action: 'ignore', reason: 'duplicate' }
     pruneDedupe(t)
 
-    // 展示冷却：不排队，直接丢弃（§6.1）。先报角色级间隔，再报全局间隔，便于定位
-    if (actorGapBlocked(event, t)) return { action: 'ignore', reason: 'actor-cooldown' }
-    if (displayGapBlocked(t)) return { action: 'ignore', reason: 'global-cooldown' }
-    if (categoryGapBlocked(event, t)) return { action: 'ignore', reason: 'category-cooldown' }
-
-    // 即时反应：一次概率抽签，命中即请求模型；未命中只在该角色配置了短句（包 / 手动编辑）时显示，否则静默
+    // 即时反应：一次概率抽签，命中即请求模型；未命中静默，不使用短句包绕过概率
     if (spec.llm && config.llmEnabled) {
       if (!hasRolled(event)) markRolled(event, t)
       const hit = opts.llmForced === true || rollLlm()
@@ -571,9 +544,7 @@ export function createReactionEngine(options = {}) {
       }
     }
 
-    const cached = resolveCachedText(event, opts.overrides || null, random)
-    if (!cached) return { action: 'silent', reason: 'no-cached-line' }
-    return { action: 'display', source: 'cached', ...cached, event }
+    return { action: 'silent', reason: 'probability-miss' }
   }
 
   /** 只做「这次事实是否还值得展示」的终检（异步返回后调用，§7.1-6） */
@@ -585,18 +556,11 @@ export function createReactionEngine(options = {}) {
     if (!isSupportedActor(event.actorKey)) return false
     if (isLlmExpired(event, t)) return false
     if (isShownDuplicate(event, t)) return false
-    if (displayGapBlocked(t)) return false
-    if (actorGapBlocked(event, t)) return false
-    if (categoryGapBlocked(event, t)) return false
     return true
   }
 
-  /** 真正开始展示时计入冷却（§6.1） */
+  /** 真正开始展示时记录同事实去重 */
   function markDisplayed(event, t = now()) {
-    lastShownAt = t
-    lastShownByActor.set(event.actorKey, t)
-    const spec = CATALOG[event.type]
-    if (spec) lastShownByCategory.set(spec.cooldownKey, t)
     markShown(event, t)
   }
 
@@ -607,18 +571,12 @@ export function createReactionEngine(options = {}) {
 
   function snapshot() {
     return {
-      lastShownAt,
-      lastShownByActor: Object.fromEntries(lastShownByActor),
-      lastShownByCategory: Object.fromEntries(lastShownByCategory),
       dedupe: Object.fromEntries(dedupe),
     }
   }
 
   function hydrate(state) {
     if (!state) return
-    lastShownAt = Number(state.lastShownAt) || 0
-    for (const [k, v] of Object.entries(state.lastShownByActor || {})) lastShownByActor.set(k, Number(v) || 0)
-    for (const [k, v] of Object.entries(state.lastShownByCategory || {})) lastShownByCategory.set(k, Number(v) || 0)
     for (const [k, v] of Object.entries(state.dedupe || {})) dedupe.set(k, v)
   }
 
@@ -638,6 +596,6 @@ export function createReactionEngine(options = {}) {
     snapshot,
     hydrate,
     // 供测试观察内部状态
-    _internals: { dedupe, llmDedupe, lastShownByActor, lastShownByCategory, mergedOperations },
+    _internals: { dedupe, llmDedupe, mergedOperations },
   }
 }

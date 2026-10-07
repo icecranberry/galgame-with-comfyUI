@@ -31,13 +31,23 @@
         </div>
         <div class="chat-header-right">
           <linshe-button class="standing-entry-desktop" variant="ghost" size="sm" @click="openStandingDisplayPage">同步形象展示 ↗</linshe-button>
-          <span class="affinity-reason-wrap">
+          <div
+            class="affinity-reason-wrap"
+            role="button"
+            tabindex="0"
+            title="对你的印象"
+            aria-label="查看对你的印象"
+            aria-haspopup="dialog"
+            @click="openImpression"
+            @keydown.enter.prevent="openImpression"
+            @keydown.space.prevent="openImpression"
+          >
             <Transition name="roll">
               <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity?.lastReason" :key="chat.affinityKey" class="header-reason">
                 💬"{{ chat.realtimeAffinity.lastReason }}"
               </span>
             </Transition>
-          </span>
+          </div>
           <div class="btn-header-settings" title="角色设置" @click="openSettings">
             <gear-icon :size="16" />
           </div>
@@ -338,9 +348,12 @@
     <Transition name="editor-fade">
       <div v-if="showImpression" class="editor-overlay" @click.self="showImpression = false">
       <div class="editor-panel impression-panel">
-        <div class="editor-header">
-          <span>{{ chat.activeChar?.display_name }} 对你的印象</span>
-          <linshe-button variant="icon" class="editor-close" @click="showImpression = false">&times;</linshe-button>
+        <div class="editor-header impression-header">
+          <span class="impression-title" :title="`${chat.activeChar?.display_name || ''} 对你的印象`">{{ chat.activeChar?.display_name }} 对你的印象</span>
+          <div class="impression-header-actions">
+            <linshe-button variant="ghost" size="sm" @click="openStandingDisplayPage">同步形象展示 ↗</linshe-button>
+            <linshe-button variant="icon" class="editor-close" @click="showImpression = false">&times;</linshe-button>
+          </div>
         </div>
         <div class="impression-body">
           <!-- 加载中 -->
@@ -2221,8 +2234,8 @@ function renderContent(text) {
 }
 
 /* 编辑弹窗淡入缩放 */
-.editor-fade-enter-active { transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.editor-fade-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+.editor-fade-enter-active,
+.editor-fade-leave-active { transition: opacity 0.3s var(--ease-standard), transform 0.3s var(--ease-standard); }
 .editor-fade-enter-from { opacity:0; transform: scale(0.95); }
 .editor-fade-leave-to   { opacity:0; transform: scale(0.95); }
 .editor-header { padding:16px 20px; border-bottom:1px solid var(--glass-border); display:flex; align-items:center; justify-content:space-between; }
@@ -2560,6 +2573,9 @@ function renderContent(text) {
   flex: 1;
   padding: 0;
 }
+.impression-header { gap: 8px; }
+.impression-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.impression-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 /* 状态 */
 .impression-status {
@@ -3082,6 +3098,7 @@ function renderContent(text) {
 /* ── delta / reason roll 动画容器 ── */
 .affinity-delta-wrap,
 .affinity-reason-wrap { position: relative; display: inline-block; vertical-align: bottom; }
+.affinity-reason-wrap { cursor: pointer; text-align: left; touch-action: manipulation; }
 
 /* ── roll Transition ── */
 .roll-enter-active { animation: roll-in 0.2s ease; }

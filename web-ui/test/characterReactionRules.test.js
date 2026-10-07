@@ -198,19 +198,13 @@ test('paused scene still normalizes explicit operations instead of throwing', ()
 
 // ── 去重与冷却（§5.4 / §6.1）──
 
-test('100 repeats inside one dedupe window produce at most one candidate and one dice roll', () => {
-  const { engine } = makeEngine({ llmProbability: 0.5 })
-  const overrides = { 'appearance.applied': [{ text: '包里的台词。', emotion: 'neutral' }] }
-  let displayed = 0
-  let modelRequests = 0
+test('100 duplicate deliveries request the model only once', () => {
+  const { engine } = makeEngine({ llmProbability: 1 })
+  let requests = 0
   for (let i = 0; i < 100; i += 1) {
-    const decision = engine.decide(event({ operationId: `op-${i}` }), now(), { overrides })
-    if (decision.action === 'display') { displayed += 1; engine.markDisplayed(event()) }
-    if (decision.action === 'request-llm') modelRequests += 1
+    if (engine.decide(event({ operationId: `op-${i}` })).action === 'request-llm') requests++
   }
-  assert.equal(displayed, 1)
-  assert.equal(modelRequests, 0)
-  assert.equal(engine._internals.dedupe.size, 1)
+  assert.equal(requests, 1)
 })
 
 test('resource dedupe follows the catalog window and the same fact never repeats inside it', () => {
@@ -248,14 +242,14 @@ test('the 400ms merge window keeps only one semantic event of one business opera
   assert.equal(engine.decide(second).reason, 'merged')
   // 同类型事件的重复回包仍由去重兜住，不会被合并掩盖
   assert.equal(engine.decide(first).reason, 'duplicate')
-  // 走出合并窗口后按正常冷却 / 去重流程判定（先越过角色级 60 秒间隔，再撞上共享类别冷却）
+  // 走出合并窗口后，独立事实可以正常抽签
   clock += 61_000
   const other = event({ type: 'appearance.applied', subject: { kind: 'outfit', id: 'outfit-d' }, outcome: 'applied', operationId: 'op-other' })
-  assert.equal(engine.decide(other).reason, 'category-cooldown')
+  assert.equal(engine.decide(other).reason, 'probability-miss')
   assert.equal(engine.isWithinMergeWindow(other, clock), false)
 })
 
-test('character pack lines are used on a dice miss; without them the miss is silent', () => {
+test('a probability miss stays silent even with a legacy character pack', () => {
   const packOverrides = {
     'appearance.applied': [
       { text: '包里的第一条台词。', emotion: 'shy' },
@@ -263,37 +257,35 @@ test('character pack lines are used on a dice miss; without them the miss is sil
     ],
   }
   const { engine } = makeEngine({ llmProbability: 0 })
-  // 配置了角色级短句：未命中抽签时显示短句包
+  // 旧短句包不能绕过概率门槛
   const withPack = engine.decide(event(), now(), { overrides: packOverrides })
-  assert.equal(withPack.action, 'display')
-  assert.ok(['包里的第一条台词。', '包里的第二条台词。'].includes(withPack.text))
+  assert.equal(withPack.action, 'silent')
 
   // 没有角色级短句：未命中即静默，不再有内置基础短句（§18）
   const plain = engine.decide(event({ operationId: 'op-plain' }))
   assert.equal(plain.action, 'silent')
-  assert.equal(plain.reason, 'no-cached-line')
+  assert.equal(plain.reason, 'probability-miss')
 })
 
-test('display cooldowns run before the dice roll and never queue', () => {
-  const { engine } = makeEngine({ llmProbability: 1 })
+test('independent hits display immediately for the same actor and category', () => {
+  const { engine, rolls } = makeEngine()
+  assert.equal(DEFAULT_CONFIG.enabled, true)
+  assert.equal(DEFAULT_CONFIG.displayDuration, 8000)
+  assert.equal(DEFAULT_CONFIG.llmProbability, 0.15)
   engine.markDisplayed(event())
-  clock += 1000
-  assert.equal(engine.decide(event({ subject: { kind: 'outfit', id: 'outfit-2' } })).reason, 'actor-cooldown')
-  clock += 65_000
-  assert.equal(engine.decide(event({ subject: { kind: 'image', id: 'img-3' } })).reason, 'category-cooldown')
-})
-
-test('appearance.applied and appearance.restored share one cooldown bucket', () => {
-  const { engine } = makeEngine({ llmProbability: 0 })
-  engine.markDisplayed(event({ type: 'appearance.applied', subject: { kind: 'outfit', id: 'outfit-a' }, outcome: 'applied' }))
-  // 越过角色级 60 秒间隔，剩下的应该是共享类别冷却（5 分钟）
-  clock += 61_000
-  const appliedAgain = event({ type: 'appearance.applied', subject: { kind: 'outfit', id: 'outfit-b' }, outcome: 'applied', operationId: 'op-applied-2' })
-  assert.equal(engine.decide(appliedAgain).reason, 'category-cooldown')
-  assert.equal(CATALOG['appearance.restored'].cooldownKey, CATALOG['appearance.applied'].cooldownKey)
-  const restored = event({ type: 'appearance.restored', subject: { kind: 'outfit', id: 'outfit-c' }, outcome: 'applied', operationId: 'op-restore-1' })
-  assert.equal(engine.decide(restored).reason, 'category-cooldown')
-  assert.equal(isEnabledEventType('appearance.restored'), true, 'M3 起 restored 已接入展示')
+  for (let i = 0; i < 10; i++) {
+    const next = event({ subject: { id: `outfit-next-${i}` }, operationId: `next-${i}` })
+    rolls.push(0.149)
+    assert.equal(engine.decide(next).action, 'request-llm')
+    assert.equal(engine.stillValid(next), true)
+    engine.markDisplayed(next)
+  }
+  rolls.push(0.15)
+  assert.equal(engine.decide(event({ subject: { id: 'miss' }, operationId: 'miss' })).action, 'silent')
+  const restored = event({ type: 'appearance.restored', subject: { id: 'restore' }, operationId: 'restore' })
+  rolls.push(0)
+  assert.equal(engine.decide(restored).action, 'request-llm')
+  assert.equal(engine.stillValid(restored), true)
 })
 
 test('failed and cancelled outcomes never produce feedback', () => {

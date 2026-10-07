@@ -345,12 +345,14 @@ async function triggerGenerate(c) {
 }
 .header-hidden { transform: translateY(-100%); }
 .moments-title {
+  flex-shrink: 0;
+  white-space: nowrap;
   font-size: 18px; font-weight: 700; color: var(--text-bright);
 }
 .is-clickable { cursor: pointer; }
 
 /* 顶栏右侧按钮组（齿轮 + 扰动世界线） */
-.topbar-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.topbar-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 10px; }
 .lib-gear {
   width: 34px; height: 34px; border-radius: 50%;
   border: 2px solid transparent;
@@ -593,9 +595,20 @@ async function triggerGenerate(c) {
 @media (max-width: 767px) {
   .moments-view { position: relative; }
   .moments-header {
-    padding: 12px 16px;
+    padding: 12px 10px;
+    gap: 8px;
     position: absolute; top: 0; left: 0; right: 0; z-index: 20;
   }
+  .moments-title { font-size: 16px; }
+  .topbar-actions { gap: 4px; flex-shrink: 0; }
+  .topbar-actions .btn-post {
+    padding: 8px 8px;
+    font-size: 12px;
+    letter-spacing: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .topbar-actions .lib-gear { width: 30px; height: 34px; flex-shrink: 0; }
   .moments-feed { padding: 80px 10px 8px; }
   .moments-list { max-width: 100%; }
   .moments-filter-bar { max-width: 100%; padding: 0 0 6px 0; }

@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.ContentValues
 import android.content.Intent
+import android.graphics.Bitmap
+import org.json.JSONObject
 import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -40,6 +42,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
+import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
@@ -53,6 +56,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
+    private lateinit var gravitySensor: StandingGravitySensor
+    private var gravityForeground = false
+    private var gravityDestroyed = false
     private lateinit var setupPanel: View
     private lateinit var urlInput: EditText
     private lateinit var hintText: TextView
@@ -85,22 +91,49 @@ class MainActivity : AppCompatActivity() {
 
     // ── 网页相册保存（AndroidBridge.saveImage）──
 
-    /** API 26–28 缺存储权限时暂存待保存任务，授权后落盘 */
+    /** WebView 桥与主线程共享权限任务，避免连续点击覆盖待保存图片。 */
+    private val saveLock = Any()
+    private val saveExecutor = Executors.newSingleThreadExecutor()
     private var pendingSave: (() -> Unit)? = null
 
-    private val writePermLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val job = pendingSave
-        pendingSave = null
-        if (granted && job != null) {
-            runCatching {
-                job()
-                Toast.makeText(this, "已保存到相册", Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                Toast.makeText(this, "保存失败: ${it.message}", Toast.LENGTH_SHORT).show()
+    private val albumPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        val job = synchronized(saveLock) {
+            pendingSave.also { pendingSave = null }
+        }
+        if (job != null) {
+            if (hasAlbumPermission()) {
+                saveExecutor.execute {
+                    val message = runCatching {
+                        job()
+                        "已保存到相册「邻舍」"
+                    }.getOrElse { "保存失败: ${it.message}" }
+                    runOnUiThread { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
+                }
+            } else {
+                Toast.makeText(this, "未获得相册权限，图片未保存。请在系统设置的应用权限中允许相册访问后重试。", Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    private fun albumPermissions(): Array<String> = when {
+        Build.VERSION.SDK_INT >= 34 -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+        )
+        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+        Build.VERSION.SDK_INT >= 29 -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    }
+
+    private fun hasAlbumPermission(): Boolean {
+        if (Build.VERSION.SDK_INT >= 34 &&
+            checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED
+        ) return true
+        return albumPermissions().filterNot {
+            it == Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+        }.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
     }
 
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
@@ -135,10 +168,27 @@ class MainActivity : AppCompatActivity() {
             loadWithOverviewMode = true
         }
 
+        gravitySensor = StandingGravitySensor(this, ::canUseStandingGravity) { session, beta, gamma ->
+            @Suppress("DEPRECATION")
+            val angle = windowManager.defaultDisplay.rotation * 90
+            emitGravityEvent("linshe-gravity", JSONObject()
+                .put("session", session).put("beta", beta).put("gamma", gamma).put("angle", angle))
+        }
+
         // 网页调用的原生存储桥（图片详情「下载」按钮），见 web-ui ImageLightbox
         webView.addJavascriptInterface(WebBridge(), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                gravitySensor.stop()
+                super.onPageStarted(view, url, favicon)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                if (!canUseStandingGravity()) gravitySensor.stop()
+                super.doUpdateVisitedHistory(view, url, isReload)
+            }
+
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
             ): Boolean {
@@ -271,10 +321,15 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         inForeground = true
+        gravityForeground = true
+        notifyGravityLifecycle()
     }
 
     override fun onPause() {
         inForeground = false
+        gravityForeground = false
+        gravitySensor.stop()
+        notifyGravityLifecycle()
         super.onPause()
     }
 
@@ -419,6 +474,26 @@ class MainActivity : AppCompatActivity() {
      */
     inner class WebBridge {
         @JavascriptInterface
+        fun hasStandingGravity(): Boolean = gravitySensor.supported
+
+        @JavascriptInterface
+        fun startStandingGravity(session: String?) {
+            if (session == null || !session.matches(Regex("[0-9]{1,16}"))) return
+            runOnUiThread {
+                if (gravityDestroyed) return@runOnUiThread
+                if (!gravitySensor.start(session)) {
+                    emitGravityEvent("linshe-gravity", JSONObject().put("session", session).put("error", "unavailable"))
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopStandingGravity(session: String?) {
+            if (session == null) return
+            runOnUiThread { if (!gravityDestroyed) gravitySensor.stop(session) }
+        }
+
+        @JavascriptInterface
         fun saveImage(name: String?, dataUrl: String?): String {
             val mime = Regex("^data:(image/[a-z0-9.+-]+);base64,").find(dataUrl ?: "")?.groupValues?.get(1)
                 ?: return "图片数据格式错误"
@@ -435,19 +510,27 @@ class MainActivity : AppCompatActivity() {
                 .ifEmpty { "image.${extForMime(mime)}" }
 
             return try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    saveViaMediaStore(cleanName, mime, bytes)
-                } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                    == PackageManager.PERMISSION_GRANTED
-                ) {
-                    saveToPublicPictures(cleanName, mime, bytes)
-                } else {
-                    pendingSave = { saveToPublicPictures(cleanName, mime, bytes) }
+                val save = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        saveViaMediaStore(cleanName, mime, bytes)
+                    } else {
+                        saveToPublicPictures(cleanName, mime, bytes)
+                    }
+                }
+                if (!hasAlbumPermission()) {
+                    synchronized(saveLock) {
+                        if (pendingSave != null) return "请先完成当前相册权限请求"
+                        pendingSave = save
+                    }
                     runOnUiThread {
-                        writePermLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        runCatching { albumPermLauncher.launch(albumPermissions()) }.onFailure {
+                            synchronized(saveLock) { pendingSave = null }
+                            Toast.makeText(this@MainActivity, "无法请求相册权限，请重试", Toast.LENGTH_LONG).show()
+                        }
                     }
                     return "permission_pending"
                 }
+                save()
                 "ok"
             } catch (e: Exception) {
                 e.message ?: "保存失败"
@@ -477,7 +560,9 @@ class MainActivity : AppCompatActivity() {
                 ?: throw IllegalStateException("无法写入相册")
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            contentResolver.update(uri, values, null, null)
+            if (contentResolver.update(uri, values, null, null) != 1) {
+                throw IllegalStateException("无法发布图片到相册")
+            }
         } catch (e: Exception) {
             contentResolver.delete(uri, null, null)
             throw e
@@ -489,7 +574,12 @@ class MainActivity : AppCompatActivity() {
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "邻舍")
         if (!dir.exists() && !dir.mkdirs()) throw IllegalStateException("无法创建相册目录")
         val file = uniqueFile(dir, displayName)
-        file.writeBytes(bytes)
+        try {
+            file.writeBytes(bytes)
+        } catch (e: Exception) {
+            file.delete()
+            throw e
+        }
         MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf(mime), null)
     }
 
@@ -507,12 +597,43 @@ class MainActivity : AppCompatActivity() {
         return file
     }
 
+    /** Restrict sensor delivery to the configured server and the standing-display route. */
+    private fun isStandingGravityPage(): Boolean {
+        val current = Uri.parse(webView.url ?: return false)
+        val configured = Uri.parse(prefs.getString(KEY_URL, null) ?: return false)
+        fun port(uri: Uri) = if (uri.port != -1) uri.port else if (uri.scheme == "https") 443 else 80
+        return current.scheme in listOf("http", "https") &&
+            current.scheme == configured.scheme && current.host != null &&
+            current.host.equals(configured.host, ignoreCase = true) && port(current) == port(configured) &&
+            current.path.orEmpty().trimEnd('/') == configured.path.orEmpty().trimEnd('/') &&
+            current.fragment?.substringBefore('?') == "/standing-display"
+    }
+
+    private fun canUseStandingGravity(): Boolean = !gravityDestroyed && gravityForeground &&
+        webView.visibility == View.VISIBLE && isStandingGravityPage()
+
+    private fun emitGravityEvent(name: String, detail: JSONObject) {
+        if (gravityDestroyed || !isStandingGravityPage()) return
+        // Re-check the route in JS as navigation may occur before evaluation executes.
+        val configured = JSONObject.quote(prefs.getString(KEY_URL, "") ?: "")
+        val source = "if(location.origin===new URL($configured).origin&&" +
+            "location.hash.split('?')[0]==='#/standing-display'){" +
+            "window.dispatchEvent(new CustomEvent(" + JSONObject.quote(name) + ",{detail:" + detail.toString() + "}));}"
+        webView.evaluateJavascript(source, null)
+    }
+
+    private fun notifyGravityLifecycle() {
+        if (::gravitySensor.isInitialized) emitGravityEvent("linshe-gravity-lifecycle",
+            JSONObject().put("active", gravityForeground && webView.visibility == View.VISIBLE))
+    }
+
     private fun showWeb() {
         // 状态栏跟随页面配色：网页为暖米白
         window.statusBarColor = getColor(R.color.page_bg)
         window.navigationBarColor = getColor(R.color.page_bg)
         setupPanel.visibility = View.GONE
         webView.visibility = View.VISIBLE
+        notifyGravityLifecycle()
     }
 
     private fun showSetup(error: String?) {
@@ -527,6 +648,8 @@ class MainActivity : AppCompatActivity() {
         hintText.text = error ?: getString(R.string.setup_hint)
         webView.visibility = View.GONE
         setupPanel.visibility = View.VISIBLE
+        if (::gravitySensor.isInitialized) gravitySensor.stop()
+        notifyGravityLifecycle()
     }
 
     private fun confirmExit() {
@@ -539,6 +662,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        gravityDestroyed = true
+        if (::gravitySensor.isInitialized) gravitySensor.stop()
+        synchronized(saveLock) { pendingSave = null }
+        saveExecutor.shutdown()
         webView.destroy()
         super.onDestroy()
     }

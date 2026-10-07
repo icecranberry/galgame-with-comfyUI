@@ -13,6 +13,7 @@
                   v-model="searchQuery"
                   class="search-input"
                   placeholder="搜索..."
+                  aria-label="搜索角色日程"
                   @keydown.esc="searchQuery = ''"
                 />
                 <div
@@ -1230,7 +1231,7 @@ function finishReset() {
 .topbar-row {
   display: flex; align-items: center; justify-content: space-between;
 }
-.topbar-row h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--text-bright); }
+.topbar-row h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--text-bright); flex-shrink: 0; white-space: nowrap; }
 .topbar-row h2.is-clickable { cursor: pointer; }
 
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
@@ -1741,6 +1742,17 @@ function finishReset() {
     position: absolute; top: 0; left: 0; right: 0; z-index: 20;
   }
   .topbar-row h2 { font-size: 1rem; }
+  .topbar-row { gap: 8px; }
+  .topbar-actions { flex: 1; min-width: 0; justify-content: flex-end; gap: 6px; }
+  .search-input {
+    width: 64px;
+    min-width: 0;
+    flex: 0 1 64px;
+    transition: width 0.3s var(--ease-standard), flex-basis 0.3s var(--ease-standard);
+  }
+  .search-input:focus { width: 180px; flex-basis: 180px; }
+  .topbar-actions .lib-gear { flex-shrink: 0; }
+  .topbar-actions .btn-reset { flex-shrink: 0; padding: 8px 10px; }
   .card-grid {
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
     gap: 8px; padding: 80px 10px 8px;

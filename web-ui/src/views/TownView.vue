@@ -25,6 +25,7 @@
       @touchstart="onCanvasTouchStart"
       @touchmove="onCanvasTouchMove"
       @touchend="onCanvasTouchEnd"
+      @touchcancel="onCanvasTouchEnd"
       @wheel.prevent="onWheel"
       @dblclick="onDblClick"
     ></canvas>
@@ -750,7 +751,8 @@ const TOOLS = [
   { id: 'road', icon: '🟨', label: '道路画笔' },
   { id: 'place', icon: '🏠', label: '放置建筑/道具（点击处为朝向镜头的底角格）' },
   { id: 'delete', icon: '🧨', label: '删除对象' },
-  { id: 'block', icon: '🚧', label: '阻挡涂刷（左键阻挡，右键恢复可走）' },
+  { id: 'block', icon: '🚧', label: '阻挡涂刷（右键恢复可走）' },
+  { id: 'unblock', icon: '🚶', label: '恢复可走' },
   { id: 'poi', icon: '📍', label: 'POI 绑定（点建筑）' },
 ]
 const LIB_TABS = [
@@ -987,7 +989,7 @@ watch(() => [town.currentMapId, town.snapshot?.worldId, town.snapshot?.worldEpoc
 function onCanvasDown(e) {
   if (dialogueInputBlocked.value || showAdmin.value || showWizard.value) return
   if (downInfo && e.pointerId !== downInfo.pointerId) { onCanvasCancel(); return }
-  if (residentCarry.active) return
+  if (residentCarry.active || pinchDistance !== null) return
   suppressClick = false
   downInfo = { x: e.offsetX, y: e.offsetY, button: e.button, moved: false, pointerId: e.pointerId }
   if (!editing.value && e.button === 0 && initialized.value && hdRenderer) {
@@ -1049,7 +1051,8 @@ function onCanvasUp(e) {
     return
   }
   if (downInfo && e.pointerId !== downInfo.pointerId) return
-  const moved = !!downInfo?.moved
+  if (!downInfo) { suppressClick = true; return }
+  const moved = !!downInfo.moved
   suppressClick = selfTap || moved
   if (editing.value && paintDrag.value && moved) {
     fillRect(paintDrag.value.startCell, paintDrag.value.lastCell)
@@ -1062,6 +1065,7 @@ function onCanvasUp(e) {
     hoverAgentKey.value = null
     hoverSpotKey.value = null
     if (!moved && !dialogueInputBlocked.value) handleCanvasTap(e)
+    suppressClick = true
   }
 }
 
@@ -1070,9 +1074,30 @@ function onCanvasUp(e) {
 // 掉拎起手势——平板上「长按拎不起来」的根因），滚动 / 双击缩放也一并禁掉
 // （touch-action: none 只管标准手势，管不住各家浏览器壳的长按菜单）。
 // 代价是触摸不再派发 click / dblclick：点按与双击改由 onCanvasUp 自行判定（handleCanvasTap）。
-function onCanvasTouchStart(e) { e.preventDefault() }
-function onCanvasTouchMove(e) { e.preventDefault() }
-function onCanvasTouchEnd(e) { e.preventDefault() }
+let pinchDistance = null
+const touchDistance = touches => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+function onCanvasTouchStart(e) {
+  e.preventDefault()
+  if (e.touches.length > 1) {
+    onCanvasCancel()
+    lastTapInfo.time = 0
+    pinchDistance = touchDistance(e.touches)
+  }
+}
+function onCanvasTouchMove(e) {
+  e.preventDefault()
+  if (pinchDistance === null || e.touches.length < 2) return
+  const distance = touchDistance(e.touches)
+  if (!dialogueInputBlocked.value && !showAdmin.value && !showWizard.value && pinchDistance > 0) {
+    cam.zoom = Math.min(2.5, Math.max(0.5, cam.zoom * distance / pinchDistance))
+    followPlayer = false
+  }
+  pinchDistance = distance
+}
+function onCanvasTouchEnd(e) {
+  e.preventDefault()
+  if (e.touches.length < 2) pinchDistance = null
+}
 
 // 触摸 / 笔尖的点按与双击（对齐桌面 click / dblclick 语义：点人开对话、点地移动、双击跟随）
 let lastTapInfo = { time: 0, x: 0, y: 0 }
@@ -1139,6 +1164,8 @@ function onCanvasClick(e) {
 }
 
 function onCanvasRightClick(e) {
+  // A touch long-press menu must not cancel the pickup it just started.
+  if (e.pointerType === 'touch' || downInfo?.button === 0) return
   if (residentCarry.active) { cancelCarry(); downInfo = null; return }
   if (dialogueInputBlocked.value) return
   if (editing.value && editTool.value === 'block') {
@@ -1398,6 +1425,7 @@ function handleEditClick(e) {
     return
   }
 
+  if (editTool.value === 'unblock') { paintBlock(cell, 0); return }
   if (editTool.value === 'block') {
     paintBlock(cell, 1)
     return

@@ -516,6 +516,13 @@ onUnmounted(() => {
 /* 尺寸由内部的 .book-spread 决定，封面绝对定位铺在上面，翻开时不会被裁切 */
 .book-frame { position: relative; }
 
+.book-spread, .diary-overlay {
+  scrollbar-width: none;
+}
+.book-spread::-webkit-scrollbar, .diary-overlay::-webkit-scrollbar {
+  display: none;
+}
+
 .book-spread {
   position: relative;
   width: min(1180px, 96vw);
