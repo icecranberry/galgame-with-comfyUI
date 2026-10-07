@@ -518,6 +518,28 @@
                 <linshe-select v-model="regenSleepType" :options="regenSleepOptions" size="sm" />
               </section>
 
+              <!-- ── 日子类型（工作日 / 休息日）──
+                   用户需求（2026-10-07）：1 周 7 天要有工作日与休息日的差异。
+                   只能选一个：一次生成一套。选了就会**覆盖**那一套（旧的会被替换）。
+                   不选 = 不写日型，仍是原来的"一套日程铺给每一天"。
+                   ⚠ 档位列表来自后端 regenerate-options（单一真源），前端不另抄。 -->
+              <section class="regen-sec">
+                <div class="regen-sec-head">
+                  <span class="regen-sec-title">日子类型</span>
+                  <span class="regen-sec-note">
+                    {{ regenDayType ? `本次按「${dayTypeLabel(regenDayType)}」生成，会覆盖该套` : '不选 = 每天一样' }}
+                  </span>
+                </div>
+                <linshe-select
+                  v-model="regenDayType" size="sm" clearable
+                  :options="[{ label: '（不区分）', value: '' }, ...regenDayTypeOptions]"
+                />
+                <p v-if="regenDayPlans.length" class="regen-sec-note">
+                  已配：{{ regenDayPlans.map(p => dayTypeLabel(p.dayType)).join('、') }}
+                  （未配的日子类型会用「默认日程」）
+                </p>
+              </section>
+
               <!-- ── 移动方式（超能力移动豁免）──
                    有角色在设定上会瞬移/飞行，通勤表对ta不构成限制。默认「普通」=
                    受通勤约束，与改动前行为一致；选其他档位即豁免换场校验与台账告警。
@@ -1009,6 +1031,14 @@ const regenSleepPlace = ref('')
 // 档位列表**只来自后端** regenerate-options（单一真源，前端不另抄一份）。
 // 默认 'normal' = 受通勤表约束，与改动前行为一致。
 const regenTransitModes = ref<any[]>([])
+// ── 日子类型（工作日/休息日，2026-10-07）──
+// 空串 = 不区分（默认行为：一套日程铺给每一天）。档位来自后端，前端不另抄。
+const regenDayType = ref('')
+const regenDayTypeOptions = ref<any[]>([])
+const regenDayPlans = ref<Array<{ dayType: string }>>([])
+function dayTypeLabel(v: string) {
+  return regenDayTypeOptions.value.find(o => o.value === v)?.label || v
+}
 const regenTransitMode = ref('normal')
 const regenTransitOptions = computed(() =>
   regenTransitModes.value.map((m: any) => ({ label: m.label, value: m.key }))
@@ -1203,16 +1233,19 @@ function saveRegenPrefs(charId: number, extra: Record<string, unknown> = {}) {
   } catch { /* 隐私模式等，忽略 */ }
 }
 
-async function ensureRegenOptions() {
+async function ensureRegenOptions(characterId?: number) {
   if (regenOptionsLoaded.value || regenOptionsLoading.value) return
   regenOptionsLoading.value = true
   try {
-    const d = await api.getRegenerateOptions()
+    // 传角色 id：后端顺带回「该角色已配了哪几套日子类型方案」（用于界面提示）
+    const d = await api.getRegenerateOptions(undefined, characterId)
     regenDefaults.value = d.defaults || { nsfwRatio: 50, sleepType: 'auto' }
     regenNsfwBands.value = Array.isArray(d.nsfwBands) ? d.nsfwBands : []
     regenSleepOptions.value = Array.isArray(d.sleepTypes) ? d.sleepTypes.map((s: any) => ({ label: s.label, value: s.value })) : []
     regenCadenceOptions.value = Array.isArray(d.cadenceOptions) ? d.cadenceOptions : []
     regenTransitModes.value = Array.isArray(d.transitModes) ? d.transitModes : []
+    regenDayTypeOptions.value = Array.isArray(d.dayTypes) ? d.dayTypes.map((x: any) => ({ label: x.label, value: x.value })) : []
+    regenDayPlans.value = Array.isArray(d.existingDayPlans) ? d.existingDayPlans : []
     regenAccessLabel.value = d.accessLabel || {}
     regenZoneLabel.value = d.zoneLabel || {}
     const groups: Array<{ region: string; areas: any[] }> = []
@@ -1250,7 +1283,10 @@ watch(showRegenerateModal, (v) => {
   //   它是用户花时间写的正文，必须记住；只在用户**成功生成过**或**主动关闭过**时才有值，
   //   所以不会出现"上次的方向赖着不走"的困扰（点「完全随机」仍不带走它）。
   regenerateDirection.value = String(prefs?.direction || '')
-  ensureRegenOptions()
+  // 日子类型：**不记忆**上一次的选择（它描述的是「这次要生成哪一套」，不是持久偏好）；
+  //   默认留空 = 不区分。已配的方案由后端随 options 返回（regenDayPlans）。
+  regenDayType.value = ''
+  ensureRegenOptions(charId)
   nextTick(() => regenerateTextareaRef.value?.focus())
 })
 
@@ -1571,6 +1607,9 @@ function onPeekAt(act: any) {
     startTime: act.startTime,
     endTime: act.endTime,
     tags: act.tags,
+    // ★ 必须带上该时段的 outfit 标注 —— 后端据此选装。
+    //   漏了它，后端会退回"按当前时刻"选装：白天点「夜间安睡」会画成穿常服睡觉。
+    outfit: act.outfit,
   })
 }
 
@@ -1609,6 +1648,8 @@ function regenOptionsPayload() {
     // 移动方式（超能力移动豁免）：仅豁免档位才传，`normal` 不传 ——
     // 与「不设置该字段 = 上线前行为」保持一致（后端也会从角色行读，这里是本次意图）
     ...(regenTransitExempt.value ? { transitMode: regenTransitMode.value } : {}),
+    // 日子类型：**只在选了的时候传** —— 不传 = 后端不写日型、走默认日历（与从前一致）
+    ...(regenDayType.value ? { dayType: regenDayType.value } : {}),
     // 固定居家/睡眠地点（人类侧指定）：随请求带去后端注入 + 落库到角色
     ...(regenHomePlace.value ? { homePlace: regenHomePlace.value, homeArea: regenHomeArea.value } : {}),
     ...(regenSleepPlace.value ? { sleepPlace: regenSleepPlace.value } : {}),

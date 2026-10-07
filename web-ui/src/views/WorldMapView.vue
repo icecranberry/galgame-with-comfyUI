@@ -247,11 +247,19 @@
             <div v-if="editPlace.access === 'time_window'" class="we-row2">
               <div class="we-field">
                 <label>开放时间</label>
-                <linshe-input v-model="editPlace.openAt" placeholder="18:00" @input="editDirty = true" />
+                <linshe-select
+                  v-model="editPlace.openAt" allow-free-input searchable
+                  :options="TIME_OPTIONS" placeholder="18:00"
+                  @update:model-value="editDirty = true"
+                />
               </div>
               <div class="we-field">
                 <label>关闭时间</label>
-                <linshe-input v-model="editPlace.closeAt" placeholder="02:00" @input="editDirty = true" />
+                <linshe-select
+                  v-model="editPlace.closeAt" allow-free-input searchable
+                  :options="TIME_OPTIONS" placeholder="02:00"
+                  @update:model-value="editDirty = true"
+                />
               </div>
             </div>
             <div class="we-field">
@@ -574,6 +582,20 @@ const ZONE_OPTIONS = [
 /** 新增地点（弹窗式，取代原生 prompt） */
 const addPlaceOpen = ref(false)
 const addPlace = reactive({ parent: null, name: '', nameEn: '', kind: '', summary: '', scenePrompt: '' })
+
+/**
+ * 开放/关闭时间候选（**半小时一档**，全天 48 档）。
+ *
+ * ⚠ 用户口径（2026-10-07）："时间限制应该改为选择栏" —— 手打 `9:00` 既容易格式不齐
+ *   （`9:00` / `09:00` / `9点` 混用），也无法约束到合法时刻。
+ *   ⚠ 但**不锁死**：组件带 `allow-free-input`，半点的特殊时间（如 `23:30`）照样能自己打；
+ *   后端 `normalizeClock` 仍是唯一真源，非法值由它兜底。
+ */
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, i) => {
+  const h = String(Math.floor(i / 2)).padStart(2, '0')
+  const m = i % 2 ? '30' : '00'
+  return { label: `${h}:${m}`, value: `${h}:${m}` }
+})
 
 /** 新建地图时可选的模板（复制已有地图的整棵树） */
 const templateId = ref('')

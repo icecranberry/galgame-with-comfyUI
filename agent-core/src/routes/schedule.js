@@ -18,6 +18,8 @@ import { getDb, getSystemRules, getWorldSetting, getGlobalRule, listTransitEdges
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+// ⚠ 日程配图必须按「那一段」选装（不是"此刻"）—— 见 getSceneOutfitForActivity 的说明
+import { getSceneOutfitForActivity, asPersonaOutfits } from '../services/outfitScene.js';
 import { config } from '../config.js';
 import {
   getTodaySchedule, getCurrentActivity,
@@ -27,6 +29,7 @@ import {
 } from '../services/scheduleManager.js';
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule, SLEEP_TYPES, NSFW_BANDS } from '../services/scheduleGenerator.js';
 import { TRANSIT_MODES, DEFAULT_TRANSIT_MODE, isTransitExempt, normalizeTransitMode } from '../services/characterTransitMode.js';
+import { DAY_TYPES, DAY_TYPE_LABEL, normalizeDayType, dayTypeOf } from '../utils/scheduleDayType.js';
 import { ledgerOverview, auditCharacter } from '../services/scheduleLedger.js';
 import { listMaps, getMap, listAreasForSchedule, pickSchedulePlaces, resolveEffectiveAccess, normalizeAccess, accessReason, ACCESS_LABEL, ZONE_LABEL } from '../services/worldMapService.js';
 import { updateScheduleActivity } from '../services/scheduleEditor.js';
@@ -296,6 +299,11 @@ export function readScheduleOptions(body = {}) {
   //   非法值经唯一真源规范化后回落 normal，同样不写。
   const transitMode = normalizeTransitMode(body.transitMode);
   if (isTransitExempt(transitMode)) out.transitMode = transitMode;
+  // ★ 日子类型（2026-10-07）：「按工作日/休息日各生成一套」时由前端显式指定要生成哪套。
+  //   不传 → 不写 options：仍是原行为（写默认日历），且提示词里不出现"今天是…"那一段。
+  if (body.dayType !== undefined && body.dayType !== null && String(body.dayType).trim() !== '') {
+    out.dayType = normalizeDayType(body.dayType);
+  }
   const homePlace = typeof body.homePlace === 'string' ? body.homePlace.trim() : '';
   if (homePlace) {
     out.homePlace = homePlace;
@@ -469,6 +477,19 @@ router.get('/regenerate-options', (req, res) => {
       // ★ 移动方式（超能力移动豁免）：**只在后端定义一份**，前端只渲染不另抄 ——
       //   否则前后端档位迟早漂移（项目红线 8）。默认 `normal` = 受通勤约束。
       transitModes: TRANSIT_MODES,
+      // ★ 日子类型（2026-10-07）：工作日 / 休息日 —— 同样只在后端定义一份。
+      //   ⚠ 这是**通用**概念（不指向任何世界观），故可放引擎侧常量（红线 12）。
+      dayTypes: DAY_TYPES.map(value => ({ value, label: DAY_TYPE_LABEL[value] })),
+      // 今天算哪种日子（前端默认选中它）+ 查询到的角色已配了哪几套方案
+      todayDayType: dayTypeOf(new Date()),
+      existingDayPlans: (() => {
+        try {
+          const cid = parseInt(req.query.characterId, 10);
+          if (!Number.isFinite(cid)) return [];
+          return getDb().prepare('SELECT day_type, generated_at, version FROM schedule_day_plans WHERE character_id = ?')
+            .all(cid).map(r => ({ dayType: r.day_type, generatedAt: r.generated_at, version: r.version }));
+        } catch { return []; }
+      })(),
       defaults: { nsfwRatio: 50, sleepType: 'auto', transitMode: DEFAULT_TRANSIT_MODE },
     });
   } catch (err) {
@@ -784,6 +805,9 @@ router.post('/:characterId/peek', async (req, res) => {
         startTime: reqActivity.startTime || '',
         endTime: reqActivity.endTime || '',
         tags: reqActivity.tags || [],
+        // ★ 必须带上 outfit 标注：配图要复现的是**这一段**的着装，不是"此刻"的
+        //   （漏了它就会退回"按当前时刻选装"，见下方 sceneOutfit 的说明）
+        outfit: reqActivity.outfit || null,
       };
     } else {
       activity = getCurrentActivity(characterId);
@@ -857,7 +881,18 @@ router.post('/:characterId/peek', async (req, res) => {
     system1 += `你是一个专业的人像摄影师，你现在需要给角色拍一张人像照，任意角度（俯拍，仰拍，正脸，侧脸，背面，低角度全都不限制），角色也不看着镜头，表现角色当前正在做的事情。角色表情、动作神态根据角色人格和正在做的事来生成，要贴合角色气质。画面输出用英文prompt`;
 
     // system2: 角色完整人格（统一入口，含生效外观注入），"你"替换为角色姓名
-    let personaText = buildCharacterPersona(character, { variant: 'full', person: charName });
+    //
+    // ★★ 着装必须按**这一段日程**判定，不能用"当前时刻"（2026-10-07 用户实报的 bug）：
+    //    用户在**白天**给日程里「夜间安睡」那一段点配图，期望看到睡衣；
+    //    但 `opts.outfits` 缺省（'auto'）时走的是 `getSceneOutfitForNow(id)` ——
+    //    它只看 `new Date()`，于是拿"此刻 16:26"选出白天的「日常装」，
+    //    画出来就是**穿着常服躺在床上睡觉**。
+    //    这里显式算该时段的服装传进去（`opts.outfits` 支持对象形式），
+    //    顺序与 auto 一致：道具/限时服饰仍然优先（在 sceneOutfitForActivity 内部已判）。
+    const sceneOutfits = asPersonaOutfits(getSceneOutfitForActivity(characterId, activity));
+    let personaText = buildCharacterPersona(character, {
+      variant: 'full', person: charName, outfits: sceneOutfits || undefined,
+    });
     if (!personaText) personaText = `角色名：${charName}`;
 
     // 誓约角色：银白细戒指外观细节
@@ -1076,6 +1111,9 @@ router.post('/:characterId/clear', (req, res) => {
     // 清空日程数据
     db.prepare('DELETE FROM daily_schedules WHERE character_id = ?').run(characterId);
     db.prepare('DELETE FROM schedule_templates WHERE character_id = ?').run(characterId);
+    // ★ 按日型的两套方案也要清（2026-10-07）—— 只清默认日历会留下"幽灵工作日/休息日方案"：
+    //   下次快照时它又被捞回来，用户会看到"清空了却还在"。
+    db.prepare('DELETE FROM schedule_day_plans WHERE character_id = ?').run(characterId);
 
     // 标记角色不再自动生成日程
     db.prepare(`

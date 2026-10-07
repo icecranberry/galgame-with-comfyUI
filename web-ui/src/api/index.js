@@ -1535,10 +1535,14 @@ export function regenerateSchedule(characterId, direction, options = {}) {
   return request(`/schedule/${characterId}/regenerate`, { method: 'POST', body })
 }
 
-/** 日程弹窗的全部选项（区域 / NSFW 档位 / 睡眠类型），档位由后端定义、前端只渲染 */
-export function getRegenerateOptions(mapId) {
-  const q = mapId ? `?mapId=${encodeURIComponent(mapId)}` : ''
-  return request(`/schedule/regenerate-options${q}`)
+/** 日程弹窗的全部选项（区域 / NSFW 档位 / 睡眠类型 / 日子类型），档位由后端定义、前端只渲染。
+ *  ⚠ 传 characterId 时后端会一并回该角色**已配的日子类型方案**（工作日/休息日）。 */
+export function getRegenerateOptions(mapId, characterId) {
+  const qs = new URLSearchParams()
+  if (mapId) qs.set('mapId', String(mapId))
+  if (characterId) qs.set('characterId', String(characterId))
+  const q = qs.toString()
+  return request(`/schedule/regenerate-options${q ? `?${q}` : ''}`)
 }
 
 /** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */

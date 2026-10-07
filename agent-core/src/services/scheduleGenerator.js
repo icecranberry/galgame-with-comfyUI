@@ -20,6 +20,43 @@ import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, ensureOutfitAnnotations } from './outfitScene.js';
 import { buildPromptBlock as buildFactionPromptBlock, isFactionPromptEnabled } from './factionService.js';
+import { normalizeDayType, dayTypeOf, dayTypeLabel as dayTypeLabelFrom } from '../utils/scheduleDayType.js';
+
+/**
+ * 该角色有没有配过「按日子类型」的日程方案。
+ * ⚠ 这是"功能是否启用"的开关：没配过的角色，提示词与从前逐字节一致（红线 4）。
+ */
+function hasDayPlans(db, characterId) {
+  try {
+    return !!db.prepare('SELECT 1 FROM schedule_day_plans WHERE character_id = ? LIMIT 1').get(characterId);
+  } catch {
+    return false;   // 迁移还没跑到的老库：当作没配（不阻断生成）
+  }
+}
+
+/**
+ * 写「默认日历」（`schedule_templates`）—— 抽出成函数，供两条路径共用：
+ * ① 不传 dayType 的普通生成；② 传了 dayType 时**同时**升级默认日历，
+ * 免得未配日型的历史日期突然无日程可回落。
+ */
+function upsertDefaultTemplate(db, characterId, json, displayName = '') {
+  const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(characterId);
+  if (existing) {
+    db.prepare(`
+      UPDATE schedule_templates
+      SET schedule_json = ?, version = version + 1, generated_at = CURRENT_TIMESTAMP
+      WHERE character_id = ?
+    `).run(json, characterId);
+    console.log(`[scheduleGen] Updated template for ${displayName} v${existing.version + 1}`);
+  } else {
+    db.prepare(`
+      INSERT INTO schedule_templates (character_id, schedule_json, version)
+      VALUES (?, ?, 1)
+    `).run(characterId, json);
+    console.log(`[scheduleGen] Created template for ${displayName}`);
+  }
+  return { schedule_json: json, version: (existing?.version || 0) + 1 };
+}
 
 /**
  * 该角色是否**禁止日程**。
@@ -450,6 +487,24 @@ ${sleepLine}
 上文的「睡眠时间个性化」一节本次不适用（不要按角色气质另外挑一种）；但**睡眠 block 的 replyDelay 仍必须是 -1**，睡眠总时长仍要在 5~9 小时之间。`);
   }
 
+  // ── 日子类型：工作日 vs 休息日（**可选**；不传就整段不出现 → 默认行为不变）──
+  //
+  // ★ 用户需求（2026-10-07）：「1 周 7 天的**工作日和休息日差异**」。
+  //   本段只负责**告诉模型今天是哪种日子**，让它把"上班/上学"与"休息"的差别写出来；
+  //   "哪几天算休息日"由 `utils/scheduleDayType.js` 单点决定（红线 8），这里不重复实现。
+  // ★ 放在约束层而不是 scheduleInst：这是**动态**内容，进共享常量会打穿 LLM 前缀缓存。
+  // ⚠ 不内置任何世界观知识（红线 12）：工作日/休息日是一切世界的通用概念，不指向具体世界。
+  const dayType = opts.dayType ? normalizeDayType(opts.dayType) : '';
+  if (dayType) {
+    const label = dayTypeLabelFrom(dayType);
+    parts.push(`【今天是${label}】
+
+本次要编排的这一天是**${label}**。请让整天的安排体现这个差别：
+${dayType === 'workday'
+      ? '· 白天以谋生/学业为主轴（通勤、上班、看店、上课等），休闲与社交排在它之外的空档；'
+      : '· 白天**不排**常规工作/学业，以休息、家务、外出娱乐、见朋友、睡懒觉等为主；\n· 作息可比工作日更松散（起得更晚、夜里更晚睡），但要符合角色自身气质。'}`);
+  }
+
   // ── 势力态势（**可选，默认关**：`FEATURE_FACTION_PROMPT=true`）──
   //
   // ★★ 为什么放在**约束层**而不是 scheduleInst：
@@ -483,7 +538,9 @@ ${parts.join('\n\n')}
  * @param {object} character - { id, display_name, base_prompt }
  * @param {string} [direction] - 用户指定的日程方向
  * @param {object} [options] - 本次编排约束（见 buildScheduleConstraintBlock）
- * @returns {Promise<{schedule_json: string, version: number}>}
+ *   含 `dayType`（'workday'|'restday'）：按日子类型生成并写入 `schedule_day_plans`；
+ *   不传 → 维持原行为（写默认日历 `schedule_templates`）。
+ * @returns {Promise<{schedule_json: string, version: number, dayType?: string}>}
  */
 // ⚠ 2026-10-08 合并 v3.7.0：上游加了「同角色并发去重」（自动刷新/手动刷新/补发共享同一个生成），
 //    本地补丁加了第 3 个参数 `options`（日程编排约束层，routes/schedule.js:976 会传）。
@@ -782,8 +839,16 @@ ${direction}**
   const transitMode = options?.transitMode !== undefined
     ? options.transitMode
     : character?.transit_mode;
+  // ★ 日子类型：**显式传的优先**；没传则**只有该角色配过日型方案时**才按"今天"自动判定。
+  //   ⚠ 这个"配过才启用"的条件是刻意的（红线 4：长驻功能默认关闭）——
+  //     没有任何日型方案的角色，约束层与从前**逐字节一致**，不会因为加了功能就多一段提示词。
+  //   好处：配过方案的角色，连自动派单（调度器没有交互式选项）也会按当天是工作日/休息日来编排。
+  const explicitDayType = options?.dayType ? normalizeDayType(options.dayType) : '';
+  const dayTypeForPrompt = explicitDayType
+    || (hasDayPlans(db, character.id) ? dayTypeOf(new Date()) : '');
   const constraintLayer = buildScheduleConstraintBlock({
     ...options,
+    dayType: dayTypeForPrompt,
     transitMode,
     characterName: character.display_name || character.name || '',
   });
@@ -839,24 +904,39 @@ ${directionMsg}`;
           }
         }
         const json = JSON.stringify(schedule);
-        const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(character.id);
 
-        if (existing) {
-          db.prepare(`
-            UPDATE schedule_templates
-            SET schedule_json = ?, version = version + 1, generated_at = CURRENT_TIMESTAMP
-            WHERE character_id = ?
-          `).run(json, character.id);
-          console.log(`[scheduleGen] Updated template for ${character.display_name} v${existing.version + 1}`);
-        } else {
-          db.prepare(`
-            INSERT INTO schedule_templates (character_id, schedule_json, version)
-            VALUES (?, ?, 1)
-          `).run(character.id, json);
-          console.log(`[scheduleGen] Created template for ${character.display_name}`);
+        // ── ★ 按日子类型分流（2026-10-07 用户需求）────────────────────
+        //   传了 `dayType` → 写进 `schedule_day_plans`（工作日 / 休息日各一套，按周循环生效）；
+        //   没传 → 仍写 `schedule_templates`（**默认日历**），行为与从前逐字节一致。
+        //   ⚠ 两条路都要有数据：没配日型的角色，`snapshotTodaySchedule` 走默认日历，
+        //     与现在完全相同（不能因为加了功能就让存量角色的日程变空）。
+        if (dayType) {
+          const dt = normalizeDayType(dayType);
+          const existed = db.prepare('SELECT id, version FROM schedule_day_plans WHERE character_id = ? AND day_type = ?')
+            .get(character.id, dt);
+          if (existed) {
+            db.prepare(`
+              UPDATE schedule_day_plans
+              SET schedule_json = ?, direction = ?, version = version + 1, generated_at = CURRENT_TIMESTAMP
+              WHERE character_id = ? AND day_type = ?
+            `).run(json, direction || null, character.id, dt);
+          } else {
+            db.prepare(`
+              INSERT INTO schedule_day_plans (character_id, day_type, schedule_json, direction, version)
+              VALUES (?, ?, ?, ?, 1)
+            `).run(character.id, dt, json, direction || null);
+          }
+          // ⚠ 同时把默认日历升到最新 —— 否则未配日型的历史日期会突然没有日程可回落
+          if (!fallbackToDefaultCalendar) {
+            // 明确要求"只当日型"（不覆盖默认日历）
+          } else {
+            upsertDefaultTemplate(db, character.id, json, character.display_name);
+          }
+          console.log(`[scheduleGen] 已写入「${dayTypeLabelFrom(dt)}」日程方案 for ${character.display_name} v${(existed?.version || 0) + 1}`);
+          return { schedule_json: json, version: (existed?.version || 0) + 1, dayType: dt };
         }
 
-        return { schedule_json: json, version: (existing?.version || 0) + 1 };
+        return upsertDefaultTemplate(db, character.id, json, character.display_name);
       }
 
       console.warn(`[scheduleGen] Validation failed for ${character.display_name}, attempt ${attempt + 1}/2`);
@@ -1271,21 +1351,52 @@ export function assignNextRefreshTime(characterId) {
 }
 
 /**
+ * 取「某一天该用哪套日程」——**唯一真源**（2026-10-07）。
+ *
+ * 顺序（这是"工作日/休息日差异"生效的落点）：
+ *   ① 该角色**按当天日子类型**配的方案（`schedule_day_plans`，例：今天是周六 → 休息日方案）；
+ *   ② 回落**默认日历**（`schedule_templates`）—— 没配过日型的角色走的还是这条，行为与从前一致。
+ *
+ * ⚠ 两个调用方（`snapshotTodaySchedule` 与 `scheduleManager` 的 fallback）**必须都用本函数**，
+ *   否则会出现"一处按休息日排、另一处按默认日历补"的错位。
+ *
+ * @param {object} db
+ * @param {number} characterId
+ * @param {Date} [date] 目标日期（默认今天）
+ * @returns {{json: string, source: 'day-plan'|'default', dayType: string}|null}
+ */
+export function resolveScheduleTemplateFor(db, characterId, date = new Date()) {
+  const dayType = dayTypeOf(date);
+  try {
+    const plan = db.prepare(
+      'SELECT schedule_json FROM schedule_day_plans WHERE character_id = ? AND day_type = ?'
+    ).get(characterId, dayType);
+    if (plan?.schedule_json) return { json: plan.schedule_json, source: 'day-plan', dayType };
+  } catch {
+    // 迁移未跑到的老库：当作没有日型方案，走默认日历（不阻断）
+  }
+  const tpl = db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id = ?').get(characterId);
+  return tpl?.schedule_json ? { json: tpl.schedule_json, source: 'default', dayType } : null;
+}
+
+/**
  * 为角色创建当天的 daily_schedules 快照（从 template 派生）
  */
 export function snapshotTodaySchedule(characterId) {
   const db = getDb();
   // ★ 归档角色禁止日程：不重建快照（见 isScheduleForbidden 的说明）
   if (isScheduleForbidden(characterId)) return null;
-  const template = db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id = ?').get(characterId);
-  if (!template) return null;
+  // ★ 取"今天该用哪套"：配过日型方案 → 按今天（工作日/休息日）取对应方案；
+  //   没配过 → 默认日历。两者都由 resolveScheduleTemplateFor 单点决定（不要在这里另写一份）。
+  const resolved = resolveScheduleTemplateFor(db, characterId, new Date());
+  if (!resolved) return null;
 
   const today = getLocalDateKey();
 
   db.prepare(`
     INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
     VALUES (?, ?, ?)
-  `).run(characterId, today, template.schedule_json);
+  `).run(characterId, today, resolved.json);
   reapplyActiveEventSchedule(characterId, db);
 
   // 清理超过 2 天的旧快照。

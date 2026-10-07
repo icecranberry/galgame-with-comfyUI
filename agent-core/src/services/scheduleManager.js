@@ -11,7 +11,7 @@
 
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
-import { snapshotTodaySchedule, isScheduleForbidden } from './scheduleGenerator.js';
+import { snapshotTodaySchedule, isScheduleForbidden, resolveScheduleTemplateFor } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { getLocalDateKey, shiftDateKey } from '../utils/localDate.js';
 import { onCharacterWake } from './dreamService.js';
@@ -217,16 +217,15 @@ function getTodayScheduleRaw(characterId) {
     //   （概览、日程页、事件调度），这个 fallback 就会把归档角色的快照补回来。
     if (isScheduleForbidden(characterId)) return null;
 
-    // fallback: 从 template 快照一条
-    const template = db.prepare(
-      'SELECT schedule_json FROM schedule_templates WHERE character_id = ?'
-    ).get(characterId);
+    // fallback: 取"今天该用的那套" —— 配过日型方案就按今天（工作日/休息日）取，
+    //   否则回落默认日历。**必须与 snapshotTodaySchedule 用同一个函数**，否则两处会错位。
+    const resolved = resolveScheduleTemplateFor(db, characterId, new Date());
 
-    if (template) {
+    if (resolved) {
       db.prepare(`
         INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
         VALUES (?, ?, ?)
-      `).run(characterId, today, template.schedule_json);
+      `).run(characterId, today, resolved.json);
       reapplyActiveEventSchedule(characterId, db);
       // 清理超过 2 天的旧快照。
       // ⚠ 与 `initialize()` 同一口径：基准用 JS 算出的 `today`，不用 SQL 的 `DATE('now')`
@@ -296,6 +295,9 @@ export function getCurrentActivity(characterId, now = new Date()) {
         startTime: act.startTime,
         endTime: act.endTime,
         tags: normalizeTags(act.tags),
+        // ★ 带上着装标注：调用方（日程配图）据此选"这一段"该穿的服装。
+        //   漏了它，配图会退回"按当前时刻选装"，与所见时段不符（2026-10-07 实报 bug）。
+        outfit: act.outfit || null,
       };
       activityCache.set(characterId, { activity: result, expireAt: Date.now() + CACHE_TTL });
       return result;
