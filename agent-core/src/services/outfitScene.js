@@ -147,10 +147,17 @@ export const NUDE_DESCRIPTION = 'completely nude, wearing no clothing at all, ba
  *  否则老角色的行仍叫「裸体」，新日程标「全身」就匹配不上了。 */
 export const NUDE_NAME = '全身';
 
-/** 规范化形态的写入：全身那套的描述一律用常量，调用方传什么都以常量为准 */
-function normalizeGarment(scene, description) {
+/**
+ * 规范化形态的写入：全身那套的描述一律用常量，调用方传什么都以常量为准。
+ *
+ * ⚠ `humanEdited` 决定**要不要过脚部护栏** —— 见 `enforceSceneFootwear` 上方那段说明。
+ *   AI 产出：过护栏（模型有惯性，必须兜底）；
+ *   人工编辑：**不过**（用户改什么就是什么）。
+ */
+function normalizeGarment(scene, description, humanEdited = false) {
   if (scene === PRIVATE_SCENE) return NUDE_DESCRIPTION;
-  return enforceSceneFootwear(scene, String(description || '').trim().slice(0, 1200));
+  const d = String(description || '').trim().slice(0, 1200);
+  return humanEdited ? d : enforceSceneFootwear(scene, d);
 }
 
 /**
@@ -165,6 +172,17 @@ function normalizeGarment(scene, description) {
  *
  * ⚠ 只做**最小干预**：能在已有文本里识别到鞋/赤脚就替换那一个词，
  *   识别不到才追加；且**睡衣不追加任何鞋类**（睡衣的规则是"不出现鞋"）。
+ *
+ * ★★ 2026-10-07 ★★ **它只能作用于 AI 产出，绝不能作用于人工编辑。**
+ *
+ * 用户实报：「玩家人工修改了绯英的睡衣，但点击保存以后自动刷新为原文段」。
+ * 实测复现根因就在这个函数：用户在睡衣里把靴子改成自己想要的写法（甚至写了 `boots`），
+ * 保存时 `upsertSceneOutfits → normalizeGarment → enforceSceneFootwear` 照着"睡衣不能有鞋"
+ * 的规则，**把含 `boot` 的整段删掉、再强制追加 `, barefoot`** ——
+ * 用户的编辑被系统静默改写，看起来就是"保存后变回原来的样子"。
+ *
+ * 判据：**护栏的目的是替"会犯错的模型"兜底，不是替人做决定。**
+ * 人工编辑是显式指令，其优先级高于任何自动规则（与本项目其它「显式优先」口径一致）。
  */
 export function enforceSceneFootwear(scene, description) {
   if (description == null || description === '') return description;   // 空值原样返回（不凭空造鞋）
@@ -217,8 +235,25 @@ export function enforceSceneFootwear(scene, description) {
   return `${cleaned(out)}, barefoot`.replace(/^,\s*/, '').trim();
 }
 
-/** 批量写入场景服装（供「一键生成」用）。同名同场景则更新描述，避免重复堆叠 */
-export function upsertSceneOutfits(characterId, outfits) {
+/**
+ * 批量写入场景服装（供「一键生成」与「界面保存」共用）。
+ * 同名同场景则更新描述，避免重复堆叠。
+ *
+ * ★★ 两条写入通道必须分开（2026-10-07 用户实报的 bug 就出在没分开）★★
+ *
+ * `opts.humanEdited = true` → **人工编辑**：描述**原样写入**，不过任何自动护栏。
+ * 否则（默认）→ **AI 产出**：过 `normalizeGarment`（含 `enforceSceneFootwear` 脚部兜底）。
+ *
+ * 病根复现：用户在睡衣里写了 `boots` 想要靴子，保存时被「睡衣不能有鞋」的护栏
+ * 把整个含 `boot` 的段删掉、再追加 `, barefoot` —— 用户看到的就是"保存后变回原样"。
+ * 护栏是替**会犯错的模型**兜底的，不该替人做决定。
+ *
+ * @param {number} characterId
+ * @param {Array<{scene:string,name:string,description:string,body?:string}>} outfits
+ * @param {{humanEdited?:boolean}} [opts]
+ */
+export function upsertSceneOutfits(characterId, outfits, opts = {}) {
+  const humanEdited = opts.humanEdited === true;
   const db = getDb();
   const ins = db.prepare(
     `INSERT INTO character_outfits (character_id, name, description, scene, body) VALUES (?, ?, ?, ?, ?)`
@@ -234,7 +269,8 @@ export function upsertSceneOutfits(characterId, outfits) {
     for (const o of outfits) {
       if (!o?.scene || !SCENE_KEYS.includes(o.scene) || !o.name) continue;
       const body = o.body != null ? String(o.body).trim().slice(0, 2000) : null;
-      const desc = normalizeGarment(o.scene, o.description);
+      // ★ humanEdited 一路传下去：人工编辑不过脚部护栏
+      const desc = normalizeGarment(o.scene, o.description, humanEdited);
       const exist = find.get(characterId, o.scene);
       if (exist) {
         /**

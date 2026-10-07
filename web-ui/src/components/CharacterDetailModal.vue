@@ -228,9 +228,39 @@
                       placeholder="long silver hair with blue gradient tips, high ponytail, purple eyes, pale skin, slim build"
                       @input="detail.dirty = true"
                     />
+
+                    <!-- ★ 2026-10-06 新增：外观特化点选框。
+                         用户口径：像真珠这样的角色需要**常驻**种族/身体特征
+                         （android, mechanical joints…），手打英文 tag 很别扭 → 给点选。
+                         标签来自 imagePromptTags.yaml（与生图词表同源）。 -->
+                    <!-- ★ 2026-10-06 改造：标签库从**内嵌面板**改为**独立弹窗**。
+                         原内嵌面板在 27 个分组时把弹窗内容撑爆（用户实报"视觉上很难用"）。
+                         同时按用户口径**只保留身体设计类标签**（种族/机械/体型/阴毛/生理特征）——
+                         动作与表情状态已移交「绘图」页，过滤由后端按唯一真源执行。
+
+                         ★ 2026-10-07 用户口径：**移除"已选 TAG"的 chip 与 × 交互**。
+                         理由：标签点选后本来就写进了上方「身体」输入框，在框里直接改就行；
+                         再摆一行不可编辑的 chip 让用户去点 × 删，是**多此一举**，
+                         而且那行长文本把「身体」输入框挤得没地方了。
+                         现在：只保留一个「＋ 选标签」入口 + 一行说明，空间全留给输入框。
+                         已选状态以**输入框内容本身**为准（那才是唯一真源）。 -->
+                    <div class="trait-block trait-block--slim">
+                      <div class="trait-head">
+                        <span class="trait-title">外观特化</span>
+                        <span class="trait-hint">常驻身体 / 种族特征 · 点选即写入上方「身体」，在框里直接改</span>
+                        <span style="flex:1"></span>
+                        <linshe-button
+                          variant="secondary" size="sm"
+                          :loading="traitCatalogLoading"
+                          @click="openTraitPicker"
+                        >＋ 选标签</linshe-button>
+                      </div>
+                    </div>
+
+                    <!-- ★ 2026-10-07 用户口径：这段说明要**缩句**（原文啰嗦）。
+                         ⚠ 保留 `NUDE_DESCRIPTION` 插值 —— 它是系统常量，写死在文案里会漂移。 -->
                     <p class="scene-auto-body">
-                      这一套不用填衣服：「全身」即不穿衣物、各角色一致，由系统写入
-                      <code>{{ NUDE_DESCRIPTION }}</code>。洗浴与私密场景只用这份<b>身体</b>、不叠衣物。
+                      「全身」即由系统写入 <code>{{ NUDE_DESCRIPTION }}</code>。多为洗浴与私密场景
                     </p>
                   </div>
 
@@ -600,6 +630,16 @@
       :base-prompt="fullPrompt"
       @applied="onPersonaRefined"
     />
+
+    <!-- ── 外观特化标签选择器（独立弹窗）──
+         原为内嵌面板，分组一多撑爆弹窗；且当时会把动作/表情状态一并倒进来。
+         现在只给身体设计类标签（后端按唯一真源过滤），动作状态移交「绘图」页。 -->
+    <AppearanceTraitPicker
+      v-model="traitPickerOpen"
+      :display-name="character?.display_name || ''"
+      :selected="selectedTraits"
+      @confirm="onTraitPickerConfirm"
+    />
   </Teleport>
 </template>
 
@@ -616,6 +656,7 @@ import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
 import PersonaRefineModal from './PersonaRefineModal.vue'
+import AppearanceTraitPicker from './AppearanceTraitPicker.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
@@ -748,6 +789,79 @@ const fullPrompt = computed(() => composePersona(detail.editPersona, effectiveAp
 
 /** 工装（常态外观）当前文本：用于判断"以它为基准"的按钮是否可用 */
 const workOutfitText = computed(() => effectiveAppearance())
+
+// ═══════════════════════════════════════════════════════════
+// 外观特化（常驻种族 / 身体特征）
+//
+// 用户口径 2026-10-06：像真珠这类角色需要**常驻**种族/身体特征
+// （`android, mechanical joints, visible seams`…），但手打英文 tag 别扭 → 给点选框。
+// 标签库来自 `imagePromptTags.yaml`（与生图词表**同源**，不是另抄一份），
+// 点选后**写进 detail.body**（身体是五套共用的单一真源），随既有保存链路落库 ——
+// 因此"点选"与"手打"最终落在同一个字段，不存在两套真源。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 外观特化标签选择器 —— 2026-10-06 改为**独立弹窗**。
+ *
+ * 原实现是内嵌在角色弹窗里的折叠面板，分组一多就把内容撑爆（用户实报"视觉上很难用"）。
+ * 现在：点「＋ 选标签」打开 `AppearanceTraitPicker` 弹窗，带搜索与分组折叠。
+ *
+ * ★ 标签内容口径：**只给身体设计类**（种族/机械/体型/阴毛/生理特征）。
+ *   动作与表情状态（流口水、乳晕微露、胸部晃动…）已移交「绘图」页 ——
+ *   过滤由后端按唯一真源 `appearanceTagPartition.js` 执行，前端不维护名单。
+ */
+const traitPickerOpen = ref(false)
+const traitCatalogLoading = ref(false)
+/** 用户显式点选的特化标签（仅用于 UI 回显/移除；真正生效的是 detail.body 里那串英文） */
+const selectedTraits = ref([])
+
+function openTraitPicker() {
+  // 打开时用当前 body 里已存在的标签做初始回显（不重新读目录，目录由弹窗自己按需拉）
+  selectedTraits.value = parseTraitsFromBody(String(detail.body || ''))
+  traitPickerOpen.value = true
+}
+
+/** 从身体描述里解析出「疑似标签」用于回显（逗号分隔，去空白） */
+function parseTraitsFromBody(body) {
+  return body.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+}
+
+/** 弹窗确认：把选中的标签**整体同步**进 body（增量的加、取消的删） */
+function onTraitPickerConfirm(next) {
+  const before = parseTraitsFromBody(String(detail.body || ''))
+  const want = new Set(next.map(t => String(t).trim()).filter(Boolean))
+  // 已选里被取消的 → 从 body 移除；新选的 → 追加
+  for (const t of before) {
+    if (!want.has(t)) removeTagFromBody(t)
+  }
+  for (const t of next) {
+    const s = String(t).trim()
+    if (s && !parseTraitsFromBody(String(detail.body || '')).includes(s)) appendTagToBody(s)
+  }
+  selectedTraits.value = [...next.map(t => String(t).trim()).filter(Boolean)]
+}
+
+function appendTagToBody(t) {
+  const body = String(detail.body || '')
+  detail.body = body.trim() ? `${body.trim().replace(/[,\s]+$/, '')}, ${t}` : t
+  detail.dirty = true
+}
+
+function removeTagFromBody(t) {
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const body = String(detail.body || '')
+  detail.body = body
+    .replace(new RegExp(`\\s*,?\\s*${esc}\\s*,?`, 'i'), ', ')
+    .replace(/\s*,\s*/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '').trim()
+  detail.dirty = true
+  selectedTraits.value = selectedTraits.value.filter(x => x !== t)
+}
+
+/** 从已选胶囊里移除一个标签（走同一个 body 同步逻辑） */
+function removeTrait(i) {
+  const t = selectedTraits.value[i]
+  if (t) removeTagFromBody(t)
+}
 
 /** 各套的输入提示语 */
 // 注意：没有 'nude' 分支 —— 全身那格放的是身体输入框（有自己的 placeholder），
@@ -2304,10 +2418,14 @@ const standingPanel = reactive({
 }
 /* min-height:0 是让输入框**可被压缩**的关键（flex 项默认 min-height:auto 不允许缩到内容以下）。
    注意「全身」格的结构多一层：.scene-edit > .scene-auto-note > textarea，
-   所以那一格要**两层都参与弹性分配**，只写直接子元素选择器匹配不到里面的输入框。 */
-.scene-edit > .scene-edit-desc { flex: 1 1 auto; min-height: 0; }
+   所以那一格要**两层都参与弹性分配**，只写直接子元素选择器匹配不到里面的输入框。
+
+   ★ 2026-10-07：`min-height:0` 原先让输入框在空间紧张时被压成**一行**（实测 43.5px，
+   用户实报"把「身体」的输入框挤没了"）。移除已选 chip 行后空间腾出来了，这里给一个
+   **明确的下限**，保证身体描述（通常 100+ 字符的英文 tag 串）至少能看全几行。 */
+.scene-edit > .scene-edit-desc { flex: 1 1 auto; min-height: 96px; }
 .scene-auto-note { flex: 1 1 auto; min-height: 0; }
-.scene-auto-note > .scene-edit-desc { flex: 1 1 auto; min-height: 0; }
+.scene-auto-note > .scene-edit-desc { flex: 1 1 auto; min-height: 96px; }
 .scene-edit-note {
   margin: 0; font-size: 11px; line-height: 1.6;
   color: var(--text-secondary);
@@ -2320,6 +2438,62 @@ const standingPanel = reactive({
   display: inline-block; padding: 1px 6px; border-radius: 5px;
   background: var(--glass-bg); color: var(--text-primary);
   font-size: 10.5px; word-break: break-all;
+}
+
+/* ── 外观特化（常驻种族/身体特征）点选框 ── */
+.trait-block { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+/* ★ 2026-10-07：移除已选 chip 行后，本块只剩"标题 + 一个入口"，压到单行高度，
+   把纵向空间让给上方「身体」输入框（用户实报：chip 行把输入框挤没了）。 */
+.trait-block--slim { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trait-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trait-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.trait-hint { font-size: 11px; color: var(--text-secondary); }
+.trait-picked { display: flex; flex-wrap: wrap; gap: 6px; }
+.trait-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 4px 2px 9px; border-radius: 999px;
+  background: var(--accent-soft, rgba(120,120,255,.14)); color: var(--text-primary);
+  font-size: 11.5px; font-family: ui-monospace, monospace;
+}
+.trait-chip-x {
+  border: 0; background: transparent; cursor: pointer; padding: 0 3px;
+  color: var(--text-secondary); font-size: 13px; line-height: 1;
+}
+.trait-chip-x:hover { color: var(--accent); }
+.trait-empty { margin: 0; font-size: 11.5px; color: var(--text-secondary); }
+.trait-panel {
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--glass-border); border-radius: 9px;
+  padding: 8px; background: var(--glass-bg);
+}
+.trait-sec { display: flex; flex-direction: column; gap: 4px; }
+.trait-sec + .trait-sec { margin-top: 8px; }
+.trait-group { display: flex; flex-direction: column; }
+.trait-group-head {
+  display: flex; align-items: center; gap: 7px;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+  padding: 4px 6px; border-radius: 6px; color: var(--text-primary);
+}
+.trait-group-head:hover { background: var(--glass-bg-hover, rgba(255,255,255,.06)); }
+.trait-group-head.open { color: var(--accent); }
+.trait-sec-name { font-size: 10.5px; color: var(--text-secondary); }
+.trait-group-name { font-size: 12px; font-weight: 600; }
+.trait-group-n {
+  margin-left: auto; font-size: 10.5px; color: var(--text-secondary);
+  background: var(--glass-bg); border-radius: 999px; padding: 0 6px;
+}
+.trait-tags { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px 6px 8px; }
+.trait-tag {
+  border: 1px solid var(--glass-border); background: transparent;
+  border-radius: 999px; padding: 2px 9px; cursor: pointer;
+  font-size: 11px; color: var(--text-secondary);
+}
+.trait-tag:hover { color: var(--text-primary); border-color: var(--accent); }
+.trait-tag.on {
+  /* ⚠ 实心强调底 + 白字必须用 --accent-solid（暗夜下会被压深）；
+     用裸 --accent 在暗夜里白字会糊（项目既有红线，darkThemeReadability 测试钉着）。 */
+  background: var(--accent-solid); border-color: var(--accent-solid);
+  color: var(--on-accent, #fff);
 }
 .scene-auto-body b { color: var(--text-primary); }
 .scene-edit-empty { font-size: 12px; color: var(--text-secondary); padding: 8px 0; }

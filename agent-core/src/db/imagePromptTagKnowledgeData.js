@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { load as yamlLoad } from 'js-yaml';
 import { containsExplicitAdultContent } from './imagePromptKnowledgePolicy.js';
+import { isBodyDesignTag, FULLY_KEPT_SECTIONS } from './appearanceTagPartition.js';
 
 const ALL_SCENES = ['chat', 'moments', 'events', 'schedule', 'mailbox', 'avatar', 'gift', 'proactive', 'standalone'];
 const SOURCE_PATH = fileURLToPath(new URL('./data/imagePromptTags.yaml', import.meta.url));
@@ -42,6 +43,9 @@ const TOP_LEVEL_CATEGORY = {
   场景: 'scene_vocabulary',
   物品: 'object_vocabulary',
   镜头: 'camera_vocabulary',
+  // ★ 2026-10-06 新增：身体特征（阴毛 / 机械义体 / 体型身高 / 种族特征）。
+  //   收进角色侧词表 —— 它描述的是"这个角色身体长什么样"，与服饰/表情同级。
+  身体特征: 'character_vocabulary',
 };
 
 const TOPIC_ALIASES = {
@@ -392,3 +396,47 @@ const built = buildImagePromptTagKnowledge(parsedSource);
 export const IMAGE_PROMPT_TAG_KNOWLEDGE = built.knowledge;
 export const IMAGE_PROMPT_TAG_KNOWLEDGE_STATS = built.stats;
 export const IMAGE_PROMPT_TAG_SOURCE_SHA256 = createHash('sha256').update(sourceBuffer).digest('hex');
+
+/**
+ * ★ 2026-10-06 新增：「外观特化」选择器用的**分组标签目录**。
+ *
+ * 与 `IMAGE_PROMPT_TAG_KNOWLEDGE` 的区别：那份是**喂给 LLM 的词表**（chunk/菜单/场景过滤），
+ * 这份是**给人点的选择器** —— 保留 YAML 的原始 section→group→tag 层级与中文标签，
+ * 并且**不做** minor（未成年人）过滤：角色卡里的身体设定是给人确认的，不该被自动删掉。
+ *
+ * 用途：角色形象弹窗的「外观特化」框 —— 用户想给某个角色（如真珠）常驻加
+ * `android, mechanical joints` 这类种族/身体特征时，不必手打英文 tag，点选即可。
+ *
+ * @returns {Array<{name:string, groups:Array<{name:string, tags:Array<{tag:string,label:string}>}>}>}
+ */
+export function listAppearanceTraitCatalog(opts = {}) {
+  const mode = opts.mode === 'draw' ? 'draw' : 'body';
+  const out = [];
+  for (const sec of parsedSource || []) {
+    const secName = String(sec?.name || '').trim();
+    if (!secName || SKIPPED_SECTIONS.has(secName)) continue;
+    // ★ 角色页（body）与绘图页（draw）**共用这一份解析结果**，只是过滤口径不同。
+    //   分家的判定依据在 `appearanceTagPartition.js`（唯一真源），此处只做过滤。
+    if (mode === 'body' && !FULLY_KEPT_SECTIONS.has(secName)) {
+      // 「人物」段是混合段：整段保留的组之外还有拆分/移出的组，需要逐组逐 TAG 过滤；
+      // 其余段（服饰/表情动作/体位/画面/场景/镜头）在角色页整段不出现。
+      const isMixedSection = secName === '人物';
+      if (!isMixedSection) continue;
+    }
+    const groups = [];
+    for (const g of sec.groups || []) {
+      const gName = String(g?.name || '').trim();
+      if (!gName) continue;
+      const tags = [];
+      for (const [tag, label] of Object.entries(g.tags || {})) {
+        const t = String(tag || '').trim();
+        if (!t) continue;
+        if (mode === 'body' && !isBodyDesignTag(secName, gName, t)) continue;
+        tags.push({ tag: t, label: String(label || '') });
+      }
+      if (tags.length) groups.push({ name: gName, tags });
+    }
+    if (groups.length) out.push({ name: secName, groups });
+  }
+  return out;
+}

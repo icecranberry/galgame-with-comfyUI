@@ -25,6 +25,20 @@
                 </div>
                 <div v-else class="dr-now dr-no-data">还没安排日程</div>
               </div>
+              <!-- ★ 2026-10-07 用户口径：清空日程应该放在**这里**（角色日程的右上角）。
+                   理由：「如果我要清空日程，会希望在侧边栏点击个交互按钮进行删除日程」——
+                   它是对**这个角色的整份日程**的破坏性操作，属于本面板的作用域；
+                   原先放在"编排日程"弹窗的头部，既是"关弹窗时最容易误点"的位置，
+                   与弹窗里的其它选项（都是"这次生成怎么调"）也不是一类东西。
+                   仅在该角色**确实有日程**时出现（没日程可清时不该占位）。 -->
+              <linshe-button
+                v-if="activities.length > 0"
+                variant="icon" class="dr-clear" tone="danger"
+                title="清空这个角色的全部日程"
+                @click="$emit('clear-schedule')"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </linshe-button>
               <linshe-button variant="icon" class="dr-close" @click="$emit('close')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
               </linshe-button>
@@ -185,6 +199,29 @@ cx="40" cy="40" r="34" fill="none" stroke="var(--accent)"
         <label class="edit-label">描述</label>
         <linshe-input v-model="editForm.description" type="textarea" rows="3" placeholder="这个场景里 ta 在做什么" maxlength="200" />
       </div>
+      <!-- ★ 小标签（tags）：日程里的分类标记（如「通勤」「性」「工作」）。
+           这些标签会进 UI 展示与检索，过去只能由模型生成、无法手改 —— 用户 2026-10-06 要求可编辑。
+           ⚠ 后端 sanitizeActivityInput 限制：最多 6 个、每个去空白、空标签丢弃。 -->
+      <div class="edit-field">
+        <label class="edit-label">
+          小标签
+          <span class="edit-hint">（回车添加；最多 6 个，用于分类与检索）</span>
+        </label>
+        <div class="edit-tags">
+          <span v-for="(t, i) in editForm.tags" :key="`${t}-${i}`" class="edit-tag">
+            {{ t }}
+            <button type="button" class="edit-tag-x" :title="`移除「${t}」`" @click="removeTag(i)">×</button>
+          </span>
+          <linshe-input
+            v-model="tagDraft" size="sm" class="edit-tag-input"
+            :placeholder="editForm.tags.length >= 6 ? '已达上限 6 个' : '输入后回车添加…'"
+            :disabled="editForm.tags.length >= 6"
+            maxlength="12"
+            @keydown.enter.prevent="addTag"
+            @keydown.,.prevent="addTag"
+          />
+        </div>
+      </div>
       <template #footer>
         <linshe-button variant="secondary" @click="editOpen = false">取消</linshe-button>
         <linshe-button variant="primary" :loading="editSaving" @click="saveEdit">保存</linshe-button>
@@ -212,7 +249,8 @@ const props = defineProps<{
   regenerating?: boolean
 }>()
 
-const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt', 'updated', 'diary'])
+// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary（日记本入口）、本地新增 clear-schedule（清除日程）—— 都保留。
+const emit = defineEmits(['close', 'peek', 'regenerate', 'chat', 'wakePhone', 'wakeDoor', 'peekAt', 'updated', 'diary', 'clear-schedule'])
 const toastFn = inject('toast', null) as any
 const notify = (msg: string, type?: string) => { try { toastFn?.(msg, type) } catch { /* toast 不可用时静默 */ } }
 
@@ -220,13 +258,30 @@ const notify = (msg: string, type?: string) => { try { toastFn?.(msg, type) } ca
 const editOpen = ref(false)
 const editSaving = ref(false)
 const editIndex = ref(-1)
-const editForm = reactive({ activity: '', location: '', description: '' })
+const editForm = reactive({ activity: '', location: '', description: '', tags: [] as string[] })
+/** 小标签输入草稿（回车/逗号提交） */
+const tagDraft = ref('')
+
+/** 添加一个小标签（去空白、去重、上限 6 —— 与后端 sanitizeActivityInput 同口径） */
+function addTag() {
+  const t = String(tagDraft.value || '').trim().replace(/[,，]/g, '')
+  if (!t) return
+  if (editForm.tags.length >= 6) { notify('最多 6 个小标签', 'error'); tagDraft.value = ''; return }
+  if (!editForm.tags.includes(t)) editForm.tags.push(t)
+  tagDraft.value = ''
+}
+function removeTag(i: number) {
+  editForm.tags.splice(i, 1)
+}
 
 function openEdit(act: any, index: number) {
   editIndex.value = index
   editForm.activity = act.activity || ''
   editForm.location = act.location || ''
   editForm.description = act.description || ''
+  // ⚠ 必须整体替换（不能 editForm.tags = [...] 直接赋值给 reactive 的数组属性会失响应）
+  editForm.tags = Array.isArray(act.tags) ? act.tags.map((t: any) => String(t)).filter(Boolean) : []
+  tagDraft.value = ''
   editOpen.value = true
 }
 
@@ -463,6 +518,14 @@ onUnmounted(() => {
   display: none;
   width: 34px; height: 34px; flex-shrink: 0;
 }
+/* 清空日程：**任何屏幕宽度都显示**（它是这个抽屉里唯一能删日程的入口，
+   ⚠ 不要像 .dr-close 那样只在移动端显示 —— 桌面端用户同样需要它）。
+   `margin-left:auto` 把它与关闭按钮一起推到行尾；关闭按钮在它右边。 */
+.dr-clear {
+  display: flex;
+  width: 34px; height: 34px; flex-shrink: 0;
+  margin-left: auto;
+}
 
 
 /* Row 2: action buttons */
@@ -687,6 +750,21 @@ onUnmounted(() => {
 }
 .edit-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
 .edit-label { font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); }
+.edit-hint { font-weight: 400; color: var(--text-tertiary, var(--text-secondary)); }
+/* 小标签编辑器：已选标签 + 输入框（回车/逗号添加） */
+.edit-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.edit-tag {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 4px 2px 9px; border-radius: 999px;
+  background: var(--accent-soft, rgba(0,0,0,0.06)); color: var(--text-primary);
+  font-size: 0.75rem;
+}
+.edit-tag-x {
+  border: 0; background: transparent; cursor: pointer; padding: 0 3px;
+  color: var(--text-secondary); font-size: 0.85rem; line-height: 1;
+}
+.edit-tag-x:hover { color: var(--accent); }
+.edit-tag-input { flex: 1 1 120px; min-width: 120px; }
 
 .tl-mark {
   display: flex; align-items: center; gap: 5px; margin-top: 6px;
