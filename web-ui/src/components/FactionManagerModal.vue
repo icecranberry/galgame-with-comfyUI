@@ -65,8 +65,15 @@
           </header>
 
           <div class="fl-form">
-            <label class="fl-field"><span>名称</span>
-              <linshe-input v-model="draft.name" size="sm" /></label>
+            <div class="fl-row">
+              <label class="fl-field"><span>名称</span>
+                <linshe-input v-model="draft.name" size="sm" /></label>
+              <!-- ★ 2026-10-07 用户实报：新建表单有「类型」，已选档案却漏了它 →
+                   已建的派系没法改类型。这里补上与新建一致的字段（脚本侧
+                   dirty/resetDraft/saveFaction 本就处理了 type，缺的只是 UI）。 -->
+              <label class="fl-field"><span>类型</span>
+                <linshe-select v-model="draft.type" size="sm" allow-free-input :options="typeOptions" /></label>
+            </div>
             <div class="fl-row">
               <label class="fl-field"><span>状态</span>
                 <linshe-select v-model="draft.status" size="sm" allow-free-input :options="statusOptions" /></label>
@@ -143,21 +150,32 @@
             <p class="fl-hint">点一下即加入（职务默认「成员」）；加入后在下方的职务框里可直接改。</p>
           </div>
 
-          <ul v-if="current.members.length" class="fl-members">
-            <li v-for="m in current.members" :key="m.id" class="fl-member">
-              <span class="fl-av" :style="avatarStyle(m)">{{ m.avatar_path ? '' : (m.display_name || '?').charAt(0) }}</span>
-              <span class="fl-member-name">{{ m.display_name }}<i v-if="m.archived" class="fl-arch">已归档</i></span>
+          <!-- ★ 2026-10-07 用户口径：成员改成与「角色区块」（TavernView 的 .char-card）
+               一致的卡片式。原先是一行「头像+名字+职务输入+移除」的平淡列表，视觉上
+               与整站卡片语汇脱节。现改为 glass 卡片网格：头像在顶、名字居中、职务可
+               直接改、底部一行「移除」。卡片本体不做整卡点击（卡里已有输入框和按钮，
+               整卡点击会抢焦点），移除走明确的按钮。 -->
+          <div v-if="current.members.length" class="fl-mcards">
+            <div
+              v-for="m in current.members"
+              :key="m.id"
+              class="fl-mcard"
+              :class="{ 'is-archived': m.archived }"
+            >
+              <span class="fl-mcard-av" :style="avatarStyle(m)">{{ m.avatar_path ? '' : (m.display_name || '?').charAt(0) }}</span>
+              <div class="fl-mcard-name" :title="m.display_name">{{ m.display_name }}</div>
+              <span v-if="m.archived" class="fl-mcard-arch">已归档</span>
               <input
-                class="fl-role-input"
+                class="fl-mcard-role"
                 :value="m.role"
                 :disabled="busy"
                 title="职务（可直接改，回车生效）"
                 @change="e => changeRole(m, e.target.value)"
                 @keyup.enter="e => changeRole(m, e.target.value)"
               />
-              <linshe-button size="sm" variant="ghost" :disabled="busy" @click="dropMember(m.id)">移除</linshe-button>
-            </li>
-          </ul>
+              <button type="button" class="fl-mcard-drop" :disabled="busy" @click="dropMember(m.id)">移除</button>
+            </div>
+          </div>
           <p v-else class="fl-hint">还没有成员 —— 点「＋ 添加角色」。</p>
 
           <!-- 势力关系 -->
@@ -546,14 +564,53 @@ watch(open, v => { if (v) load() })
 .fl-pick.is-in { opacity: .4; cursor: default; }
 .fl-pick-name { font-size: var(--fs-xs); color: var(--text); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.fl-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.fl-member { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); }
-.fl-member-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fl-arch { font-style: normal; font-size: var(--fs-xs); color: var(--text-secondary); margin-left: 6px; }
-.fl-role-input {
-  width: 92px; font-size: var(--fs-xs); padding: 3px 8px; border-radius: 999px;
+/* ── 成员卡片（与 TavernView 的 .char-card 同一视觉语汇）──
+   glass 背景 + 16px 圆角 + 圆形头像 + 网格；不全宽铺满，跟随容器自适应列数。 */
+.fl-mcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 10px;
+}
+.fl-mcard {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 14px 8px 10px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+}
+.fl-mcard.is-archived { opacity: .6; }
+.fl-mcard-av {
+  width: 52px; height: 52px; border-radius: 50%; flex: none;
+  background-color: rgba(var(--accent-rgb), .18); background-size: cover; background-position: center;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-md); font-weight: 700; color: var(--text-bright); overflow: hidden;
+}
+.fl-mcard-name {
+  font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright);
+  text-align: center; line-height: 1.3; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fl-mcard-arch {
+  font-size: 10px; padding: 0 7px; border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, .07); color: var(--text-secondary); user-select: none;
+}
+.fl-mcard-role {
+  width: 100%; box-sizing: border-box; text-align: center;
+  font-size: var(--fs-xs); padding: 3px 8px; border-radius: 999px;
   border: 1px solid var(--glass-border); background: transparent; color: var(--text);
 }
+.fl-mcard-role:focus { outline: none; border-color: var(--accent); }
+.fl-mcard-drop {
+  margin-top: 2px; padding: 2px 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border); background: transparent;
+  color: var(--text-secondary); font-size: 11px; cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+.fl-mcard-drop:hover:not(:disabled) { border-color: var(--danger, #c62828); color: var(--danger, #c62828); }
+.fl-mcard-drop:disabled { opacity: .5; cursor: default; }
 
 .fl-rels { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .fl-rels li { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); }
