@@ -1,8 +1,16 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
-import { generateEventTypes, generateTopics } from '../services/libraryGenerator.js';
+import { generateEventTypes, generateTopics, describeLibraryImage } from '../services/libraryGenerator.js';
 
 const router = Router();
+
+router.post('/describe-image', async (req, res) => {
+  try {
+    res.json({ direction: await describeLibraryImage(req.body || {}) });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || '图片场景识别失败' });
+  }
+});
 
 // ── 工具函数 ──
 

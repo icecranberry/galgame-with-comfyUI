@@ -1373,6 +1373,10 @@ export async function listEventTypes() {
   return request(`/library/event-types`)
 }
 
+export function describeLibraryImage(type, image, direction, signal) {
+  return request('/library/describe-image', { method: 'POST', body: { type, image, direction }, signal })
+}
+
 export function createEventType(data) {
   return request(`/library/event-types`, { method: 'POST', body: data })
 }

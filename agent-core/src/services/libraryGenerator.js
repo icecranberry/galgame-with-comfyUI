@@ -8,6 +8,19 @@
 import { chatSync } from '../llm/llm-client.js';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
+import { LIBRARY_IMAGE_SCENE_PROMPT, validateLibraryImageInput } from './libraryImageScene.js';
+
+export async function describeLibraryImage(input) {
+  const { image, type, direction } = validateLibraryImageInput(input);
+  const msgs = buildSystemLayers(LIBRARY_IMAGE_SCENE_PROMPT, type === 'event-types' ? 'event' : 'moments');
+  msgs.push({ role: 'user', content: [
+    { type: 'text', text: `请为${type === 'event-types' ? '奇遇事件库' : '朋友圈话题库'}还原图中场景，输出一段场景方向。${direction ? `\n额外要求：${direction}` : ''}` },
+    { type: 'image_url', image_url: { url: image } },
+  ] });
+  const result = await chatSync(msgs, { temperature: 0.3, max_tokens: 700, label: '事件库-图片场景识别' });
+  if (typeof result !== 'string' || !result.trim()) throw new Error('未识别到场景，请换张图片重试');
+  return result.trim();
+}
 
 const BATCH_SIZE = 8;
 

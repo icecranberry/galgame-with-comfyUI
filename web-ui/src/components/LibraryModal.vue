@@ -10,13 +10,14 @@
       </template>
       <div class="lib-body">
           <!-- 生成器 -->
-          <div class="gen-section">
+          <div class="gen-section" @paste="onScenePaste">
             <div class="gen-row">
               <div class="gen-input-wrap">
                 <linshe-input
                   ref="directionInput"
                   @keydown.enter.exact.prevent="onDirectionEnter"
                   v-model="direction"
+                  :disabled="describingImage"
                   class="gen-input"
                   type="textarea"
                   rows="2"
@@ -27,9 +28,18 @@
                   <div class="scan-text">幻想中…</div>
                 </div>
               </div>
-              <linshe-button variant="primary" @click="doGenerate" :disabled="generating || saving">
+              <linshe-button variant="primary" @click="doGenerate" :disabled="generating || saving || describingImage">
                 {{ generating ? '幻想中…' : '开始幻想' }}
               </linshe-button>
+            </div>
+            <div class="image-direction-row">
+              <div v-show="false" aria-hidden="true">
+                <linshe-input ref="imagePicker" type="file" tabindex="-1" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" @change="onSceneImage" />
+              </div>
+              <linshe-button variant="secondary" size="sm" :loading="describingImage" :disabled="generating || saving || describingImage" @click="imagePicker?.$el?.click()">
+                {{ describingImage ? '正在识别场景…' : '上传图片还原场景' }}
+              </linshe-button>
+              <span class="image-direction-hint" role="status">{{ describingImage ? '识别完成后自动填入上方，可继续修改' : '也可在上方输入框直接粘贴图片（Ctrl+V），最大 6MB；可先填写补充要求' }}</span>
             </div>
 
             <!-- 生成结果预览 -->
@@ -149,7 +159,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, inject, nextTick } from 'vue'
+import { ref, computed, watch, inject, nextTick, onBeforeUnmount } from 'vue'
 import * as api from '../api/index.js'
 import LibraryItemCard from './LibraryItemCard.vue'
 import CollapseTransition from './CollapseTransition.vue'
@@ -177,6 +187,69 @@ const customOpen = ref(true)
 
 const direction = ref('')
 const directionInput = ref(null)
+const imagePicker = ref(null)
+const describingImage = ref(false)
+let imageRequest = null
+
+function cancelImageRecognition() {
+  imageRequest?.abort()
+  imageRequest = null
+  describingImage.value = false
+}
+
+watch(() => [props.modelValue, props.type], cancelImageRecognition)
+onBeforeUnmount(cancelImageRecognition)
+
+function onSceneImage(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  recognizeSceneImage(file)
+}
+
+function onScenePaste(event) {
+  const clipboard = event.clipboardData
+  const imageItem = Array.from(clipboard?.items || []).find(item => item.kind === 'file' && item.type.startsWith('image/'))
+  const file = imageItem?.getAsFile() || Array.from(clipboard?.files || []).find(file => file.type.startsWith('image/'))
+  if (!file) return // 普通文字粘贴保持原生行为
+  event.preventDefault()
+  recognizeSceneImage(file)
+}
+
+async function recognizeSceneImage(file) {
+  if (!file || describingImage.value || generating.value || saving.value) return
+  if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'].includes(file.type)) {
+    return toastFn('请选择 PNG、JPG、WEBP、GIF 或 AVIF 图片', 'error')
+  }
+  if (file.size > 6 * 1024 * 1024) return toastFn('图片不能超过 6MB', 'error')
+  const controller = new AbortController()
+  imageRequest = controller
+  describingImage.value = true
+  const originalDirection = direction.value
+  const libraryType = props.type
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('图片读取失败，请重试'))
+      reader.readAsDataURL(file)
+    })
+    if (controller.signal.aborted) return
+    const result = await api.describeLibraryImage(libraryType, image, originalDirection, controller.signal)
+    if (controller.signal.aborted || imageRequest !== controller) return
+    if (!result.direction?.trim()) throw new Error('未识别到场景，请重试')
+    direction.value = result.direction
+    toastFn('场景已填入，可修改后开始幻想', 'success')
+  } catch (err) {
+    if (!controller.signal.aborted) toastFn(err.message || '图片识别失败，请重试', 'error')
+  } finally {
+    if (imageRequest === controller) {
+      imageRequest = null
+      describingImage.value = false
+      await nextTick()
+      directionInput.value?.focus()
+    }
+  }
+}
 const generating = ref(false)
 const saving = ref(false)
 const previewItems = ref([])
@@ -216,13 +289,13 @@ watch(() => props.modelValue, async (v) => {
 
 function onDirectionEnter(e) {
   if (e.isComposing || e.keyCode === 229) return
-  if (generating.value || saving.value) return
+  if (generating.value || saving.value || describingImage.value) return
   e.target.blur()
   doGenerate()
 }
 
 async function doGenerate() {
-  if (generating.value || saving.value) return
+  if (generating.value || saving.value || describingImage.value) return
   generating.value = true
   try {
     const res = isEvents.value
@@ -433,6 +506,8 @@ function addItem() {
 
 /* 生成器 */
 .gen-section { margin-bottom: 20px; }
+.image-direction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.image-direction-hint { color: var(--text-secondary); font-size: var(--fs-xs); }
 .gen-row { display: flex; gap: 10px; align-items: stretch; }
 .gen-input-wrap { position: relative; flex: 1; min-width: 0; }
 .gen-input-wrap .gen-input { width: 100%; box-sizing: border-box; }
