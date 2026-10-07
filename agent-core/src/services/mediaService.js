@@ -2162,11 +2162,15 @@ async function generatePosterIssue(outlet) {
   `).get(outlet.id);
   const prevNo = Number(safeParse(prev?.payload_json, null)?.issueNo) || 0;
 
+  // ★ 2026-10-07：原先这里把刊名**写死**成《狸狸八卦》（下面 tags/author_name/日志同）。
+  //   poster 是通用形态（`outlet.layout === 'poster'` 的任何刊都走这条分支），写死刊名
+  //   等于对着别的刊喊「请出《狸狸八卦》」。既然默认那本已被用户删除，更没理由留死名，
+  //   一律改用 `outlet.name`。
   const msgs = [
     { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
     { role: 'system', content: outlet.prompt },
     { role: 'system', content: buildPosterFormatPrompt() },
-    { role: 'user', content: `请出《狸狸八卦》新的一期海报。上一期编号是 ${prevNo || '（尚无，本期为 01）'}，本期编号用 ${prevNo + 1}。\n\n必须是全新的瓜，不得重复往期。` },
+    { role: 'user', content: `请出《${outlet.name}》新的一期海报。上一期编号是 ${prevNo || '（尚无，本期为 01）'}，本期编号用 ${prevNo + 1}。\n\n必须是全新的瓜，不得重复往期。` },
   ];
 
   const raw = await chatSync(msgs, {
@@ -2186,12 +2190,12 @@ async function generatePosterIssue(outlet) {
     outlet.id, batchId,
     `【${String(p.issueNo).padStart(2, '0')}】${p.bubbles[0] || p.bigTitle}`,
     [p.hotline, ...p.caption].filter(Boolean).join('\n').slice(0, 2000),
-    JSON.stringify(['狸狸八卦', '海报']),
-    `狸狸八卦编辑部`,
+    JSON.stringify([outlet.name, '海报']),
+    `${outlet.name}编辑部`,
     p.views, p.views * randInt(8, 20), JSON.stringify([]),
     p.image_prompt, JSON.stringify(p),
   );
-  console.log(`[media] 《狸狸八卦》第 ${p.issueNo} 期海报发布（${p.bubbles.length} 气泡 / ${p.panels.length} 小图）`);
+  console.log(`[media] 《${outlet.name}》第 ${p.issueNo} 期海报发布（${p.bubbles.length} 气泡 / ${p.panels.length} 小图）`);
   broadcast('media_new_posts', { outletId: outlet.id, count: 1 });
   // 先补主图；小图由 fillPendingImages 的 poster 分支继续补
   fillPendingImages(1).catch(err => console.error('[media] 本期海报补图失败:', err.message));
