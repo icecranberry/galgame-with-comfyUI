@@ -15,29 +15,34 @@
  * ── 红线对照 ──────────────────────────────────────────────────
  * · 红线 12：派系是**世界观实例专属** → 只认当前激活世界观；结构化定义镜像回
  *   `world-projects/<slug>/project.json` 的 `factions` 槽位（引擎只读，不内置任何世界观的派系名）。
- * · 红线 8：类型/关系的词表只在本文件定义一份（`FACTION_TYPES` / `FACTION_RELATIONS`），
- *   前端经 `GET /api/factions/types` 渲染。
+ * · 红线 8：**枚举**词表（关系/职务/支柱/类型建议）只在本文件定义一份，前端经
+ *   `GET /api/factions/types` 渲染；类型/状态/立场是**自由文本 + 建议值**（见下方说明）。
  * · 归档角色：**不计入**成员数（`archived=0` 才算），但详情里仍可看到（另标注）。
  */
 
 import { getDb, getActiveWorldSetting } from '../db/index.js';
 import { slugForWorld, writeProject, readProject } from './worldProjectLibrary.js';
 
-/** 派系类型 —— 唯一真源（对齐 vault「四层架构」的 政权/军事/秘密结社） */
-export const FACTION_TYPES = ['政权', '军事', '秘密结社', '宗教', '商业', '其他'];
-/** 势力关系 —— 唯一真源 */
+/**
+ * ⚠⚠ 本节的 `*_SUGGESTIONS` **只是建议值，不是白名单**（2026-10-07 用户实报后改的）。
+ *
+ * 踩过：我一开始把「类型 / 状态 / 立场」做成了**硬校验的词表**（未知值直接抛错），结果
+ *   · 用户世界里「星穹列车组」「巡海游侠」只能落成「其他」→ 用户说"**类型不合适**"；
+ *   · 后端的建议值没送到时，前端只能显示一个写死的「稳固」→ 用户说"**状态只有 1 个**"。
+ * 根因：把**可能因世界观而异**的词表当成了引擎约束。硬校验 → 换世界观必错；
+ * 而"建议值缺失"会退化成"没得选"。所以一律改成 **自由文本 + 建议值**（同「权力支柱」的口径）。
+ */
+export const FACTION_TYPE_SUGGESTIONS = [
+  '政权', '军事', '秘密结社', '宗教', '商业', '媒体', '学术', '家族', '社群', '其他',
+];
+export const FACTION_STATUS_SUGGESTIONS = ['鼎盛', '稳固', '困顿', '衰落', '新兴'];
+export const FACTION_STANCE_SUGGESTIONS = ['友好', '中立', '冷淡', '敌对'];
+/** 势力关系 —— 这几个词是**通用**的（不指向任何世界观），故仍作枚举 */
 export const FACTION_RELATIONS = ['同盟', '敌对', '中立', '从属', '竞争'];
 /** 图上"默认画哪些边"（D4）：中立太密，默认不画 */
 export const DEFAULT_VISIBLE_RELATIONS = ['同盟', '敌对', '从属'];
 /** 职务的常用建议值（自由文本，仅作前端联想，不做校验） */
 export const ROLE_SUGGESTIONS = ['首领', '干部', '成员', '线人', '顾问', '挂名'];
-/**
- * 势力状态 —— 唯一真源（参考用户既有《开局态势》的用词：鼎盛 / 稳固 / 困顿）。
- * ⚠ 全是**通用**词：引擎不得内置任何世界观专名（红线 12）。
- */
-export const FACTION_STATUSES = ['鼎盛', '稳固', '困顿', '衰落', '新兴'];
-/** 该势力**对玩家**的态度（区别于 `faction_relations` 的派系↔派系） */
-export const FACTION_STANCES = ['友好', '中立', '冷淡', '敌对'];
 /**
  * 「权力支柱」小标签的**通用**建议值 —— 一句话说清这个势力**凭什么立足**。
  *
@@ -113,28 +118,18 @@ function uniqueSlug(name, excludeId = null) {
   throw fail('派系同名过多，换一个名字');
 }
 
-function assertType(type) {
-  const t = clampText(type, 20) || '其他';
-  if (!FACTION_TYPES.includes(t)) throw fail(`未知的派系类型：${t}（可选：${FACTION_TYPES.join(' / ')}）`);
-  return t;
+/**
+ * 「类型 / 状态 / 立场」统一按**自由文本**处理：只截断长度、给空值兜底，**不校验词表**。
+ * （理由见文件顶部 `*_SUGGESTIONS` 那段：硬校验会让"换世界观"直接失配。）
+ */
+function freeLabel(v, fallback, max = 20) {
+  return clampText(v, max) || fallback;
 }
 
 function assertRelation(relation) {
   const r = clampText(relation, 20);
   if (!FACTION_RELATIONS.includes(r)) throw fail(`未知的势力关系：${r}（可选：${FACTION_RELATIONS.join(' / ')}）`);
   return r;
-}
-
-function assertStatus(status) {
-  const s = clampText(status, 12) || '稳固';
-  if (!FACTION_STATUSES.includes(s)) throw fail(`未知的势力状态：${s}（可选：${FACTION_STATUSES.join(' / ')}）`);
-  return s;
-}
-
-function assertStance(stance) {
-  const s = clampText(stance, 12) || '中立';
-  if (!FACTION_STANCES.includes(s)) throw fail(`未知的立场：${s}（可选：${FACTION_STANCES.join(' / ')}）`);
-  return s;
 }
 
 /**
@@ -197,24 +192,24 @@ function assertNoCycle(id, parentId) {
 /** 组织架构：members + 角色名（含归档标记；计数另行排除归档） */
 function membersOf(factionId) {
   return db().prepare(`
-    SELECT m.id, m.character_id, m.role, m.rank, m.note,
+    SELECT m.id, m.character_id, m.role, m.note,
            c.display_name, c.name AS char_name, COALESCE(c.archived, 0) AS archived
     FROM faction_members m
     JOIN characters c ON c.id = m.character_id
     WHERE m.faction_id = ?
-    ORDER BY m.rank DESC, c.display_name COLLATE NOCASE
+    ORDER BY m.role, c.display_name COLLATE NOCASE
   `).all(factionId);
 }
 
 /** 势力关系（出边） */
 function relationsOf(factionId) {
   return db().prepare(`
-    SELECT r.id, r.to_faction_id AS toId, r.relation, r.strength, r.note,
+    SELECT r.id, r.to_faction_id AS toId, r.relation, r.note,
            f.name AS toName, f.type AS toType
     FROM faction_relations r
     JOIN factions f ON f.id = r.to_faction_id
     WHERE r.from_faction_id = ?
-    ORDER BY r.strength DESC
+    ORDER BY r.relation, f.name COLLATE NOCASE
   `).all(factionId);
 }
 
@@ -270,7 +265,7 @@ export function createFaction(input = {}) {
   if (!slug) throw fail('没有激活的世界观，无法创建派系（先在「世界观设置」里激活一套）');
   const name = clampText(input.name, MAX_NAME);
   if (!name) throw fail('派系名不能为空');
-  const type = assertType(input.type);
+  const type = freeLabel(input.type, '其他');
   const parentId = input.parentId == null || input.parentId === '' ? null : Number(input.parentId);
 
   const row = db().prepare(`
@@ -289,8 +284,8 @@ export function createFaction(input = {}) {
     slug,
     assertInt(input.sortOrder, 0, -9999, 9999),
     clampText(input.scope, 120),
-    assertStatus(input.status),
-    assertStance(input.stance),
+    freeLabel(input.status, '稳固', 12),
+    freeLabel(input.stance, '中立', 12),
     clampText(input.goal, 300),
     JSON.stringify(normalizeTags(input.tags)),
   );
@@ -306,7 +301,7 @@ export function updateFaction(id, patch = {}) {
 
   const next = {
     name: patch.name === undefined ? cur.name : clampText(patch.name, MAX_NAME),
-    type: patch.type === undefined ? cur.type : assertType(patch.type),
+    type: patch.type === undefined ? cur.type : freeLabel(patch.type, '其他'),
     parentId: patch.parentId === undefined
       ? cur.parent_id
       : (patch.parentId == null || patch.parentId === '' ? null : Number(patch.parentId)),
@@ -316,8 +311,8 @@ export function updateFaction(id, patch = {}) {
     icon: patch.icon === undefined ? cur.icon : (clampText(patch.icon, 40) || null),
     sortOrder: patch.sortOrder === undefined ? cur.sort_order : assertInt(patch.sortOrder, 0, -9999, 9999),
     scope: patch.scope === undefined ? cur.scope : clampText(patch.scope, 120),
-    status: patch.status === undefined ? cur.status : assertStatus(patch.status),
-    stance: patch.stance === undefined ? cur.stance : assertStance(patch.stance),
+    status: patch.status === undefined ? cur.status : freeLabel(patch.status, '稳固', 12),
+    stance: patch.stance === undefined ? cur.stance : freeLabel(patch.stance, '中立', 12),
     goal: patch.goal === undefined ? cur.goal : clampText(patch.goal, 300),
     tags: patch.tags === undefined ? parseTags(cur.tags) : normalizeTags(patch.tags),
   };
@@ -359,12 +354,11 @@ export function addMember(factionId, input = {}) {
   if (!ch) throw fail('角色不存在', 404);
 
   const role = clampText(input.role, 20) || '成员';
-  const rank = assertInt(input.rank, 5, 0, 9);
   try {
     db().prepare(`
-      INSERT INTO faction_members (faction_id, character_id, role, rank, note)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(fid, characterId, role, rank, clampText(input.note, 200));
+      INSERT INTO faction_members (faction_id, character_id, role, note)
+      VALUES (?, ?, ?, ?)
+    `).run(fid, characterId, role, clampText(input.note, 200));
   } catch (err) {
     if (/UNIQUE/i.test(err.message)) throw fail('该角色已在此派系里担任同一职务（换个职务或改那条）', 409);
     throw err;
@@ -379,10 +373,9 @@ export function updateMember(factionId, memberId, patch = {}) {
   const cur = db().prepare('SELECT * FROM faction_members WHERE id = ? AND faction_id = ?').get(mid, fid);
   if (!cur) throw fail('成员记录不存在', 404);
   db().prepare(`
-    UPDATE faction_members SET role = ?, rank = ?, note = ? WHERE id = ?
+    UPDATE faction_members SET role = ?, note = ? WHERE id = ?
   `).run(
     patch.role === undefined ? cur.role : (clampText(patch.role, 20) || '成员'),
-    patch.rank === undefined ? cur.rank : assertInt(patch.rank, cur.rank, 0, 9),
     patch.note === undefined ? cur.note : clampText(patch.note, 200),
     mid,
   );
@@ -409,7 +402,6 @@ export function upsertRelation(input = {}) {
   if (!Number.isFinite(fromId) || !Number.isFinite(toId)) throw fail('缺少 fromId / toId');
   if (fromId === toId) throw fail('派系不能和自己建立关系');
   const relation = assertRelation(input.relation);
-  const strength = assertInt(input.strength, 50, 0, 100);
   const note = clampText(input.note, 200);
 
   const from = db().prepare('SELECT id, world_slug FROM factions WHERE id = ?').get(fromId);
@@ -418,12 +410,12 @@ export function upsertRelation(input = {}) {
   if (from.world_slug !== to.world_slug) throw fail('不能跨世界观建立势力关系');
 
   db().prepare(`
-    INSERT INTO faction_relations (from_faction_id, to_faction_id, relation, strength, note)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO faction_relations (from_faction_id, to_faction_id, relation, note)
+    VALUES (?, ?, ?, ?)
     ON CONFLICT(from_faction_id, to_faction_id)
-    DO UPDATE SET relation = excluded.relation, strength = excluded.strength,
+    DO UPDATE SET relation = excluded.relation,
                   note = excluded.note, updated_at = CURRENT_TIMESTAMP
-  `).run(fromId, toId, relation, strength, note);
+  `).run(fromId, toId, relation, note);
   mirrorToProject(from.world_slug);
   return getFaction(fromId);
 }
@@ -522,8 +514,8 @@ export function mirrorToProject(slug = activeWorldSlug()) {
       color: f.color,
       icon: f.icon,
       sort_order: f.sortOrder,
-      members: f.members.map(m => ({ character: m.char_name, role: m.role, rank: m.rank })),
-      relations: f.relations.map(r => ({ to: r.toId, relation: r.relation, strength: r.strength })),
+      members: f.members.map(m => ({ character: m.char_name, role: m.role })),
+      relations: f.relations.map(r => ({ to: r.toId, relation: r.relation })),
     }));
     const cur = readProject(slug);
     writeProject(slug, { ...cur, slug, exists: true, factions });

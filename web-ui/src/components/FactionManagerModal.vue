@@ -46,7 +46,7 @@
             </label>
             <label class="faction-field">
               <span>类型</span>
-              <linshe-select v-model="draft.type" size="sm" :options="typeOptions" />
+              <linshe-select v-model="draft.type" size="sm" allow-free-input :options="typeOptions" />
             </label>
             <label class="faction-field">
               <span>上级组织</span>
@@ -80,7 +80,7 @@
             </label>
             <label class="faction-field">
               <span>类型</span>
-              <linshe-select v-model="draft.type" size="sm" :options="typeOptions" />
+              <linshe-select v-model="draft.type" size="sm" allow-free-input :options="typeOptions" />
             </label>
             <label class="faction-field">
               <span>上级组织</span>
@@ -96,11 +96,11 @@
             </label>
             <label class="faction-field">
               <span>状态</span>
-              <linshe-select v-model="draft.status" size="sm" :options="statusOptions" />
+              <linshe-select v-model="draft.status" size="sm" allow-free-input :options="statusOptions" />
             </label>
             <label class="faction-field">
               <span>对我（玩家）的态度</span>
-              <linshe-select v-model="draft.stance" size="sm" :options="stanceOptions" />
+              <linshe-select v-model="draft.stance" size="sm" allow-free-input :options="stanceOptions" />
             </label>
             <label class="faction-field faction-field--wide">
               <span>当下目标</span>
@@ -131,23 +131,21 @@
           <!-- 组织架构 -->
           <h5 class="faction-sub">组织架构（{{ current.memberCount }} 名在册<span v-if="current.archivedMemberCount">，{{ current.archivedMemberCount }} 名已归档</span>）</h5>
           <table class="faction-table">
-            <thead><tr><th>角色</th><th>职务</th><th>等级</th><th></th></tr></thead>
+            <thead><tr><th>角色</th><th>职务</th><th></th></tr></thead>
             <tbody>
               <tr v-for="m in current.members" :key="m.id" :class="{ 'is-archived': m.archived }">
                 <td>{{ m.display_name }}<span v-if="m.archived" class="faction-archived-tag">已归档</span></td>
                 <td>{{ m.role }}</td>
-                <td>{{ m.rank }}</td>
                 <td class="faction-td-act">
                   <linshe-button size="sm" variant="ghost" :disabled="busy" @click="dropMember(m.id)">移除</linshe-button>
                 </td>
               </tr>
-              <tr v-if="!current.members.length"><td colspan="4" class="faction-empty-row">还没有成员</td></tr>
+              <tr v-if="!current.members.length"><td colspan="3" class="faction-empty-row">还没有成员</td></tr>
             </tbody>
           </table>
           <div class="faction-inline-form">
             <linshe-select v-model="memberDraft.characterId" size="sm" searchable :options="characterOptions" placeholder="选角色" />
             <linshe-input v-model="memberDraft.role" size="sm" :placeholder="rolePlaceholder" list="faction-roles" />
-            <linshe-input v-model.number="memberDraft.rank" size="sm" type="number" min="0" max="9" placeholder="等级" />
             <linshe-button size="sm" variant="secondary" :disabled="busy || !memberDraft.characterId" @click="submitMember">加入</linshe-button>
           </div>
           <datalist id="faction-roles">
@@ -157,23 +155,21 @@
           <!-- 势力关系 -->
           <h5 class="faction-sub">与其他势力的关系</h5>
           <table class="faction-table">
-            <thead><tr><th>对象</th><th>关系</th><th>强度</th><th></th></tr></thead>
+            <thead><tr><th>对象</th><th>关系</th><th></th></tr></thead>
             <tbody>
               <tr v-for="r in current.relations" :key="r.id">
                 <td>{{ r.toName }}</td>
                 <td><span class="faction-rel-chip" :class="relClass(r.relation)">{{ r.relation }}</span></td>
-                <td>{{ r.strength }}</td>
                 <td class="faction-td-act">
                   <linshe-button size="sm" variant="ghost" :disabled="busy" @click="dropRelation(r.id)">移除</linshe-button>
                 </td>
               </tr>
-              <tr v-if="!current.relations.length"><td colspan="4" class="faction-empty-row">还没有登记关系</td></tr>
+              <tr v-if="!current.relations.length"><td colspan="3" class="faction-empty-row">还没有登记关系</td></tr>
             </tbody>
           </table>
           <div class="faction-inline-form">
             <linshe-select v-model="relationDraft.toId" size="sm" searchable :options="otherFactionOptions" placeholder="选对方派系" />
             <linshe-select v-model="relationDraft.relation" size="sm" :options="relationOptions" />
-            <linshe-input v-model.number="relationDraft.strength" size="sm" type="number" min="0" max="100" placeholder="强度" />
             <linshe-button size="sm" variant="secondary" :disabled="busy || !relationDraft.toId" @click="submitRelation">登记</linshe-button>
           </div>
 
@@ -226,8 +222,8 @@ const current = ref(null)
 const creating = ref(false)
 const meta = reactive({ types: [], relations: [], statuses: [], stances: [], roleSuggestions: [], pillarSuggestions: [], defaultVisibleRelations: [] })
 const draft = reactive({ name: '', type: '其他', parentId: '', summary: '', description: '', color: '', scope: '', status: '稳固', stance: '中立', goal: '', tags: [] })
-const memberDraft = reactive({ characterId: '', role: '', rank: 5 })
-const relationDraft = reactive({ toId: '', relation: '同盟', strength: 50 })
+const memberDraft = reactive({ characterId: '', role: '' })
+const relationDraft = reactive({ toId: '', relation: '同盟' })
 const promptPreview = ref('')
 const promptLoading = ref(false)
 
@@ -312,10 +308,8 @@ function select(f) {
   resetDraft()
   memberDraft.characterId = ''
   memberDraft.role = ''
-  memberDraft.rank = 5
   relationDraft.toId = ''
   relationDraft.relation = meta.relations[0] || '同盟'
-  relationDraft.strength = 50
 }
 
 function startCreate() {
@@ -424,12 +418,10 @@ async function submitMember() {
     const f = await api.addFactionMember(current.value.id, {
       characterId: memberDraft.characterId,
       role: memberDraft.role || '成员',
-      rank: memberDraft.rank,
     })
     applyResult(f)
     memberDraft.characterId = ''
     memberDraft.role = ''
-    memberDraft.rank = 5
   } catch (err) { loadError.value = err?.message || '加入失败' } finally { busy.value = false }
 }
 
@@ -448,11 +440,9 @@ async function submitRelation() {
       fromId: current.value.id,
       toId: relationDraft.toId,
       relation: relationDraft.relation,
-      strength: relationDraft.strength,
     })
     applyResult(f)
     relationDraft.toId = ''
-    relationDraft.strength = 50
   } catch (err) { loadError.value = err?.message || '登记失败' } finally { busy.value = false }
 }
 

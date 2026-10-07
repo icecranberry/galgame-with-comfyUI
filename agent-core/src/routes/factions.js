@@ -9,10 +9,10 @@
 
 import { Router } from 'express';
 import {
-  FACTION_TYPES,
+  FACTION_TYPE_SUGGESTIONS,
+  FACTION_STATUS_SUGGESTIONS,
+  FACTION_STANCE_SUGGESTIONS,
   FACTION_RELATIONS,
-  FACTION_STATUSES,
-  FACTION_STANCES,
   ROLE_SUGGESTIONS,
   POWER_PILLAR_SUGGESTIONS,
   DEFAULT_VISIBLE_RELATIONS,
@@ -43,12 +43,15 @@ function handle(res, fn) {
 }
 
 // ── 词表（红线 8：唯一真源在后端，前端只渲染）──
+// ⚠ `types` / `statuses` / `stances` 是**建议值，不是白名单**：类型/状态/立场都可自由填
+//   （硬校验会让"换世界观"直接失配 —— 2026-10-07 用户实报「类型不合适」后改的）。
+//   只有 `relations` 是枚举（那几个词通用，不指向任何世界观）。
 router.get('/types', (req, res) => {
   res.json({
-    types: FACTION_TYPES,
+    types: FACTION_TYPE_SUGGESTIONS,
+    statuses: FACTION_STATUS_SUGGESTIONS,
+    stances: FACTION_STANCE_SUGGESTIONS,
     relations: FACTION_RELATIONS,
-    statuses: FACTION_STATUSES,
-    stances: FACTION_STANCES,
     roleSuggestions: ROLE_SUGGESTIONS,
     pillarSuggestions: POWER_PILLAR_SUGGESTIONS,
     defaultVisibleRelations: DEFAULT_VISIBLE_RELATIONS,

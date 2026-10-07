@@ -57,12 +57,17 @@ test('★★★ 迁移 003：三张表都建出来了', () => {
   }
 });
 
-test('★★ 词表是后端单一真源', () => {
-  assert.ok(svc.FACTION_TYPES.includes('政权'));
-  assert.ok(svc.FACTION_TYPES.includes('秘密结社'));
+test('★★ 词表是后端单一真源（且类型/状态/立场只是**建议值**、不是白名单）', () => {
+  assert.ok(svc.FACTION_TYPE_SUGGESTIONS.includes('政权'));
+  assert.ok(svc.FACTION_TYPE_SUGGESTIONS.includes('秘密结社'));
+  assert.ok(svc.FACTION_STATUS_SUGGESTIONS.includes('困顿'));
+  assert.ok(svc.FACTION_STANCE_SUGGESTIONS.includes('冷淡'));
   assert.ok(svc.FACTION_RELATIONS.includes('同盟'));
   assert.ok(svc.FACTION_RELATIONS.includes('敌对'));
   assert.ok(!svc.DEFAULT_VISIBLE_RELATIONS.includes('中立'), '中立默认不画（否则图会糊）');
+  // ★ 类型/状态/立场**不得**再是硬校验白名单（旧名不该存在）
+  assert.equal(svc.FACTION_TYPES, undefined, '旧硬词表已废弃');
+  assert.equal(svc.FACTION_STATUSES, undefined, '旧硬词表已废弃');
 });
 
 // ─────────────────────────────────────────────────────────
@@ -76,7 +81,9 @@ test('★★★ 创建派系：slug 稳定、类型受校验', () => {
   assert.equal(f.type, '秘密结社');
   assert.ok(f.slug.length > 0, '应生成 slug');
   assert.equal(f.memberCount, 0);
-  assert.throws(() => svc.createFaction({ name: 'x', type: '不存在的类型' }), /未知的派系类型/);
+  // ★ 类型是**自由文本 + 建议值**，不是白名单（2026-10-07 用户实报「类型不合适」后改的）
+  assert.equal(svc.createFaction({ name: '自定义类型测', type: '舰队' }).type, '舰队');
+  assert.equal(svc.createFaction({ name: '空类型测' }).type, '其他', '空值回落「其他」');
   assert.throws(() => svc.createFaction({ name: '' }), /不能为空/);
 });
 
@@ -113,8 +120,8 @@ test('★★★ 成员多对多：同一角色可同时属两个派系', () => {
   const f1 = svc.createFaction({ name: '多属甲', type: '商业' });
   const f2 = svc.createFaction({ name: '多属乙', type: '秘密结社' });
   const cid = newCharacter('多属者');
-  svc.addMember(f1.id, { characterId: cid, role: '员工', rank: 5 });
-  svc.addMember(f2.id, { characterId: cid, role: '线人', rank: 3 });
+  svc.addMember(f1.id, { characterId: cid, role: '员工' });
+  svc.addMember(f2.id, { characterId: cid, role: '线人' });
   assert.equal(svc.getFaction(f1.id).memberCount, 1);
   assert.equal(svc.getFaction(f2.id).memberCount, 1);
 });
@@ -144,11 +151,11 @@ test('★★★ 归档角色不计入成员数，但仍在成员列表里（D7�
 test('★ 成员可改职务/等级、可移除', () => {
   const f = svc.createFaction({ name: '成员维护', type: '其他' });
   const cid = newCharacter('成员维护者');
-  const afterAdd = svc.addMember(f.id, { characterId: cid, role: '成员', rank: 5 });
+  const afterAdd = svc.addMember(f.id, { characterId: cid, role: '成员' });
   const mid = afterAdd.members[0].id;
-  const upd = svc.updateMember(f.id, mid, { role: '首领', rank: 9 });
+  const upd = svc.updateMember(f.id, mid, { role: '首领' });
   assert.equal(upd.members[0].role, '首领');
-  assert.equal(upd.members[0].rank, 9);
+  assert.ok(!('rank' in upd.members[0]), '成员不该再有等级数值（2026-10-07 用户裁定删除）');
   const rm = svc.removeMember(f.id, mid);
   assert.equal(rm.memberCount, 0);
   assert.throws(() => svc.removeMember(f.id, mid), /不存在/);
@@ -158,18 +165,17 @@ test('★ 成员可改职务/等级、可移除', () => {
 // ④ 势力关系
 // ─────────────────────────────────────────────────────────
 
-test('★★★ 势力关系 upsert：同盟可改敌对，强度受限 0-100', () => {
+test('★★★ 势力关系 upsert：同盟可改敌对，同一对只留一条（**已经没有强度数值**）', () => {
   const a = svc.createFaction({ name: '关系甲', type: '政权' });
   const b = svc.createFaction({ name: '关系乙', type: '军事' });
-  let out = svc.upsertRelation({ fromId: a.id, toId: b.id, relation: '同盟', strength: 80 });
+  let out = svc.upsertRelation({ fromId: a.id, toId: b.id, relation: '同盟' });
   assert.equal(out.relations.length, 1);
   assert.equal(out.relations[0].relation, '同盟');
-  assert.equal(out.relations[0].strength, 80);
+  assert.ok(!('strength' in out.relations[0]), '关系不该再有强度数值（2026-10-07 用户裁定删除）');
 
-  out = svc.upsertRelation({ fromId: a.id, toId: b.id, relation: '敌对', strength: 999 });
+  out = svc.upsertRelation({ fromId: a.id, toId: b.id, relation: '敌对' });
   assert.equal(out.relations.length, 1, '同一对只留一条（upsert）');
   assert.equal(out.relations[0].relation, '敌对');
-  assert.equal(out.relations[0].strength, 100, '强度应被夹到 100');
 });
 
 test('★★ 自指 / 跨世界 / 未知关系一律拒绝', () => {
@@ -256,7 +262,7 @@ test('★★ _autoMount 的约定式扫描应发现 factions.js', async () => {
 test('★ 设计稿要求的"三块"仍各自独立（静态钉住）', () => {
   const src = fs.readFileSync(path.join(SRC, 'services/factionService.js'), 'utf8');
   assert.match(src, /与「角色文件夹」的区别/, '服务里必须写明与文件夹的区别（防合并）');
-  assert.match(src, /FACTION_TYPES = \[/, '类型词表必须在后端单一定义');
+  assert.match(src, /FACTION_TYPE_SUGGESTIONS = \[/, '类型建议值必须在后端单一定义');
   assert.match(src, /FACTION_RELATIONS = \[/, '关系词表必须在后端单一定义');
 });
 
@@ -282,8 +288,10 @@ test('★★★ 新建/更新带态势字段：状态与立场受词表校验', 
   assert.equal(f.stance, '友好');
   assert.equal(f.goal, '把持城北货运');
 
-  assert.throws(() => svc.createFaction({ name: 'x', status: '爆炸' }), /未知的势力状态/);
-  assert.throws(() => svc.createFaction({ name: 'x', stance: '暧昧' }), /未知的立场/);
+  // ★ 状态/立场同样是**自由文本**（硬校验会让"换世界观"失配）
+  const c2 = svc.createFaction({ name: '自定状态测', status: '初生', stance: '试探' });
+  assert.equal(c2.status, '初生');
+  assert.equal(c2.stance, '试探');
 
   const upd = svc.updateFaction(f.id, { status: '困顿', goal: '收缩防线' });
   assert.equal(upd.status, '困顿');
@@ -401,4 +409,27 @@ test('★★★ 势力态势绝不进共享常量 scheduleInst（否则打穿前
   const cbi = sg.indexOf('export function buildScheduleConstraintBlock');
   const body = sg.slice(cbi, sg.indexOf('\n}', sg.indexOf('if (!parts.length) return null;', cbi)));
   assert.match(body, /isFactionPromptEnabled\(\)/, '注入判定必须在约束层里');
+});
+
+// ─────────────────────────────────────────────────────────
+// 删掉两个数值栏（迁移 005，2026-10-07 用户裁定）
+// ─────────────────────────────────────────────────────────
+
+test('★★★ 迁移 005：faction_members.rank 与 faction_relations.strength 已从表结构里删掉', () => {
+  const mc = db.prepare('PRAGMA table_info(faction_members)').all().map(c => c.name);
+  const rc = db.prepare('PRAGMA table_info(faction_relations)').all().map(c => c.name);
+  assert.ok(!mc.includes('rank'), 'faction_members 不该再有 rank 列');
+  assert.ok(!rc.includes('strength'), 'faction_relations 不该再有 strength 列');
+  assert.ok(mc.includes('role'), '职务要留着（它才是"谁大谁小"的载体）');
+});
+
+test('★★ 即便调用方仍传 rank/strength，也一律忽略（不报错、不落库）', () => {
+  const f = svc.createFaction({ name: '忽略数值测' });
+  const cid = newCharacter('忽略数值者');
+  const out = svc.addMember(f.id, { characterId: cid, role: '成员', rank: 9 });
+  assert.ok(!('rank' in out.members[0]));
+  const g = svc.createFaction({ name: '忽略关系数值测' });
+  const rel = svc.upsertRelation({ fromId: f.id, toId: g.id, relation: '同盟', strength: 88 });
+  assert.equal(rel.relations[0].relation, '同盟');
+  assert.ok(!('strength' in rel.relations[0]));
 });
