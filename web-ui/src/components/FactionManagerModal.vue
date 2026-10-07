@@ -132,7 +132,21 @@
           </div>
 
           <div v-if="pickerOpen" class="fl-picker">
+            <!-- ★ 2026-10-07 用户要求：候选加分类筛选 + 默认排除归档角色。
+                 归档 = 禁止一切主动行为，拉进来等于登记一个"不会动"的成员。 -->
+            <div class="fl-scopes">
+              <button
+                v-for="s in pickScopes" :key="s.key"
+                type="button" class="fl-scope"
+                :class="{ on: pickScope === s.key, 'is-arch': s.key === 'archived' }"
+                @click="pickScope = s.key"
+              >{{ s.label }}<span class="fl-scope-n">{{ s.count }}</span></button>
+            </div>
             <linshe-input v-model="pickQuery" size="sm" placeholder="搜索角色…" />
+            <p v-if="hiddenArchivedCount" class="fl-hidden-tip">
+              已隐藏 {{ hiddenArchivedCount }} 个归档角色（归档＝不参与任何主动活动）
+              <button type="button" class="fl-hidden-link" @click="pickScope = 'archived'">查看归档</button>
+            </p>
             <div class="fl-pick-grid">
               <button
                 v-for="c in pickList"
@@ -141,12 +155,17 @@
                 class="fl-pick"
                 :class="{ 'is-in': isMember(c.id) }"
                 :disabled="busy || isMember(c.id)"
+                :title="c.archived ? '这是归档角色（不参与任何主动活动）' : ''"
                 @click="pick(c)"
               >
                 <span class="fl-av" :style="avatarStyle(c)">{{ c.avatar_path ? '' : (c.display_name || c.name || '?').charAt(0) }}</span>
                 <span class="fl-pick-name">{{ c.display_name || c.name }}</span>
+                <span v-if="c.archived" class="fl-pick-arch">已归档</span>
               </button>
             </div>
+            <p v-if="!pickList.length" class="fl-hint">
+              这个分类下没有角色 —— 换个分类或清空搜索词试试。
+            </p>
             <p class="fl-hint">点一下即加入（职务默认「成员」）；加入后在下方的职务框里可直接改。</p>
           </div>
 
@@ -239,6 +258,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   /** 全量角色（用于成员选择） */
   characters: { type: Array, default: () => [] },
+  /** 角色文件夹（用于候选分类筛选；与酒馆页/侧栏同一份口径：folder_id，未分类为 null） */
+  folders: { type: Array, default: () => [] },
 })
 const emit = defineEmits(['update:modelValue', 'changed'])
 
@@ -281,11 +302,60 @@ const otherFactionOptions = computed(() => items.value
 const MAX_TAGS = 8
 
 const memberIds = computed(() => new Set((current.value?.members || []).map(m => m.character_id)))
+
+/**
+ * 「添加角色」候选的两层收窄（2026-10-07 用户要求）。
+ *
+ * ── 为什么候选里要排除归档 ──────────────────────────────────
+ * 归档 = 禁止一切主动行为（日程/朋友圈/奇遇全停）。把一个归档角色拉进派系，
+ * 等于登记了一个"不会动"的成员 —— 用户看到的就是"加进来了却毫无反应"。
+ * ★ 默认**不列出**归档角色（与事件线编辑表单的候选口径一致），
+ *   但**不禁止**：用户可显式切到「含归档」再选 —— 那是有意的（比如给旧成员补登关系）。
+ *
+ * ⚠ 已加入的归档成员**必须继续显示在成员区**（带「已归档」角标）——
+ *   这是红线 0 的同源要求：不能因为"默认隐藏"就让用户找不到、删不掉已有的东西。
+ *
+ * ── 分类筛选 ────────────────────────────────────────────────
+ * 分类取值组合：`active`（未归档，默认）/ `archived`（仅归档）/ `all`（全部）/
+ * 具体文件夹 id（`f<id>`，未归档且属于该文件夹）。
+ * 与左侧会话栏、酒馆页的文件夹口径一致（`folder_id`，未分类为 null）。
+ */
+const pickScope = ref('active')
+const showArchivedTip = ref(false)
 const pickList = computed(() => {
   const q = pickQuery.value.trim().toLowerCase()
   const all = props.characters || []
-  if (!q) return all
-  return all.filter(c => String(c.display_name || c.name || '').toLowerCase().includes(q))
+  const scope = pickScope.value
+  let list = all
+  if (scope === 'active') list = all.filter(c => !c.archived)
+  else if (scope === 'archived') list = all.filter(c => c.archived)
+  else if (scope !== 'all') {
+    // `f<id>`：指定文件夹内的未归档角色
+    const fid = Number(String(scope).slice(1))
+    list = all.filter(c => !c.archived && Number(c.folder_id) === fid)
+  }
+  if (!q) return list
+  return list.filter(c => String(c.display_name || c.name || '').toLowerCase().includes(q))
+})
+
+/** 候选分类项：未归档 / 归档 / 各文件夹（未分类并入「未归档」不单列，避免选项爆炸） */
+const pickScopes = computed(() => {
+  const all = props.characters || []
+  const active = all.filter(c => !c.archived).length
+  const arch = all.filter(c => c.archived).length
+  const items = [{ key: 'active', label: '未归档', count: active }]
+  for (const f of (props.folders || [])) {
+    const n = all.filter(c => !c.archived && Number(c.folder_id) === Number(f.id)).length
+    if (n > 0) items.push({ key: `f${f.id}`, label: f.name, count: n })
+  }
+  if (arch > 0) items.push({ key: 'archived', label: '归档', count: arch })
+  return items
+})
+
+/** 候选里被"排除归档"挡掉的人数 —— 用来提示用户"人没丢，是被收起来了" */
+const hiddenArchivedCount = computed(() => {
+  if (pickScope.value !== 'active') return 0
+  return (props.characters || []).filter(c => c.archived).length
 })
 
 function avatarStyle(c) {
@@ -558,6 +628,28 @@ watch(open, v => { if (v) load() })
 .fl-hint { font-size: var(--fs-xs); color: var(--text-secondary); margin: 6px 0 0; }
 
 .fl-picker { padding: 10px; border: 1px solid var(--glass-border); border-radius: 10px; margin-bottom: 8px; }
+/* 候选分类（未归档 / 各文件夹 / 归档）——与酒馆页的文件夹 chip 同一视觉语汇 */
+.fl-scopes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.fl-scope {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--glass-border); background: transparent;
+  color: var(--text-secondary); font-family: inherit; font-size: 11.5px;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.fl-scope:hover { color: var(--accent); border-color: var(--accent); }
+.fl-scope.on { color: #fff; background: var(--accent-solid); border-color: transparent; }
+.fl-scope.is-arch { border-style: dashed; }
+.fl-scope-n { font-size: 10px; opacity: .8; font-variant-numeric: tabular-nums; }
+.fl-hidden-tip { font-size: 11px; color: var(--text-secondary); margin: 6px 0 0; line-height: 1.6; }
+.fl-hidden-link {
+  margin-left: 6px; padding: 0; border: none; background: none;
+  color: var(--accent); font-family: inherit; font-size: 11px; cursor: pointer; text-decoration: underline;
+}
+.fl-pick-arch {
+  font-size: 9.5px; padding: 0 6px; border-radius: 999px;
+  background: rgba(0, 0, 0, .07); color: var(--text-secondary); user-select: none;
+}
 .fl-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 8px; max-height: 210px; overflow-y: auto; }
 .fl-pick { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px; border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer; }
 .fl-pick:hover:not(:disabled) { background: rgba(var(--accent-rgb), .08); }

@@ -827,6 +827,7 @@
     <FactionManagerModal
       v-model="showFactionManager"
       :characters="sortedCharacters"
+      :folders="folders"
       @changed="refreshFactionCount"
     />
 
