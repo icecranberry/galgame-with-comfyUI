@@ -241,3 +241,87 @@ test('★ 非法输入返回 4xx 而非 5xx（参数问题不该报成服务故�
   assert.match(routeSrc, /res\.status\(400\)\.json/, '建线失败应 400');
   assert.match(routeSrc, /code = \/不存在\/\.test\(err\.message\) \? 404 : 400/, '更新应区分 404/400');
 });
+
+// ─────────────────────────────────────────────────────────
+// ⑦ 节点图筛选与渲染上限（第二期）
+// ─────────────────────────────────────────────────────────
+
+test('★★★ 不传任何选项时，节点图结果与加筛选前逐字节一致（红线 4：默认不改行为）', () => {
+  const a = svc.createEventLine({ name: '默认A', participantIds: [7], places: ['甲地'] });
+  const b = svc.createEventLine({ name: '默认B', participantIds: [7], places: ['甲地'] });
+  const g1 = svc.buildLineGraph();          // 不传
+  const g2 = svc.buildLineGraph({});        // 空对象
+  assert.equal(g1.nodes.length, g2.nodes.length, '空选项应与不传等价');
+  assert.ok(g1.nodes.some(n => n.id === a.id) && g1.nodes.some(n => n.id === b.id),
+    '默认应包含全部线（含终态）');
+  assert.equal(g1.truncated, 0, '未超上限时 truncated 应为 0');
+  svc.deleteEventLine(a.id); svc.deleteEventLine(b.id);
+});
+
+test('★★★ 按角色筛选：只留该角色卷入的线，且**不留指向隐藏节点的悬空边**', () => {
+  // 关键：边必须在"筛选后的可见集"内重算。若先按全量算边再过滤节点，
+  // 会留下指向被隐藏节点的边 —— vue-flow 渲染悬空边会报错或漏画。
+  const a = svc.createEventLine({ name: '筛A', participantIds: [101] });
+  const b = svc.createEventLine({ name: '筛B', participantIds: [101, 102] });
+  const c = svc.createEventLine({ name: '筛C', participantIds: [102] });   // 不含 101
+  const g = svc.buildLineGraph({ participantId: 101 });
+  const ids = g.nodes.map(n => n.id);
+  assert.ok(ids.includes(a.id) && ids.includes(b.id), '应保留含 101 的线');
+  assert.ok(!ids.includes(c.id), '不含 101 的线应被排除');
+  for (const e of g.edges) {
+    assert.ok(ids.includes(e.from) && ids.includes(e.to),
+      `边 ${e.from}→${e.to} 的两端都必须在可见节点集内（无悬空边）`);
+  }
+  const abEdge = g.edges.find(e => (e.from === a.id && e.to === b.id) || (e.from === b.id && e.to === a.id));
+  assert.ok(abEdge, '同一角色卷入的两条线之间，关联边应保留');
+  for (const l of [a, b, c]) svc.deleteEventLine(l.id);
+});
+
+test('★★ includeTerminal:false 排除终态线，且不会留下指向终态线的边', () => {
+  const act = svc.createEventLine({ name: '活跃', stage: '延展', participantIds: [201] });
+  const end = svc.createEventLine({ name: '终态', stage: '收束', participantIds: [201] });
+  const g = svc.buildLineGraph({ includeTerminal: false });
+  const ids = g.nodes.map(n => n.id);
+  assert.ok(ids.includes(act.id), '活跃线应保留');
+  assert.ok(!ids.includes(end.id), '终态线应被排除');
+  assert.ok(!g.edges.some(e => !ids.includes(e.from) || !ids.includes(e.to)),
+    '不应留有指向被排除节点的边');
+  // 显式传 true / 缺省 → 含终态
+  assert.ok(svc.buildLineGraph({ includeTerminal: true }).nodes.some(n => n.id === end.id));
+  svc.deleteEventLine(act.id); svc.deleteEventLine(end.id);
+});
+
+test('★★★ 渲染上限必须**显式回报**截断数，绝不静默丢节点（红线 0）', () => {
+  const made = [];
+  for (let i = 0; i < 5; i++) made.push(svc.createEventLine({ name: `限${i}` }));
+  const before = svc.buildLineGraph({ limit: 0 }).total;   // limit<=0 = 不限
+  const g = svc.buildLineGraph({ limit: 2 });
+  assert.equal(g.nodes.length, 2, '应截到上限');
+  assert.equal(g.total, before, 'total 应回报筛选后的真实总数');
+  assert.equal(g.truncated, before - 2, 'truncated 必须如实回报被截断的数量（不得静默）');
+  for (const l of made) svc.deleteEventLine(l.id);
+});
+
+test('★★ 渲染上限与首次生成容量是两个不同的量（前者管渲染，后者管写入）', () => {
+  assert.equal(typeof svc.GRAPH_NODE_LIMIT, 'number');
+  assert.ok(svc.GRAPH_NODE_LIMIT > svc.AUTO_LINE_CAPACITY,
+    '渲染上限应大于首次生成容量 —— 否则用户手工加到第 9 条就在图上消失了');
+  assert.match(routeSrc, /graphNodeLimit: GRAPH_NODE_LIMIT/, '上限应随 /meta 下发（前端不自建）');
+});
+
+test('★★★ 筛选判据是"有没有显式给值"，不是"值大不大" —— participantId:0 也必须真的筛', () => {
+  // 前端下拉从真实 participantIds 聚合，可能含 0；若拿 `pid>0` 当判据，
+  // 用户选了 `#0` 却拿到全量 —— 是**静默错误**（红线 0）。
+  const zero = svc.createEventLine({ name: '零号角色线', participantIds: [0] });
+  const one = svc.createEventLine({ name: '一号角色线', participantIds: [1] });
+  const byZero = svc.buildLineGraph({ participantId: 0 });
+  const ids = byZero.nodes.map(n => n.id);
+  assert.ok(ids.includes(zero.id), '含 0 的线应保留');
+  assert.ok(!ids.includes(one.id), '不含 0 的线应被排除（不能因 0 是假值就放行全量）');
+  // 不传 / 传 null / 传空串 ⇒ 视为不筛选
+  for (const v of [undefined, null, '']) {
+    assert.equal(svc.buildLineGraph({ participantId: v }).nodes.length, byZero.nodes.length + 1,
+      `participantId=${String(v)} 应视为不筛选（返回全部）`);
+  }
+  svc.deleteEventLine(zero.id); svc.deleteEventLine(one.id);
+});

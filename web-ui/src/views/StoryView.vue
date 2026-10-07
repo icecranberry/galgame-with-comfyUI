@@ -52,31 +52,40 @@
       </div>
     </div>
 
-    <div v-else class="sv-body">
-      <!-- 节点图（第一期形态）：按关联聚合展示，边取自后端的自动计算结果 -->
-      <p v-if="!graph.nodes.length" class="sv-empty">还没有节点 —— 先建几条事件线。</p>
-      <template v-else>
-        <p class="sv-graph-note">
-          节点＝事件线；连线为<strong>自动计算的结构性关联</strong>（共享角色 / 地点 / 派生关系），
-          不是模型推断的「语义相似」—— 避免造假关系。
-        </p>
-        <div class="sv-graph">
-          <div v-for="n in graph.nodes" :key="n.id" class="sv-node" :class="{ 'is-terminal': n.terminal }">
-            <span class="sv-stage" :class="stageClass(n.stage)">{{ n.stage }}</span>
-            <span class="sv-node-name">{{ n.name }}</span>
-          </div>
-        </div>
-        <div v-if="graph.edges.length" class="sv-edges">
-          <p class="sv-sect-title">关联（{{ graph.edges.length }} 条）</p>
-          <div v-for="(e, i) in graph.edges" :key="i" class="sv-edge">
-            <span class="sv-edge-from">{{ nameOf(e.from) }}</span>
-            <span class="sv-edge-arrow">{{ e.kind === 'derive' ? '⇒ 派生自' : '↔' }}</span>
-            <span class="sv-edge-to">{{ nameOf(e.to) }}</span>
-            <span class="sv-edge-label">{{ e.label }}</span>
-          </div>
-        </div>
-        <p v-else class="sv-empty">当前没有线之间存在结构性关联。</p>
-      </template>
+    <div v-else class="sv-body sv-body-graph">
+      <!-- 节点图（第二期）：真正的画布。
+           节点＝事件线；连线为**后端自动算**的结构性关联（共享角色/地点/派生），不做语义推断。
+           ⚠ 筛选必须走服务端 —— 见下方 loadGraph 的注释。 -->
+      <div class="sv-graph-bar">
+        <span class="sv-graph-note">
+          节点＝事件线；连线为<strong>自动计算的结构性关联</strong>（共享角色 / 地点 / 派生关系），不是模型推断的「语义相似」。
+        </span>
+        <span class="sv-flex"></span>
+        <label class="sv-filter">
+          <span>按角色筛选</span>
+          <linshe-select v-model="filterPid" size="sm" :options="participantOptions" style="min-width: 140px" />
+        </label>
+        <button
+          type="button" class="sv-chip" :class="{ on: !includeTerminal }"
+          title="只显示仍在推进的线（隐藏收束/淡出的终态线）"
+          @click="toggleTerminal"
+        >只看在推进的</button>
+        <linshe-button variant="ghost" size="sm" @click="fitGraph">适配视图</linshe-button>
+      </div>
+      <p v-if="graphTruncated" class="sv-trunc">
+        ⚠ 图上有 {{ graphTruncated }} 条线超出单屏上限（已显示 {{ graph.nodes.length }} / {{ graphTotal }}），
+        请用上方筛选收窄，或到「线列表」页查看全部。
+      </p>
+      <div class="sv-canvas">
+        <StoryGraphCanvas
+          ref="canvasRef"
+          :nodes="graph.nodes"
+          :edges="graph.edges"
+          :stages="stages"
+          :active-id="form.id"
+          @select="openEdit"
+        />
+      </div>
     </div>
 
     <!-- 新建 / 编辑（同一表单，语义不同：新建不含锁线开关） -->
@@ -144,12 +153,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, watch, inject } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import StoryGraphCanvas from '../components/story/StoryGraphCanvas.vue'
 
 const toastFn = inject('toast', null)
 
@@ -158,10 +168,25 @@ const busy = ref(false)
 const tab = ref('lines')
 const lines = ref([])
 const graph = ref({ nodes: [], edges: [] })
+const graphTotal = ref(0)
+const graphTruncated = ref(0)
+const canvasRef = ref(null)
 /** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
 const stages = ref([])
+/** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
+const filterPid = ref('')
+const includeTerminal = ref(true)
 
 const stageOptions = computed(() => stages.value.map(s => ({ label: s, value: s })))
+/** 参与角色下拉：从现有线里聚合，附角色 id（第一版不拉角色名，避免多一个请求） */
+const participantOptions = computed(() => {
+  const ids = new Set()
+  for (const l of lines.value) for (const id of (l.participantIds || [])) ids.add(id)
+  return [
+    { label: '全部角色', value: '' },
+    ...[...ids].sort((a, b) => a - b).map(id => ({ label: `角色 #${id}`, value: String(id) })),
+  ]
+})
 const deriveOptions = computed(() => [
   { label: '（无）', value: '' },
   ...lines.value.filter(l => l.id !== form.id).map(l => ({ label: l.name || `#${l.id}`, value: String(l.id) })),
@@ -176,23 +201,43 @@ const form = reactive({
 function stageClass(s) {
   return { 'st-qi': s === '起线', 'st-yan': s === '延展', 'st-cheng': s === '成形', 'st-shou': s === '收束', 'st-dan': s === '淡出' }
 }
-function nameOf(id) {
-  return lines.value.find(l => l.id === id)?.name || `#${id}`
-}
 
 async function load() {
   loading.value = true
   try {
-    const [meta, ls, g] = await Promise.all([api.getStoryMeta(), api.listStoryLines(), api.getStoryGraph()])
+    const [meta, ls] = await Promise.all([api.getStoryMeta(), api.listStoryLines()])
     stages.value = Array.isArray(meta?.stages) ? meta.stages : []
     lines.value = Array.isArray(ls?.lines) ? ls.lines : []
-    graph.value = { nodes: g?.nodes || [], edges: g?.edges || [] }
+    await loadGraph()
   } catch (err) {
     toastFn?.('读取事件线失败：' + (err?.message || ''), 'error')
   } finally {
     loading.value = false
   }
 }
+
+/**
+ * 拉节点图数据。
+ *
+ * ★★ 筛选**必须走服务端**：后端是"先选出可见节点、再只在可见集内算边"。
+ *    前端若自己 `filter(nodes)` 而边仍来自全量，会出现指向被隐藏节点的**悬空边**
+ *    （vue-flow 收到会告警/漏画）。所以筛选一变就重新请求，而不是本地过滤。
+ */
+async function loadGraph() {
+  const g = await api.getStoryGraph({
+    participantId: filterPid.value || null,
+    includeTerminal: includeTerminal.value,
+  })
+  graph.value = { nodes: g?.nodes || [], edges: g?.edges || [] }
+  graphTotal.value = Number(g?.total ?? graph.value.nodes.length)
+  graphTruncated.value = Number(g?.truncated ?? 0)
+}
+
+watch([filterPid, includeTerminal], () => { loadGraph().catch(() => {}) })
+watch(tab, v => { if (v === 'graph') loadGraph().catch(() => {}) })
+
+function toggleTerminal() { includeTerminal.value = !includeTerminal.value }
+function fitGraph() { canvasRef.value?.fit() }
 
 function openCreate() {
   Object.assign(form, {
@@ -269,7 +314,8 @@ onMounted(load)
 </script>
 
 <style scoped>
-.story-view { display: flex; flex-direction: column; min-height: 0; padding: 18px 20px; }
+/* ⚠ `min-height: 0` 必需：本页在纵向 flex 链上，且节点图页签内部有需要确定高度的画布。 */
+.story-view { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 18px 20px; box-sizing: border-box; }
 .sv-header { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--glass-border); }
 .sv-title { margin: 0; font-size: var(--fs-lg); font-weight: 700; }
 .sv-sub { font-size: var(--fs-xs); color: var(--text-secondary); }
@@ -294,6 +340,8 @@ onMounted(load)
 .st-shou { background: var(--stage-shou-bg, #F1EFE8); color: var(--stage-shou-fg, #5F5E5A); }
 .st-dan { background: var(--stage-dan-bg, #F1EFE8); color: var(--stage-dan-fg, #888780); }
 .sv-body { flex: 1; min-height: 0; overflow-y: auto; padding-top: 14px; }
+/* 节点图页签：父链必须一路给到确定高度，否则 vue-flow 在 0 高容器里不渲染任何节点 */
+.sv-body-graph { display: flex; flex-direction: column; overflow: hidden; }
 .sv-empty { padding: 28px 0; text-align: center; font-size: var(--fs-sm); color: var(--text-secondary); }
 .sv-list { display: flex; flex-direction: column; gap: 10px; }
 .sv-card {
@@ -313,19 +361,24 @@ onMounted(load)
 .sv-next { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
 .sv-card-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--glass-border); }
 .sv-meta { font-size: var(--fs-xs); color: var(--text-secondary); }
-.sv-graph-note { margin: 0 0 12px; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); }
-.sv-graph { display: flex; flex-wrap: wrap; gap: 8px; }
-.sv-node {
-  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
-  border-radius: var(--radius-full); border: var(--border-strong); background: var(--glass-bg);
+
+/* ── 节点图（第二期）：工具条 + 画布 ──
+   ⚠ 画布需要有**确定的高度**：vue-flow 在 0 高度的容器里不会渲染任何节点
+     （它按容器实际尺寸算 viewport）。父级链上必须一路给到 flex 高度。 */
+.sv-graph-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sv-graph-note { font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); }
+.sv-filter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-trunc {
+  margin: 0 0 10px; padding: 6px 10px; border-radius: var(--radius-sm);
+  font-size: var(--fs-xs); background: #FAEEDA; color: #854F0B;
 }
-.sv-node.is-terminal { opacity: 0.6; }
-.sv-node-name { font-size: var(--fs-sm); }
-.sv-edges { margin-top: 16px; }
-.sv-sect-title { margin: 0 0 8px; font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
-.sv-edge { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: var(--fs-sm); }
-.sv-edge-arrow { color: var(--accent); }
-.sv-edge-label { font-size: var(--fs-xs); color: var(--text-secondary); }
+[data-theme="dark"] .sv-trunc { background: #412402; color: #FAC775; }
+.sv-canvas {
+  flex: 1; min-height: 420px;
+  border-radius: var(--radius-lg); border: var(--glass-border);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
 .sv-form { display: flex; flex-direction: column; gap: 12px; }
 .sv-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sv-field { display: flex; flex-direction: column; gap: 6px; }

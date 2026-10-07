@@ -12,7 +12,7 @@
 
 import { Router } from 'express';
 import {
-  LINE_STAGES, TERMINAL_LINE_STAGES, AUTO_LINE_CAPACITY,
+  LINE_STAGES, TERMINAL_LINE_STAGES, AUTO_LINE_CAPACITY, GRAPH_NODE_LIMIT,
   listEventLines, getEventLine, createEventLine, updateEventLine, deleteEventLine,
   setEventLinePin, buildLineGraph,
 } from '../services/story/eventLineService.js';
@@ -25,6 +25,7 @@ router.get('/meta', (req, res) => {
     stages: LINE_STAGES,
     terminalStages: TERMINAL_LINE_STAGES,
     capacity: AUTO_LINE_CAPACITY,
+    graphNodeLimit: GRAPH_NODE_LIMIT,
   });
 });
 
@@ -36,10 +37,25 @@ router.get('/lines', (req, res) => {
   }
 });
 
-/** 节点图数据：节点=事件线，边=**代码自动算**的结构性关联（不让 AI 生成） */
+/**
+ * 节点图数据：节点=事件线，边=**代码自动算**的结构性关联（不让 AI 生成）。
+ *
+ * ── 筛选（第二期）─────────────────────────────────────────
+ * query: `participantId`（只看某角色卷入的线）、`includeTerminal=0`（排除终态线）。
+ * ⚠ 筛选在服务层完成（"选节点 + 算边"必须原子，否则产生指向隐藏节点的悬空边）。
+ * ⚠ 不传 query 时与加筛选前行为一致（红线 4）；响应含 `total/truncated` 以**显式**告知上限截断（红线 0）。
+ */
 router.get('/graph', (req, res) => {
   try {
-    res.json(buildLineGraph());
+    const q = req.query || {};
+    res.json(buildLineGraph({
+      participantId: q.participantId != null && q.participantId !== '' ? Number(q.participantId) : null,
+      // ⚠ 只有**显式**传 `includeTerminal=0/false` 才排除终态；缺省保持"含全部"（默认不改行为）
+      includeTerminal: q.includeTerminal === undefined || q.includeTerminal === ''
+        ? true
+        : !/^(0|false|no)$/i.test(String(q.includeTerminal)),
+      limit: q.limit != null && q.limit !== '' ? Number(q.limit) : undefined,
+    }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

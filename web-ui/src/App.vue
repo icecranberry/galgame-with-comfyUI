@@ -364,7 +364,9 @@ onUnmounted(() => {
 .sidebar-handle svg { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 /* 折叠后箭头翻向另一边，提示可以再点开 */
 .app-layout.sidebar-collapsed .sidebar-handle svg { transform: rotate(180deg); }
-.page-host { position: relative; flex: 1; min-width: 0; }
+/* ⚠ `min-height: 0` 是必需的：本项在纵向 flex 链上，缺了它内部 `overflow` 撑不满，
+   需要确定高度的页面（如「故事」页的 vue-flow 画布）会拿到 0 高度而不渲染任何节点。 */
+.page-host { position: relative; flex: 1; min-width: 0; min-height: 0; }
 .page-modal-host { position: absolute; inset: 0; pointer-events: none; }
 .page-modal-host .modal-overlay { pointer-events: auto; }
 #app { position: relative; z-index: 1; }

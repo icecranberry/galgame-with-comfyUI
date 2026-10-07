@@ -1448,9 +1448,15 @@ export function getStoryMeta() {
 export function listStoryLines() {
   return request(`/story/lines`)
 }
-/** 节点图数据：节点=事件线，边由后端**自动算**（结构性关联，非 AI 生成） */
-export function getStoryGraph() {
-  return request(`/story/graph`)
+/** 节点图数据：节点=事件线，边由后端**自动算**（结构性关联，非 AI 生成）。
+ *  ⚠ 筛选**必须走服务端**（`participantId` / `includeTerminal`）——
+ *    后端会"先选节点、再在可见集内算边"；前端若自己 filter 会留下指向隐藏节点的悬空边。 */
+export function getStoryGraph({ participantId = null, includeTerminal = true } = {}) {
+  const qs = new URLSearchParams()
+  if (participantId != null && participantId !== '') qs.set('participantId', String(participantId))
+  if (includeTerminal === false) qs.set('includeTerminal', '0')
+  const q = qs.toString()
+  return request(`/story/graph${q ? `?${q}` : ''}`)
 }
 export function createStoryLine(data) {
   return request(`/story/lines`, { method: 'POST', body: data })

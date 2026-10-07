@@ -41,6 +41,18 @@ const LINE_STAGE_ALIASES = {
 /** 首次生成容量上限（构画的 `AUTO_LINE_CAPACITY=8`，同口径） */
 export const AUTO_LINE_CAPACITY = 8;
 
+/**
+ * 节点图单屏节点数上限（第二期，用户设计文档 §2.2）。
+ *
+ * ⚠ **这不是数据上限，而是"渲染上限"** —— 与 `AUTO_LINE_CAPACITY` 是两回事：
+ *   - `AUTO_LINE_CAPACITY` 管"首次自动生成最多几条线"（写入侧）
+ *   - 本项管"一张图上最多画几个节点"（渲染侧），超出的由前端**分页/截断并显式告知**
+ *
+ * ★ 为什么要有：54 个角色 × N 条线会变成毛线球，图反而失去可读性。
+ *   ⚠ 超限**绝不能静默丢弃**（红线 0）—— 必须把"还有几条没显示"回给前端。
+ */
+export const GRAPH_NODE_LIMIT = 40;
+
 /** 阶段归一：合法值原样；别名映射；其余落「起线」（不猜） */
 export function normalizeLineStage(v) {
   const s = String(v ?? '').trim();
@@ -198,14 +210,31 @@ export function setEventLinePin(id, pin) {
  *   判据是**结构性事实**：共享参与角色 / 共享地点 / 显式派生。
  *   不做任何"语义相似"推断 —— 那才会造假关系。
  *
- * @returns {{nodes:Array, edges:Array<{from:number,to:number,kind:string,label:string}>}}
+ * ── 筛选（第二期，用户设计文档 §2.2）────────────────────────
+ * ⚠ 设计文档明确：「不要一开始就画"所有角色 × 所有事件"的大图 —— 54 个角色 × N 条线
+ *   会变成毛线球。**默认按角色筛选**，且限制单屏节点数。」
+ *   故这里支持按参与角色 / 是否含终态线收窄。**筛选必须在算边之前**：
+ *   模型是"先选出可见节点集，再只在可见集内算边"——否则会出现指向被隐藏节点的悬空边。
+ *
+ * ★ 兼容（红线 4「默认不改行为」）：**不传任何选项时，返回结果与加筛选前逐字节一致**
+ *   （`filterLinesForGraph(lines, {})` 原样返回全部）。
+ *
+ * @param {{participantId?:number|null, includeTerminal?:boolean, limit?:number}} [opts]
+ * @returns {{nodes:Array, edges:Array<{from:number,to:number,kind:string,label:string}>, total:number, truncated:number}}
  */
-export function buildLineGraph() {
-  const lines = listEventLines();
+export function buildLineGraph(opts = {}) {
+  const all = filterLinesForGraph(listEventLines(), opts);
+  // ★ 渲染上限：超出部分**必须显式回报**（红线 0：绝不静默丢弃）。
+  //   不传 limit 时用 GRAPH_NODE_LIMIT；传 0 / 负数表示不限。
+  const rawLimit = opts.limit === undefined ? GRAPH_NODE_LIMIT : Number(opts.limit);
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : Infinity;
+  const lines = all.slice(0, limit);
+  const truncated = all.length - lines.length;
+  const ids = new Set(lines.map(l => l.id));
   const edges = [];
-  // 派生边（显式字段）
+  // 派生边（显式字段）—— 两端都必须在可见集内，避免悬空边
   for (const l of lines) {
-    if (l.derivedFrom && lines.some(x => x.id === l.derivedFrom)) {
+    if (l.derivedFrom && ids.has(l.derivedFrom)) {
       edges.push({ from: l.derivedFrom, to: l.id, kind: 'derive', label: '派生' });
     }
   }
@@ -226,7 +255,34 @@ export function buildLineGraph() {
       edges.push({ from: a.id, to: b.id, kind: 'related', label: parts.join('、') });
     }
   }
-  return { nodes: lines, edges };
+  return { nodes: lines, edges, total: all.length, truncated };
+}
+
+/**
+ * 节点图的可见性筛选 —— **唯一真源**（红线 8：筛选口径只此一份）。
+ *
+ * ⚠ 为什么筛选要下沉到服务层而不是前端过滤：前端若自己 `filter` 一遍，
+ *   边是后端按**全量**算的 → 会把指针指向被隐藏的节点，vue-flow 收到悬空边会报错/漏画。
+ *   所以"选节点 + 算边"必须原子完成。
+ *
+ * ★ 不传 opts（或 opts 全空）时**原样返回**，保证与加筛选前行为一致（红线 4）。
+ */
+export function filterLinesForGraph(lines = [], opts = {}) {
+  // ⚠ 判据是"**有没有显式给值**"，不是"值大不大"：`participantId: 0` 也必须按 0 筛
+  //   （前端下拉从真实 `participantIds` 聚合，可能含 0；若拿 `>0` 当判据，
+  //    用户选了 `#0` 却得到全量，是**静默错误**——正好是红线 0 那类"点了没反应/结果不对"）。
+  const rawPid = opts.participantId;
+  const hasPid = rawPid != null && rawPid !== '' && Number.isFinite(Number(rawPid));
+  const pid = hasPid ? Number(rawPid) : null;
+  // ⚠ 默认值是 `true`（含终态）—— 保持与无筛选时一致；若要"只看在推进的线"，
+  //   由调用方显式传 `includeTerminal:false`。
+  const includeTerminal = opts.includeTerminal !== false;
+  if (!hasPid && includeTerminal) return [...lines];
+  return lines.filter(l => {
+    if (hasPid && !l.participantIds.includes(pid)) return false;
+    if (!includeTerminal && l.terminal) return false;
+    return true;
+  });
 }
 
 /**
