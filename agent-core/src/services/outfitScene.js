@@ -614,10 +614,14 @@ function findCurrentIndex(activities, minutes) {
  * ⚠ **兜底绝不能落到 `nude`** —— 那是"只用于私密场景"的一套，
  *   若成了兜底，日程里没写 outfit 的角色会在大街上不穿衣服。见 PRIVATE_SCENE。
  *
+ * @param {number} characterId
+ * @param {Date} [date] 用来定位"今天"的日程
+ * @param {object} [override] ★ 可选：**直接指定某一段活动**，不走"当前时刻"
+ *   —— 见 `getSceneOutfitForActivity` 上方那段说明（日程配图必须用它）。
  * @returns {{outfit: object, scene: string, source: string}|null}
  *          source 便于排查：'sleep' | 'schedule' | 'fallback'
  */
-export function getSceneOutfitForNow(characterId, date = new Date()) {
+export function getSceneOutfitForNow(characterId, date = new Date(), override = null) {
   const outfits = listSceneOutfits(characterId);
   if (!outfits.length) return null;
 
@@ -626,6 +630,54 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
   const dayOutfits = outfits.filter(o => o.scene !== 'sleep' && o.scene !== PRIVATE_SCENE);
   const byName = new Map(outfits.map(o => [o.name, o]));
   const byId = new Map(outfits.map(o => [String(o.id), o]));
+
+  /**
+   * ★★ 指定了活动 → 以**那一段**为准，绝不看当前时刻。
+   *
+   * 为什么必须这样（2026-10-07 用户实报的 bug）：
+   *   用户在**白天**点日程里「夜间安睡」那一段的配图，期望看到睡衣；
+   *   但过去此处只认 `new Date()`，于是拿"此刻 16:26"去选装 →
+   *   命中白天的「日常装」→ 画出来是**穿着常服躺在床上睡觉**。
+   *   语义上：日程配图要复现的是**那一段**的样子，不是"现在"的样子。
+   *
+   * ⚠ **仍需向前回溯**（与"此刻"分支同口径）：日程只在**换装的那一刻**标注
+   *   `outfit`，后续同时段的时段是 `null`（如「洗漱换睡衣」标了睡衣，紧接着的
+   *   「就寝安眠」是 null）。若这里不看回溯，那一段会兜底成日常装 ——
+   *   等于把同一个 bug 换个位置又犯一次。
+   */
+  if (override) {
+    const acts = todayActivities(characterId, date);
+    const cur = override;
+    if (Number(cur.replyDelay) === -1 && sleepOutfit) {
+      return { outfit: sleepOutfit, scene: 'sleep', source: 'sleep' };
+    }
+    // 从"这一段的同名时段"起向前回溯（找不到同名段就只用它自己）
+    const startIdx = acts.findIndex(a =>
+      a.startTime === cur.startTime && a.endTime === cur.endTime);
+    if (startIdx >= 0) {
+      for (let step = 0; step < acts.length; step++) {
+        const i = (startIdx - step + acts.length) % acts.length;
+        const text = String(acts[i]?.outfit || '').trim();
+        if (!text) continue;
+        const hit = byName.get(text) || byId.get(text);
+        if (hit) {
+          // 回溯到的若是睡眠时段，按硬规则仍用睡衣（与"此刻"分支结果一致）
+          if (Number(acts[i].replyDelay) === -1 && sleepOutfit) {
+            return { outfit: sleepOutfit, scene: 'sleep', source: 'sleep' };
+          }
+          return { outfit: hit, scene: hit.scene, source: 'schedule' };
+        }
+      }
+    }
+    // 该时段自己带的 outfit（调用方直接传了值、但不在今日日程里时走这条）
+    const own = String(cur.outfit || '').trim();
+    if (own) {
+      const hit = byName.get(own) || byId.get(own);
+      if (hit) return { outfit: hit, scene: hit.scene, source: 'schedule' };
+    }
+    const fb = dayOutfits[0] || sleepOutfit;
+    return fb ? { outfit: fb, scene: fb.scene, source: 'fallback' } : null;
+  }
 
   const acts = todayActivities(characterId, date);
   if (!acts.length) {
@@ -667,6 +719,30 @@ export function asPersonaOutfits(sceneOutfit) {
   //   直接用它会丢掉身体特征。listSceneOutfits 已算好 `text`；这里的对象可能来自别处，故兜底现算。
   const text = o.text || composeOutfitText(o.body, o.description);
   return { limited: [{ name: o.name, description: text }], exclusive: null };
+}
+
+/**
+ * ★ 按**指定活动**取该时段应穿的场景服装（日程配图专用）。
+ *
+ * ── 为什么要单独有这一个（2026-10-07 用户实报的 bug）──────────
+ * 用户反映「姬子的睡眠没有与睡衣关联上」：截图里她在**床上睡觉**，却穿着常服。
+ * 根因不在数据（日程里 `outfit: "睡衣"` 标得没错、`character_outfits` 里 sleep 那套也在），
+ * 而在**取用**：日程配图过去调 `getSceneOutfitForNow(id)`，它只认 `new Date()` ——
+ * 用户在白天点「夜间安睡」那一段，就被按"此刻 16:26"选成了白天的常服。
+ *
+ * 语义定调：**日程配图要复现的是"那一段"的样子，不是"现在"的样子。**
+ *   所以这里以活动自身的 `replyDelay` / `outfit` 为准，完全不看当前时刻。
+ *
+ * ⚠ 与 `getSceneOutfitForNow` 的关系：那个用于**聊天/朋友圈**（角色此刻确实那么穿），
+ *   这个用于**回看日程某一段**。两者不能互相替代。
+ *
+ * @param {number} characterId
+ * @param {{replyDelay?:number|string, outfit?:string}} activity 日程里的那一段
+ * @returns {{outfit: object, scene: string, source: string}|null}
+ */
+export function getSceneOutfitForActivity(characterId, activity) {
+  if (!activity) return getSceneOutfitForNow(characterId);
+  return getSceneOutfitForNow(characterId, new Date(), activity);
 }
 
 // ── 日程生成时的服装标注层 ──────────────────────────────────

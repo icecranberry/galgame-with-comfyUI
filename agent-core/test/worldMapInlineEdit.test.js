@@ -160,9 +160,20 @@ test('★★ 每个可改字段都要标脏（漏一个 → 改了却保存不�
     'editPlace.summary', 'editPlace.scenePrompt',
     'editPlace.openAt', 'editPlace.closeAt',
   ];
+  /**
+   * ⚠ 标脏的写法有**两种**，取决于控件类型，不能用同一个正则去套：
+   *   · 原生 input / textarea → `@input="editDirty = true"`
+   *   · `linshe-select`（开放/关闭时间是下拉）→ `@update:model-value="editDirty = true"`
+   *     （下拉没有原生 input 事件；vue 3 的 kebab 与 camel 两种写法都要认）
+   * 之前这里只认 `@input`，于是把「用 linshe-select 正确标了脏」误判成漏标。
+   */
+  const bind = f => {
+    const v = f.replace('.', '\\.');
+    const dirty = '@(?:input|update:model-value|update:modelValue)="editDirty = true"';
+    return new RegExp(`v-model="${v}"[^>]*${dirty}|${dirty}[^>]*v-model="${v}"`);
+  };
   for (const f of need) {
-    const re = new RegExp(`v-model="${f.replace('.', '\\.')}"[^>]*@input="editDirty = true"|@input="editDirty = true"[^>]*v-model="${f.replace('.', '\\.')}"`);
-    assert.ok(re.test(view), `${f} 的输入必须标脏 —— 否则改了保存不了`);
+    assert.ok(bind(f).test(view), `${f} 的输入必须标脏 —— 否则改了保存不了`);
   }
   // 准入/分区/上级是点击或下拉，另判
   assert.match(view, /editPlace\.access = [^"]*editDirty = true/, '准入切换要标脏');
