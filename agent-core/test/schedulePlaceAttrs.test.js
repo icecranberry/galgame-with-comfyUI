@@ -22,7 +22,7 @@ globalThis.fetch = async url => { throw new Error(`placeAttrs test forbids netwo
 
 const {
   normalizeAccess, normalizeZone, isAccessibleByDefault, accessReason,
-  pickSchedulePlaces, ACCESS_LEVELS, ZONE_LEVELS, ZONE_OUTFIT_HINT,
+  pickSchedulePlaces, resolveEffectiveAccess, ACCESS_LEVELS, ZONE_LEVELS, ZONE_OUTFIT_HINT,
 } = await import('../src/services/worldMapService.js');
 const { buildScheduleConstraintBlock } = await import('../src/services/scheduleGenerator.js');
 
@@ -116,6 +116,73 @@ test('★ 父级未标注时不影响子项（不能因为父级空就把子项�
   assert.equal(r.excluded.length, 0);
 });
 
+// ─────────────────────────────────────────────────────────
+// ★★ 2026-10-07 用户实报：「玩家自己新建的地点，区域勾了私人空间后仍然受限，
+//    而 AGENT 创建的正常」——这条揭出两个真缺陷，下面把两者都钉住。
+// ─────────────────────────────────────────────────────────
+
+test('★★★ private **不得**从父区继承（它是归属属性，不是准入属性）', () => {
+  // 实测数据：「翡翠的私人生态舰」区域级 access=private，其下 7 个舱室自己都没标注。
+  // 旧代码把 private 一路继承 → 7 个舱室全被判成「某角色的私人空间」不可去。
+  // 语义上「典当品陈列长廊」是营业场所、「异星生态庭院」是景观舱，
+  // 不该因为是"翡翠的船"就整个进不去 —— private 的语义是**单点归属**（某个角色的房间）。
+  const places = [{ name: '典当品陈列长廊', access: '' }, { name: '异星生态庭院', access: '' }];
+  const r = pickSchedulePlaces(places, new Set(), 'private');
+  assert.equal(r.included.length, 2, '区域标 private 时，未标注的子地点应当**可去**');
+  assert.equal(r.excluded.length, 0);
+});
+
+test('★★★ restricted 仍然继承（与 private 区分开，别一起改掉）', () => {
+  // 「幻月秘庭」整区谢绝外人 —— 这种必须继续继承，否则整区会被放行。
+  const places = [{ name: '秘庭前廊·仪式经路', access: '' }];
+  const r = pickSchedulePlaces(places, new Set(), 'restricted');
+  assert.equal(r.included.length, 0, 'restricted 必须继承 —— 这是它与 private 的关键差别');
+  // 且**显式标注 private 的单点**依然要挡（只有"继承来的 private"才不挡）
+  const r2 = pickSchedulePlaces([{ name: '某人的卧室', access: 'private' }], new Set(), '');
+  assert.equal(r2.included.length, 0, '显式标了 private 的单点仍应被挡');
+});
+
+test('★★★ 用户显式勾选的受限地点必须**真的进候选集**（不是只加一句注释）', () => {
+  // 旧实现：勾选只生成 forcedPlaces（给模型看的注释行），地点名**不进 scenesByArea**；
+  // 而渲染层遇到"本区无可用地点"会整区跳过 → 用户看到的是"勾了完全没用"。
+  const places = [{ name: '重力安保核心', access: 'private' }];
+  const r = pickSchedulePlaces(places, new Set(), '', new Set(['重力安保核心']));
+  assert.deepEqual(r.included.map(p => p.name), ['重力安保核心'], '勾选后必须进池');
+  assert.equal(r.annotated.length, 1, '应记为"需标注"');
+  assert.match(r.included[0].note, /本次用户已显式指定/, '标注必须写明是用户显式指定，否则模型见"私人"仍会自己排除');
+});
+
+test('★ 排除优先于显式放行（勾选与划掉同时存在时，划掉赢）', () => {
+  const places = [{ name: '重力安保核心', access: 'private' }];
+  const r = pickSchedulePlaces(places, new Set(['重力安保核心']), '', new Set(['重力安保核心']));
+  assert.equal(r.included.length, 0, '用户划掉必须优先于勾选');
+  assert.equal(r.excluded[0].why, 'user-excluded');
+});
+
+test('★★★ 准入继承只能有**一份实现**（唯一真源 `resolveEffectiveAccess`）', () => {
+  // 上面那个 bug 有**两个**独立成因，其中一个是"同一口径写了两遍"（项目红线 8）：
+  //   · `pickSchedulePlaces`（决定生成时能不能去）
+  //   · `routes/schedule.js` 的 `decorated`（决定前端界面显示能不能去）
+  // 两份逻辑各自演化 → 界面与生成结果不一致，用户看到"界面说不能去"的错觉。
+  // 本测试用源码扫描钉住：路由里不得再出现自己的继承判断。
+  const src = fs.readFileSync(new URL('../src/routes/schedule.js', import.meta.url), 'utf8');
+  assert.match(src, /resolveEffectiveAccess/, '路由应调用唯一真源');
+  // 旧写法：`areaBlocked && own === '' ? areaAccess : own`（自己拼一遍继承）
+  assert.ok(!/areaBlocked\s*&&\s*own\s*===\s*''\s*\?\s*areaAccess\s*:\s*own/.test(src),
+    '不得再自己拼继承逻辑 —— 必须取 `resolveEffectiveAccess` 的结果');
+});
+
+test('★★ resolveEffectiveAccess：继承标记必须准确（前端据此显示「所在区域受限」）', () => {
+  assert.deepEqual(resolveEffectiveAccess('', 'restricted'), { access: 'restricted', inherited: true },
+    '未标注 + 父区 restricted → 继承受限，且标记为继承');
+  assert.deepEqual(resolveEffectiveAccess('', 'private'), { access: '', inherited: false },
+    '未标注 + 父区 private → **不继承**（这是本轮修的核心）');
+  assert.deepEqual(resolveEffectiveAccess('public', 'restricted'), { access: 'public', inherited: false },
+    '显式 public 解锁父级受限，且不算继承');
+  assert.deepEqual(resolveEffectiveAccess('private', 'restricted'), { access: 'private', inherited: false },
+    '自己标了 private 就按自己的走（父区是 restricted 也不改写它）');
+});
+
 test('约束块：准入禁令段在无区域时也可用（问题 2 的"不依赖 areas"落点）', () => {
   const s = buildScheduleConstraintBlock({
     accessNotes: [{ name: '珠星总部', area: '珠星集团CBD区', note: '谢绝外人／需身份' }],
@@ -175,6 +242,43 @@ test('常量：zone → 服装 key 的映射是稳定的（改动会破坏服装
   assert.equal(ZONE_OUTFIT_HINT.private_transit, 'nude');
   assert.equal(ACCESS_LEVELS.length, 4);
   assert.equal(ZONE_LEVELS.length, 3);
+});
+
+// ─────────────────────────────────────────────────────────
+// T6（2026-10-06）：地名清单不得再硬编码在提示词散文里
+// ─────────────────────────────────────────────────────────
+
+test('★★ T6：`scheduleInst` 不再列举会漂移的地名黑名单，改为"以地图数据为准"', () => {
+  // 原散文写「不写进去的地方：珠星集团CBD区、海原电视塔、非仪式期的幻月秘庭」——
+  // 与地图矛盾：CBD 在地图里是 public，且其下「珠星站」还是线路 A 的车站，
+  // 照散文执行会把车站也排除掉。凡"地图数据之外的清单"都会这样漂移。
+  const src = fs.readFileSync(new URL('../src/services/scheduleGenerator.js', import.meta.url), 'utf8');
+  // 取 scheduleInst 模板（从声明到下一个 `;` 结束）
+  const inst = src.match(/const scheduleInst = `[\s\S]*?`;/)?.[0] || '';
+  assert.ok(inst.length > 500, '应能截出 scheduleInst 模板');
+  assert.doesNotMatch(inst, /不写进去的地方/, 'scheduleInst 里不应再有"不写进去的地方"这句硬编码清单');
+  // ★ 2026-10-07：更进一步 —— scheduleInst 里**不得出现任何具体地名**，
+  //   连"以地图数据为准"那类举例也一并去掉，改为指引到本次注入的区域清单。
+  assert.doesNotMatch(inst, /珠星集团CBD区/, 'scheduleInst 不应点名「珠星集团CBD区」（它与地图 public 冲突）');
+  for (const t of ['二维市', '鸽川', '绘世学院', '世界尽头酒馆', '馋嘴胡同', '滨河道']) {
+    assert.ok(!inst.includes(t), `scheduleInst 不应内置地名「${t}」——应改为从地图/区域清单读`);
+  }
+  assert.match(inst, /专门给某地加限制|以它为准|主要活动区域/, '应改为"以本次注入的地图数据为准"的口径');
+});
+
+test('★ T6：地图里受限地点是唯一真源（collectAccessNotes 只读地图、不另抄清单）', () => {
+  const src = fs.readFileSync(new URL('../src/routes/schedule.js', import.meta.url), 'utf8');
+  const fn = src.match(/function collectAccessNotes[\s\S]*?\n}/)?.[0] || '';
+  assert.ok(fn, 'collectAccessNotes 应存在');
+  // 它必须从地图读（loadScheduleAreas），而不是引用任何写死的地名数组
+  assert.match(fn, /loadScheduleAreas\(/, 'collectAccessNotes 必须从地图读');
+  assert.match(fn, /normalizeAccess\(/, '必须按 access 语义判定，而非按名字');
+  // 不得断言"任何中文"（理由文案『仅限特定对象/整个区域』是中文标签，不是地名）；
+  // 也先剥掉注释（函数体内的说明注释会举地名为例，那是文档不是清单）。
+  const codeOnly = fn.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const name of ['珠星', '海原电视塔', '幻月秘庭', '泊地站', '鸽川']) {
+    assert.ok(!codeOnly.includes(name), `collectAccessNotes 不应硬编码地点名「${name}」——应完全由地图 access 驱动`);
+  }
 });
 
 test.after(() => { try { fs.unlinkSync(TMP); } catch { /* 忽略 */ } });

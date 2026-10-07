@@ -19,7 +19,7 @@
  *   · 类型化表达（"巷口面包铺 · 烘焙/早餐"），**不写人物剧情/前史**
  */
 
-import { getDb, getWorldSetting, getSystemRulesWithWorld } from '../db/index.js';
+import { getDb, getWorldSetting, getSystemRulesWithWorld, getSystemRules } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 // ⚠ 项目里有**两个同名导出**、语义不同，别拿错：
 //   · eventGenerator.extractFirstJson → 返回 **JSON 字符串**（调用方自己 JSON.parse(repairJson(s))）—— 本文件用这个
@@ -120,6 +120,12 @@ export function accessReason(place) {
 
 /** 一次展开最多接受多少个场景（防模型失控吐几十个） */
 const MAX_SCENES_PER_DISTRICT = 10;
+/**
+ * 遍历地点树的深度上限 —— **防环护栏，不是层级上限**。
+ * `parent_id` 是结构真源、`level` 只是冗余列；历史数据一旦成环（A→B→A），
+ * 无上限递归会直接把进程栈打爆。真实世界的地图不会超过这个深度。
+ */
+const MAX_PLACE_DEPTH = 12;
 /** 每场景 POI 数量区间（范式要求一区 6~9 个） */
 const POI_MIN = 4;
 const POI_MAX = 9;
@@ -332,11 +338,384 @@ export function upsertPlace(placeId, patch = {}) {
   })();
 }
 
+/**
+ * 让 AI 依据「名称 / 类型 / 一句话简介」生成一条**英文画面描述**（scene_prompt）。
+ *
+ * ── 为什么单独做这个（2026-10-06 用户要求）──────────────
+ * 地图地点的 `scene_prompt` 有两个消费方（日程注入的反八股素材、哈托比亚「城市风光」的生图取景），
+ * 但它**必须用英文**写画面（生图规则要求 ALL text in English），手写很别扭。
+ * 用户口径：在人写好了"名称+类型+简介"后，给一个按钮**自动生成**这条英文画面描述。
+ *
+ * ── 与 `expandPlace` 的关系 ──
+ * 那是"展开下一级"（产出结构），本节是"补一条字段"（产出文本）。**不落库** ——
+ * 只返回给前端预览，用户可改可重掷，确认后随 `PUT /places/:id` 保存（与论坛马甲同一取向：
+ * 生成物先给人看，不直接覆盖已有内容）。
+ *
+ * ⚠ 只依据用户已填的**中文**信息做翻译+扩写；无世界观的纯地名也能生成（不强制依赖世界观）。
+ *
+ * @param {{name?:string, kind?:string, summary?:string, nameEn?:string, context?:string}} input
+ * @returns {Promise<{ok:true, scenePrompt:string}>}
+ */
+export async function generateScenePrompt({ name = '', kind = '', summary = '', nameEn = '', context = '' } = {}) {
+  const nm = String(name || '').trim();
+  if (!nm) throw Object.assign(new Error('请先填写名称'), { statusCode: 400 });
+
+  const world = (() => { try { return getWorldSetting(); } catch { return ''; } })();
+  const msgs = [
+    { role: 'system', content: getSystemRulesWithWorld() || '你是一个场景美术描述师。' },
+    {
+      role: 'system',
+      content: `你要为一个虚构地点写一条**英文画面描述**，供 AI 生图模型取景使用。
+
+硬性要求：
+- **全英文输出**（生图模型不吃中文）。**不得出现任何中文字符** —— 专有名词/设定词
+  （如"愿力""星穹"）也要**意译或音译**成英文（如 willpower / astral），宁可用近义词也不要留中文。
+- 只写**画面本身**：环境、光线、材质、天气、氛围、色调、建筑/陈设细节。
+- **绝对不要写人**（不要出现 person/girl/man，除非环境必然包含人流，用 crowd 也要克制）。
+- 40 个英文词以内，用逗号分隔的短语堆叠风格（Danbooru/插画站常用写法），不要完整句子。
+- 与地点名、类型、简介**保持一致**：它是"什么性质的地方"要能从画面看出来。
+
+只输出 JSON：{"scene_prompt": "..."}，不要任何解释。`,
+    },
+    {
+      role: 'user',
+      content: `地点名称：${nm}${nameEn ? `（${nameEn}）` : ''}
+类型：${kind || '（未填）'}
+一句话简介：${summary || '（未填）'}
+${context ? `所属：${context}\n` : ''}${world ? `\n参考世界观（摘录）：\n${String(world).slice(0, 1200)}` : ''}`,
+    },
+  ];
+
+  const raw = await chatSync(msgs, {
+    temperature: 0.8, max_tokens: 300,
+    response_format: { type: 'json_object' }, label: `worldmap:scene:${nm}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  const obj = jsonStr ? safeParse(repairJson(jsonStr), null) : null;
+  let out = clampText(obj?.scene_prompt || '', 400);
+  // ★ 出口兜底：即便提示词已写明"全英文"，模型偶尔仍会漏一个中文词进来
+  //   （实测吐过 "dazzling愿力 glow"）。scene_prompt 是**喂英文生图模型**的，
+  //   混中文会污染提示词 —— 这里把残留的 CJK 字符直接剔除，并压掉多余空格/逗号。
+  out = out.replace(/[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/g, ' ')
+    .replace(/\s*,\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+  if (!out) throw new Error('模型没产出画面描述，请重试');
+  return { ok: true, scenePrompt: out };
+}
+
+/**
+ * 让 AI **追加**生活地点（POI）到某个已有地点下 —— 用户 2026-10-07 要求。
+ *
+ * ── 为什么必须有这个（而不是复用手动「+ 添加一条」）─────────
+ * 用户实况：很多时候只想给这个地点补几个**店/设施**，**不需要**再建一层下级地点。
+ * 既有的「✨ 让 AI 展开下一级」会 DELETE 掉该地点下的**全部**子节点再整体替换（幂等换一批），
+ * 手写的子地点会被一起清掉；「+ 添加一条」又得一条条敲名字。
+ * 本函数补的就是中间那条路：**只往 pois_json 里追加**，不碰任何子节点。
+ *
+ * ── 与 `expandPlace` 的关键区别（改代码前务必看清）──────────
+ *   · `expandPlace`      → 产出**结构**（L3 场景），会 `DELETE ... WHERE parent_id = ?`；
+ *   · `expandPois`（本函数）→ 只在**当前节点**上追加 POI 行，**不落库**（前端预览确认后才随
+ *     `PUT /places/:id` 保存），也不做任何删除。
+ *
+ * ★★ 出口两道闸门（缺一不可，都是踩过的坑）：
+ *   ① **与已有 POI 去重**（按名字，忽略大小写与空白）—— 否则「再点一次」就堆出一串同名店；
+ *   ② **全是重复时不能静默返回空数组**（红线 0）：前端拿到 `[]` 只会看到"点了没反应"。
+ *      此时抛 400 带明确原因，用户知道该做什么（先改现有条目名，或换个方向重掷）。
+ *
+ * @param {number} placeId
+ * @param {{count?:number, hint?:string, excludeNames?:string[]}} opts
+ *   `excludeNames` 由前端传**当前表单里已有**的 POI 名（含未保存的手改条目），
+ *   比只查库更准 —— 用户刚手打完名字还没点保存，库里的 `pois_json` 并不包含它。
+ * @returns {Promise<{ok:true, pois:Array<{name:string,type:string,blurb:string}>}>}
+ *   返回的是**要追加的那几条**（不是全量），由前端决定怎么并进表单。
+ */
+export async function expandPois(placeId, { count = 4, hint = '', excludeNames = [] } = {}) {
+  const db = getDb();
+  const place = db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(placeId);
+  if (!place) throw Object.assign(new Error('地点不存在'), { statusCode: 404 });
+
+  const world = (() => { try { return getWorldSetting(); } catch { return ''; } })();
+  const parent = place.parent_id
+    ? db.prepare('SELECT name FROM world_map_places WHERE id = ?').get(place.parent_id)
+    : null;
+
+  // 已有 POI：库里存的 + 前端传来的（未保存的手改条目）合并去重。
+  // ⚠ 前端那份可能含空名（用户点了「+ 添加一条」还没填），要过滤掉再参与比对。
+  const existingNames = [
+    ...(safeParse(place.pois_json, []) || []).map(p => String(p?.name || '')),
+    ...(Array.isArray(excludeNames) ? excludeNames : []),
+  ].map(s => s.trim()).filter(Boolean);
+
+  // 上层地点的同级 POI 也读几个当"别重复"的参考（跨兄弟节点重名很出戏，但不硬性禁止）
+  const siblingNames = parent
+    ? db.prepare('SELECT pois_json FROM world_map_places WHERE parent_id = ? AND id != ? LIMIT 8')
+      .all(place.parent_id, placeId)
+      .flatMap(r => (safeParse(r.pois_json, []) || []).map(p => String(p?.name || '')))
+      .filter(Boolean)
+    : [];
+
+  const n = Math.max(1, Math.min(8, Number(count) || 4));
+  const msgs = [
+    { role: 'system', content: getSystemRulesWithWorld() || '你是一个世界观设定师。' },
+    { role: 'system', content: POI_APPEND_FORMAT(existingNames, siblingNames) },
+    {
+      role: 'user',
+      content: `地点：**${place.name}**${place.name_en ? `（${place.name_en}）` : ''}
+${place.kind ? `类型：${place.kind}\n` : ''}${place.summary ? `它是什么地方：${place.summary}\n` : ''}${parent ? `它属于「${parent.name}」。\n` : ''}${hint.trim() ? `\n【本次特别要求】${hint.trim()}\n` : ''}
+请给这个地点补 **${n} 个**生活地点（店 / 设施）。${existingNames.length ? '已列出的这些**不要再出**。' : ''}`,
+    },
+  ];
+
+  const raw = await chatSync(msgs, {
+    temperature: 0.9, max_tokens: 900,
+    response_format: { type: 'json_object' }, label: `worldmap:poi:${place.name}`,
+  });
+  const jsonStr = extractFirstJson(raw);
+  const obj = jsonStr ? safeParse(repairJson(jsonStr), null) : null;
+
+  // 兼容模型偶尔改用 "places"/"items" 作键（不按格式走时也要能捞回来）
+  const list = Array.isArray(obj?.pois) ? obj.pois
+    : Array.isArray(obj?.places) ? obj.places
+      : Array.isArray(obj?.items) ? obj.items : [];
+
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, '');
+  const blocked = new Set(existingNames.map(norm));
+  const seen = new Set();
+  const out = [];
+  for (const p of normalizePois(list)) {
+    const k = norm(p.name);
+    if (!k || blocked.has(k) || seen.has(k)) continue;   // 闸门① 与已有/本轮重复的都丢掉
+    seen.add(k);
+    out.push(p);
+  }
+
+  // 闸门② 一条都不剩 → 抛错说清原因，绝不 `return []`
+  if (!out.length) {
+    throw Object.assign(
+      new Error(existingNames.length
+        ? `AI 给出的都是已有地点（${existingNames.slice(0, 4).join('、')}${existingNames.length > 4 ? ' 等' : ''}），没有新内容。可再点一次换一批，或先改掉现有条目名。`
+        : 'AI 没产出可用的生活地点，请重试'),
+      { statusCode: 502 },
+    );
+  }
+  return { ok: true, pois: out };
+}
+
+/**
+ * 追加 POI 时的输出格式约束。
+ *
+ * ⚠ `existing` / `siblings` 只把**名字**列给模型当"别再出"的负样本 ——
+ * 刻意**不列**已存在的店名以外的任何内容（blurb/类型），否则模型会把整行照抄回来。
+ * 名字为空数组时整段不出现（不给模型看空列表）。
+ */
+function POI_APPEND_FORMAT(existing = [], siblings = []) {
+  return `请严格按以下 JSON 格式输出，不要任何解释或 JSON 以外的文字：
+
+{
+  "pois": [
+    { "name": "店名／地点名（中文，意象＋功能热词融合，2~7字）", "type": "零售|餐饮|服务|配套", "blurb": "一句话说清它是什么、有什么生活气息（≤30字）" }
+  ]
+}
+
+硬性纪律（务必遵守）：
+1. **优先平凡日常场所**——便利店、面包坊、澡堂、洗衣店、站台、小饭馆、文具店、报刊亭……
+   不要空泛奇观（"宏伟的中央广场""神秘的古代遗迹"这类勿用）。
+2. **店名要「意象 + 功能热词」融合**：名字里同时装着画面和梗，且梗必须**从这家店的功能里自然长出来**。
+   好例：澡堂=「班味清零汤」、汽水铺=「童年一响」、洗衣店=「出厂设置」、咖啡=「续命一刻」。
+   坏例（禁用）：白月光、emo、精神SPA 这类与功能脱节的硬贴；也不要「XXの店」这种空名。
+3. **只写地点本身**：类型 + 一句生活气息即可。**绝对不要写人物、老板、店员、顾客的剧情或前史**。
+4. **不出现日文假名**，也不要用中式刻板语汇（面馆、大排档、里弄、茶摊、赊账本、老字号）。
+5. 这几个生活地点之间**不要同质堆叠**（别开三家便利店）；类型要分散，
+   **零售 / 餐饮 / 服务**至少各覆盖到（配套类可选）。
+6. 贴合 <world_setting> 的底色（若世界观有独特的货币/生物/职业/现象，可自然地体现在店名或 blurb 里）。
+7. **它们要能合理存在于这个地点里**：这个地点是商场就别全是街边摊，是车站就别全是住宅配套。
+${existing.length ? `\n【已经有的（**严禁重复**，名字不要撞）】${existing.join('、')}` : ''}${siblings.length ? `\n【同层的其它地点已用过这些名字（尽量避开）】${siblings.slice(0, 20).join('、')}` : ''}`;
+}
+
 /** 把 `null` / `''` / `0` / `'0'` 统一成"无父级"，其余转成数字 */
 function normalizeParentId(v) {
   if (v === null || v === undefined || v === '' || v === 0 || v === '0') return null;
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// AI：修正地点（参考图 / 文字要点 → 重写 类型+简介+英文画面描述）
+//
+// 用户 2026-10-07 口径：**明确要求照「角色 → 修正外观」那一套做**，并给出了样式参考。
+// 所以这里刻意与 `routes/characters.js` 的 `refine-appearance-draft` /
+// `expand-appearance-draft` 保持**同构**（同样两条入口、同样"只出草稿不落库"、
+// 同样把可编辑结果回传由前端回填），便于两边一起维护。
+//
+// 与「✨ AI 生成画面描述」的区别：
+//   · `generateScenePrompt` → 只补 `scene_prompt` **一个字段**，输入是用户已写好的中文。
+//   · `refinePlaceDraft`（本函数）→ 依据参考图或要点，**重写整条地点的可描述字段**
+//     （类型 / 一句话简介 / 英文画面描述），输入是"图"或"零散要点"。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 修正地点的公共语料：把这个地点在树里的位置、以及**兄弟地点**的名字给它，
+ * 让它写出来的东西"落在这张图的语境里"，而不是凭空一座城。
+ *
+ * ⚠ 兄弟地点只给**名字**（不给简介）—— 给多了模型会去复读别人的描述。
+ */
+function buildPlaceCorpus(place, db) {
+  const parent = place.parent_id
+    ? db.prepare('SELECT name, kind, summary FROM world_map_places WHERE id = ?').get(place.parent_id)
+    : null;
+  const siblings = place.parent_id
+    ? db.prepare('SELECT name, kind FROM world_map_places WHERE parent_id = ? AND id != ? ORDER BY sort_order LIMIT 10')
+      .all(place.parent_id, place.id)
+    : db.prepare('SELECT name, kind FROM world_map_places WHERE map_id = ? AND parent_id IS NULL AND id != ? ORDER BY sort_order LIMIT 10')
+      .all(place.map_id, place.id);
+  const map = db.prepare('SELECT name FROM world_maps WHERE id = ?').get(place.map_id);
+  const lines = [];
+  if (map?.name) lines.push(`所属地图：${map.name}`);
+  if (parent) lines.push(`上级地点：「${parent.name}」${parent.kind ? `（${parent.kind}）` : ''}${parent.summary ? ` —— ${parent.summary}` : ''}`);
+  if (siblings.length) {
+    lines.push(`同层的其它地点：${siblings.map(s => `${s.name}${s.kind ? `（${s.kind}）` : ''}`).join('、')}`);
+  }
+  return lines.join('\n');
+}
+
+/** 修正地点的 system 提示词（图片模式与文字模式共用的部分） */
+const REFINE_PLACE_SYSTEM_PROMPT = `你是虚构世界的地理设定助手。用户会给你一个**已有地点**的当前信息（可能还有一张参考图），请重写它的可描述字段。
+
+【输出三个字段，只输出 JSON】
+{
+  "kind": "类型（≤8字，如 商店街 / 站台 / 公园 / 河岸 / 居民街 / 地标 / 中庭）",
+  "summary": "一句话交代这块地方长什么样、什么人来、什么时候最热闹（中文，≤60字）",
+  "scene_prompt": "英文画面描述（见下方硬性要求）"
+}
+
+【铁律】
+1. **忠实于用户给的信息**：用户给了参考图就以图为准，用户给了文字要点就只按要点改。
+   用户**没有要求改**的部分保持原样，不要借机重写一遍。
+2. 地点名（name）**不归你管**，不要动它、也不要在输出里重复它。
+3. 不要编造人物。这里只描述"地方"，老板/店员/顾客的剧情或前史一律不写。
+4. 贴合已有的语境：写出来的东西要能落在它上级地点与同层地点的语境里，不要凭空造一座城。
+
+【scene_prompt 的硬性要求（它要被喂给英文生图模型，写错会直接污染画面）】
+- **全英文输出**，不得出现任何中文字符。专有名词/设定词（如"愿力""星穹"）也要意译或音译
+  （如 willpower / astral），宁可用近义词也不要留中文。
+- 只写**画面本身**：环境、光线、材质、天气、氛围、色调、建筑/陈设细节。
+- **绝对不要写人**（不要出现 person/girl/man；环境必然有人流时用 crowd 也要克制）。
+- 40 个英文词以内，用逗号分隔的短语堆叠风格（插画站常用写法），不要完整句子。
+
+只输出 JSON，不要任何解释。`;
+
+/**
+ * 修正地点 · 图片模式：观察参考图重写该地点的字段。
+ *
+ * @param {{placeId:number, image:string, hints?:string}} input  `image` 是 dataURL
+ * @returns {Promise<{ok:true, kind:string, summary:string, scenePrompt:string}>}
+ */
+export async function refinePlaceFromImage({ placeId, image = '', hints = '' } = {}) {
+  const db = getDb();
+  const place = db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(Number(placeId));
+  if (!place) throw Object.assign(new Error('地点不存在'), { statusCode: 404 });
+
+  const m = String(image).match(/^data:image\/(png|jpeg|webp);base64,/i);
+  if (!m) throw Object.assign(new Error('请上传 PNG / JPG / WEBP 图片'), { statusCode: 400 });
+  if (String(image).length > 8 * 1024 * 1024) {
+    throw Object.assign(new Error('图片过大，请压缩后再上传（不超过 6MB）'), { statusCode: 400 });
+  }
+
+  const corpus = buildPlaceCorpus(place, db);
+  const world = (() => { try { return getWorldSetting(); } catch { return ''; } })();
+
+  const textPart = [
+    `当前地点「${place.name}」的已有信息（供参考，以图为准）：`,
+    `类型：${place.kind || '（未填）'}`,
+    `一句话简介：${place.summary || '（未填）'}`,
+    corpus,
+    hints.trim() ? `\n【用户特别要求】${hints.trim()}` : '',
+  ].filter(Boolean).join('\n');
+
+  try {
+    const res = await chatSync([
+      { role: 'system', content: getSystemRules({ roleplay: false }) },
+      { role: 'system', content: REFINE_PLACE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: `${textPart}\n\n参考图如下，请据此重写这个地点。` },
+          { type: 'image_url', image_url: { url: image } },
+        ],
+      },
+    ], { temperature: 0.3, max_tokens: 700, response_format: { type: 'json_object' }, label: `worldmap:refine-img:${place.name}` });
+    return { ok: true, ...absorbPlaceRefine(res) };
+  } catch (err) {
+    throw translateVisionError(err);
+  }
+}
+
+/**
+ * 修正地点 · 文字模式：按用户给的零散要点扩写。
+ * 与图片模式同一套输出契约（三个字段），只是输入换成文字。
+ */
+export async function refinePlaceFromText({ placeId, brief = '', hints = '' } = {}) {
+  const db = getDb();
+  const place = db.prepare('SELECT * FROM world_map_places WHERE id = ?').get(Number(placeId));
+  if (!place) throw Object.assign(new Error('地点不存在'), { statusCode: 404 });
+
+  const b = String(brief || '').trim();
+  if (!b) throw Object.assign(new Error('请先写下你想要的要点'), { statusCode: 400 });
+
+  const corpus = buildPlaceCorpus(place, db);
+  const res = await chatSync([
+    { role: 'system', content: getSystemRules({ roleplay: false }) },
+    { role: 'system', content: REFINE_PLACE_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: `当前地点「${place.name}」的已有信息：
+类型：${place.kind || '（未填）'}
+一句话简介：${place.summary || '（未填）'}
+${corpus}
+
+【用户给出的要点（必须全部体现在结果里，没说到的部分由你补全成完整描述）】
+${b}
+${hints.trim() ? `\n【用户特别要求】${hints.trim()}` : ''}`,
+    },
+  ], { temperature: 0.7, max_tokens: 700, response_format: { type: 'json_object' }, label: `worldmap:refine-txt:${place.name}` });
+  return { ok: true, ...absorbPlaceRefine(res) };
+}
+
+/**
+ * 收口模型返回：解析 JSON 并归一化三个字段。
+ *
+ * ⚠ `scene_prompt` 的 CJK 清洗不可省 —— 实测模型即便被明确要求"全英文"，
+ * 仍会漏一两个中文词（吐过 "dazzling愿力 glow"），而这段文字是**直接喂生图模型**的。
+ * 与 `generateScenePrompt` 用同一套清洗，避免两条链路口径不一致。
+ */
+function absorbPlaceRefine(raw) {
+  const jsonStr = extractFirstJson(String(raw || ''));
+  const obj = jsonStr ? safeParse(repairJson(jsonStr), null) : null;
+  const kind = clampText(obj?.kind || '', 20);
+  const summary = clampText(obj?.summary || '', 600);
+  let scenePrompt = clampText(obj?.scene_prompt || '', 400);
+  scenePrompt = scenePrompt.replace(/[\u3000-\u303f\u4e00-\u9fff\uff00-\uffef]/g, ' ')
+    .replace(/\s*,\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+  // 三个字段全空 = 模型没产出可用内容（不是"用户想要清空"）→ 抛错，别静默把表单清空
+  if (!kind && !summary && !scenePrompt) {
+    throw Object.assign(new Error('模型没能读出可用的地点信息，请重试或换一张更清晰的图片'), { statusCode: 502 });
+  }
+  return { kind, summary, scenePrompt };
+}
+
+/**
+ * 中转站对「模型不支持图片输入」的报错措辞五花八门，常见是 400/404 且 body 为空。
+ * 关键词匹配不到就按状态码兜底识别 —— 与 `routes/characters.js` 的修正外观同一策略，
+ * 命中即给出"去设置里换视觉模型"的可执行提示（原始报错留在括号里便于排查）。
+ */
+function translateVisionError(err) {
+  const status = err?.status || err?.response?.status || err?.statusCode;
+  const rawMsg = String(err?.message || '');
+  if (status === 400 || status === 404 || /image|vision|multimodal|visual|image_url|content part/i.test(rawMsg)) {
+    return Object.assign(new Error(
+      `当前配置的 LLM API 不支持图片输入，请在设置中更换支持视觉（图片输入）的模型后重试（上游返回：${rawMsg || status}）`,
+    ), { statusCode: 500 });
+  }
+  return err;
 }
 
 /**
@@ -770,6 +1149,9 @@ export function exportMarkdown(mapId) {
 /**
  * 取「某区域下可用于日程的地点」及其属性。
  *
+ * ⚠ 这是**唯一真源**：日程注入与前端弹窗都走这里，不要在 routes/schedule.js
+ *   里另写一份过滤逻辑 —— 否则两处口径迟早漂移（项目红线 8）。
+ *
  * @param {string} areaName 子区名（level 2）
  * @param {number|null} mapId
  * @returns {Array<{id,name,kind,category,access,zone,scene_prompt,summary,reason}>}
@@ -778,6 +1160,51 @@ export function listAreaPlaceAttrs(areaName, mapId = null) {
   const { areas } = listAreasForSchedule(mapId);
   const area = areas.find(a => a.name === areaName);
   return area?.places ?? [];
+}
+
+/**
+ * ★★ 判断一个节点是否可以直接作为「日程地点」使用 —— **不看它的 level 数值**。
+ *
+ * ── 为什么不能写 `level === 3`（2026-10-07 用户实报的 bug 根因）────────
+ * 用户新建「二相乐园之外 → 托帕的私人生态舰」后，**该区在编排日程里一个地点都不出现**。
+ * 实测 DB：它的子节点里两个是 `level=3`、**三个是 `level=4`**（用户曾在更深处建过东西，
+ * 或节点被迁移过；`level` 是冗余列，历史数据可能不准）。
+ * 而 `listAreasForSchedule` 原来硬过滤 `s.level === LEVEL.SCENE`：
+ *   · 三个 lv4 地点被**静默丢弃**（用户只会看到"这个区点不开/没内容"）；
+ *   · 更糟的是 lv3 的节点若自己还有孩子（实测「鸽川区」下 `鸽川河与滨河道`、
+ *     `狸狸周刊报社` 都有子节点），会被当成"地点"塞进去，但它其实是个**容器**。
+ *
+ * 正确判据是**结构性的、与具体世界观和层级深度都无关**：
+ *   · 有子节点 → 它是**中间层**，继续往下走（下钻），不作为候选集本身；
+ *   · 无子节点 → 它是**叶子**，可以作为日程地点。
+ * 这样「二维市→鸽川区→场景」和「生态舰→甲板→货运巷」两种深度都能正确工作，
+ * 也让新加的世界观无需迁就引擎假设的层数。
+ *
+ * @param {{children?:Array}} node 树节点（必须带 children；扁平行请先用 buildTree）
+ * @returns {boolean}
+ */
+function isSchedulePlaceNode(node) {
+  return !(node?.children?.length > 0);
+}
+
+/**
+ * 递归收集一个子树里**所有叶子节点**（可作日程地点的那些）。
+ *
+ * ⚠ 深度上限 `MAX_PLACE_DEPTH` 是防环护栏而非层级限制：`level` 是冗余列、
+ *    `parent_id` 才是结构真源，历史数据一旦成环，无上限递归会栈溢出。
+ *
+ * @param {Array} nodes 待遍历的节点
+ * @param {number} depth 当前深度（仅用于护栏与可读性）
+ * @returns {Array} 叶子节点（含其原始字段）
+ */
+function collectLeafPlaceNodes(nodes, depth = 0) {
+  const out = [];
+  if (depth > MAX_PLACE_DEPTH) return out;
+  for (const n of (nodes || [])) {
+    if (isSchedulePlaceNode(n)) out.push(n);
+    else out.push(...collectLeafPlaceNodes(n.children, depth + 1));
+  }
+  return out;
 }
 
 /** 列出可作为日常活动区域的子区（含其下地点属性）——日程弹窗与注入共用 */
@@ -790,8 +1217,9 @@ export function listAreasForSchedule(mapId = null) {
   const areas = [];
   for (const region of map.tree) {
     for (const district of region.children ?? []) {
-      const places = (district.children ?? [])
-        .filter(s => s.level === LEVEL.SCENE)
+      // ★ 见 isSchedulePlaceNode 的说明：判据是"有没有子节点"，不是 level 数值。
+      //   过度深度的容器会被自动下钻，lv3/lv4 的叶子一视同仁地收进来。
+      const places = collectLeafPlaceNodes(district.children ?? [])
         .map(s => ({
           id: s.id, name: s.name, kind: s.kind || '', category: s.category || '',
           access: normalizeAccess(s.access), zone: normalizeZone(s.zone),
@@ -811,35 +1239,78 @@ export function listAreasForSchedule(mapId = null) {
 }
 
 /**
+ * ★★ 唯一真源：判定一个地点的**实际准入**（含父区继承）。
+ *
+ * ── 为什么必须抽成函数（2026-10-07）────────────────────────
+ * 这条口径原本有**两份实现**：`pickSchedulePlaces`（决定"生成时能不能去"）
+ * 和 `routes/schedule.js` 的 `decorated`（决定"前端界面显示能不能去"）。
+ * 两份一旦漂移，用户看到的就是"界面说能去、生成时去不了"——最难查的一类 bug。
+ *
+ * ── 继承规则（只继承 restricted）──────────────────────────
+ * · `restricted`（谢绝外人／需身份）**继承**：整区谢绝外人时其下地点一并受限
+ *   （`幻月秘庭` 是这种，必须继承）。
+ * · `private`（某角色的私人空间）**不继承**：它是**归属**属性、是单点属性。
+ *   一个区域标 private 只说明"这整块地方是某人的"，不代表它里面每个房间都是私人空间。
+ * · 子项显式写 `public` 可解锁父级的受限（否则「车站谢绝外人」这种错会静默发生）。
+ *
+ * @param {string} ownAccess 该地点自己的 access
+ * @param {string} parentAccess 所属子区的 access
+ * @returns {{access:string, inherited:boolean}} 实际准入与"是否来自继承"
+ */
+export function resolveEffectiveAccess(ownAccess, parentAccess) {
+  const own = normalizeAccess(ownAccess);
+  if (own === 'public') return { access: own, inherited: false };   // 显式 public 解锁
+  if (own !== '') return { access: own, inherited: false };         // 自己标了什么就是什么
+  // 自己没标注 → 只有父级 restricted 才继承
+  const pa = normalizeAccess(parentAccess);
+  if (pa === 'restricted') return { access: pa, inherited: true };
+  return { access: '', inherited: false };
+}
+
+/**
  * 从候选里挑出「本次可进提示词」的地点，并给出需要标注的例外。
  *
  * 规则（用户口径：「别去不合适的地方」）：
  *  - public / 未标注 → 进候选池
- *  - restricted / private → **默认不进**；但若用户显式勾选了它，则**进池并带 `仅限…` 标注**
- *    （用户显式指令优先于自动过滤，与本项目其它「显式优先」口径一致）
+ *  - restricted / private → **默认不进**；但若用户**显式勾选**了它（`picked`），
+ *    则**进池并带 `仅限…` 标注**（用户显式指令优先于自动过滤，与本项目其它「显式优先」口径一致）
  *  - time_window → 进池，但附开放时段，由模型自己核验
  *  - 用户**取消勾选**的地点一律排除（排除优先于一切）
  *
- * ⚠ **子区自身的 access 也要算**：`幻月秘庭` 是 lv2 子区、access=restricted，
- *    它下面的场景若只看自己的 access 会被整区放行 —— 所以这里额外接受
- *    `parentAccess`，父级受限时其下所有场景一并受限（除非场景自己显式写了 public）。
+ * ⚠ 继承规则见 `resolveEffectiveAccess`（**只继承 restricted**）。
+ *   ★★ 2026-10-07 用户实报的 bug 正是踩了这条：
+ *   「翡翠的私人生态舰」在**区域级**标了 `private`，其下 7 个舱室自己都没标注，
+ *   旧代码把 private 一路继承下去 → 7 个舱室全被标成「某角色的私人空间」不可去。
+ *   语义上「典当品陈列长廊」是营业场所、「异星生态庭院」是景观舱，显然不该因为是
+ *   "翡翠的船"就都进不去。
  *
  * @param {Array} places  来自 listAreaPlaceAttrs
  * @param {Set<string>} excluded 用户取消勾选的地点名
- * @param {string} [parentAccess] 所属子区的 access（继承用）
+ * @param {string} [parentAccess] 所属子区的 access（**仅 restricted 参与继承**）
+ * @param {Set<string>} [picked] 用户**显式勾选**（放行）的地点名 —— 受限点由此进池
  * @returns {{included:Array,excluded:Array,annotated:Array}} annotated = 被显式放行但需标注的
  */
-export function pickSchedulePlaces(places = [], excluded = new Set(), parentAccess = '') {
+export function pickSchedulePlaces(places = [], excluded = new Set(), parentAccess = '', picked = new Set()) {
   const included = [], excludedOut = [], annotated = [];
-  const pa = normalizeAccess(parentAccess);
-  const parentBlocked = pa === 'restricted' || pa === 'private';
   for (const p of places) {
     const name = p?.name;
     if (!name) continue;
     if (excluded.has(name)) { excludedOut.push({ name, why: 'user-excluded' }); continue; }
-    // 父级受限且子项自己没写 public → 继承受限（子项显式 public 可解锁）
-    const own = normalizeAccess(p.access);
-    const access = own === 'public' ? own : (parentBlocked && own === '' ? pa : own);
+    const { access } = resolveEffectiveAccess(p.access, parentAccess);
+    // ★★ 用户**显式勾选**的受限地点：强制进池并标注。
+    //   这一条曾经缺失 —— 勾选只生成了给模型看的"注释行"，地点名**没有进清单**，
+    //   而清单渲染遇到"本区无可用地点"会整区跳过 → 用户看到的是"勾了完全没用"。
+    //   显式指令必须真正落到候选集里，而不是只写一句说明（见 routes/schedule.js 的 forcedPlaces）。
+    if (picked.has(name) && !isAccessibleByDefault(access) && access !== 'time_window') {
+      // ⚠ 标注里必须写明"**本次用户已显式指定，可用**"：
+      //   只说「某角色的私人空间」的话，模型看到"私人"就会自己把它排除掉，
+      //   用户勾选的意思恰恰相反（"我就要它来这儿"）。显式指令要显式表达。
+      const why = accessReason({ ...p, access }) || '仅限特定对象';
+      const note = `${why}（**本次用户已显式指定，可用**）`;
+      const item = { ...p, access, note };
+      included.push(item); annotated.push(item);
+      continue;
+    }
     if (isAccessibleByDefault(access)) { included.push({ ...p, access, note: '' }); continue; }
     if (access === 'time_window') {
       const t = accessReason(p);

@@ -157,32 +157,80 @@
         </div>
 
         <template v-else>
-          <!-- ═══ 内联编辑态：直接在右侧面板里改，不再弹窗 ═══
-               用户口径（2026-10-06）：编辑没必要用弹窗，界面有大片空位可直接填。
-               好处：能一边看着下面的「下级地点/生活地点」一边改，不必遮住上下文。 -->
-          <div v-if="editingInline" class="wd-head wd-head--edit">
-            <div class="we-inline-title">编辑地点</div>
+          <!-- ═══════════════════════════════════════════════════════════
+              一号式地点编辑（2026-10-07 用户口径）
+
+              ★ 用户原话：「我的期望是一站式、一页式进行人工编辑工作…
+                你的『编辑』和『取消』本质上就是折叠当前地点的详细编辑区块，
+                功能位置发生变化，非常反人类。」
+
+              病根：此前是**两态切换** ——
+                · 浏览态：按钮是「编辑 / 修正 / 删除」，表单被 v-if 折叠；
+                · 编辑态：按钮变成「修正 / 取消 / 保存」，表单展开。
+              「编辑」「取消」其实只是**折叠开关**，却让整套按钮**换了位置和组合**，
+              用户每次都得重新找按钮（尤其从树里点进来直接就是编辑态、
+              从点位图点进来是浏览态 —— 同一件事两种长相）。
+
+              ★ 现在：**选中即编辑，表单常驻，操作按钮位置与组合固定不变**。
+                不再有「编辑」按钮（不需要"进入编辑"这一步），
+                「取消」改为语义准确的「撤销」（= 恢复成库里的值）。
+              ⚠ 不要改回两态 —— 那正是用户抱怨的"反人类"。
+              ═══════════════════════════════════════════════════════════ -->
+          <div class="wd-head">
+            <div>
+              <h3 class="wd-name">
+                {{ selected.name }}
+                <span v-if="selected.name_en" class="wd-en">{{ selected.name_en }}</span>
+                <span class="wd-lv">{{ levelLabel(selected.level) }}</span>
+                <!-- 有未保存改动时的显式提示：编辑态常驻后，用户更需要知道"改了没保存" -->
+                <span v-if="editDirty" class="wd-dirty" title="有未保存的改动">未保存</span>
+              </h3>
+            </div>
             <div class="wd-head-ops">
-              <linshe-button variant="ghost" size="sm" @click="cancelEdit">取消</linshe-button>
-              <linshe-button variant="primary" size="sm" :disabled="busy || !editPlace.name.trim()" :loading="busy" @click="onSaveEdit">保存</linshe-button>
+              <linshe-button variant="ghost" size="sm" title="用参考图或文字要点让 AI 重写这个地点的类型/简介/画面描述" @click="openRefine(editPlace)">修正</linshe-button>
+              <linshe-button variant="ghost" size="sm" tone="danger" @click="onDelete(selected)">删除</linshe-button>
+              <linshe-button variant="ghost" size="sm" :disabled="!editDirty || busy" title="放弃改动，恢复成已保存的内容" @click="onUndoEdit">撤销</linshe-button>
+              <linshe-button variant="primary" size="sm" :disabled="!editDirty || !editPlace.name.trim()" :loading="busy" @click="onSaveAll">保存</linshe-button>
             </div>
           </div>
-          <div v-if="editingInline" class="wm-picker we-inline">
+
+          <!-- ── 地点信息（常驻表单）── -->
+          <div class="wm-picker we-inline">
             <div class="we-field">
               <label>名称</label>
-              <linshe-input v-model="editPlace.name" placeholder="中文名" />
+              <linshe-input v-model="editPlace.name" placeholder="中文名" @input="editDirty = true" />
             </div>
             <div class="we-field">
               <label>英文名<span class="we-opt">（可选，官方风格合成意译）</span></label>
-              <linshe-input v-model="editPlace.nameEn" placeholder="如 Duomension City" />
+              <linshe-input v-model="editPlace.nameEn" placeholder="如 Duomension City" @input="editDirty = true" />
             </div>
             <div class="we-field">
               <label>类型<span class="we-opt">（可选，如 核心区 / 车站 / 商店街）</span></label>
-              <linshe-input v-model="editPlace.kind" />
+              <linshe-input v-model="editPlace.kind" @input="editDirty = true" />
             </div>
             <div class="we-field">
               <label>一句话简介</label>
-              <linshe-input v-model="editPlace.summary" type="textarea" :rows="3" placeholder="这块地方长什么样、什么人来" />
+              <linshe-input v-model="editPlace.summary" type="textarea" :rows="3" placeholder="这块地方长什么样、什么人来" @input="editDirty = true" />
+            </div>
+            <!-- ★ T2（2026-10-06）：画面描述（英文）—— 供生图取景用。
+                 两个消费方：① 日程注入（让 LLM 写 description 时有画面素材，治「八股」）；
+                 ② 哈托比亚图片站的「城市风光」题材（直接作为 scene 填入生图提示词）。
+                 ⚠ 必须是**英文**（生图规则要求 ALL text in English），故给英文 placeholder。 -->
+            <div class="we-field">
+              <label class="we-label-row">
+                <span>画面描述<span class="we-opt">（英文，供生图/日程取景；留空则不注入）</span></span>
+                <linshe-button
+                  variant="ghost" size="sm" :loading="sceneGenBusy"
+                  :disabled="!editPlace.name.trim()"
+                  :title="editPlace.name.trim() ? '依据名称/类型/简介自动生成英文画面描述（可再手改）' : '请先填写名称'"
+                  @click="onGenerateScenePrompt('edit')"
+                >✨ AI 生成</linshe-button>
+              </label>
+              <linshe-input
+                v-model="editPlace.scenePrompt" type="textarea" :rows="3"
+                placeholder="neon-lit gateway station, wet platform tiles, drifting steam, dusk glow…"
+                @input="editDirty = true"
+              />
             </div>
             <div class="we-field">
               <label>准入权限<span class="we-opt">（日程不会把角色安排到「谢绝外人／私人」的地点）</span></label>
@@ -191,7 +239,7 @@
                   v-for="o in ACCESS_OPTIONS" :key="o.value" type="button"
                   class="we-chip" :class="{ on: editPlace.access === o.value }"
                   :title="o.tip"
-                  @click="editPlace.access = (editPlace.access === o.value ? '' : o.value)"
+                  @click="editPlace.access = (editPlace.access === o.value ? '' : o.value); editDirty = true"
                 >{{ o.label }}</button>
               </div>
               <p v-if="editPlace.access === 'time_window'" class="we-hint">限时段：再填下面的开放时间（不填则只写「仅特定时段」）</p>
@@ -199,11 +247,11 @@
             <div v-if="editPlace.access === 'time_window'" class="we-row2">
               <div class="we-field">
                 <label>开放时间</label>
-                <linshe-input v-model="editPlace.openAt" placeholder="18:00" />
+                <linshe-input v-model="editPlace.openAt" placeholder="18:00" @input="editDirty = true" />
               </div>
               <div class="we-field">
                 <label>关闭时间</label>
-                <linshe-input v-model="editPlace.closeAt" placeholder="02:00" />
+                <linshe-input v-model="editPlace.closeAt" placeholder="02:00" @input="editDirty = true" />
               </div>
             </div>
             <div class="we-field">
@@ -213,29 +261,13 @@
                   v-for="o in ZONE_OPTIONS" :key="o.value" type="button"
                   class="we-chip" :class="{ on: editPlace.zone === o.value }"
                   :title="o.tip"
-                  @click="editPlace.zone = (editPlace.zone === o.value ? '' : o.value)"
+                  @click="editPlace.zone = (editPlace.zone === o.value ? '' : o.value); editDirty = true"
                 >{{ o.label }}</button>
               </div>
             </div>
             <div class="we-field">
               <label>上级地点<span class="we-opt">（改这里 = 移动它的位置）</span></label>
-              <linshe-select v-model="editPlace.parentId" :options="parentOptions" size="sm" />
-            </div>
-          </div>
-
-          <template v-if="!editingInline">
-          <div class="wd-head">
-            <div>
-              <h3 class="wd-name">
-                {{ selected.name }}
-                <span v-if="selected.name_en" class="wd-en">{{ selected.name_en }}</span>
-                <span class="wd-lv">{{ levelLabel(selected.level) }}</span>
-              </h3>
-              <p v-if="selected.summary" class="wd-summary">{{ selected.summary }}</p>
-            </div>
-            <div class="wd-head-ops">
-              <linshe-button variant="ghost" size="sm" title="名称 / 英文名 / 类型 / 简介 / 权限 / 区域性质" @click="openEdit(selected)">编辑</linshe-button>
-              <linshe-button variant="ghost" size="sm" tone="danger" @click="onDelete(selected)">删除</linshe-button>
+              <linshe-select v-model="editPlace.parentId" :options="parentOptions" size="sm" @update:modelValue="editDirty = true" />
             </div>
           </div>
 
@@ -250,7 +282,7 @@
             <span class="wd-ops-hint">下面还有 {{ selChildren.length }} 个下级 · {{ selPois.length }} 个生活地点</span>
           </div>
 
-          <!-- 下级地点 -->
+          <!-- 下级地点（★ 编辑态也显示：一边改一边看下级上下文，不再被表单挡掉） -->
           <div v-if="selChildren.length" class="wd-sect">
             <p class="wd-sect-title">下级地点<span class="wd-sect-hint">点进去看更细的一层</span></p>
             <div class="wd-scene-grid">
@@ -263,7 +295,6 @@
               </button>
             </div>
           </div>
-          </template>
 
           <!-- 生活地点：任何层级都能加（一条街本身也可以是"有营生"的那一层） -->
           <div class="wd-sect">
@@ -279,7 +310,10 @@
                 <span class="wpoi-h-blurb">一句生活气息</span>
               </div>
               <div v-for="(p, i) in selPois" :key="i" class="wpoi-row">
-                <linshe-select v-model="p.type" :options="poiOptions" size="sm" class="wpoi-type-sel" aria-label="类型" />
+                <linshe-select
+                  v-model="p.type" :options="poiOptions" size="sm" class="wpoi-type-sel"
+                  aria-label="类型" @update:modelValue="poisDirty = true"
+                />
                 <linshe-input v-model="p.name" size="sm" class="wpoi-name-in" placeholder="名称" @input="poisDirty = true" />
                 <linshe-input v-model="p.blurb" size="sm" class="wpoi-blurb-in" placeholder="可留空" @input="poisDirty = true" />
                 <button type="button" class="wpoi-del" title="删除这条" @click="removePoi(i)">×</button>
@@ -289,8 +323,21 @@
 
             <div class="wpoi-foot">
               <linshe-button variant="ghost" size="sm" @click="addPoi">+ 添加一条</linshe-button>
+              <!-- ★ 2026-10-07 用户口径：「很多时候不需要添加新的下一级」——
+                   只想给这个地点补几个店/设施，不想为了加一条街边摊再建一层子地点。
+                   与上面的「✨ 让 AI 展开下一级」不同：那个会**删掉**该地点下全部子节点后整体替换，
+                   这个只往生活地点里**追加**，不碰任何下级地点。 -->
+              <linshe-button
+                variant="ghost" size="sm" :loading="poiGenBusy"
+                title="按这个地点补几个店/设施（追加到下面，不影响下级地点）"
+                @click="onAiAddPois"
+              >✨ AI 添加生活地点</linshe-button>
               <span class="wpoi-spacer"></span>
-              <linshe-button v-if="poisDirty" variant="primary" size="sm" :loading="busy" @click="savePois">保存生活地点</linshe-button>
+              <!-- ★ 2026-10-07：原来这里有个独立「保存生活地点」按钮（只在 poisDirty 时出现）。
+                   一站式编辑后**由顶部的「保存」统一次提交**地点字段 + 生活地点 ——
+                   那个按钮已删除（同一个动作两个按钮、且位置还会变，正是用户抱怨的点）。
+                   这里只留一句状态提示，让用户知道"改动还没保存、去哪保存"。 -->
+              <span v-if="poisDirty" class="wpoi-dirty-hint">生活地点有改动 · 点右上角「保存」一并提交</span>
             </div>
           </div>
         </template>
@@ -363,6 +410,22 @@
           <label>一句话简介<span class="we-opt">（可留空）</span></label>
           <linshe-input v-model="addPlace.summary" type="textarea" :rows="3" placeholder="这块地方长什么样、什么人来" />
         </div>
+        <!-- ★ T2：画面描述（英文）—— 新建时也可填，供生图取景与日程注入 -->
+        <div class="we-field">
+          <label class="we-label-row">
+            <span>画面描述<span class="we-opt">（可留空；英文，供生图/日程取景）</span></span>
+            <linshe-button
+              variant="ghost" size="sm" :loading="sceneGenBusy"
+              :disabled="!addPlace.name.trim()"
+              :title="addPlace.name.trim() ? '依据名称/类型/简介自动生成英文画面描述（可再手改）' : '请先填写名称'"
+              @click="onGenerateScenePrompt('add')"
+            >✨ AI 生成</linshe-button>
+          </label>
+          <linshe-input
+            v-model="addPlace.scenePrompt" type="textarea" :rows="3"
+            placeholder="neon-lit gateway station, wet platform tiles, drifting steam…"
+          />
+        </div>
         <div class="wm-modal-foot">
           <linshe-button variant="secondary" @click="addPlaceOpen = false">取消</linshe-button>
           <linshe-button variant="primary" :disabled="busy || !addPlace.name.trim()" :loading="busy" @click="onSaveAdd">创建</linshe-button>
@@ -388,6 +451,18 @@
         </div>
       </div>
     </linshe-modal>
+
+    <!-- ── 修正地点（参考图 / 文字要点 → AI 重写类型+简介+画面描述）──
+         2026-10-07 用户口径：照「角色 → 修正外观」那一套做（样式也已对齐）。
+         ⚠ `character-id` 传 null —— 地图没有角色，那个「从最近图片中挑选」的入口
+           依赖角色 id 取图，传 null 时整行自动隐藏（组件内已判空）。 -->
+    <PlaceRefineModal
+      v-model="refineOpen"
+      :place-id="refineTarget.id"
+      :place-name="refineTarget.name"
+      :character-id="null"
+      @applied="onPlaceRefined"
+    />
   </div>
 </template>
 
@@ -399,6 +474,7 @@ import * as api from '../api/index.js'
 //    表现为"按钮根本不渲染成按钮、弹窗内容直接平铺到页面上"。
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import MapPointView from '../components/worldmap/MapPointView.vue'
+import PlaceRefineModal from '../components/worldmap/PlaceRefineModal.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
@@ -415,6 +491,13 @@ const map = ref(null)
 const viewMode = ref('tree')
 const selected = ref(null)
 const busy = ref(false)
+/** ★ AI 追加生活地点中（独立于 busy：它只动 POI 表单，不该锁住面板上其它的保存按钮） */
+const poiGenBusy = ref(false)
+/** ★ 「修正地点」弹窗开关与目标快照 */
+const refineOpen = ref(false)
+const refineTarget = reactive({ id: null, name: '' })
+/** 画面描述的 AI 生成中（独立于 busy，避免生成时锁住整个面板的保存按钮） */
+const sceneGenBusy = ref(false)
 const brief = ref('')
 const worldName = ref('')
 const pickerOpen = ref(false)
@@ -457,12 +540,21 @@ function saveExpanded() {
 /** 生活地点有未保存的改动 */
 const poisDirty = ref(false)
 
+/**
+ * 地点字段有未保存的改动。
+ * ★ 2026-10-07 一站式编辑：表单常驻后，"改了没保存"必须显式可见
+ *   （此前靠"编辑/取消"两态的切换来表达，现在没有态可切了）。
+ */
+const editDirty = ref(false)
+
 /** 地点信息编辑（名称/英文名/类型/简介/上级=移动） */
 const editPlaceOpen = ref(false)
 const editPlace = reactive({
   id: null, name: '', nameEn: '', kind: '', summary: '', parentId: '',
   // 准入 / 分区（2026-10-05）：地图数据即真源，日程生成会按它过滤与联动服装
   access: '', zone: '', openAt: '', closeAt: '',
+  // 画面描述（英文）—— T2 新增：供生图取景（哈托比亚城市风光）与日程注入
+  scenePrompt: '',
 })
 
 // ★ 准入权限选项 —— 与后端 `worldMapService.ACCESS_LEVELS` / `ACCESS_LABEL` 同口径。
@@ -481,7 +573,7 @@ const ZONE_OPTIONS = [
 
 /** 新增地点（弹窗式，取代原生 prompt） */
 const addPlaceOpen = ref(false)
-const addPlace = reactive({ parent: null, name: '', nameEn: '', kind: '', summary: '' })
+const addPlace = reactive({ parent: null, name: '', nameEn: '', kind: '', summary: '', scenePrompt: '' })
 
 /** 新建地图时可选的模板（复制已有地图的整棵树） */
 const templateId = ref('')
@@ -643,14 +735,33 @@ function toggleCollapse(id) {
 /**
  * 点树节点：选中它。若已有子级，**同时切换展开** —— 这样一次点击既能看到内容、
  * 又能收起来，不用去点那个很小的三角（触屏尤其需要）。
+ *
+ * ★ 2026-10-07 用户口径（一站式编辑）：「选中即编辑」，不再有"进入编辑态"这一步。
+ *   此前是两态（树里点=进编辑态 / 点位图点=只读），同一件事两种长相，按钮位置还会变。
  */
 function onNodeClick(n) {
-  selectPlace(n)
-  if (n.children?.length) toggleCollapse(n.id)
+  const wasSelected = selected.value?.id === n.id
+  // ⚠ selectPlace 在"有未保存改动且用户选了取消"时返回 false → 此时**不能再折叠**，
+  //   否则用户看到的是"取消切换了，但树自己动了一下"，更莫名其妙。
+  if (selectPlace(n) === false) return
+  // 已经选中的同一个节点再点：只折叠/展开，避免反复重置表单
+  if (n.children?.length && !wasSelected) toggleCollapse(n.id)
 }
-function selectPlace(p) {
+/**
+ * 选中一个地点 → 右侧面板**总是**把它灌进编辑表单（不再区分浏览/编辑两态）。
+ *
+ * ⚠ 切节点前若有未保存改动，先问一声 —— 常驻编辑态下很容易在改一半时点了别的节点，
+ *   静默丢弃改动会让人莫名其妙（本项目红线 0 的同源问题：不要让用户"看不到发生了什么"）。
+ */
+function selectPlace(p, opts = {}) {
+  if (editDirty.value && !opts.keepDirty && !opts.skipConfirm) {
+    const cur = selected.value?.name || '当前地点'
+    if (!window.confirm(`「${cur}」有未保存的改动，切换后会被丢弃。\n\n确定要切换吗？`)) return false
+  }
   selected.value = ensureNodeShape(p)
   poisDirty.value = false
+  openEdit(p)
+  return true
 }
 
 // ── 生活地点编辑（本地改动 → 显式保存）──
@@ -665,51 +776,97 @@ function removePoi(i) {
   selected.value.pois.splice(i, 1)
   poisDirty.value = true
 }
-async function savePois() {
-  const s = selected.value
-  if (!s || busy.value) return
-  // 名称为空的条目丢掉（用户点了「添加一条」又没填）
-  const clean = (s.pois || [])
-    .map(p => ({ name: String(p.name || '').trim(), type: p.type || '配套', blurb: String(p.blurb || '').trim() }))
-    .filter(p => p.name)
-  busy.value = true
-  try {
-    await api.updateWorldMapPlace(s.id, { pois: clean })
-    await loadMap(map.value.id)
-    refreshSelected()
-    // 展开到该节点，让用户看到改动落到了哪（语义是 expanded，所以是 add 不是 delete）
-    const sc = new Set(expanded.value); sc.add(s.id); expanded.value = sc; saveExpanded()
-    poisDirty.value = false
-    await loadMaps()
-    toastFn?.('生活地点已保存', 'success')
-  } catch (err) {
-    toastFn?.('保存失败：' + (err?.message || ''), 'error')
-  } finally { busy.value = false }
-}
+// ⚠ 这里原本还有一个 `savePois()`（单独的"保存生活地点"按钮）。
+//   2026-10-07 一站式编辑后，POI 与地点字段**由 `onSaveAll` 一次提交** ——
+//   保留了旧的独立保存就会有两份实现（红线 8），故删除。
+//   注意：`onSaveAll` 里**保留**了它的一个副作用 —— 保存后展开该节点，
+//   让用户看到改动落到了哪。
 
 // ── 地点信息编辑 ──
-// ★ 2026-10-06 用户口径：编辑**不再用弹窗**，直接在右侧面板内联展开 ——
-//   面板本来就有大片空白，弹窗还会遮住下面的「下级地点/生活地点」，边看边改做不到。
-const editingInline = ref(false)
+// ★ 2026-10-06 用户口径：编辑**不再用弹窗**，直接在右侧面板内联展开。
+// ★ 2026-10-07 用户口径：**进一步取消"编辑态"本身** —— 选中即编辑、表单常驻。
+//   ⚠ 因此**没有 `editingInline` 这个开关了**（曾用它切两态，那正是被抱怨的设计）：
+//   表单的显隐只由 `selected` 是否存在决定，`editDirty` 只用于"未保存"提示与按钮可用性。
+//   不要再引入一个"是否在编辑态"的变量 —— 那会把两态结构悄悄带回来。
 
+/**
+ * 打开编辑表单 —— 现在是"选中即调用"，不再是用户显式点击的动作。
+ *
+ * ⚠ `editDirty` 必须在灌值**之后**才置 false：灌值过程本身会触发 @input。
+ */
 function openEdit(p) {
-  editPlace.id = p.id
-  editPlace.name = p.name
-  editPlace.nameEn = p.name_en || ''
-  editPlace.kind = p.kind || ''
-  editPlace.summary = p.summary || ''
-  editPlace.parentId = p.parent_id ? String(p.parent_id) : ''
+  editPlace.id = p?.id ?? null
+  editPlace.name = p?.name || ''
+  editPlace.nameEn = p?.name_en || ''
+  editPlace.kind = p?.kind || ''
+  editPlace.summary = p?.summary || ''
+  editPlace.parentId = p?.parent_id ? String(p.parent_id) : ''
   // 准入 / 分区（后端返回的是空串表示未标注）
-  editPlace.access = p.access || ''
-  editPlace.zone = p.zone || ''
-  editPlace.openAt = p.open_at || ''
-  editPlace.closeAt = p.close_at || ''
-  editingInline.value = true
+  editPlace.access = p?.access || ''
+  editPlace.zone = p?.zone || ''
+  editPlace.openAt = p?.open_at || ''
+  editPlace.closeAt = p?.close_at || ''
+  editPlace.scenePrompt = p?.scene_prompt || ''
+  editDirty.value = false
 }
 
-/** 放弃编辑：只关掉内联态，不落库（表单值下次 openEdit 会重新灌） */
-function cancelEdit() {
-  editingInline.value = false
+/**
+ * 撤销：恢复成**库里已保存**的内容（语义准确的"取消"）。
+ *
+ * ★ 2026-10-07：原名 `cancelEdit`，语义是"退出编辑态"；一站式之后没有"退出"这回事了
+ *   （表单恒常驻），所以它只能表示"放弃这次的改动"—— 名字必须跟着语义改，
+ *   否则下一个读代码的人会以为它还能"关掉表单"。
+ */
+function onUndoEdit() {
+  const p = fullFlat.value.find(x => x.id === editPlace.id)
+    || (map.value?.places || []).find(x => x.id === editPlace.id)
+    || selected.value
+  if (!p) return
+  openEdit(p)                 // 重新从库里灌一遍
+  poisDirty.value = false     // 生活地点的改动一并回退（它属于同一个"保存"动作）
+  toastFn?.('已撤销未保存的改动', 'info')
+}
+
+/**
+ * ★ 2026-10-06 用户口径：写完「名称 / 类型 / 一句话简介」后，一键让 AI 生成
+ *   英文画面描述（scene_prompt，供生图取景与日程注入）。
+ * ⚠ 生成结果**只填进表单、不落库** —— 用户可再手改，点「保存」才写库。
+ *   这与「论坛马甲」同一取向：AI 产出先给人看，不直接覆盖。
+ * @param {'edit'|'add'} mode 编辑态还是新增态（两处表单不同对象）
+ */
+async function onGenerateScenePrompt(mode) {
+  const src = mode === 'edit' ? editPlace : addPlace
+  const name = String(src.name || '').trim()
+  if (!name) { toastFn?.('请先填写名称', 'error'); return }
+  if (sceneGenBusy.value) return
+  sceneGenBusy.value = true
+  try {
+    const ctx = (() => {
+      if (mode === 'edit' && src.id) {
+        const n = fullFlat.value.find(x => x.id === src.id)
+        const p = n?.parent_id ? fullFlat.value.find(x => x.id === n.parent_id) : null
+        return p ? p.name : ''
+      }
+      return addPlace.parent?.name || ''
+    })()
+    const r = await api.generateWorldMapScenePrompt({
+      name,
+      nameEn: String(src.nameEn || '').trim(),
+      kind: String(src.kind || '').trim(),
+      summary: String(src.summary || '').trim(),
+      context: ctx,
+    })
+    const out = String(r?.scenePrompt || '').trim()
+    if (!out) { toastFn?.('AI 没产出画面描述，请重试', 'error'); return }
+    src.scenePrompt = out
+    // ★ 编辑态下必须标脏，否则顶部「保存」不亮、用户以为"生成没生效"
+    if (mode === 'edit') editDirty.value = true
+    toastFn?.('已生成画面描述（可再手改，保存后生效）', 'success')
+  } catch (err) {
+    toastFn?.('生成失败：' + (err?.message || ''), 'error')
+  } finally {
+    sceneGenBusy.value = false
+  }
 }
 
 /** 该节点的全部子孙 id（用于把「上级」候选里的自己与子孙剔掉，防止成环） */
@@ -739,28 +896,52 @@ const parentOptions = computed(() => {
   return out
 })
 
-async function onSaveEdit() {
+/**
+ * 保存这个地点的全部改动 —— **一站式**：地点字段与生活地点**一次提交**。
+ *
+ * ★ 2026-10-07 用户口径：原来是"保存"（地点字段）与"保存生活地点"（POI）两个按钮，
+ *   而且「保存生活地点」只在 `poisDirty` 时才出现（位置还会变）。
+ *   一站式之后统一成**顶部这一个「保存」**：用户改了什么就提交什么，不必分辨
+ *   "这条改动该点哪个按钮"。两个接口顺序调用，任一失败即中止并明确报错（不假成功）。
+ */
+async function onSaveAll() {
+  const s = selected.value
   if (!editPlace.id || busy.value) return
+  const hasPoiChange = poisDirty.value
+  if (!editDirty.value && !hasPoiChange) return
   busy.value = true
   try {
-    await api.updateWorldMapPlace(editPlace.id, {
-      name: editPlace.name.trim(),
-      name_en: editPlace.nameEn.trim(),
-      kind: editPlace.kind.trim(),
-      summary: editPlace.summary.trim(),
-      // ★ 准入 / 分区：空串 = 未标注（按"可去"处理）
-      access: editPlace.access || '',
-      zone: editPlace.zone || '',
-      open_at: editPlace.access === 'time_window' ? (editPlace.openAt || '') : '',
-      close_at: editPlace.access === 'time_window' ? (editPlace.closeAt || '') : '',
-      // ★ 传 parentId = **移动**（后端支持改 parent_id 并整棵子树重算层级）；
-      //   传空串 = 提到顶层。不传这个键才是"不移动"。
-      parentId: editPlace.parentId === '' ? null : Number(editPlace.parentId),
-    })
-    editPlaceOpen.value = false
-    editingInline.value = false
-    // 移动后选中项要留在原节点上
+    // ① 地点字段（含移动）
+    if (editDirty.value) {
+      await api.updateWorldMapPlace(editPlace.id, {
+        name: editPlace.name.trim(),
+        name_en: editPlace.nameEn.trim(),
+        kind: editPlace.kind.trim(),
+        summary: editPlace.summary.trim(),
+        // ★ 准入 / 分区：空串 = 未标注（按"可去"处理）
+        access: editPlace.access || '',
+        zone: editPlace.zone || '',
+        open_at: editPlace.access === 'time_window' ? (editPlace.openAt || '') : '',
+        close_at: editPlace.access === 'time_window' ? (editPlace.closeAt || '') : '',
+        // ★ T2：画面描述（英文）——留空即清除，生图/日程注入会自动跳过空值
+        scene_prompt: (editPlace.scenePrompt || '').trim(),
+        // ★ 传 parentId = **移动**（后端支持改 parent_id 并整棵子树重算层级）；
+        //   传空串 = 提到顶层。不传这个键才是"不移动"。
+        parentId: editPlace.parentId === '' ? null : Number(editPlace.parentId),
+      })
+    }
+    // ② 生活地点（名称为空的条目丢掉 —— 用户点了「添加一条」又没填）
+    if (hasPoiChange && s) {
+      const clean = (s.pois || [])
+        .map(p => ({ name: String(p.name || '').trim(), type: p.type || '配套', blurb: String(p.blurb || '').trim() }))
+        .filter(p => p.name)
+      await api.updateWorldMapPlace(editPlace.id, { pois: clean })
+    }
     const keepId = editPlace.id
+    editPlaceOpen.value = false
+    editDirty.value = false
+    poisDirty.value = false
+    // 移动后选中项要留在原节点上
     selected.value = { id: keepId }
     await loadMap(map.value.id)
     refreshSelected()
@@ -846,6 +1027,7 @@ function onAddChild(parent) {
   addPlace.nameEn = ''
   addPlace.kind = ''
   addPlace.summary = ''
+  addPlace.scenePrompt = ''
   addPlaceOpen.value = true
 }
 async function onSaveAdd() {
@@ -861,6 +1043,9 @@ async function onSaveAdd() {
       nameEn: addPlace.nameEn.trim(),
       kind: addPlace.kind.trim(),
       summary: addPlace.summary.trim(),
+      // ★ T2：新建时也带上画面描述（⚠ 后端 addPlace 收的是驼峰 `scenePrompt`，
+      //   与 PUT 的 snake_case `scene_prompt` 不同名 —— 传错会静默丢弃）
+      scenePrompt: (addPlace.scenePrompt || '').trim(),
     })
     addPlaceOpen.value = false
     await loadMap(map.value.id)
@@ -904,6 +1089,79 @@ async function onExpand(d) {
   } catch (err) {
     toastFn?.('展开失败：' + (err?.message || ''), 'error')
   } finally { busy.value = false }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 2026-10-07 新增两项（用户实报）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * ① AI **追加**生活地点。
+ *
+ * 用户口径：「很多时候不需要添加新的下一级」—— 只想补几个店/设施。
+ * ⚠ 与 `onExpand` 的关键差别：那个调 `/expand` 会 `DELETE ... WHERE parent_id = ?`
+ *   把该地点下**已经手写好的下级地点全部清掉**再重造；本函数打的是 `/poi-draft`，
+ *   只往 `pois_json` 追加，一个子节点都不碰。
+ *
+ * ★ `excludeNames` 必须带**当前表单里已有**的名字（含用户刚改还没保存的）：
+ *   服务端只查库里的 `pois_json` 会漏掉这些，去重就失效了。
+ *   生成器出口还有一道"全重复就抛错"的闸门 —— 所以这里拿到的一定是非空数组，
+ *   不需要（也不应该）在前端再吞一次空结果。
+ */
+async function onAiAddPois() {
+  if (!selected.value?.id || poiGenBusy.value) return
+  poiGenBusy.value = true
+  try {
+    // 生成几条：按已有数量递补到 4~6 条左右，避免一次堆太多
+    const want = selPois.value.length >= 6 ? 3 : Math.max(2, 6 - selPois.value.length)
+    const r = await api.expandWorldMapPois({
+      placeId: selected.value.id,
+      count: want,
+      excludeNames: selPois.value.map(p => String(p?.name || '')).filter(Boolean),
+    })
+    const got = Array.isArray(r?.pois) ? r.pois : []
+    for (const p of got) selPois.value.push({ type: p.type || '配套', name: p.name || '', blurb: p.blurb || '' })
+    poisDirty.value = true
+    toastFn?.(`AI 补了 ${got.length} 个生活地点，确认后点「保存生活地点」`, 'success')
+  } catch (err) {
+    // 服务端在"全是重复"时会给 502 带明确原因 —— 原样透出，别改写成"失败"
+    toastFn?.(err?.message || 'AI 添加失败', 'error')
+  } finally { poiGenBusy.value = false }
+}
+
+/** 打开「修正地点」弹窗（照角色「修正外观」那套：参考图 / 文字要点 → 重写字段） */
+function openRefine(p) {
+  if (!p?.id) return
+  refineTarget.id = p.id
+  refineTarget.name = p.name || ''
+  refineOpen.value = true
+}
+
+/**
+ * 修正结果回填：**只填进编辑表单，不直接落库** —— 与角色「修正外观」同构
+ * （AI 产出先给人看，用户可再手改）。
+ * 空字段保留原值（服务端已保证三个字段至少有一个非空，这里做逐字段保护）。
+ */
+function onPlaceRefined(patch) {
+  // 从**最新数据**里取该节点（不能用弹窗打开时的快照：期间可能已刷新过）
+  const p = fullFlat.value.find(x => x.id === refineTarget.id)
+    || (map.value?.places || []).find(x => x.id === refineTarget.id)
+  if (!p) { toastFn?.('修正结果未能回填：找不到该地点，请重开编辑', 'error'); return }
+  // ★ 第一次打开编辑态的人，`selected` 可能是**扁平行**（没有 children 键）→
+  //   模板读 `selected.children.length` 会抛错、整页空白（本项目反复踩过的坑）。
+  //   所以先定位到该节点再编辑，避免"修正完页面白掉"。
+  // ⚠ 这里**跳过"未保存改动"确认**：修正是用户主动发起的动作，
+  //   结果正要回填进表单，此时拦截问他"要不要丢弃"毫无意义（他还什么都没改）。
+  if (selected.value?.id !== p.id) selectPlace(p, { skipConfirm: true })
+  openEdit(selected.value || p)          // 用**库里当前值**灌满表单，避免残留上一次的编辑
+  if (patch.kind) editPlace.kind = patch.kind
+  if (patch.summary) editPlace.summary = patch.summary
+  if (patch.scenePrompt) editPlace.scenePrompt = patch.scenePrompt
+  // ★ 一站式：回填即视为"有未保存改动"，顶部「保存」会亮起
+  //   （此前是"填入编辑态表单"等用户自己点保存，但那时没有 dirty 标记，
+  //    用户看不出"到底填进去了没有"）
+  editDirty.value = true
+  toastFn?.('已填入表单，确认后点「保存」', 'success')
 }
 
 function openSettings() {
@@ -992,9 +1250,9 @@ async function onExport() {
 .we-field { display: flex; flex-direction: column; gap: 6px; }
 
 /* ── 面板内联编辑（替代原「编辑地点」弹窗）──
-   用户口径 2026-10-06：面板有大片空白，就地改即可，不必弹窗遮住下文。 */
-.wd-head--edit { align-items: center; }
-.we-inline-title { font-size: var(--fs-lg); font-weight: 600; color: var(--text-bright); }
+   用户口径 2026-10-06：面板有大片空白，就地改即可，不必弹窗遮住下文。
+   ★ 2026-10-07 一站式：表单**常驻**（不再有编辑/浏览两态），故原先的
+     `.wd-head--edit` / `.we-inline-title` 已无消费者 —— 已删除，别再加回来。 */
 .we-inline {
   margin: 10px 0 14px;
   padding: 14px;
@@ -1005,6 +1263,8 @@ async function onExport() {
 .we-inline .we-field label { font-size: var(--fs-sm); color: var(--text-secondary); }
 .we-field label { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
 .we-opt { font-weight: 400; color: var(--text-tertiary, var(--text-secondary)); }
+/* 「画面描述」标签行：左标题 + 右「✨ AI 生成」（用户口径：写完基本信息后可一键生成） */
+.we-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 /* ── 准入 / 分区 开关（勾选式，点一下切换）── */
 .we-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .we-chip {
@@ -1131,6 +1391,16 @@ async function onExport() {
 .wd-name { margin: 0; font-size: var(--fs-lg); font-weight: 700; }
 .wd-en { margin-left: 8px; font-size: var(--fs-xs); font-weight: 400; color: var(--text-secondary); font-style: italic; }
 .wd-summary { margin: 5px 0 0; font-size: var(--fs-sm); line-height: 1.75; color: var(--text-secondary); }
+
+/* 「未保存」徽标：一站式编辑（表单常驻）之后，用户更需要知道"改了还没存" ——
+   此前由"编辑/取消"两态的切换来表达，现在没有态可切了，必须显式提示。 */
+.wd-dirty {
+  margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-full);
+  font-size: 10px; font-weight: 600; vertical-align: 2px;
+  background: rgba(var(--accent-rgb), 0.16); color: var(--accent);
+}
+/* 生活地点改动提示（原来的独立"保存生活地点"按钮已并入顶部「保存」） */
+.wpoi-dirty-hint { font-size: var(--fs-xs); color: var(--accent); }
 
 .wd-head-ops { display: flex; gap: 6px; flex-shrink: 0; }
 

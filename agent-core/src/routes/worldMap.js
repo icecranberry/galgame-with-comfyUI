@@ -14,7 +14,8 @@ import { Router } from 'express';
 import {
   listMaps, createMap, updateMap, deleteMap, duplicateMap, getMap,
   addPlace, upsertPlace, deletePlace,
-  generateSkeleton, expandPlace, exportMarkdown,
+  generateSkeleton, expandPlace, expandPois, exportMarkdown, generateScenePrompt,
+  refinePlaceFromImage, refinePlaceFromText,
   LEVEL_LABEL, POI_TYPES,
 } from '../services/worldMapService.js';
 
@@ -99,6 +100,64 @@ router.get('/maps/:id/export', (req, res) => {
 });
 
 // ── 地点 ──
+
+/**
+ * POST /api/worldmap/places/scene-prompt —— 依据「名称/类型/简介」生成**英文画面描述**。
+ *
+ * 用户 2026-10-06 口径：写好了名称、类型、一句话简介以后，给一个按钮自动生成生图 TAG。
+ * **不落库**（只返回预览，用户可改可重掷，确认后随 PUT /places/:id 保存）——
+ * 与「论坛马甲」同一取向：生成物先给人看，不直接覆盖已有内容。
+ * ⚠ 放在 `/places/:placeId` 参数路由**之前**注册（字面路径早于参数路由，本项目既有约定）。
+ */
+router.post('/places/scene-prompt', async (req, res) => {
+  try {
+    res.json(await generateScenePrompt(req.body || {}));
+  } catch (err) { fail(res, err); }
+});
+
+/**
+ * POST /api/worldmap/places/:placeId/poi-draft —— **AI 追加生活地点**（不落库）。
+ *
+ * 用户 2026-10-07 口径：「很多时候不需要添加新的下一级」——
+ * 只想给这个地点补几个店/设施，不想为了加一条街边摊再建一层子地点。
+ * 与「✨ 让 AI 展开下一级」的区别：那个会**删除**全部子节点后整体替换，这个只往
+ * 当前节点的 pois 里**追加**，不碰任何子节点。
+ *
+ * ⚠ `excludeNames` 是前端传来**当前表单里已有**的 POI 名（含未保存的手改条目）：
+ *   用户刚打完名字还没点保存时，库里的 pois_json 并不包含它，只查库会去重失败。
+ * 生成器出口已有两道闸门（与已有条目去重 / 全重复时抛错而非返回空），详见服务层。
+ */
+router.post('/places/:placeId/poi-draft', async (req, res) => {
+  try {
+    const { count, hint, excludeNames } = req.body || {};
+    res.json(await expandPois(Number(req.params.placeId), { count, hint, excludeNames }));
+  } catch (err) { fail(res, err); }
+});
+
+/**
+ * POST /api/worldmap/places/:placeId/refine-draft —— **修正地点**（不落库）。
+ *
+ * 用户 2026-10-07 口径：明确要求照「角色 → 修正外观」那一套做（含样式参考）。
+ * 两条入口与角色侧同名同构：
+ *   · `mode: 'image'` + `image` → 观察参考图重写；
+ *   · `mode: 'text'`  + `brief` → 按用户零散要点扩写。
+ * 产出 `{kind, summary, scenePrompt}` 三个字段的**草稿**，由前端填进编辑表单，
+ * 用户可再手改，点「保存」才随 `PUT /places/:id` 落库 —— 与角色侧一致：
+ * AI 产出先给人看，不直接覆盖。
+ *
+ * ⚠ 与 `POST /places/scene-prompt` 的分工：那个只补 `scene_prompt` **一个字段**
+ *   （输入是用户已写好的中文）；这个重写**整条可描述字段**（输入是图或要点）。
+ */
+router.post('/places/:placeId/refine-draft', async (req, res) => {
+  try {
+    const { mode = 'image', image = '', brief = '', hints = '' } = req.body || {};
+    const placeId = Number(req.params.placeId);
+    const r = mode === 'text'
+      ? await refinePlaceFromText({ placeId, brief, hints })
+      : await refinePlaceFromImage({ placeId, image, hints });
+    res.json(r);
+  } catch (err) { fail(res, err); }
+});
 
 router.post('/maps/:id/places', (req, res) => {
   try {
