@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -9,7 +9,7 @@ import { createPinia, setActivePinia } from 'pinia'
 globalThis.fetch = async () => { throw new Error('本测试不应发起网络请求') }
 
 const { useMomentsStore } = await import('../src/stores/moments.js')
-setActivePinia(createPinia())
+beforeEach(() => setActivePinia(createPinia()))
 
 function post(id, extra = {}) {
   return { id, content: `post${id}`, created_at: '2024-01-01T00:00:00.000Z', ...extra }
@@ -26,7 +26,7 @@ test('filterUser 只保留 author_type 为 user 的帖子', () => {
 
   assert.equal(store.filteredPosts.length, 4)
   store.toggleFilterUser()
-  assert.deepEqual(store.filteredPosts.map(p => p.id), [1, 4])
+  assert.deepEqual(store.filteredPosts.map(p => p.id), [4, 1])
   store.toggleFilterUser()
   assert.equal(store.filteredPosts.length, 4)
 })
@@ -55,7 +55,7 @@ test('「我发的」与角色筛选互斥，与「赞过」可叠加', () => {
 
   store.toggleFilterUser()                    // 打开「我发的」→ 让出角色筛选
   assert.equal(store.filterCharacterId, null)
-  assert.deepEqual(store.filteredPosts.map(p => p.id), [1, 2])
+  assert.deepEqual(store.filteredPosts.map(p => p.id), [2, 1])
 
   store.toggleFilterLiked()                   // 叠加「赞过」
   assert.deepEqual(store.filteredPosts.map(p => p.id), [1])
@@ -76,4 +76,11 @@ test('charactersWithPosts 不把「我」算进角色筛选条', () => {
     post(2, { author_type: 'character', character_id: 7, display_name: '琪亚娜' }),
   ]
   assert.deepEqual(store.charactersWithPosts.map(c => c.author), [7])
+})
+
+
+test('补发动态按发布时间而非插入顺序显示', () => {
+  const store = useMomentsStore()
+  store.posts = [post(3, { created_at: '2026-10-07T01:00:00Z' }), post(1, { created_at: '2026-10-07T10:00:00Z' }), post(2, { created_at: '2026-10-07T04:00:00Z' })]
+  assert.deepEqual(store.filteredPosts.map(p => p.id), [1, 2, 3])
 })

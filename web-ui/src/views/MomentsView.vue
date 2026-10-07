@@ -4,6 +4,7 @@
     <div class="moments-header" :class="{ 'header-hidden': isMobile && !headerVisible }">
       <span class="moments-title" @click="isMobile && toggleMobileSidebar()" :class="{ 'is-clickable': isMobile }">朋友圈</span>
       <div class="topbar-actions">
+        <div class="btn-post" role="button" tabindex="0" :class="{ 'is-disabled': backfillRunning || backfillSubmitting }" :aria-disabled="backfillRunning || backfillSubmitting" @click.stop="startBackfill" @keydown.enter.prevent.stop="startBackfill" @keydown.space.prevent.stop="startBackfill">{{ backfillRunning || backfillSubmitting ? '补发中' : '补发动态' }}</div>
         <div class="lib-gear" role="button" tabindex="0" @keydown.enter.prevent="libraryOpen = true" @keydown.space.prevent="libraryOpen = true" @click="libraryOpen = true" title="话题库管理"><gear-icon :size="18" /></div>
         <div class="btn-post" role="button" tabindex="0" :class="{ 'is-disabled': genPending }" :aria-disabled="genPending" @click.stop="!genPending && (showPicker = !showPicker)" @keydown.enter.prevent.stop="!genPending && (showPicker = !showPicker)" @keydown.space.prevent.stop="!genPending && (showPicker = !showPicker)">
           {{ genPending ? '扰动中' : '🎬 扰动世界线' }}
@@ -24,7 +25,9 @@
           <div
             class="picker-avatar"
             :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
-          >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
+          >
+{{ c.avatar_path ? '' : c.display_name.charAt(0) }}
+</div>
           <span>{{ c.display_name }}</span>
         </div>
       </div>
@@ -35,8 +38,7 @@
 
     <!-- 内容区 -->
     <div ref="scrollContainer" class="moments-feed" @scroll="onScroll">
-
-      <!-- 用户自己发朋友圈：文字 + 粘贴/上传图片 -->
+<!-- 用户自己发朋友圈：文字 + 粘贴/上传图片 -->
       <div class="moments-composer-wrap">
         <UserMomentComposer />
       </div>
@@ -52,7 +54,9 @@
             class="filter-avatar filter-all"
             :class="{ active: moments.filterCharacterId === null && !moments.filterUser }"
             @click="moments.setFilter(null)"
-          >全部</div>
+          >
+全部
+</div>
           <!-- 赞过筛选 -->
           <div
             class="filter-avatar filter-heart"
@@ -127,6 +131,32 @@ import ShareCard from '../components/ShareCard.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LibraryModal from '../components/LibraryModal.vue'
 import GearIcon from '../components/GearIcon.vue'
+
+import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
+import { backfillMoments } from '../api/index.js'
+
+const taskStore = useImageEditTasksStore()
+const toast = inject('toast', null)
+const confirm = inject('confirm')
+const backfillSubmitting = ref(false)
+const backfillRunning = computed(() => taskStore.tasks.some(t => t.action === 'moment_backfill' && t.status === 'running'))
+async function startBackfill() {
+  if (backfillSubmitting.value || backfillRunning.value) return
+  backfillSubmitting.value = true
+  try {
+    const accepted = await confirm({
+      title: '补发动态',
+      message: '是否补全今日所有角色未发的朋友圈？（如果已经挂机一整天了那就不需要）',
+      okText: '是',
+      cancelText: '否',
+      danger: false,
+    })
+    if (!accepted || backfillRunning.value) return
+    await backfillMoments()
+    await taskStore.refresh()
+  } catch (err) { toast?.(err.message || '补发启动失败', 'error') }
+  finally { backfillSubmitting.value = false }
+}
 
 const moments = useMomentsStore()
 const chat = useChatStore()
@@ -320,7 +350,7 @@ async function triggerGenerate(c) {
 .is-clickable { cursor: pointer; }
 
 /* 顶栏右侧按钮组（齿轮 + 扰动世界线） */
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .lib-gear {
   width: 34px; height: 34px; border-radius: 50%;
   border: 2px solid transparent;

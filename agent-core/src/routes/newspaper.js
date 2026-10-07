@@ -6,9 +6,18 @@ import {
   listNewspaperEditions,
   getNewspaperByDate,
   regenerateNewspaperImage,
+  regenerateTodayNewspaper,
 } from '../services/newspaperService.js';
 
 const router = Router();
+
+router.post('/regenerate', async (req, res) => {
+  try {
+    res.json({ newspaper: await regenerateTodayNewspaper() });
+  } catch (err) {
+    res.status(400).json({ error: err.message || '日报重新生成失败，请稍后再试' });
+  }
+});
 
 // GET /api/newspaper/today — 今天的《邻舍日报》（没有则 { newspaper: null }）
 router.get('/today', (req, res) => {

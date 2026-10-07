@@ -165,22 +165,22 @@
             <button
                 type="button"
               class="nav-btn"
-              :disabled="!store.newerEntry || store.loading || store.flipping"
-              :title="store.newerEntry ? `翻到 ${labelOf(store.newerEntry.date)}` : '已经是最新的一篇'"
-              @click="store.stepNewer()"
+              :disabled="!store.olderEntry || store.loading || store.flipping"
+              :title="store.olderEntry ? `翻到 ${labelOf(store.olderEntry.date)}` : '没有更早的日记了'"
+              @click="store.stepOlder()"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-              <span>{{ store.newerEntry ? '较新一篇' : '已到最新' }}</span>
+              <span>{{ store.olderEntry ? '较早一篇' : '已到最早' }}</span>
             </button>
             <span class="nav-hint" aria-live="polite"><span class="nav-caption">翻阅日记</span>{{ navHint }}</span>
             <button
                 type="button"
               class="nav-btn"
-              :disabled="!store.olderEntry || store.loading || store.flipping"
-              :title="store.olderEntry ? `翻到 ${labelOf(store.olderEntry.date)}` : '没有更早的日记了'"
-              @click="store.stepOlder()"
+              :disabled="!store.newerEntry || store.loading || store.flipping"
+              :title="store.newerEntry ? `翻到 ${labelOf(store.newerEntry.date)}` : '已经是最新的一篇'"
+              @click="store.stepNewer()"
             >
-              <span>{{ store.olderEntry ? '较早一篇' : '已到最早' }}</span>
+              <span>{{ store.newerEntry ? '较新一篇' : '已到最新' }}</span>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg>
             </button>
           </nav>
@@ -375,16 +375,16 @@ function onSwipeEnd(e) {
   const dy = e.clientY - swipe.y
   swipe = null
   if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.4) return
-  if (dx > 0) store.stepNewer()
-  else store.stepOlder()
+  if (dx > 0) store.stepOlder()
+  else store.stepNewer()
 }
 
 // ── 键盘翻页 ──
 function onKeydown(e) {
   if (!store.open) return
   if (e.key === 'Escape') requestClose()
-  else if (e.key === 'ArrowLeft') store.stepNewer()
-  else if (e.key === 'ArrowRight') store.stepOlder()
+  else if (e.key === 'ArrowLeft') store.stepOlder()
+  else if (e.key === 'ArrowRight') store.stepNewer()
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown))

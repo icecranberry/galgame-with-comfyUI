@@ -130,11 +130,11 @@ function dbCharacterBrief(characterId) {
 
 export function maybeGenerateDailyNewspaper(now = new Date()) {
   if (now.getHours() < GENERATION_HOUR) return null;
+  if (generating) return generating;
   const existing = getTodayNewspaper();
   // 当天报纸已出：只剩补图一条路（生成中途重启 / ComfyUI 当时没开 / 单张失败都靠这里兜底）
   if (existing) return maybeRefillTodayImages(existing);
   if (Date.now() - lastFailedAt < FAIL_RETRY_DELAY_MS) return null;
-  if (generating) return generating;
   generating = generateDailyNewspaper()
     .catch(err => {
       lastFailedAt = Date.now();
@@ -145,6 +145,19 @@ export function maybeGenerateDailyNewspaper(now = new Date()) {
 }
 
 const IMAGE_REFILL_RETRY_DELAY_MS = FAIL_RETRY_DELAY_MS; // 缺图补印的失败冷却
+
+/** 手动重印：新文字成功落库前保留原报，配图沿用后台补印。 */
+export async function regenerateTodayNewspaper() {
+  if (generating) throw new Error('日报正在生成中，请稍后再试');
+  generating = generateDailyNewspaper({ replace: true, backgroundImages: true });
+  try {
+    const row = await generating;
+    if (!row) throw new Error('没有可用于生成日报的角色');
+    return mapPaperRowForFrontend(row);
+  } finally {
+    generating = null;
+  }
+}
 
 function maybeRefillTodayImages(row) {
   if (collectImageTasks(row).length === 0) return null;
@@ -159,7 +172,7 @@ function maybeRefillTodayImages(row) {
     } finally {
       // 还有缺图（失败/静默无图）就冷却一段时间再试；补齐了则下次 tick 直接跳过
       const latest = getTodayNewspaper() || row;
-      if (collectImageTasks(latest).length > 0) lastImageRefillFailedAt = Date.now();
+      if (latest.id === row.id && collectImageTasks(latest).length > 0) lastImageRefillFailedAt = Date.now();
       refillingImages = null;
     }
   })();
@@ -218,9 +231,11 @@ export function pickWorldLoot(hasWorldSetting = false) {
   return { key, kind: effect.kind, name: effect.name, theme: effect.theme };
 }
 
-export async function generateDailyNewspaper() {
+export async function generateDailyNewspaper({ replace = false, backgroundImages = false } = {}) {
   const db = getDb();
-  if (getTodayNewspaper()) {
+  const publishDate = getLocalDateKey();
+  const previous = getTodayNewspaper();
+  if (previous && !replace) {
     console.log('[newspaper] Today\'s paper already exists, skip');
     return getTodayNewspaper();
   }
@@ -264,7 +279,7 @@ export async function generateDailyNewspaper() {
   }
 
   // ── 落库（文字先上线，配图后台逐张补）──
-  const edition = (db.prepare('SELECT COALESCE(MAX(edition), 0) AS maxEdition FROM town_newspapers').get()?.maxEdition || 0) + 1;
+  const edition = previous?.edition || (db.prepare('SELECT COALESCE(MAX(edition), 0) AS maxEdition FROM town_newspapers').get()?.maxEdition || 0) + 1;
   // 吐槽帖排在 1.5~7 小时后，避开清晨无人的时段
   const complaintAfter = new Date(Date.now() + (1.5 * 3600_000 + Math.random() * 5.5 * 3600_000)).toISOString();
   // 主角身份快照进特稿：报纸是已印出的历史，角色之后被删除也不能失去"这期写的是谁"
@@ -273,11 +288,14 @@ export async function generateDailyNewspaper() {
     character_name: featured.display_name,
     character_avatar: featured.avatar_path || null,
   };
-  const insertResult = db.prepare(`
+  const insertResult = db.transaction(() => {
+    // 新 id 防止旧的在途配图覆盖重印后的文章；删除与插入原子提交。
+    if (replace) db.prepare('DELETE FROM town_newspapers WHERE publish_date = ?').run(publishDate);
+    return db.prepare(`
     INSERT INTO town_newspapers (publish_date, name, edition, items_json, character_id, character_event_json, world_state_json, moment_done, complaint_after)
     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
   `).run(
-    getLocalDateKey(),
+    publishDate,
     NEWSPAPER_NAME,
     edition,
     JSON.stringify(draft.news),
@@ -286,11 +304,18 @@ export async function generateDailyNewspaper() {
     JSON.stringify(draft.world_state),
     toSQLiteDate(complaintAfter),
   );
+  })();
   const paperId = Number(insertResult.lastInsertRowid);
   console.log(`[newspaper] 《${NEWSPAPER_NAME}》第${edition}期 published for ${getLocalDateKey()} (featured: ${featured.display_name}, worldState: ${draft.world_state ? draft.world_state.name : 'none'})`);
 
   // ── 配图：逐张生成（不阻塞文字上线，失败留空由前端占位 + tick 补印兜底）──
-  await fillPaperImages(db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(paperId));
+  const row = db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(paperId);
+  if (backgroundImages) {
+    lastImageRefillFailedAt = 0;
+    maybeRefillTodayImages(row);
+  } else {
+    await fillPaperImages(row);
+  }
 
   return db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(paperId);
 }
@@ -468,6 +493,7 @@ export async function regenerateNewspaperImage({ date, slot, index } = {}) {
   const success = await generateAndStorePaperImage(row, task);
   if (!success) return { ok: false, error: '配图生成失败，请稍后再试' };
   const fresh = db.prepare('SELECT * FROM town_newspapers WHERE id = ?').get(row.id);
+  if (!fresh) return { ok: false, error: '这期日报已重新生成，请刷新后再试' };
   return { ok: true, newspaper: mapPaperRowForFrontend(fresh) };
 }
 

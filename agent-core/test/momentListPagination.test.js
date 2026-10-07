@@ -80,3 +80,17 @@ test('不传 limit 时默认 1000，超出上限被钳制', async () => {
   assert.equal(all.status, 200);
   assert.ok(all.payload.posts.length <= 1000);
 });
+
+test('补发帖按发布时间排序，复合游标翻页不会漏掉较大 id 的旧动态', async () => {
+  const db = getDb();
+  db.prepare('DELETE FROM moment_posts').run();
+  const ids = [seedPost(db), seedPost(db), seedPost(db)];
+  ['2026-10-07 12:00:00', '2026-10-07 18:00:00', '2026-10-07 09:00:00'].forEach((time, i) => {
+    db.prepare('UPDATE moment_posts SET created_at = ? WHERE id = ?').run(time, ids[i]);
+  });
+  const app = await makeApp();
+  const first = await request(app, '/api/moments?limit=2');
+  assert.deepEqual(first.payload.posts.map(p => p.id), [ids[1], ids[0]]);
+  const second = await request(app, `/api/moments?limit=2&before_id=${ids[0]}`);
+  assert.deepEqual(second.payload.posts.map(p => p.id), [ids[2]]);
+});

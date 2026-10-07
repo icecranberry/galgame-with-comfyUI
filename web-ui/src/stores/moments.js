@@ -47,7 +47,7 @@ export const useMomentsStore = defineStore('moments', () => {
     if (filterLiked.value) {
       result = result.filter(p => p.liked)
     }
-    return result
+    return [...result].sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || b.id - a.id)
   })
 
   // 当前可见的帖子（前 page * PAGE_SIZE 条）
@@ -141,8 +141,9 @@ export const useMomentsStore = defineStore('moments', () => {
     if (!serverHasMore.value || _loadingMore) return
     _loadingMore = true
     try {
-      // keyset 游标 = 已加载帖子中最旧的 id（新帖 unshift 在前，取 min 不受顺序影响）
-      const beforeId = posts.value.reduce((min, p) => Math.min(min, p.id), Infinity)
+      // 按发布时间和 id 的复合顺序取游标，补发帖的 id 与时间不再同序。
+      const oldest = posts.value.reduce((min, p) => !min || new Date(p.created_at) < new Date(min.created_at) || (p.created_at === min.created_at && p.id < min.id) ? p : min, null)
+      const beforeId = oldest?.id
       const data = await api.listMoments({ limit: SERVER_BATCH, beforeId: Number.isFinite(beforeId) ? beforeId : undefined })
       const seen = new Set(posts.value.map(p => p.id))
       const fresh = (data.posts || []).filter(p => !seen.has(p.id))

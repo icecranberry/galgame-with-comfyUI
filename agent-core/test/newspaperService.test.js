@@ -544,3 +544,25 @@ test('listNewspaperEditions and getNewspaperByDate support past edition browsing
 
   db.prepare('DELETE FROM town_newspapers').run();
 });
+
+test('failed manual regeneration preserves the published paper and releases its lock', async () => {
+  const db = getDb();
+  db.prepare('DELETE FROM town_newspapers').run();
+  db.prepare(`INSERT INTO town_newspapers (publish_date, name, edition, items_json)
+    VALUES (?, '邻舍日报', 7, '[]')`).run(getLocalDateKey());
+  const original = svc.getTodayNewspaper();
+  const characters = db.prepare('SELECT id, events_disabled FROM characters').all();
+  db.prepare('UPDATE characters SET events_disabled = 1').run();
+  try {
+    await assert.rejects(svc.regenerateTodayNewspaper(), /没有可用于生成日报的角色/);
+    assert.deepEqual(svc.getTodayNewspaper(), original);
+    await assert.rejects(svc.regenerateTodayNewspaper(), /没有可用于生成日报的角色/);
+    assert.deepEqual(svc.getTodayNewspaper(), original);
+  } finally {
+    for (const character of characters) {
+      db.prepare('UPDATE characters SET events_disabled = ? WHERE id = ?')
+        .run(character.events_disabled, character.id);
+    }
+    db.prepare('DELETE FROM town_newspapers').run();
+  }
+});

@@ -770,7 +770,7 @@ export function testHires() {
 
 // ── Moments 朋友圈 ──
 /**
- * 分页拉取朋友圈帖子（服务端 keyset 分页：id 倒序，before_id 取更旧一批）
+ * 分页拉取朋友圈帖子（服务端 keyset 分页：发布时间、id 倒序，before_id 定位时间游标）
  * @param {{ limit?: number, beforeId?: number }} opts 缺省 limit=1000；传 beforeId 续拉下一批
  */
 export async function listMoments({ limit, beforeId } = {}) {
@@ -1351,6 +1351,10 @@ export async function generateNewspaper() {
   return request(`/newspaper/generate`, { method: 'POST' })
 }
 
+export async function regenerateTodayNewspaper() {
+  return request('/newspaper/regenerate', { method: 'POST' })
+}
+
 // 手动补印一张缺失的报纸配图（slot: lead=特稿 / world=今日异闻 / item=普通新闻，index 为新闻下标；
 // date 省略 = 今天，带日期可给历史期补图）
 export async function regenerateNewspaperImage({ slot, index, date } = {}) {
@@ -1851,3 +1855,7 @@ export const generateStandingTouchLines = (id, expectedVersion) => request(`/cha
 export const setStandingDisplayCharacter = body => request('/standing-display/active', { method: 'PUT', body })
 
 export const fillAllStandingTouchLines = () => request('/expression-standings/touch-lines/fill', { method:'POST' })
+
+export const backfillMoments = () => request('/moments/backfill', { method: 'POST' })
+
+export const stopBackfillMoments = taskId => request(`/moments/backfill/${encodeURIComponent(taskId)}/stop`, { method: 'POST' })

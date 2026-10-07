@@ -45,7 +45,15 @@ function normalizeTags(tags) {
  * @param {object} character - { id, display_name, base_prompt }
  * @returns {Promise<{schedule_json: string, version: number}>}
  */
-export async function generateSchedule(character, direction) {
+// 同一角色的自动刷新、手动刷新与补发任务共享正在执行的生成。
+const pendingSchedules = new Map();
+export function generateSchedule(character, direction) {
+  if (pendingSchedules.has(character.id)) return pendingSchedules.get(character.id);
+  const pending = generateScheduleImpl(character, direction).finally(() => pendingSchedules.delete(character.id));
+  pendingSchedules.set(character.id, pending);
+  return pending;
+}
+async function generateScheduleImpl(character, direction) {
   const db = getDb();
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);

@@ -40,14 +40,18 @@
               <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
                 <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
               </div>
+              <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-error-text">{{ task.progress?.stage }}</div>
               <div v-if="task.status === 'failed'" class="iet-error-text">{{ task.error }}</div>
               <div v-else-if="task.status === 'pending_confirm'" class="iet-error-text">等待确认</div>
-              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
+              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ task.action === 'moment_backfill' ? task.result?.summary : isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
             </div>
+          </div>
+          <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-card-actions">
+            <linshe-button size="sm" :disabled="stoppingTaskId === task.id || task.progress?.phase === 'stopping'" @click="onStopBackfill(task)">{{ task.progress?.phase === 'stopping' ? '正在停止' : '停止' }}</linshe-button>
           </div>
           <div v-if="task.status === 'failed' || task.status === 'pending_confirm' || task.status === 'ready'" class="iet-card-actions">
             <linshe-button v-if="task.status === 'failed' && isDiary(task)" size="sm" @click="onRetryDiary(task)">重试</linshe-button>
-            <linshe-button v-else-if="task.status === 'failed'" size="sm" @click="onRerun(task)">重试</linshe-button>
+            <linshe-button v-else-if="task.status === 'failed' && task.action !== 'moment_backfill'" size="sm" @click="onRerun(task)">重试</linshe-button>
             <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
             <linshe-button v-if="task.status === 'ready' && isDiary(task)" size="sm" @click="onViewDiary(task)">翻开看看</linshe-button>
             <linshe-button variant="secondary" size="sm" :disabled="busy" @click="onDiscard(task)">关闭</linshe-button>
@@ -64,10 +68,21 @@ import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { useDiaryStore } from '../stores/diary.js'
 import BeforeAfterSlider from './BeforeAfterSlider.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import { stopBackfillMoments } from '../api/index.js'
 
 const store = useImageEditTasksStore()
 const diaryStore = useDiaryStore()
 const toastFn = inject('toast', null)
+const stoppingTaskId = ref(null)
+async function onStopBackfill(task) {
+  if (stoppingTaskId.value || task.progress?.phase === 'stopping') return
+  stoppingTaskId.value = task.id
+  try {
+    await stopBackfillMoments(task.id)
+    await store.refresh()
+  } catch (err) { toastFn?.(err.message || '停止失败', 'error') }
+  finally { stoppingTaskId.value = null }
+}
 const busy = ref(false)
 const activeTaskId = ref(null)
 
@@ -88,6 +103,7 @@ watch(modalTask, (t) => {
 store.connect()
 
 function actionLabel(action) {
+  if (action === 'moment_backfill') return '补发动态'
   if (action === 'standing') return '立绘'
   if (action === 'diary') return '日记'
   return action === 'upscale' ? 'HiresFix 细化' : '重新生成'
@@ -117,6 +133,7 @@ function cardTitleLabel(task) {
 }
 
 function cardStatusText(task) {
+  if (task.action === 'moment_backfill' && task.status === 'ready') return task.result?.cancelled ? '已停止' : '完成'
   if (task.status === 'failed') return '失败'
   if (task.status === 'pending_confirm') return '待确认'
   if (isDiary(task)) return task.status === 'ready' ? '写好了' : '生成中'

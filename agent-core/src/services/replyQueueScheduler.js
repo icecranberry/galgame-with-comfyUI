@@ -1,3 +1,4 @@
+import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 回复队列调度器
  *
@@ -81,6 +82,7 @@ async function tick() {
 // ── 日程刷新 ──
 
 async function maybeRefreshOneSchedule() {
+  if (isMomentBackfillRunning()) return;
   const db = getDb();
   const candidate = db.prepare(`
     SELECT id, display_name, base_prompt FROM characters

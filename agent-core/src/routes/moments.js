@@ -19,7 +19,23 @@ import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
 import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
 
+import { startMomentBackfill, stopMomentBackfill, isMomentBackfillRunning } from '../services/momentBackfill.js';
+
 const router = Router();
+router.post('/backfill/:taskId/stop', (req, res) => {
+  try {
+    stopMomentBackfill(req.params.taskId);
+    res.json({ stopping: true });
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+router.post('/backfill', (req, res) => {
+  try {
+    res.json({ task_id: startMomentBackfill(generateMomentPost, {
+      waitForIdle: () => Promise.allSettled([...generatingCharacters.values()]),
+    }) });
+  }
+  catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
 
 /**
  * 把落库的 prompt 拆回逐张提示词（多图用 `---` 分隔线拼接）
@@ -151,7 +167,7 @@ router.get('/', (req, res) => {
   const params = [nickname];
   let where = `WHERE mp.status = 'done'`;
   if (Number.isFinite(beforeId) && beforeId > 0) {
-    where += ' AND mp.id < ?';
+    where += ' AND (mp.created_at, mp.id) < (SELECT created_at, id FROM moment_posts WHERE id = ?)';
     params.push(beforeId);
   }
   params.push(limit + 1);
@@ -172,7 +188,7 @@ router.get('/', (req, res) => {
     LEFT JOIN characters c ON c.id = mp.character_id
     LEFT JOIN town_npcs n ON n.id = mp.npc_id
     ${where}
-    ORDER BY mp.id DESC
+    ORDER BY mp.created_at DESC, mp.id DESC
     LIMIT ?
   `).all(...params);
 
@@ -585,7 +601,21 @@ async function generateTownNpcMomentImages(npc, imagePrompts, opts = {}) {
  * 生成一条朋友圈帖子（文案 + 配图）
  * 单次 LLM 调用输出 { text, imagePrompt[, imagePrompt2[, imagePrompt3]] }，确保图文一致
  */
+const generatingCharacters = new Map();
 async function generateMomentPost(character, opts = {}) {
+  if (isMomentBackfillRunning() && !opts.backfill) throw new Error('ALREADY_GENERATING');
+  const existing = generatingCharacters.get(character.id);
+  if (existing) {
+    if (!opts.backfill) throw new Error('ALREADY_GENERATING');
+    // 自动任务可能在补发启动前已开始，先等它完成，避免抢占同一角色。
+    await existing.catch(() => {});
+  }
+  const pending = generateMomentPostImpl(character, opts);
+  generatingCharacters.set(character.id, pending);
+  try { return await pending; }
+  finally { generatingCharacters.delete(character.id); }
+}
+async function generateMomentPostImpl(character, opts = {}) {
   const db = getDb();
 
   // 0. 并发保护：检查该角色是否已有正在生成中的帖子
@@ -659,7 +689,7 @@ async function generateMomentPost(character, opts = {}) {
   if (isSpecialMode) {
     pickedForm = { name: '叙事长文', desc: '仅在采用梦境或幻想动因时可展开叙事长文；否则围绕当前日程随手写一两个短句，不凑长文', len: '梦境叙事80-200字，否则按日程写短句' };
   } else {
-    const _hour = new Date().getHours();
+    const _hour = (opts.postedAt || new Date()).getHours();
     const _isNight = _hour >= 22 || _hour < 5;
     const formWeights = {};
     for (const f of MOMENT_FORMS) formWeights[f.name] = f.weight * (_isNight && f.nightBoost ? 1.8 : 1.0);
@@ -763,7 +793,7 @@ async function generateMomentPost(character, opts = {}) {
     ? '\n- **誓约画面特征**：imagePrompt 必须明确描述角色左手无名指戴着一枚清晰可见的银白细戒指；只在画面中体现，text 不提及戒指。'
     : '';
 
-  const now = new Date();
+  const now = opts.postedAt || new Date();
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
 
@@ -771,8 +801,8 @@ async function generateMomentPost(character, opts = {}) {
   let prevMomentText = '';
   try {
     prevMomentText = db.prepare(
-      `SELECT content FROM moment_posts WHERE character_id = ? AND status = 'done' AND content != '' ORDER BY created_at DESC LIMIT 1`
-    ).get(character.id)?.content || '';
+      `SELECT content FROM moment_posts WHERE character_id = ? AND status = 'done' AND content != '' AND created_at <= ? ORDER BY created_at DESC LIMIT 1`
+    ).get(character.id, toSQLite(now.toISOString()))?.content || '';
   } catch { /* ignore */ }
 
   // 5% 概率保留自然的口语停顿，不靠故意错字制造生活感
@@ -832,8 +862,8 @@ ${dynamicRules}`;
   let scheduleContext = '';
   let scheduleWithUser = false; // 日程提到了用户（如聊天约定改写的日程）→ 本条朋友圈带上用户
   try {
-    if (!isFreeMode && config.features.schedule !== false) {
-      const activity = getCurrentActivity(character.id);
+    if (opts.backfill || (!isFreeMode && config.features.schedule !== false)) {
+      const activity = opts.backfill ? opts.activity : getCurrentActivity(character.id);
       if (activity && activity.activity !== '自由时间') {
         scheduleContext = buildMomentScheduleContext(character.display_name, activity);
         const nickname = (config.user.nickname || '').trim();
@@ -901,7 +931,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   // 梦境候选与自由模式不额外注入生活记录；已注入的当前日程仍按上方优先级处理。
   if (config.features.town === true && !isFreeMode && !isSpecialMode) {
     try {
-      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: Date.now },
+      const lifeContext = createCharacterTownLifeContext({ db, clock: { now: () => now.getTime() },
         registry: createTownActorRegistry(db), timeZone: config.town.timeZone })(character.id);
       if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: `${MOMENT_RECORD_BACKDROP_RULE}\n\n${lifeContext}` });
     } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
@@ -944,9 +974,9 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   // 4. 更新帖子
   db.prepare(`
     UPDATE moment_posts
-    SET content = ?, prompt = ?, images = ?, status = 'done'
+    SET content = ?, prompt = ?, images = ?, status = 'done', created_at = COALESCE(?, created_at)
     WHERE id = ?
-  `).run(text, imagePrompt, JSON.stringify(imageUrls), postId);
+  `).run(text, imagePrompt, JSON.stringify(imageUrls), opts.postedAt ? toSQLite(opts.postedAt.toISOString()) : null, postId);
 
   // 5. 设置下次发帖时间（2~8 小时后）
   const nextDelay = 2 * 3600_000 + Math.random() * 6 * 3600_000;
@@ -966,7 +996,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     avatar_path: character.avatar_path,
     
     status: 'done',
-    created_at: new Date().toISOString(),
+    created_at: (opts.postedAt || new Date()).toISOString(),
   });
 
   // 异步触发关系网朋友互动（5 秒后启动，不阻塞，完全独立于用户）
@@ -986,7 +1016,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     avatar_path: character.avatar_path,
     
     status: 'done',
-    created_at: new Date().toISOString(),
+    created_at: (opts.postedAt || new Date()).toISOString(),
   };
 
   } catch (err) {

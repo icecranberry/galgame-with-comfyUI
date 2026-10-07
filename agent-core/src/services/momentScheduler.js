@@ -1,3 +1,4 @@
+import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 朋友圈定时发帖调度器
  *
@@ -94,7 +95,7 @@ async function maybePostNewspaperComplaint() {
 }
 
 async function tick() {
-  if (processing) {
+  if (processing || isMomentBackfillRunning()) {
     console.log('[momentScheduler] Previous post still generating, skip this tick');
     return;
   }

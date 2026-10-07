@@ -200,7 +200,17 @@
 
       <!-- 报尾 -->
       <footer class="np-colophon">
-        <span>《{{ paper.name }}》 · {{ totalCount }} 条今日预告</span>
+        <div class="np-colophon-start">
+          <span>《{{ paper.name }}》 · {{ totalCount }} 条今日预告</span>
+          <linshe-button
+            v-if="isToday"
+            variant="link"
+            size="sm"
+            :loading="regenerating"
+            :disabled="regenerating"
+            @click="regeneratePaper"
+          >{{ regenerating ? '正在重新生成…' : '重新生成今日日报' }}</linshe-button>
+        </div>
         <span class="np-colophon-hint">点击任意新闻，读全文、看大图</span>
         <span class="np-colophon-motto">今日事，早知道</span>
       </footer>
@@ -309,6 +319,7 @@ const editions = ref([])          // 历史期简目，最新在前
 const navLoading = ref(false)
 const loading = ref(false)
 const urging = ref(false)
+const regenerating = ref(false)
 const dismissing = ref(false)
 const detail = ref(null)   // { kind: 'lead' | 'world' } | { kind: 'item', index }
 const zoomSrc = ref('')
@@ -554,6 +565,24 @@ async function urgePrint() {
   } catch { /* 冷却中 / 正在生成：不打断用户 */ }
   finally {
     urging.value = false
+  }
+}
+
+async function regeneratePaper() {
+  if (regenerating.value || !isToday.value) return
+  regenerating.value = true
+  try {
+    const data = await api.regenerateTodayNewspaper()
+    todayPaper.value = data.newspaper
+    if (isToday.value) closeDetail()
+    emit('read', data.newspaper)
+    schedulePoll()
+    await fetchEditions()
+    toastFn?.('今日日报已重新生成，配图将陆续更新', 'success')
+  } catch (err) {
+    toastFn?.(err.message || '日报重新生成失败，请稍后再试', 'error')
+  } finally {
+    regenerating.value = false
   }
 }
 
@@ -1102,6 +1131,12 @@ onBeforeUnmount(() => {
   font-size: 11px;
   letter-spacing: 0.14em;
   color: #a08c74;
+}
+.np-colophon-start {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
 }
 .np-colophon-motto {
   font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'SimSun', serif;
