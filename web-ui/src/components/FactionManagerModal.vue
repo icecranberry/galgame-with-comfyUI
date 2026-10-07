@@ -68,6 +68,9 @@
           <h4 class="faction-h">
             {{ current.name }}
             <span class="faction-type-chip">{{ current.type }}</span>
+            <span class="faction-status-chip" :class="statusClass(current.status)">{{ current.status }}</span>
+            <span class="faction-stance-chip" :class="stanceClass(current.stance)">对我：{{ current.stance }}</span>
+            <span v-for="t in current.tags" :key="t" class="faction-tag-chip">{{ t }}</span>
           </h4>
 
           <div class="faction-form">
@@ -87,6 +90,26 @@
               <span>配色（可选）</span>
               <linshe-input v-model="draft.color" size="sm" placeholder="#a06cd5" />
             </label>
+            <label class="faction-field">
+              <span>势力范围</span>
+              <linshe-input v-model="draft.scope" size="sm" placeholder="如：城北 / 全城 / 行踪不明" />
+            </label>
+            <label class="faction-field">
+              <span>状态</span>
+              <linshe-select v-model="draft.status" size="sm" :options="statusOptions" />
+            </label>
+            <label class="faction-field">
+              <span>对我（玩家）的态度</span>
+              <linshe-select v-model="draft.stance" size="sm" :options="stanceOptions" />
+            </label>
+            <label class="faction-field faction-field--wide">
+              <span>当下目标</span>
+              <linshe-input v-model="draft.goal" size="sm" placeholder="它现在想干什么 —— 这对生成最有指导性" />
+            </label>
+            <label class="faction-field faction-field--wide">
+              <span>权力支柱（小标签，顿号分隔，最多 8 个）</span>
+              <linshe-input v-model="tagsText" size="sm" list="faction-pillars" placeholder="如：武力威慑、财力雄厚、情报网络" />
+            </label>
             <label class="faction-field faction-field--wide">
               <span>概述</span>
               <linshe-input v-model="draft.summary" size="sm" placeholder="一句话定位" />
@@ -96,6 +119,9 @@
               <linshe-input v-model="draft.description" type="textarea" :rows="4" placeholder="核心理念、终极目标、行动方式…" />
             </label>
           </div>
+          <datalist id="faction-pillars">
+            <option v-for="p in meta.pillarSuggestions" :key="p" :value="p" />
+          </datalist>
           <div class="faction-actions">
             <linshe-button size="sm" variant="primary" :disabled="busy || !dirty" @click="saveFaction">保存</linshe-button>
             <linshe-button size="sm" variant="ghost" :disabled="busy || !dirty" @click="resetDraft">重置</linshe-button>
@@ -150,6 +176,14 @@
             <linshe-input v-model.number="relationDraft.strength" size="sm" type="number" min="0" max="100" placeholder="强度" />
             <linshe-button size="sm" variant="secondary" :disabled="busy || !relationDraft.toId" @click="submitRelation">登记</linshe-button>
           </div>
+
+          <!-- 给 LLM 的创意写作指导（只读预览 —— 真正是否注入由各功能的开关决定） -->
+          <h5 class="faction-sub">给 LLM 的创意写作指导</h5>
+          <div class="faction-inline-form">
+            <linshe-button size="sm" variant="secondary" :disabled="promptLoading" @click="loadPromptPreview">预览「势力态势」提示词</linshe-button>
+            <span class="faction-note">状态 / 立场 / 支柱 / 当下目标 都会被写进这一段</span>
+          </div>
+          <pre v-if="promptPreview" class="faction-prompt">{{ promptPreview }}</pre>
         </template>
 
         <p v-else class="faction-empty">
@@ -190,10 +224,12 @@ const loadError = ref('')
 const items = ref([])
 const current = ref(null)
 const creating = ref(false)
-const meta = reactive({ types: [], relations: [], roleSuggestions: [], defaultVisibleRelations: [] })
-const draft = reactive({ name: '', type: '其他', parentId: '', summary: '', description: '', color: '' })
+const meta = reactive({ types: [], relations: [], statuses: [], stances: [], roleSuggestions: [], pillarSuggestions: [], defaultVisibleRelations: [] })
+const draft = reactive({ name: '', type: '其他', parentId: '', summary: '', description: '', color: '', scope: '', status: '稳固', stance: '中立', goal: '', tags: [] })
 const memberDraft = reactive({ characterId: '', role: '', rank: 5 })
 const relationDraft = reactive({ toId: '', relation: '同盟', strength: 50 })
+const promptPreview = ref('')
+const promptLoading = ref(false)
 
 const typeOptions = computed(() => (meta.types.length ? meta.types : ['其他']).map(t => ({ label: t, value: t })))
 const relationOptions = computed(() => (meta.relations.length ? meta.relations : ['同盟']).map(r => ({ label: r, value: r })))
@@ -206,6 +242,13 @@ const otherFactionOptions = computed(() => items.value
   .filter(f => !current.value || f.id !== current.value.id)
   .map(f => ({ label: `${f.name}（${f.type}）`, value: f.id })))
 const rolePlaceholder = computed(() => (meta.roleSuggestions.length ? meta.roleSuggestions.slice(0, 3).join(' / ') : '职务'))
+const statusOptions = computed(() => (meta.statuses.length ? meta.statuses : ['稳固']).map(s => ({ label: s, value: s })))
+const stanceOptions = computed(() => (meta.stances.length ? meta.stances : ['中立']).map(s => ({ label: s, value: s })))
+/** 权力支柱：顿号/逗号分隔的文本 ↔ 数组（存库是 JSON 数组） */
+const tagsText = computed({
+  get: () => (draft.tags || []).join('、'),
+  set: v => { draft.tags = String(v || '').split(/[、,，;；|]/).map(s => s.trim()).filter(Boolean) },
+})
 
 const dirty = computed(() => {
   if (!current.value) return false
@@ -216,10 +259,35 @@ const dirty = computed(() => {
     || draft.summary !== c.summary
     || draft.description !== c.description
     || draft.color !== (c.color || '')
+    || draft.scope !== (c.scope || '')
+    || draft.status !== (c.status || '稳固')
+    || draft.stance !== (c.stance || '中立')
+    || draft.goal !== (c.goal || '')
+    || tagsText.value !== (c.tags || []).join('、')
 })
 
 function relClass(rel) {
   return { 'is-ally': rel === '同盟', 'is-enemy': rel === '敌对', 'is-vassal': rel === '从属' }
+}
+
+// 状态/立场的配色：鼎盛=旺、困顿/衰落=弱；友好=绿、冷淡=灰、敌对=红
+function statusClass(s) {
+  return { 'is-strong': s === '鼎盛', 'is-weak': s === '困顿' || s === '衰落', 'is-new': s === '新兴' }
+}
+function stanceClass(s) {
+  return { 'is-ally': s === '友好', 'is-enemy': s === '敌对', 'is-cold': s === '冷淡' }
+}
+
+async function loadPromptPreview() {
+  promptLoading.value = true
+  try {
+    const r = await api.getFactionPromptBlock()
+    promptPreview.value = r.empty ? '（还没有登记派系 —— 这一段不会出现，行为与从前一致）' : (r.text || '')
+  } catch (err) {
+    loadError.value = err?.message || '预览失败'
+  } finally {
+    promptLoading.value = false
+  }
 }
 
 function resetDraft() {
@@ -231,6 +299,11 @@ function resetDraft() {
   draft.summary = c.summary
   draft.description = c.description
   draft.color = c.color || ''
+  draft.scope = c.scope || ''
+  draft.status = c.status || '稳固'
+  draft.stance = c.stance || '中立'
+  draft.goal = c.goal || ''
+  draft.tags = [...(c.tags || [])]
 }
 
 function select(f) {
@@ -254,6 +327,11 @@ function startCreate() {
   draft.summary = ''
   draft.description = ''
   draft.color = ''
+  draft.scope = ''
+  draft.status = meta.statuses[0] || '稳固'
+  draft.stance = '中立'
+  draft.goal = ''
+  draft.tags = []
 }
 
 async function load(preferId) {
@@ -292,6 +370,9 @@ async function submitCreate() {
       type: draft.type,
       parentId: draft.parentId === '' ? null : draft.parentId,
       summary: draft.summary,
+      scope: draft.scope,
+      status: draft.status,
+      stance: draft.stance,
     })
     creating.value = false
     items.value.push(f)
@@ -311,6 +392,11 @@ async function saveFaction() {
       summary: draft.summary,
       description: draft.description,
       color: draft.color,
+      scope: draft.scope,
+      status: draft.status,
+      stance: draft.stance,
+      goal: draft.goal,
+      tags: draft.tags,
     })
     applyResult(f)
   } catch (err) { loadError.value = err?.message || '保存失败' } finally { busy.value = false }
@@ -395,8 +481,26 @@ watch(open, v => { if (v) load() })
 .faction-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .faction-item-count { font-size: var(--fs-xs); color: var(--text-secondary); }
 .faction-type-chip { font-size: var(--fs-xs); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--glass-border); color: var(--text-secondary); flex: none; }
+/* ── 态势小标签（状态 / 立场 / 权力支柱）── */
+.faction-status-chip, .faction-stance-chip, .faction-tag-chip {
+  font-size: var(--fs-xs); padding: 1px 6px; border-radius: 999px;
+  border: 1px solid var(--glass-border); color: var(--text-secondary); flex: none;
+}
+.faction-status-chip.is-strong { color: #c62828; border-color: #c62828; }
+.faction-status-chip.is-weak { color: #6b7280; border-color: #9ca3af; }
+.faction-status-chip.is-new { color: #2e7d32; border-color: #2e7d32; }
+.faction-stance-chip.is-ally { color: #2e7d32; border-color: #2e7d32; }
+.faction-stance-chip.is-cold { color: #6b7280; border-color: #9ca3af; }
+.faction-stance-chip.is-enemy { color: #c62828; border-color: #c62828; }
+.faction-tag-chip { background: rgba(var(--accent-rgb), .12); color: var(--text-bright); border-color: transparent; }
+.faction-prompt {
+  margin-top: 8px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(0, 0, 0, .04); border: 1px solid var(--glass-border);
+  font-size: var(--fs-xs); line-height: 1.65; color: var(--text-secondary);
+  white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto;
+}
 .faction-detail { flex: 1; min-width: 0; }
-.faction-h { margin: 0 0 10px; font-size: var(--fs-md); display: flex; align-items: center; gap: 8px; }
+.faction-h { margin: 0 0 10px; font-size: var(--fs-md); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .faction-sub { margin: 18px 0 8px; font-size: var(--fs-sm); color: var(--text-bright); }
 .faction-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .faction-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--text-secondary); }

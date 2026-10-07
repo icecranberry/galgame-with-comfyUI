@@ -11,7 +11,10 @@ import { Router } from 'express';
 import {
   FACTION_TYPES,
   FACTION_RELATIONS,
+  FACTION_STATUSES,
+  FACTION_STANCES,
   ROLE_SUGGESTIONS,
+  POWER_PILLAR_SUGGESTIONS,
   DEFAULT_VISIBLE_RELATIONS,
   listFactions,
   getFaction,
@@ -23,6 +26,7 @@ import {
   removeMember,
   upsertRelation,
   removeRelation,
+  buildPromptBlock,
 } from '../services/factionService.js';
 
 const router = Router();
@@ -43,10 +47,21 @@ router.get('/types', (req, res) => {
   res.json({
     types: FACTION_TYPES,
     relations: FACTION_RELATIONS,
+    statuses: FACTION_STATUSES,
+    stances: FACTION_STANCES,
     roleSuggestions: ROLE_SUGGESTIONS,
+    pillarSuggestions: POWER_PILLAR_SUGGESTIONS,
     defaultVisibleRelations: DEFAULT_VISIBLE_RELATIONS,
   });
 });
+
+// ⚠ /prompt-block 必须排在 /:id 之前，否则会被 :id 吃掉
+router.get('/prompt-block', (req, res) => handle(res, () => {
+  const text = buildPromptBlock({
+    onlyWithGoal: req.query.onlyWithGoal === '1' || req.query.onlyWithGoal === 'true',
+  });
+  res.json({ text, empty: text == null });
+}));
 
 // ── 派系 CRUD ──
 router.get('/', (req, res) => handle(res, () => res.json({ items: listFactions() })));

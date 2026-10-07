@@ -259,3 +259,105 @@ test('★ 设计稿要求的"三块"仍各自独立（静态钉住）', () => {
   assert.match(src, /FACTION_TYPES = \[/, '类型词表必须在后端单一定义');
   assert.match(src, /FACTION_RELATIONS = \[/, '关系词表必须在后端单一定义');
 });
+
+// ─────────────────────────────────────────────────────────
+// 态势与小标签（迁移 004，2026-10-07）
+// 参考用户既有《剧本 开局态势》：status / stance / goal / powerPillars 才是写作抓手
+// ─────────────────────────────────────────────────────────
+
+test('★★★ 迁移 004：factions 补上 scope/status/stance/goal/tags 五列', () => {
+  const cols = db.prepare('PRAGMA table_info(factions)').all().map(c => c.name);
+  for (const c of ['scope', 'status', 'stance', 'goal', 'tags']) {
+    assert.ok(cols.includes(c), `缺列 ${c}`);
+  }
+});
+
+test('★★★ 新建/更新带态势字段：状态与立场受词表校验', () => {
+  const f = svc.createFaction({
+    name: '态势测', type: '政权',
+    scope: '城北', status: '鼎盛', stance: '友好', goal: '把持城北货运',
+  });
+  assert.equal(f.scope, '城北');
+  assert.equal(f.status, '鼎盛');
+  assert.equal(f.stance, '友好');
+  assert.equal(f.goal, '把持城北货运');
+
+  assert.throws(() => svc.createFaction({ name: 'x', status: '爆炸' }), /未知的势力状态/);
+  assert.throws(() => svc.createFaction({ name: 'x', stance: '暧昧' }), /未知的立场/);
+
+  const upd = svc.updateFaction(f.id, { status: '困顿', goal: '收缩防线' });
+  assert.equal(upd.status, '困顿');
+  assert.equal(upd.goal, '收缩防线');
+  assert.equal(upd.scope, '城北', '没传的字段应保留');
+});
+
+test('★★★ 权力支柱小标签：顿号/逗号都能拆、去重、截断且不校验词表（世界专属支柱要能自由填）', () => {
+  const f1 = svc.createFaction({ name: '标签测A', tags: '武力威慑、财力雄厚、武力威慑' });
+  assert.deepEqual(f1.tags, ['武力威慑', '财力雄厚'], '应去重');
+
+  const f2 = svc.createFaction({ name: '标签测B', tags: '武力威慑,情报网络,信仰凝聚' });
+  assert.deepEqual(f2.tags, ['武力威慑', '情报网络', '信仰凝聚'], '逗号也要能拆');
+
+  const f3 = svc.createFaction({ name: '标签测C', tags: Array.from({ length: 12 }, (_, i) => `支柱${i}`) });
+  assert.equal(f3.tags.length, 8, '最多 8 个');
+
+  // ★ 自由文本：某世界观专属的支柱（如参考里的「欢愉愿力」）**允许**填，只是不许写进引擎代码
+  const f4 = svc.createFaction({ name: '标签测D', tags: ['某世界专属支柱'] });
+  assert.deepEqual(f4.tags, ['某世界专属支柱']);
+});
+
+test('★★ 坏 tags 数据不炸（解析失败按空数组）', () => {
+  const f = svc.createFaction({ name: '坏标签' });
+  db.prepare('UPDATE factions SET tags = ? WHERE id = ?').run('{不是数组}', f.id);
+  assert.deepEqual(svc.getFaction(f.id).tags, []);
+});
+
+// ─────────────────────────────────────────────────────────
+// 给 LLM 的创意写作指导块
+// ─────────────────────────────────────────────────────────
+
+test('★★★ buildPromptBlock：没有派系时返回 null（调用方整段不出现 = 默认不改行为）', () => {
+  const f = svc.createFaction({ name: '唯一派系' });
+  assert.ok(svc.buildPromptBlock() !== null);
+  svc.deleteFaction(f.id);
+  // 把前面测试建的都删掉后再验
+  db.prepare('DELETE FROM factions').run();
+  assert.equal(svc.buildPromptBlock(), null);
+});
+
+test('★★★ buildPromptBlock：带上状态/立场/支柱/当下目标，且明确"别照抄"', () => {
+  svc.createFaction({
+    name: '态势帮', type: '秘密结社', scope: '城南', status: '困顿', stance: '冷淡',
+    goal: '寻找新的财源', tags: ['武力威慑', '地盘控制'],
+  });
+  const text = svc.buildPromptBlock();
+  assert.match(text, /<factions>/);
+  assert.match(text, /态势帮/);
+  assert.match(text, /状态：困顿/);
+  assert.match(text, /对我：冷淡/);
+  assert.match(text, /支柱：武力威慑、地盘控制/);
+  assert.match(text, /当下目标：寻找新的财源/);
+  assert.match(text, /不要照抄|不要凭空发明/, '必须明确禁止照抄/编造');
+  assert.match(text, /<\/factions>$/);
+});
+
+test('★★ buildPromptBlock：onlyWithGoal 只留"有目标"的', () => {
+  svc.createFaction({ name: '无目标帮' });
+  const all = svc.buildPromptBlock();
+  const only = svc.buildPromptBlock({ onlyWithGoal: true });
+  assert.ok(all.includes('无目标帮'));
+  assert.ok(!only.includes('无目标帮'));
+  assert.ok(only.includes('态势帮'));
+});
+
+test('★★★ 引擎词表里**不得**出现世界观专属的权力支柱（红线 12）', () => {
+  const src = fs.readFileSync(path.join(SRC, 'services/factionService.js'), 'utf8');
+  // 只查"会被拼进提示词/参与判断"的正文：注释行跳过（注释里举例说明是允许的）
+  const body = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  for (const t of ['幻月游戏', '欢愉假面', '欢愉愿力', '寰宇巨企', '共愿帮', '二相乐园']) {
+    assert.ok(!body.includes(t), `引擎正文不得出现世界观专名「${t}」`);
+  }
+  // 建议值必须存在且是通用词
+  assert.ok(svc.POWER_PILLAR_SUGGESTIONS.length >= 5);
+  assert.ok(svc.POWER_PILLAR_SUGGESTIONS.includes('武力威慑'));
+});

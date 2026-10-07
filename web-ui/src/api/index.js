@@ -2535,3 +2535,9 @@ export function upsertFactionRelation(payload) {
 export function removeFactionRelation(relationId) {
   return request(`/factions/relations/${relationId}`, { method: 'DELETE' })
 }
+
+/** 预览「势力态势」提示词块（供创意写作参考；空 = 还没登记派系） */
+export function getFactionPromptBlock(params = {}) {
+  const q = params.onlyWithGoal ? '?onlyWithGoal=1' : ''
+  return request(`/factions/prompt-block${q}`)
+}

@@ -31,6 +31,27 @@ export const FACTION_RELATIONS = ['同盟', '敌对', '中立', '从属', '竞�
 export const DEFAULT_VISIBLE_RELATIONS = ['同盟', '敌对', '从属'];
 /** 职务的常用建议值（自由文本，仅作前端联想，不做校验） */
 export const ROLE_SUGGESTIONS = ['首领', '干部', '成员', '线人', '顾问', '挂名'];
+/**
+ * 势力状态 —— 唯一真源（参考用户既有《开局态势》的用词：鼎盛 / 稳固 / 困顿）。
+ * ⚠ 全是**通用**词：引擎不得内置任何世界观专名（红线 12）。
+ */
+export const FACTION_STATUSES = ['鼎盛', '稳固', '困顿', '衰落', '新兴'];
+/** 该势力**对玩家**的态度（区别于 `faction_relations` 的派系↔派系） */
+export const FACTION_STANCES = ['友好', '中立', '冷淡', '敌对'];
+/**
+ * 「权力支柱」小标签的**通用**建议值 —— 一句话说清这个势力**凭什么立足**。
+ *
+ * ⚠ ⚠ 这里**只放通用词**：像「欢愉愿力」「欢愉假面」「寰宇巨企」那种是**某个世界观的专名**，
+ *   写进引擎后换世界观就是错的（红线 12）。世界专属的支柱由用户自己填，
+ *   随 `world-projects/<slug>/project.json` 的镜像走。
+ */
+export const POWER_PILLAR_SUGGESTIONS = [
+  '武力威慑', '财力雄厚', '人脉广泛', '情报网络', '法理正当',
+  '舆论声量', '技术垄断', '信仰凝聚', '地盘控制', '声望威望',
+];
+/** 标签上限（防 UI 与提示词被刷爆） */
+const MAX_TAGS = 8;
+const MAX_TAG_LEN = 12;
 
 const MAX_NAME = 40;
 const MAX_TEXT = 2000;
@@ -90,6 +111,49 @@ function assertRelation(relation) {
   const r = clampText(relation, 20);
   if (!FACTION_RELATIONS.includes(r)) throw fail(`未知的势力关系：${r}（可选：${FACTION_RELATIONS.join(' / ')}）`);
   return r;
+}
+
+function assertStatus(status) {
+  const s = clampText(status, 12) || '稳固';
+  if (!FACTION_STATUSES.includes(s)) throw fail(`未知的势力状态：${s}（可选：${FACTION_STATUSES.join(' / ')}）`);
+  return s;
+}
+
+function assertStance(stance) {
+  const s = clampText(stance, 12) || '中立';
+  if (!FACTION_STANCES.includes(s)) throw fail(`未知的立场：${s}（可选：${FACTION_STANCES.join(' / ')}）`);
+  return s;
+}
+
+/**
+ * 归一「权力支柱」标签：接受数组或「a、b,c」字符串。
+ * ⚠ 去重 + 去空 + 截断（各有上限），并**去重时不区分全半角顿号**。
+ * ⚠ 自由文本 —— **不做词表校验**（世界观专属的支柱本就该自由填）。
+ */
+function normalizeTags(input) {
+  const raw = Array.isArray(input)
+    ? input
+    : String(input ?? '').split(/[、,，;；|]/);
+  const out = [];
+  for (const t of raw) {
+    const s = clampText(t, MAX_TAG_LEN);
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
+/** 从库里读出的 tags（TEXT，JSON 数组）→ 数组；坏数据回落空数组并留痕 */
+function parseTags(text) {
+  if (!text) return [];
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v.map(String).filter(Boolean) : [];
+  } catch {
+    console.warn('[factionService] factions.tags 不是合法 JSON，按空处理');
+    return [];
+  }
 }
 
 function assertInt(v, fallback, min, max) {
@@ -154,6 +218,12 @@ function toDTO(row) {
     parentId: row.parent_id,
     summary: row.summary || '',
     description: row.description || '',
+    // ── 态势与小标签（2026-10-07，迁移 004）──
+    scope: row.scope || '',
+    status: row.status || '稳固',
+    stance: row.stance || '中立',
+    goal: row.goal || '',
+    tags: parseTags(row.tags),
     color: row.color || '',
     icon: row.icon || '',
     worldSlug: row.world_slug || '',
@@ -192,8 +262,9 @@ export function createFaction(input = {}) {
   const parentId = input.parentId == null || input.parentId === '' ? null : Number(input.parentId);
 
   const row = db().prepare(`
-    INSERT INTO factions (slug, name, type, parent_id, summary, description, color, icon, world_slug, sort_order, origin)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual')
+    INSERT INTO factions (slug, name, type, parent_id, summary, description, color, icon, world_slug, sort_order, origin,
+                          scope, status, stance, goal, tags)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?)
   `).run(
     uniqueSlug(name),
     name,
@@ -205,6 +276,11 @@ export function createFaction(input = {}) {
     clampText(input.icon, 40) || null,
     slug,
     assertInt(input.sortOrder, 0, -9999, 9999),
+    clampText(input.scope, 120),
+    assertStatus(input.status),
+    assertStance(input.stance),
+    clampText(input.goal, 300),
+    JSON.stringify(normalizeTags(input.tags)),
   );
   const created = getFaction(row.lastInsertRowid);
   mirrorToProject(slug);
@@ -227,6 +303,11 @@ export function updateFaction(id, patch = {}) {
     color: patch.color === undefined ? cur.color : (clampText(patch.color, 20) || null),
     icon: patch.icon === undefined ? cur.icon : (clampText(patch.icon, 40) || null),
     sortOrder: patch.sortOrder === undefined ? cur.sort_order : assertInt(patch.sortOrder, 0, -9999, 9999),
+    scope: patch.scope === undefined ? cur.scope : clampText(patch.scope, 120),
+    status: patch.status === undefined ? cur.status : assertStatus(patch.status),
+    stance: patch.stance === undefined ? cur.stance : assertStance(patch.stance),
+    goal: patch.goal === undefined ? cur.goal : clampText(patch.goal, 300),
+    tags: patch.tags === undefined ? parseTags(cur.tags) : normalizeTags(patch.tags),
   };
   if (!next.name) throw fail('派系名不能为空');
   if (next.parentId != null) assertNoCycle(numId, next.parentId);
@@ -234,9 +315,11 @@ export function updateFaction(id, patch = {}) {
   db().prepare(`
     UPDATE factions
     SET name = ?, type = ?, parent_id = ?, summary = ?, description = ?, color = ?, icon = ?,
-        sort_order = ?, updated_at = CURRENT_TIMESTAMP
+        sort_order = ?, scope = ?, status = ?, stance = ?, goal = ?, tags = ?,
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(next.name, next.type, next.parentId, next.summary, next.description, next.color, next.icon, next.sortOrder, numId);
+  `).run(next.name, next.type, next.parentId, next.summary, next.description, next.color, next.icon,
+    next.sortOrder, next.scope, next.status, next.stance, next.goal, JSON.stringify(next.tags), numId);
   const out = getFaction(numId);
   mirrorToProject(cur.world_slug);
   return out;
@@ -344,6 +427,61 @@ export function removeRelation(relationId) {
   return { deleted: Number(relationId) };
 }
 
+// ── 给 LLM 的创意写作指导块 ────────────────────────────────────
+
+/**
+ * 生成「势力态势」提示词块（供创意写作时参考）。
+ *
+ * ── 为什么这样写 ──────────────────────────────────────────────
+ * 参考用户既有的《剧本 开局态势》结构：光有"势力叫什么"对写作没用，
+ * **"现在什么状态 + 想干什么 + 靠什么立足"** 才是抓手 —— 于是这里按
+ * `状态 / 立场 / 支柱 / 当下目标` 组织，并明确要求"言行与处境一致"。
+ *
+ * ★ **没有派系时返回 `null`** —— 调用方据此整段不出现，保证"默认不改行为"（红线 4）。
+ * ⚠ 内容**全部来自 DB/项目库**（某世界观的派系名与支柱都属该世界观），引擎不内置任何专名（红线 12）。
+ * ⚠ 调用方必须把它放在**动态层**（如日程的约束层），**绝不要塞进共享常量**（会打穿 LLM 前缀缓存）。
+ *
+ * @param {{limit?:number, onlyWithGoal?:boolean}} [opts]
+ * @returns {string|null}
+ */
+export function buildPromptBlock(opts = {}) {
+  const limit = Number.isFinite(opts.limit) ? Math.max(0, Math.floor(opts.limit)) : 20;
+  let list = listFactions();
+  if (opts.onlyWithGoal) list = list.filter(f => f.goal);
+  if (limit > 0) list = list.slice(0, limit);
+  if (!list.length) return null;
+
+  const lines = [];
+  for (const f of list) {
+    const bits = [
+      `**${f.name}**`,
+      f.type ? `${f.type}` : '',
+      f.scope ? `范围：${f.scope}` : '',
+      f.status ? `状态：${f.status}` : '',
+      f.stance ? `对我：${f.stance}` : '',
+    ].filter(Boolean);
+    lines.push(`- ${bits.join(' ｜ ')}`);
+    if (f.parentId) {
+      const parent = list.find(x => x.id === f.parentId);
+      if (parent) lines.push(`  （隶属：${parent.name}）`);
+    }
+    if (f.tags.length) lines.push(`  支柱：${f.tags.join('、')}`);
+    if (f.goal) lines.push(`  当下目标：${f.goal}`);
+    else if (f.summary) lines.push(`  概述：${f.summary}`);
+  }
+
+  return `<factions>
+【势力态势 —— 供你理解这个世界的格局】
+
+${lines.join('\n')}
+
+写作要求：
+· 角色的言行要与其所属派系的**处境与目标**一致（困顿的势力更收敛，鼎盛的更张扬）。
+· 涉及势力之间的互动时，按上面的「支柱」与「当下目标」推演，**不要凭空发明新势力或新目标**。
+· 本段只供你把握分寸：**不要照抄、不要向角色复述这些设定**。
+</factions>`;
+}
+
 // ── project.json 镜像（红线 12：定义随世界观项目库走）────────────
 
 /**
@@ -364,6 +502,11 @@ export function mirrorToProject(slug = activeWorldSlug()) {
       parent: f.parentId ? (db().prepare('SELECT slug FROM factions WHERE id = ?').get(f.parentId)?.slug || null) : null,
       summary: f.summary,
       description: f.description,
+      scope: f.scope,
+      status: f.status,
+      stance: f.stance,
+      goal: f.goal,
+      tags: f.tags,
       color: f.color,
       icon: f.icon,
       sort_order: f.sortOrder,
