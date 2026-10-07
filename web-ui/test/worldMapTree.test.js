@@ -102,7 +102,8 @@ test('★ 空白页根因：不能再用 selected.children.length / selected.poi
 
 test('★ ensureNodeShape 存在，且 selectPlace / refreshSelected 都过它', () => {
   assert.match(viewSrc, /function ensureNodeShape/, '缺 ensureNodeShape')
-  assert.match(viewSrc, /function selectPlace\(\s*p\s*\)[\s\S]{0,200}ensureNodeShape\(p\)/,
+  // ⚠ selectPlace 后来加了第二参 opts（={} 时跳过未保存确认）；旧正则写死 `(p)` 会误报。
+  assert.match(viewSrc, /function selectPlace\(p[,)][\s\S]{0,300}ensureNodeShape\(p\)/,
     'selectPlace 应保证选中项形状')
   assert.match(viewSrc, /function refreshSelected[\s\S]{0,900}ensureNodeShape\(node\)/,
     'refreshSelected 应保证选中项形状')
