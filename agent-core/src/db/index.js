@@ -2938,7 +2938,7 @@ function migrateChatBgSchema(db) {
 /**
  * 迁移: 宝箱橱窗 —— 商品清单与当前橱窗
  *
- * loot_catalog：由外部清单（E:\邻舍-local\loot-catalog\catalog.json）导入的商品池。
+ * loot_catalog：由外部清单（`邻舍-local/30-工具箱/loot-catalog/catalog.json`）导入的商品池。
  *   图片按「单件」缓存（image_url），因为候选组合随机、几乎不重复，按整套生图等于每次刷新都烧算力。
  * loot_offers：当前橱窗里每页的 8 个格子。放库里而不是内存 —— 刷新页面不该把橱窗清空。
  */

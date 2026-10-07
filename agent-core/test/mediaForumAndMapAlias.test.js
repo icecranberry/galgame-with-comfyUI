@@ -20,7 +20,7 @@ const read = p => fs.readFileSync(p, 'utf8');
 // ─────────────────────────────────────────────────────────
 // A5 别名表：必须只有一份（单一真源）
 // ─────────────────────────────────────────────────────────
-test('A5：别名表必须是单一真源 JSON，前端与工具脚本都读它', () => {
+test('A5：别名表必须是单一真源 JSON，前端与工具脚本都读它', (t) => {
   const jsonPath = path.join(WEB_SRC, 'data/erxiangAlias.json');
   assert.ok(fs.existsSync(jsonPath), '必须存在 data/erxiangAlias.json（别名唯一真源）');
   const data = JSON.parse(read(jsonPath));
@@ -36,7 +36,11 @@ test('A5：别名表必须是单一真源 JSON，前端与工具脚本都读它'
   assert.ok(!/const SPOT_ALIAS = \{\s*\S+\s*:/.test(vue),
     'SPOT_ALIAS 不得再硬编码字面量（应派生自 JSON）');
 
-  const py = read(path.join(ROOT, '邻舍-local/0-投递箱/2026-10-05_二相乐园-地点点位图/regen_coords.py'));
+  // ⚠ 该工具脚本在**本地工具箱** `邻舍-local/` 内（不进上游仓库）→ 上游环境不存在时跳过这段断言。
+  //    （2026-10-07 分区重组：`0-投递箱/` → `20-工作记录/`）
+  const pyPath = path.join(ROOT, '邻舍-local/20-工作记录/2026-10-05_二相乐园-地点点位图/regen_coords.py');
+  if (!fs.existsSync(pyPath)) return t.skip('本地工具箱不在（上游环境）——跳过工具脚本断言');
+  const py = read(pyPath);
   assert.match(py, /erxiangAlias\.json/, '工具脚本也必须读同一份 JSON（不得再硬编码 ALIAS）');
   assert.ok(!/^ALIAS = \{/.test(py.replace(/^\s+/gm, '')), '脚本里不得再有 ALIAS 字面量');
 });

@@ -42,7 +42,7 @@ import {
 // ── 常量 ──
 
 // 宝箱冷却时长：上游默认 16 小时（16 * 3600），本地改成 1 分钟。
-// 这是本地补丁的一部分（见 E:\邻舍-local），更新版本时会随 local 分支一起重放，不会再被覆盖。
+// 这是本地补丁的一部分（见 `邻舍-local/`），更新版本时会随 local 分支一起重放，不会再被覆盖。
 export const CHEST_COOLDOWN_SECONDS = 60;
 const OUTFIT_DURATION_HOURS = 24;
 const BUFF_DURATION_HOURS = 6;
