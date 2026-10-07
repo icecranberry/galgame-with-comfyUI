@@ -1183,26 +1183,57 @@ export function listAreaPlaceAttrs(areaName, mapId = null) {
  * @param {{children?:Array}} node 树节点（必须带 children；扁平行请先用 buildTree）
  * @returns {boolean}
  */
-function isSchedulePlaceNode(node) {
-  return !(node?.children?.length > 0);
+/** 一个节点**自身**是否带"地点属性"（有其一即认为它本身是个地点，不是纯分组） */
+function hasPlaceTraits(node) {
+  if (!node) return false;
+  if (node.kind) return true;
+  for (const k of ['scene_prompt', 'summary', 'category']) {
+    if (String(node[k] ?? '').trim()) return true;
+  }
+  return Array.isArray(node.pois) && node.pois.length > 0;
 }
 
 /**
- * 递归收集一个子树里**所有叶子节点**（可作日程地点的那些）。
+ * 一个节点**自身**能不能作为日程地点。
  *
+ * ── ★ 2026-10-07 修正：旧判据把「有子节点的地点」整条丢掉 ──────────
+ * 旧写法是 `!(node.children?.length > 0)` —— 即"有子节点 ⇒ 一定是容器"。
+ * 用户实报「**狸狸周刊的选择项丢失**」就是它：
+ *   狸狸周刊 自己是一家杂志社（有 kind/简介/场景），但下面挂着子地点「不死神探事务所」，
+ *   于是它被判成容器、**自己被丢掉**，只剩子节点顶上来（同理还丢了「鸽川河与滨河道」）。
+ *
+ * 新判据 = **自己像不像地点**：带 kind / 简介 / 场景 / 分类 / POI 之一 ⇒ 它本身就是地点；
+ * 什么都没有的**纯分组节点**才只作下钻通道。
+ *
+ * ⚠ 这个判据之所以成立，前提是**遍历的起点是 `district.children`**（见 listAreasForSchedule）——
+ *   区域(lv1)/子区(lv2) 本身也有 kind 与简介，绝不能被当成地点收进来；它们不在遍历范围内，
+ *   所以不受本判据影响。**不要把本函数挪去判区域/子区**。
+ * ⚠ 仍然不用 `level` 做判据：`level` 是冗余列，结构真源是 `parent_id`（历史数据里对不上过）。
+ */
+export function isSchedulePlaceNode(node) {
+  if (!node) return false;
+  if (hasPlaceTraits(node)) return true;      // 自己就是地点（哪怕下面还挂着子地点）
+  return !(node.children?.length > 0);        // 没属性又没子节点 = 叶子，也算地点
+}
+
+/**
+ * 递归收集一个子树里**所有可作日程地点的节点**。
+ *
+ * ⚠ **不再只收叶子**（2026-10-07）：一个节点自身是地点时，**它和它的子节点都要收**
+ *   （狸狸周刊 与 不死神探事务所 是两家不同的地点，用户应能分别勾选）。
  * ⚠ 深度上限 `MAX_PLACE_DEPTH` 是防环护栏而非层级限制：`level` 是冗余列、
- *    `parent_id` 才是结构真源，历史数据一旦成环，无上限递归会栈溢出。
+ *   `parent_id` 才是结构真源，历史数据一旦成环，无上限递归会栈溢出。
  *
  * @param {Array} nodes 待遍历的节点
  * @param {number} depth 当前深度（仅用于护栏与可读性）
- * @returns {Array} 叶子节点（含其原始字段）
+ * @returns {Array} 地点节点（含其原始字段）
  */
-function collectLeafPlaceNodes(nodes, depth = 0) {
+export function collectPlaceNodes(nodes, depth = 0) {
   const out = [];
   if (depth > MAX_PLACE_DEPTH) return out;
   for (const n of (nodes || [])) {
     if (isSchedulePlaceNode(n)) out.push(n);
-    else out.push(...collectLeafPlaceNodes(n.children, depth + 1));
+    if (n?.children?.length) out.push(...collectPlaceNodes(n.children, depth + 1));
   }
   return out;
 }
@@ -1217,9 +1248,9 @@ export function listAreasForSchedule(mapId = null) {
   const areas = [];
   for (const region of map.tree) {
     for (const district of region.children ?? []) {
-      // ★ 见 isSchedulePlaceNode 的说明：判据是"有没有子节点"，不是 level 数值。
-      //   过度深度的容器会被自动下钻，lv3/lv4 的叶子一视同仁地收进来。
-      const places = collectLeafPlaceNodes(district.children ?? [])
+      // ★ 判据见 isSchedulePlaceNode 的说明：**"自己像不像地点"，不是"有没有子节点"**。
+      //   「狸狸周刊」那种"本身是地点、下面还挂着子地点"的节点必须一起收进来（2026-10-07 用户实报丢失）。
+      const places = collectPlaceNodes(district.children ?? [])
         .map(s => ({
           id: s.id, name: s.name, kind: s.kind || '', category: s.category || '',
           access: normalizeAccess(s.access), zone: normalizeZone(s.zone),

@@ -48,31 +48,60 @@ test('★★★ 日程地点判定不得硬编码 level 数值（这正是"新�
   //   用户新建的「托帕的私人生态舰」下面 3 个地点是 lv4，被整批静默丢弃。
   assert.ok(!/\.filter\(s => s\.level === LEVEL\.SCENE\)/.test(svc),
     '不得再用 `s.level === LEVEL.SCENE` 过滤 —— level 是冗余列，历史数据未必等于结构深度');
-  assert.match(fn, /collectLeafPlaceNodes/, '应改用"叶子节点"判定');
+  assert.match(fn, /collectPlaceNodes/, '应改用"结构性地点判定"');
 });
 
-test('★★ 叶子判据必须是结构性的：有子节点=中间层，无子节点=地点', () => {
-  // ⚠ 这个函数刻意**只有两行**，不能用 fnBody 截长断言 —— 直接匹配源码。
-  const m = svc.match(/function isSchedulePlaceNode\(node\) \{[\s\S]{0,200}?\n\}/);
+test('★★★ 地点判据必须是"自己像不像地点"，不是"有没有子节点"（狸狸周刊丢失的根因）', async () => {
+  const { isSchedulePlaceNode } = await import('../src/services/worldMapService.js');
+
+  // ★ 用户实报：狸狸周刊自己是一家杂志社、下面还挂着「不死神探事务所」——
+  //   旧判据"有子节点 ⇒ 容器"把它整条丢掉，界面里就只剩子节点。
+  const shopWithChild = {
+    name: '狸狸周刊', kind: '杂志社', scene_prompt: 'x', summary: 'y',
+    children: [{ name: '不死神探事务所', kind: '事务所' }],
+  };
+  assert.equal(isSchedulePlaceNode(shopWithChild), true, '自带 kind/场景的节点本身就是地点');
+
+  // 纯分组节点（什么都没有）才只作下钻通道
+  const container = { name: '某某片区', children: [{ name: '内部地点', kind: '商店' }] };
+  assert.equal(isSchedulePlaceNode(container), false, '无任何地点属性的多子节点 = 容器');
+
+  // 叶子永远算地点
+  assert.equal(isSchedulePlaceNode({ name: '光秃秃的叶子' }), true);
+  assert.equal(isSchedulePlaceNode(null), false);
+
+  // 判据仍不得依赖 level
+  const m = svc.match(/function isSchedulePlaceNode\(node\) \{[\s\S]{0,600}?\n\}/);
   assert.ok(m, '应有 isSchedulePlaceNode');
-  assert.match(m[0], /children/, '判据应基于 children（结构真源）');
-  assert.ok(!/level/.test(m[0]), '该函数不得出现 level —— 它就是为摆脱层级假设而存在的');
-  // 语义必须是"没有子节点才算地点"
-  assert.match(m[0], /!\(node\?\.children\?\.length > 0\)/, '应是"无子节点=叶子=地点"');
+  // 只看函数体里的可执行行，注释里提到 level 是允许的（说明为什么不用它）
+  const body = m[0].split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.ok(!/level/.test(body), '该函数不得用 level 做判据');
+});
+
+test('★★★ collectPlaceNodes：父节点是地点时，父与子**都要**收（两家不同地点）', async () => {
+  const { collectPlaceNodes } = await import('../src/services/worldMapService.js');
+  const tree = [
+    { name: '鸽川大道', kind: '主街' },
+    { name: '狸狸周刊', kind: '杂志社', children: [{ name: '不死神探事务所', kind: '事务所' }] },
+    { name: '某片区', children: [{ name: '内部商店', kind: '商店' }] },
+  ];
+  const names = collectPlaceNodes(tree).map(n => n.name);
+  assert.deepEqual(names, ['鸽川大道', '狸狸周刊', '不死神探事务所', '内部商店'],
+    '有地点属性的父节点要收，其子节点也要收；纯容器只下钻不收自己');
 });
 
 test('★★ 向下收集必须有深度上限（防环护栏）', () => {
-  const fn = fnBody(svc, 'collectLeafPlaceNodes');
+  const fn = fnBody(svc, 'collectPlaceNodes');
   assert.match(fn, /MAX_PLACE_DEPTH/, '必须有深度上限');
   assert.match(fn, /depth/, '应传递当前深度');
   assert.match(svc, /const MAX_PLACE_DEPTH = \d+/, '常量应有定义');
 });
 
 test('★★ 分支不能静默丢内容：多级容器要下钻而不是丢掉', () => {
-  const fn = fnBody(svc, 'collectLeafPlaceNodes');
+  const fn = fnBody(svc, 'collectPlaceNodes');
   // 有子节点时必须递归进去，而不是 continue/跳过 —— 否则整棵子树消失
-  assert.match(fn, /collectLeafPlaceNodes\(n\.children/, '中间层必须下钻');
-  assert.match(fn, /out\.push\(n\)/, '叶子必须被收集');
+  assert.match(fn, /collectPlaceNodes\(n\.children/, '子节点必须下钻');
+  assert.match(fn, /out\.push\(n\)/, '节点必须被收集');
 });
 
 // ─────────────────────────────────────────────────────────
