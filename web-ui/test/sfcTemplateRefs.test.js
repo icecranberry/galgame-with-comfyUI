@@ -89,6 +89,8 @@ const WATCHED = [
   'src/views/ScheduleView.vue',
   'src/views/WorldMapView.vue',
   'src/views/TavernView.vue',
+  // 「故事」页三页签 + 多个弹窗，体量与改动频率都够高（2026-10-07 补）
+  'src/views/StoryView.vue',
 ]
 
 test('★ 模板引用必须全都有定义（拦住"整段误删 → ReferenceError → 页面炸"）', async (t) => {

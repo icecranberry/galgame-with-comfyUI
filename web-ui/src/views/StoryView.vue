@@ -265,6 +265,16 @@
         <linshe-button variant="primary" :disabled="!outlineDraft || outlineBusy" @click="saveOutlineDraft">保存</linshe-button>
       </template>
     </linshe-modal>
+
+    <!-- 编辑某个节点的 Scene（2026-10-07 用户口径：替代原生 window.prompt）
+         ⚠ 弹窗只收集文本，写库仍由 submitSceneEdit 走 /outline/beats/:index（状态归 StoryView） -->
+    <StoryOutlineSceneModal
+      v-model="sceneEditOpen"
+      :beat="sceneEdit"
+      :busy="sceneBusy"
+      :error="sceneError"
+      @save="submitSceneEdit"
+    />
   </div>
 </template>
 
@@ -278,6 +288,7 @@ import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import MultiPickSelect from '../components/ui/MultiPickSelect.vue'
 import StoryGraphCanvas from '../components/story/StoryGraphCanvas.vue'
 import StoryLineGenerateModal from '../components/story/StoryLineGenerateModal.vue'
+import StoryOutlineSceneModal from '../components/story/StoryOutlineSceneModal.vue'
 
 const toastFn = inject('toast', null)
 
@@ -296,6 +307,11 @@ const outlineBusy = ref(false)
 const outlineGenOpen = ref(false)
 const outlineDirection = ref('')
 const outlineDraft = ref(null)
+/** 编辑节点 Scene 的弹窗（2026-10-07 用户口径：替代原生 window.prompt） */
+const sceneEditOpen = ref(false)
+const sceneEdit = ref(null)
+const sceneBusy = ref(false)
+const sceneError = ref('')
 /** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
 const stages = ref([])
 /** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
@@ -415,10 +431,31 @@ async function toggleOutlinePin() {
   } catch (err) { toastFn?.('操作失败：' + (err?.message || ''), 'error') }
 }
 async function editScene(i, cur) {
-  const v = window.prompt('改这个节点的 Scene（阶段会发生什么）', cur || '')
-  if (v == null) return
-  try { outline.value = (await api.updateStoryOutlineBeat(i, v))?.outline || outline.value }
-  catch (err) { toastFn?.('保存失败：' + (err?.message || ''), 'error') }
+  // ★ 2026-10-07 用户口径：原为 `window.prompt`（原生单行框），Scene 是多行叙述，
+  //   在那边根本没法好好改 → 改为正式弹窗（StoryOutlineSceneModal）。
+  //   带上 time/title 作上下文（弹窗里要显示"改的是哪个节点"）。
+  const b = outline.value?.beats?.[i] || {}
+  sceneEdit.value = { index: i, scene: cur || '', time: b.time || '', title: b.title || '' }
+  sceneBusy.value = false
+  sceneError.value = ''
+  sceneEditOpen.value = true
+}
+
+/** 弹窗里点「保存」—— 与旧 prompt 分支同样的写库调用，只是入口换了 */
+async function submitSceneEdit(value) {
+  const target = sceneEdit.value
+  if (!target || sceneBusy.value) return
+  sceneBusy.value = true
+  sceneError.value = ''
+  try {
+    outline.value = (await api.updateStoryOutlineBeat(target.index, value))?.outline || outline.value
+    sceneEditOpen.value = false
+    sceneEdit.value = null
+  } catch (err) {
+    sceneError.value = err?.message || '保存失败'
+  } finally {
+    sceneBusy.value = false
+  }
 }
 async function removeBeat(i) {
   if (!window.confirm(`删除第 ${i + 1} 个节点？`)) return
