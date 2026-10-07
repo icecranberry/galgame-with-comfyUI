@@ -270,3 +270,23 @@ export function emitSchedulePeeked({ characterId, activityName = '' } = {}) {
     payload: { summary: '用户瞄了一眼该角色此刻在做什么' },
   })
 }
+
+/** 只认已提交、真正给正式角色应用效果的服务端收据，不读取当前选择。 */
+export function emitTownBuildingEffectApplied(operation) {
+  if (operation?.status !== 'committed' || !operation.operationId) return { ok: false, reason: 'not-committed' }
+  const result = operation.result
+  const effect = ['appearance', 'state'].includes(result?.kind)
+    ? result : result?.kind === 'fortune' ? result.stateApplied : null
+  if (!effect?.effectId || !Number.isInteger(Number(effect.characterId)) || Number(effect.characterId) <= 0) {
+    return { ok: false, reason: 'no-character-effect' }
+  }
+  const label = String(result.optionLabel || result.title || '').slice(0, 40)
+  return dispatchCharacterObservation({
+    type: 'town.building_effect_applied', source: 'town-building-feature', initiator: 'user',
+    actorKey: `character:${effect.characterId}`, actorName: effect.targetName || '',
+    worldId: operation.worldId,
+    subject: { kind: 'building-operation', id: operation.operationId },
+    operationId: operation.operationId, outcome: 'applied',
+    payload: { itemName: label, summary: `特殊建筑给角色应用了「${label}」${result.kind === 'appearance' ? '外观' : '状态'}效果` },
+  })
+}

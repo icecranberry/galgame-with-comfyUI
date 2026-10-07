@@ -5,6 +5,7 @@
 // 只看 rendererKey 会把 BUFF 商店错分进衣柜面板。
 import { computed, ref, unref, watch } from 'vue'
 import * as townBuildingFeaturesApi from '../../../api/townBuildingFeatures.js'
+import { emitTownBuildingEffectApplied } from '../../../utils/characterReactionProducers.js'
 import { listItems } from '../../../api/index.js'
 
 // 提供玩法选项的 renderer；fortune/draw 由服务端按种子定结果，gallery 只读展示
@@ -380,6 +381,7 @@ export function useShopFeature({ event, scope, emit, api } = {}) {
   }
 
   function finishWith(operation) {
+    emitTownBuildingEffectApplied(operation)
     emit('completed', operation)
     emit('refresh')
   }

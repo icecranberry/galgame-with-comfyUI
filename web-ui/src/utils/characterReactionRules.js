@@ -46,6 +46,15 @@ export const MAX_VISIBLE_TEXT = 40
 
 /** 事件注册表：每条声明唯一生产者、事实语义、去重作用域与冷却桶 */
 export const CATALOG = {
+  'town.building_effect_applied': {
+    category: 'character',
+    producer: 'town-building-feature',
+    feedbackOwner: 'character-reaction',
+    dedupeScope: 'resource',
+    llm: true,
+    guaranteed: true,
+    summary: '特殊建筑已给角色应用外观或状态效果',
+  },
   'character.pin_enabled': {
     category: 'character',
     producer: 'character-pin',
@@ -536,7 +545,7 @@ export function createReactionEngine(options = {}) {
     // 即时反应：一次概率抽签，命中即请求模型；未命中静默，不使用短句包绕过概率
     if (spec.llm && config.llmEnabled) {
       if (!hasRolled(event)) markRolled(event, t)
-      const hit = opts.llmForced === true || rollLlm()
+      const hit = spec.guaranteed === true || opts.llmForced === true || rollLlm()
       if (hit) {
         // 一旦决定请求模型，就把这条事实占住：失败 / 超时的重试路径不会再抽签或重复请求
         markPending(event, t)

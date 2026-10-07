@@ -426,3 +426,21 @@ test('a timeout is reported and does not throw', async (t) => {
   assert.equal(result.status, 504);
   assert.match(result.reason, /超时/);
 });
+
+test('building reactions verify committed character effects and use server receipt facts', t => {
+  const db = fixture(t);
+  db.exec('CREATE TABLE town_building_feature_operations (operation_id TEXT, status TEXT, target_json TEXT, result_json TEXT)');
+  const insert = db.prepare('INSERT INTO town_building_feature_operations VALUES (?, ?, ?, ?)');
+  insert.run('applied', 'committed', '["char:42"]', JSON.stringify({ kind: 'state', characterId: 42, effectId: 8, optionLabel: '轻盈' }));
+  insert.run('failed', 'failed', '["char:42"]', '{}');
+  insert.run('other', 'committed', '["char:43"]', JSON.stringify({ kind: 'state', characterId: 43, effectId: 9 }));
+  insert.run('purchase', 'committed', '["char:42"]', JSON.stringify({ kind: 'purchase', itemId: 3 }));
+  insert.run('fortune', 'committed', '["char:42"]', JSON.stringify({ kind: 'fortune', title: '好运', stateApplied: { characterId: 42, effectId: 10 } }));
+  const make = id => baseEvent({ type: 'town.building_effect_applied', outcome: 'applied', subject: { kind: 'building-operation', id }, payload: { itemName: '伪造效果' } });
+  const result = validateReactionEvent(make('applied'), db);
+  assert.equal(result.ok, true);
+  assert.match(result.content, /轻盈/);
+  assert.doesNotMatch(result.content, /伪造/);
+  assert.equal(validateReactionEvent(make('fortune'), db).ok, true);
+  for (const id of ['failed', 'other', 'purchase', 'missing']) assert.equal(validateReactionEvent(make(id), db).ok, false);
+});

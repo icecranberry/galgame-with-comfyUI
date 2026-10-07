@@ -27,7 +27,7 @@ export const TOWN_NPC_EVENT_TYPE_KEY = 'town.custom';
 export const TOWN_NPC_AMBIENT_EVENT_TYPE_KEY = 'town.ambient';
 export const TOWN_NPC_EVENT_DURATION_MIN = 60;
 
-// M7 自动叙事（town-update.md §6.8）：ambient 奇遇（镇民自发场景 + 导演邀请）创建时，
+// ambient 场景兼容：仅在玩家手动创建时，
 // 给已落库的场景补一段角色对白。纯表现层——契约不过/预算耗尽/零模型一律不落
 // narrative_json，卡片维持纯描述；叙事永不参与事件结算。
 const townNarrative = createTownNarrativeService({ narrativeConfig: config.town.narrative });
@@ -152,13 +152,15 @@ function townPlayerInfo(db) {
  * @param {string} [options.customPrompt] - 事件方向（来自小镇互动的线索）
  * @param {string} [options.locationName] - 起点地点名
  * @param {string} [options.playerName] - 玩家名
- * @param {boolean} [options.manual] - 手动触发（生图走高优先级）
+ * @param {boolean} [options.manual] - 必须为 true，仅允许玩家手动触发（生图走高优先级）
  * @param {Function} [options.beforePersist] - 落库前守卫（事务内）
  * @param {Function} [options.afterPersist] - 落库后回填（事务内，收 eventId）
  * @param {object} [options.llm] - 测试注入 { chatSync }
  * @param {object} [options.image] - 测试注入 { generateImageRaw }
  */
 export async function generateTownNpcEvent(npc, options = {}) {
+  // NPC 奇遇只能由玩家主动发起；在数据库、模型和图片调用之前拒绝后台创建。
+  if (options.manual !== true) throw new Error('NPC_EVENT_REQUIRES_PLAYER_ACTION');
   const db = getDb();
   const now = new Date();
   const chatSync = options.llm?.chatSync || defaultChatSync;
@@ -377,8 +379,8 @@ ${worldPenetrationLine}
     return id;
   }).immediate();
 
-  // 自动叙事（M7）：两条 ambient 生成路径（自发升级/导演邀请）都已按「聚焦图 + 自动 LLM」
-  // 门控后才走到这里，这里只补预算与契约（narrate 内部处理）。手动玩家邀请（town.custom）不叙事。
+  // 保留手动 ambient 场景的对白补充能力，预算与契约由 narrate 处理。
+  // 常规玩家邀请（town.custom）不追加叙事；此处不会创建新的奇遇。
   if (isAmbient && config.features.townLLM && config.features.townAutoLLM) {
     try {
       const { source, narrative } = await townNarrative.narrate({

@@ -11,6 +11,7 @@ import { CATALOG, SCHEMA_VERSION, isKnownEventType, isSupportedActor, parseActor
 
 /** 事件来源白名单 */
 export const ALLOWED_SOURCES = Object.freeze([
+  'town-building-feature',
   'character-pin',
   'character-avatar',
   'character-display-name',
@@ -22,7 +23,7 @@ export const ALLOWED_SOURCES = Object.freeze([
 ])
 
 /** subject.kind 白名单 */
-export const ALLOWED_SUBJECT_KINDS = Object.freeze(['moment', 'letter', 'character', 'outfit', 'schedule', 'relationship'])
+export const ALLOWED_SUBJECT_KINDS = Object.freeze(['building-operation', 'moment', 'letter', 'character', 'outfit', 'schedule', 'relationship'])
 
 /** outcome 白名单：requested 只表示发起，不表示完成 */
 export const ALLOWED_OUTCOMES = Object.freeze(['requested', 'saved', 'confirmed', 'applied'])

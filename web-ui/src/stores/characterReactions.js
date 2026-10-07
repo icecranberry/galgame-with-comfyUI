@@ -230,7 +230,7 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
     const entry = await ensureMaterials(actorKey)
     if (disposed) return false
     if (!config.enabled) return false
-    if (blocked.value || sceneBlocked.value) {
+    if (blocked.value || (sceneBlocked.value && !CATALOG[candidate.event.type]?.guaranteed)) {
       // 遮罩 / 演出 / 系统 Toast 打开期间只保留最新候选，8 秒失效（3.2 / 6.1）
       pending.value = candidate
       if (pendingTimer) clearTimeout(pendingTimer)
@@ -374,7 +374,9 @@ export const useCharacterReactionsStore = defineStore('characterReactions', () =
   function setSceneBlocked(value, reason = '') {
     sceneBlocked.value = !!value
     if (sceneBlocked.value) {
-      if (shown.value.length) dismissDisplay()
+      for (const card of shown.value) {
+        if (!CATALOG[card.event?.type]?.guaranteed) dismissDisplay(card.id)
+      }
     } else {
       maybeShowPending()
     }

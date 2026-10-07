@@ -41,7 +41,7 @@ test('town npc events mirror the character event lifecycle without a character c
   assert.equal(JSON.parse(event.choice_history).length, 1);
 
   // 2. 唯一活跃约束：同一镇民不允许第二条活跃奇遇
-  await assert.rejects(gen.generateTownNpcEvent(npc, { llm: fakeLlm({}), image: noImage }),
+  await assert.rejects(gen.generateTownNpcEvent(npc, { manual: true, llm: fakeLlm({}), image: noImage }),
     { message: 'ALREADY_ACTIVE_EVENT' });
 
   // 3. processing CAS：防并发重复推进（已有请求在处理中时拒绝新的选择）
@@ -105,7 +105,7 @@ test('ambient events anchor on two townsfolk and let the player step in at branc
     customPrompt: '镇民小孙和茶娘阿圆在茶摊碰面，聊起了今天的稀罕事。',
     ambient: true,
     companionNpc: { name: other.display_name, appearance: other.appearance_desc, persona: other.persona },
-    locationName: '茶摊', locationKey: 'tea', manual: false,
+    locationName: '茶摊', locationKey: 'tea', manual: true,
     worldId: 'w1', worldEpoch: 1, durationMin: 120,
     llm, image: noImage,
   });
@@ -227,7 +227,7 @@ test('M7 自动叙事：ambient 奇遇开场补对白；契约不过/零模型�
     });
   } };
   const event = await gen.generateTownNpcEvent(npc, {
-    ambient: true, companionNpc: { name: '爱走的阿快', appearance: '', persona: '' },
+    manual: true, ambient: true, companionNpc: { name: '爱走的阿快', appearance: '', persona: '' },
     worldId: 'narr-a',
     llm: llmGood, image: noImage,
   });
@@ -249,7 +249,7 @@ test('M7 自动叙事：ambient 奇遇开场补对白；契约不过/零模型�
   try {
     let calls2 = 0;
     const event2 = await gen.generateTownNpcEvent(npc2, {
-      ambient: true, companionNpc: { name: '阿快', appearance: '', persona: '' },
+      manual: true, ambient: true, companionNpc: { name: '阿快', appearance: '', persona: '' },
       worldId: 'narr-b',
       llm: { chatSync: async () => { calls2 += 1; return JSON.stringify({ title: '茶摊的水开了。', description: '描述描述描述描述描述描述描述描述描述描述。', prompt: '图', choiceA: 'A', choiceB: 'B' }); } },
       image: noImage,
@@ -270,10 +270,30 @@ test('M7 自动叙事：ambient 奇遇开场补对白；契约不过/零模型�
     return JSON.stringify({ sourceEventId, summary: '这是一个足够长的摘要，超过二十个字的要求。是的。', lines: [{ speakerActorId: 'stranger', text: '这不是允许的说话人。' }], choices: [] });
   } };
   const event3 = await gen.generateTownNpcEvent(npc3, {
-    ambient: true, companionNpc: { name: '阿快', appearance: '', persona: '' },
+    manual: true, ambient: true, companionNpc: { name: '阿快', appearance: '', persona: '' },
     worldId: 'narr-c',
     llm: llmBad, image: noImage,
   });
   assert.equal(calls3, 3, '叙事最多重试 maxAttempts 次');
   assert.equal(event3.narrative_json ?? null, null, '模板回退不落 narrative_json');
+});
+
+
+test('NPC event creation rejects every non-manual entry before side effects', async t => {
+  const db = getDb();
+  t.after(() => closeDb());
+  const npc = fakeNpc(db);
+  let calls = 0;
+  const unexpected = async () => { calls += 1; throw new Error('Unexpected generation'); };
+  for (const manual of [undefined, false, null, 1, 'true']) {
+    for (const ambient of [false, true]) {
+      await assert.rejects(gen.generateTownNpcEvent(npc, {
+        manual, ambient,
+        llm: { chatSync: unexpected }, image: { generateImageRaw: unexpected },
+        beforePersist: unexpected, afterPersist: unexpected,
+      }), { message: 'NPC_EVENT_REQUIRES_PLAYER_ACTION' });
+    }
+  }
+  assert.equal(calls, 0);
+  assert.equal(db.prepare('SELECT count(*) n FROM town_npc_events').get().n, 0);
 });

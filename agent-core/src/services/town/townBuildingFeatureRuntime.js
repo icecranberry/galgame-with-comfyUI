@@ -376,7 +376,7 @@ function executeDeterministic(context, operation, feature, selection, snapshot, 
         durationHours: params.durationHours, characterId: target.characterId,
         displayName: target.displayName, sourceRef: operation.operation_id,
         expireSlot: true });
-      return { kind: 'appearance', targetName: target.displayName, optionLabel: option.label,
+      return { kind: 'appearance', characterId: target.characterId, targetName: target.displayName, optionLabel: option.label,
         expiresAt: applied.expiresAt, effectId: applied.effectId, slot: applied.slot,
         summary: `${target.displayName} 换上了「${option.label}」` };
     }
@@ -386,7 +386,7 @@ function executeDeterministic(context, operation, feature, selection, snapshot, 
       if (!option) throw townError('INVALID_SELECTION');
       const applied = applyTemporaryState(db, target.characterId, option.stateProfileKey,
         { durationHours: params.durationHours, label: option.label, sourceRef: operation.operation_id });
-      return { kind: 'state', targetName: target.displayName, optionLabel: option.label,
+      return { kind: 'state', characterId: target.characterId, targetName: target.displayName, optionLabel: option.label,
         expiresAt: applied.expiresAt, effectId: applied.effectId,
         summary: `${target.displayName} 进入了「${option.label}」状态` };
     }
@@ -457,7 +457,7 @@ function executeDeterministic(context, operation, feature, selection, snapshot, 
         const target = resolveCharacterTarget(db, selection.targetActorKeys);
         const applied = applyTemporaryState(db, target.characterId, picked.stateProfileKey,
           { durationHours: picked.durationHours, label: picked.title, sourceRef: operation.operation_id });
-        stateApplied = { targetName: target.displayName, effectId: applied.effectId, expiresAt: applied.expiresAt };
+        stateApplied = { characterId: target.characterId, targetName: target.displayName, effectId: applied.effectId, expiresAt: applied.expiresAt };
       }
       return { kind: 'fortune', fortuneKey: picked.key, title: picked.title, text: picked.text,
         stateApplied, price: 0, summary: `抽到了「${picked.title}」签` };

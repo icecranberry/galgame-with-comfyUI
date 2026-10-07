@@ -96,7 +96,7 @@
 
     <!-- 移动端底部：朋友圈 + 奇遇 + 更多 -->
     <div v-if="isMobile" class="sidebar-footer">
-      <div class="footer-nav-btn" :class="{ active: $route.path === '/moments' }" @click="onMomentsClick">
+      <div class="footer-nav-btn" role="button" tabindex="0" :aria-current="$route.path === '/moments' ? 'page' : undefined" @click="onMomentsClick" @keydown.enter.prevent="onMomentsClick" @keydown.space.prevent="onMomentsClick">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="18" height="18" fill="currentColor">
             <path d="M679.17 398.982V126.497s-133.338-71.481-288.989-16.366l288.99 288.851z m25.245 160.303V137.748s157.63 71.434 202.052 244.963L704.415 559.285z m-84.8 122.527l290.99-273.649s51.488 83.709-25.293 273.649H619.614z m-148.586 34.695h393.014S816.6 845.102 646.788 898.195L471.03 716.507z m-128.293-86.811v256.18s102.072 65.365 276.878 21.477L342.736 629.696z m-227.366 13.25l199.075-178.62v406.207c0-0.001-120.272-41.75-199.075-227.587z m-5.045-28.57S64.787 467.442 128.48 339.824h273.81L110.326 614.377z m35.357-303.193s57.603-130.594 214.21-191.87l186.894 191.87H145.682z" />
@@ -105,7 +105,7 @@
         </div>
         <span>朋友圈</span>
       </div>
-      <div class="footer-nav-btn" :class="{ active: $route.path === '/events' }" @click="onEventsClick">
+      <div class="footer-nav-btn" role="button" tabindex="0" :aria-current="$route.path === '/events' ? 'page' : undefined" @click="onEventsClick" @keydown.enter.prevent="onEventsClick" @keydown.space.prevent="onEventsClick">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -836,12 +836,6 @@ function formatTime(iso) {
   position: relative;
   cursor: pointer;
 }
-.footer-nav-btn:hover, .footer-nav-btn.active {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-  text-decoration: none;
-}
-
 .footer-more-btn {
   width: 46px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -854,7 +848,15 @@ function formatTime(iso) {
   transition: all 0.2s ease;
   user-select: none;
 }
-.footer-more-btn:hover { background: var(--bg-hover); color: var(--text-bright); }
+/* 触屏点击会保留模拟 :hover，仅在支持悬停的精细指针设备启用。 */
+@media (hover: hover) and (pointer: fine) {
+  .footer-nav-btn:hover,
+  .footer-more-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-bright);
+    text-decoration: none;
+  }
+}
 
 .nav-icon-wrap {
   position: relative;

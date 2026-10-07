@@ -40,7 +40,6 @@ import { createTownGoalService } from './townGoalService.js';
 import { createTownDirectorService } from './townDirectorService.js';
 import { pickIdleLifeAction } from './townDecisionService.js';
 import { listLifeVenues } from './townAffordanceService.js';
-import { generateTownNpcEvent, TOWN_NPC_AMBIENT_EVENT_TYPE_KEY } from './townNpcEventGenerator.js';
 import { getDb } from '../../db/index.js';
 import { config } from '../../config.js';
 import { chatSync } from '../../llm/llm-client.js';
@@ -835,14 +834,13 @@ function actorNpcId(actorId) {
  * M6：规则事件导演——只能从已结算事实建立候选：
  * 餐食见底（经营停摆）、目标达成（值得庆祝）、关系里程碑（熟络起来）。
  * repeat_key 按天分桶幂等；条件消失自动「自行处理」，过期自动关闭，均无惩罚。
- * 邀请只在聚焦图 + 自动 LLM + 事件系统开启时生成（复用镇民 ambient 奇遇管线）。
+ * 这里只维护事实候选，不主动创建 NPC 奇遇；奇遇由玩家手动发起。
  */
 function maintainDirectorPass(now) {
   const world = state.world;
   if (!world || !state.map) return;
   try {
     maintainDirectorDetection(now, world);
-    maintainDirectorInvitation(now, world);
   } catch (err) {
     console.warn('[town] director pass failed:', err?.message || err);
   }
@@ -895,54 +893,6 @@ function maintainDirectorDetection(now, world) {
 
   // ── 到期关闭 + 邀请节奏控制 ──
   director.expireDue({ worldId: world.worldId, nowUtcMs: now });
-}
-
-function maintainDirectorInvitation(now, world) {
-  const director = townDirector();
-  if (!(isMapFocused(state.mapId) && config.features.townLLM && config.features.townAutoLLM
-    && config.features.events)) return;
-  const candidate = director.nextInvite({ worldId: world.worldId, nowUtcMs: now });
-  if (candidate && spawnDirectorInvitation(candidate)) {
-    director.markInvited({ worldId: world.worldId, repeatKey: candidate.repeat_key, nowUtcMs: now });
-  }
-}
-
-/** 把导演候选变成一条镇民 ambient 奇遇（玩家可在奇遇页参与；失败/冲突静默让位）。 */
-function spawnDirectorInvitation(candidate) {
-  try {
-    const payload = JSON.parse(candidate.payload_json || '{}');
-    const npcMetas = [...state.meta.values()].filter(m => m.kind === 'npc');
-    if (npcMetas.length === 0) return false;
-    const ownerMeta = npcMetas.find(m => m.refId === payload.ownerNpcId) || npcMetas[0];
-    const companionMeta = npcMetas.find(m => m !== ownerMeta) || null;
-    const owner = getDb().prepare('SELECT * FROM town_npcs WHERE id = ?').get(ownerMeta.refId);
-    if (!owner) return false;
-    const companion = companionMeta
-      ? getDb().prepare('SELECT display_name, appearance_desc, persona FROM town_npcs WHERE id = ?').get(companionMeta.refId)
-      : null;
-    enqueueLlm(async () => {
-      try {
-        await generateTownNpcEvent(owner, {
-          customPrompt: payload.prompt,
-          ambient: true,
-          companionNpc: companion ? { name: companion.display_name, appearance: companion.appearance_desc,
-            persona: companion.persona } : undefined,
-          locationName: payload.venueName || null,
-          locationKey: payload.locationKey || null,
-          manual: false,
-          worldId: state.world?.worldId ?? null,
-          worldEpoch: state.world?.epoch ?? null,
-          durationMin: config.town.ambientStoryDurationMin,
-        });
-      } catch (err) {
-        if (err?.message !== 'ALREADY_ACTIVE_EVENT') console.warn('[town] director invitation failed:', err?.message || err);
-      }
-    });
-    return true;
-  } catch (err) {
-    console.warn('[town] director invitation spawn failed:', err?.message || err);
-    return false;
-  }
 }
 
 function findAgentByActorId(actorId) {
@@ -1675,11 +1625,10 @@ function endEncounter(enc, now) {
   broadcastTownEncounterEnd({ id: enc.id });
 
   if (enc.messages.length > 0) {
-    // 相遇摘要润色与环境奇遇升级是「给人看」的表现：只在聚焦图消耗 LLM；
+    // 相遇摘要润色是「给人看」的表现：只在聚焦图消耗 LLM；
     // 非聚焦图/零模型的相遇已经在上面按规则结算完毕。
     if (isMapFocused(state.mapId)) {
       enqueueLlm(() => runEncounterSummary(enc));
-      maybeUpgradeToAmbientStory(enc, now);
     }
   }
 }
@@ -2033,60 +1982,6 @@ function appendEncounterExperience(enc, summary, outcome, occurredAt) {
   return actorIds;
 }
 
-function ambientStoryCountToday(db) {
-  const active = db.prepare(`SELECT count(*) n FROM town_npc_events
-    WHERE event_type_key = ? AND created_at >= datetime('now', '-24 hours')`).get(TOWN_NPC_AMBIENT_EVENT_TYPE_KEY).n;
-  const history = db.prepare(`SELECT count(*) n FROM town_npc_event_history
-    WHERE event_type_key = ? AND created_at >= datetime('now', '-24 hours')`).get(TOWN_NPC_AMBIENT_EVENT_TYPE_KEY).n;
-  return active + history;
-}
-
-/** 环境奇遇钩子：NPC×NPC 相遇后有概率升级为一条镇民奇遇（town.ambient），进玩家奇遇列表。 */
-function maybeUpgradeToAmbientStory(enc) {
-  try {
-    if (!config.features.townLLM || !config.features.townAutoLLM || !config.features.events) return;
-    if (!isMapFocused(state.mapId)) return; // 非聚焦图不消耗 LLM（残留相遇收尾时同样不升级）
-    if (!state.world) return;
-    if (Math.random() >= (config.town.ambientStoryProb ?? 0)) return;
-    const metaA = state.meta.get(enc.a), metaB = state.meta.get(enc.b);
-    if (!metaA || !metaB) return;
-    if (metaA.kind !== 'npc' || metaB.kind !== 'npc') return; // 环境奇遇只锚定镇民；角色相遇走角色管线
-    const db = getDb();
-    if (ambientStoryCountToday(db) >= (config.town.ambientStoryDailyCap ?? 0)) return;
-    const npcRow = db.prepare('SELECT * FROM town_npcs WHERE id = ? AND town_enabled = 1').get(metaA.refId);
-    const companionRow = db.prepare('SELECT display_name, appearance_desc, persona FROM town_npcs WHERE id = ?').get(metaB.refId);
-    if (!npcRow || !companionRow) return;
-
-    const owner = npcRow;
-    const transcript = enc.messages.slice(-4)
-      .map(m => `${(m.speakerAgentKey === enc.a ? metaA : metaB).displayName}：${m.content}`)
-      .join('\n');
-    const customPrompt = `镇民${metaA.displayName}和${metaB.displayName}刚在${enc.location.name}碰面，聊了几句：\n${transcript}\n以${owner.display_name}为主角、${companionRow.display_name}为同伴，从这次碰面出发，展开一段正在发生的小镇日常奇遇。`;
-
-    enqueueLlm(async () => {
-      try {
-        if (ambientStoryCountToday(db) >= (config.town.ambientStoryDailyCap ?? 0)) return;
-        await generateTownNpcEvent(owner, {
-          customPrompt,
-          ambient: true,
-          companionNpc: { name: companionRow.display_name, appearance: companionRow.appearance_desc, persona: companionRow.persona },
-          locationName: enc.location?.name || null,
-          locationKey: enc.location?.key || null,
-          manual: false,
-          worldId: state.world?.worldId ?? null,
-          worldEpoch: state.world?.epoch ?? null,
-          durationMin: config.town.ambientStoryDurationMin,
-        });
-        console.log(`[town] ambient story spawned from encounter #${enc.id} (${owner.display_name} × ${companionRow.display_name})`);
-      } catch (err) {
-        if (err?.message !== 'ALREADY_ACTIVE_EVENT') console.warn('[town] ambient story failed:', err?.message || err);
-      }
-    });
-  } catch (err) {
-    console.warn('[town] ambient story hook failed:', err?.message || err);
-  }
-}
-
 function maybeStatusBubbles(now) {
   const generation = state.generation;
   const intervalMs = config.town.statusBubbleIntervalMin * 60_000;
@@ -2284,8 +2179,8 @@ function tickRuntime(rt, now) {
   advancePlayer(now);
   playerNearbyReactions(now);
   // 相遇扫描是世界逻辑（谁遇见谁、经历如何结算），对所有图运行——后台图与零模型
-  // 同样有相遇并按规则沉淀经历；相遇对话、摘要润色、环境奇遇升级、状态气泡才是
-  // 演出，仍在 runEncounterDialogue/runEncounterSummary/maybeUpgradeToAmbientStory/
+  // 同样有相遇并按规则沉淀经历；相遇对话、摘要润色、状态气泡才是
+  // 演出，仍在 runEncounterDialogue/runEncounterSummary/
   // maybeStatusBubbles 内按「聚焦图 + 自动 LLM」门控。
   scanEncounters(now);
   expireEncounters(now);

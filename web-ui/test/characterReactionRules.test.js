@@ -22,6 +22,7 @@ import {
   normalizeCharacterObservation,
 } from '../src/utils/characterObservationEvents.js'
 import {
+  emitTownBuildingEffectApplied,
   emitAppearanceApplied,
   emitAppearanceRestored,
   emitCharacterAvatarChanged,
@@ -87,6 +88,7 @@ test('catalog only keeps the remaining non-town actions; record-only facts stay 
     'moment.share_exported',
     'schedule.agreement',
     'schedule.peeked',
+    'town.building_effect_applied',
   ])
   assert.deepEqual(EVENT_TYPES.slice().sort(), [
     'appearance.applied',
@@ -99,6 +101,7 @@ test('catalog only keeps the remaining non-town actions; record-only facts stay 
     'moment.like_enabled',
     'moment.share_exported',
     'schedule.peeked',
+    'town.building_effect_applied',
   ])
   assert.equal(isEnabledEventType('appearance.restored'), true)
   assert.equal(DEFAULT_CONFIG.categoryEnabled.schedule, true)
@@ -569,4 +572,39 @@ test('relationship and schedule-peek producers expose only the confirmed fact', 
   assert.equal(peek.event.source, 'schedule-view')
   assert.equal(peek.event.subject.kind, 'schedule')
   assert.equal(peek.event.actorKey, 'character:9')
+})
+
+test('building effects always request feedback while ordinary events still use 15 percent', () => {
+  const engine = createReactionEngine({ now, random: () => 0.99 })
+  assert.equal(engine.decide(event()).action, 'silent')
+  const applied = event({ type: 'town.building_effect_applied', operationId: 'building-1', subject: { kind: 'building-operation', id: 'building-1' } })
+  assert.equal(engine.decide(applied).action, 'request-llm')
+  assert.equal(engine.decide(applied).reason, 'duplicate')
+  engine.markDisplayed(applied)
+  const next = { ...applied, operationId: 'building-2', subject: { kind: 'building-operation', id: 'building-2' } }
+  assert.equal(engine.decide(next).action, 'request-llm')
+  assert.equal(engine.stillValid(next), true)
+})
+
+test('building producer uses committed receipt identity and ignores unapplied goods', () => {
+  const operation = { operationId: 'building-effect-1', status: 'committed', result: {
+    kind: 'state', characterId: 42, targetName: '小满', effectId: 5, optionLabel: '轻盈',
+  } }
+  const emitted = emitTownBuildingEffectApplied(operation)
+  assert.equal(emitted.ok, true)
+  assert.equal(emitted.event.actorKey, 'character:42')
+  assert.equal(emitted.event.subject.id, operation.operationId)
+  assert.equal(emitted.event.payload.itemName, '轻盈')
+  for (const status of ['pending', 'failed', 'cancelled']) {
+    assert.equal(emitTownBuildingEffectApplied({ ...operation, status }).ok, false)
+  }
+  for (const kind of ['purchase', 'exchange', 'draw', 'fortune']) {
+    assert.equal(emitTownBuildingEffectApplied({ ...operation, result: { kind, itemId: 5 } }).ok, false)
+  }
+  assert.equal(emitTownBuildingEffectApplied({ ...operation, result: {
+    kind: 'fortune', title: '好运', stateApplied: { characterId: 42, effectId: 8 },
+  } }).ok, true)
+  assert.equal(emitTownBuildingEffectApplied({ ...operation, result: {
+    ...operation.result, characterId: null,
+  } }).ok, false)
 })
