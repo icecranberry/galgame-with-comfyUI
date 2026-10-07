@@ -1470,6 +1470,14 @@ export function setStoryLinePin(id, pin) {
 export function deleteStoryLine(id) {
   return request(`/story/lines/${id}`, { method: 'DELETE' })
 }
+/** 编辑表单候选：角色（已排除归档）+ 地点（来自世界地图，带 region/area 归属） */
+export function getStoryOptions() {
+  return request(`/story/options`)
+}
+/** AI 生成事件线草稿（**只出草稿不落库**，由前端填进编辑表单） */
+export function generateStoryLine(data) {
+  return request(`/story/generate`, { method: 'POST', body: data })
+}
 
 export function getCharacterScheduleLedger(characterId) {
   return request(`/schedule/ledger/${characterId}`)

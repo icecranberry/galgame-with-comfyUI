@@ -15,6 +15,10 @@
  */
 
 import { getDb } from '../../db/index.js';
+import { chatSync } from '../../llm/llm-client.js';
+// ⚠ 复用 `eventGenerator` 的 JSON 抽取/修复（与 `worldMapService.refinePlaceFromText`
+//   同一处工具），避免各写一份"从模型输出里抠 JSON"的口径。
+import { extractFirstJson, repairJson } from '../eventGenerator.js';
 
 /**
  * 阶段机 —— 与构画 `schema.js` 的 `LINE_STAGES` 同口径。
@@ -295,4 +299,188 @@ export function filterLinesForGraph(lines = [], opts = {}) {
 export function limitInitialLines(lines = [], limit = AUTO_LINE_CAPACITY, isInitial = false) {
   if (!isInitial) return [...lines];
   return [...lines].slice(0, limit);
+}
+
+// ═══════════════════════════════════════════════════════════
+// 编辑表单的候选数据（2026-10-07 用户要求）
+//
+// 用户口径：「涉及角色和涉及地点我建议改为可输入并自动检索的选择框」。
+// → 前端用可检索多选，**候选由后端给**。为什么不放前端自造：
+//   ① 角色候选必须排除归档角色（归档 = 不参与任何主动行为，见项目红线）；
+//   ② 地点候选的层级（大地区/子地区）**唯一真源是地图**，前端不该另写一份遍历逻辑（红线 8）。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 「涉及角色」候选。
+ *
+ * ★ 排除**归档角色**（`archived=1`）—— 与 `scheduleGenerator.isScheduleForbidden` 同一取向：
+ *   归档 = 不参与任何主动行为，事件线也不该再把他卷进来。
+ * ⚠ 这是**主列表的过滤口径**，不是"编辑已存线时也把归档角色抹掉" ——
+ *   历史线里已经写进去的归档角色 id 必须原样保留（人工编辑不受自动护栏约束），
+ *   前端只需在候选中找不到时照原值显示即可。
+ */
+export function listParticipantOptions() {
+  const rows = getDb().prepare(`
+    SELECT id, display_name FROM characters
+    WHERE COALESCE(archived, 0) = 0
+    ORDER BY id ASC
+  `).all();
+  return rows.map(r => ({ id: r.id, name: r.display_name || `#${r.id}` }));
+}
+
+/**
+ * 「涉及地点」候选 —— 扁平化**所有**世界地图的地点，并带上归属层级。
+ *
+ * 返回 `{name, region, area, kind}`：
+ *   - `region` = L1 大地区名，`area` = L2 子地区名，供前端分组/收敛（与
+ *     `ui/PlaceCascadeSelect.vue` 需要的数据形状一致，可复用它的分组逻辑）。
+ *   - ⚠ 只取 L1~L3（大地区 / 子地区 / 场景），不含 L4+ 的 POI：
+ *     事件线是叙事地理层级的东西，挂到"某家店的收银台"没有意义。
+ *   - ⚠ 地名**可能重名**（多个区都有「中心广场」）→ 前端展示时必须带 `region/area`，
+ *     否则用户选了也不知道选的是哪个（这正是 `PlaceCascadeSelect` 当初被做出来的原因）。
+ */
+export function listPlaceOptions() {
+  const db = getDb();
+  const maps = db.prepare('SELECT id FROM world_maps').all();
+  const out = [];
+  for (const m of maps) {
+    const rows = db.prepare(
+      'SELECT id, parent_id, level, name, kind FROM world_map_places WHERE map_id = ? ORDER BY level, sort_order, id'
+    ).all(m.id);
+    const byId = new Map(rows.map(r => [r.id, r]));
+    for (const r of rows) {
+      if (![1, 2, 3].includes(r.level)) continue;
+      const parent = r.parent_id ? byId.get(r.parent_id) : null;
+      // L1 是自身即大地区；L2 的 parent 是 region；L3 的 parent 是 area、祖父是 region。
+      let region = '';
+      let area = '';
+      if (r.level === 1) region = r.name;
+      else if (r.level === 2) { region = parent?.name || ''; area = r.name; }
+      else {
+        area = parent?.name || '';
+        const grand = parent?.parent_id ? byId.get(parent.parent_id) : null;
+        region = grand?.name || '';
+      }
+      const name = String(r.name || '').trim();
+      if (!name) continue;
+      out.push({ name, region, area, kind: r.kind || '' });
+    }
+  }
+  // 去重（同名同区只留一条），并按 大地区 → 子地区 → 名字 稳定排序
+  const seen = new Set();
+  return out.filter(p => {
+    const k = `${p.region}|${p.area}|${p.name}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).sort((a, b) => a.region.localeCompare(b.region, 'zh')
+    || a.area.localeCompare(b.area, 'zh') || a.name.localeCompare(b.name, 'zh'));
+}
+
+// ═══════════════════════════════════════════════════════════
+// AI 生成事件线草稿（2026-10-07 用户要求「需要一个 AI 生成按钮」）
+//
+// ★ 与「修正地点」「修正外观」**同一范式**：只出草稿、**不落库**，
+//   结果回给前端填进编辑表单，用户可改，点「保存」才写库。
+//   为什么不直接落库：AI 产出需要人工过一遍（与 T1 记忆证据闸门同一取向，
+//   项目红线 L10 —— 护栏只作用于 AI，人工编辑不受约束）。
+// ═══════════════════════════════════════════════════════════
+
+const GENERATE_LINE_PROMPT = `你是一个剧情线策划助手。给定角色的身份与用户写下的要点，为「跨天演进的剧情线」补出一条**起线阶段的草稿**。
+
+## 你要产出什么
+这条线是"一件事后来怎么发展"的**起点**（不是一次性事件）。它应该：
+- 有明确的**当事方**与**利益/情感冲突**（否则没有戏可演）；
+- 有**可推进的方向**（下一步会自然发生什么），而不是已经完结的状态；
+- 扎根在这个角色的日常与所处世界里，不是凭空冒出的宏大设定。
+
+## 字段要求
+- name：线名，**6~18 字**。像一句"这件事的标题"，不要写成句子或带破折号/冒号的解说。
+  ✗「绯英的稿约——一场连环局」 ✓「绯英的连环画稿约」
+- desc：**发生了什么、为什么值得跟进**，40~90 字。写具体的人与事，不写抒情。
+- nextText：**下一步会自然发生什么**，20~50 字。给下一轮生成当锚点用的。
+- whenText：起步时间，**自由文本**，如「第 1 天」「这两天」「最近」。
+- stage：固定输出「起线」。
+
+## 硬性要求
+- **不要照抄用户原话**：用户给的是要点，你要把它展开成具体情节。
+- **不要编造用户没暗示的大设定**：宁可在用户给的范围内写具体，不要自己加新组织/新地点/新世界观。
+- **地点从给定候选里挑**（若给了候选）；没给候选就写用户要点里出现的地名。
+- 只输出 JSON，不要解释、不要 Markdown 代码块。
+
+## 输出格式
+{"name":"...","desc":"...","nextText":"...","whenText":"...","stage":"起线"}`;
+
+/**
+ * 由要点生成一条事件线草稿。**不写库**。
+ *
+ * @param {{brief?:string, hints?:string, participantIds?:number[], places?:string[]}} input
+ * @returns {Promise<{name:string,desc:string,nextText:string,whenText:string,stage:string}>}
+ */
+export async function generateEventLineDraft(input = {}) {
+  const brief = String(input.brief || '').trim();
+  if (!brief) throw Object.assign(new Error('请先写下这条线大概想讲什么'), { statusCode: 400 });
+
+  const db = getDb();
+  // 用户已选的参与角色 → 取名字喂给模型（比只给 id 有用得多）
+  const pids = (Array.isArray(input.participantIds) ? input.participantIds : [])
+    .map(Number).filter(Number.isFinite);
+  let peopleBlock = '';
+  if (pids.length) {
+    const ph = pids.map(() => '?').join(',');
+    const rows = db.prepare(`SELECT id, display_name FROM characters WHERE id IN (${ph})`).all(...pids);
+    if (rows.length) peopleBlock = `\n【涉及角色】${rows.map(r => `${r.display_name}（id ${r.id}）`).join('、')}`;
+  }
+  // 用户已选地点
+  const places = (Array.isArray(input.places) ? input.places : [])
+    .map(p => String(p || '').trim()).filter(Boolean);
+  const placeBlock = places.length ? `\n【涉及地点】${places.join('、')}` : '';
+
+  // 已有线名，避免生成重名/雷同的线
+  const existing = listEventLines().map(l => l.name).filter(Boolean);
+  const existingBlock = existing.length
+    ? `\n【已有的事件线（不要重复，也尽量不要和它们撞主题）】${existing.slice(0, 20).join('、')}`
+    : '';
+
+  // 地点候选（供模型挑；只在用户没指定地点时给，避免干扰）
+  let placeHint = '';
+  if (!places.length) {
+    const opts = listPlaceOptions().slice(0, 120).map(p => p.name);
+    if (opts.length) placeHint = `\n【可用的地点名（若要点里提到地点，用这些标准名）】${[...new Set(opts)].join('、')}`;
+  }
+
+  const hints = String(input.hints || '').trim();
+  const res = await chatSync([
+    { role: 'system', content: GENERATE_LINE_PROMPT },
+    {
+      role: 'user',
+      content: `【这条线想讲什么（用户要点，必须全部体现）】
+${brief}${peopleBlock}${placeBlock}${existingBlock}${placeHint}${hints ? `\n\n【用户特别要求】${hints}` : ''}`,
+    },
+  ], { temperature: 0.8, max_tokens: 600, response_format: { type: 'json_object' }, label: 'story:gen-line' });
+
+  return absorbLineDraft(res);
+}
+
+/**
+ * 收口模型返回。
+ *
+ * ⚠ **必须校验出可用内容再返回**：全空时抛错，而不是回一个空草稿 ——
+ *   否则前端会拿空值覆盖用户已经填好的表单（与 `absorbPlaceRefine` 同源思路）。
+ */
+export function absorbLineDraft(raw) {
+  const jsonStr = extractFirstJson(String(raw || ''));
+  const obj = jsonStr ? safeParseJson(repairJson(jsonStr)) : null;
+  const name = String(obj?.name ?? '').trim().slice(0, 80);
+  const desc = String(obj?.desc ?? '').trim().slice(0, 1200);
+  const nextText = String(obj?.nextText ?? obj?.next ?? '').trim().slice(0, 600);
+  const whenText = String(obj?.whenText ?? obj?.when ?? '').trim().slice(0, 120);
+  if (!name && !desc && !nextText) {
+    throw Object.assign(new Error('模型没能读出可用的剧情线，请把要点写得更具体些再试'), { statusCode: 502 });
+  }
+  return { name, desc, nextText, whenText, stage: normalizeLineStage(obj?.stage) };
+}
+
+function safeParseJson(text) {
+  try { return JSON.parse(text); } catch { return null; }
 }

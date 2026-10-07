@@ -325,3 +325,104 @@ test('★★★ 筛选判据是"有没有显式给值"，不是"值大不大" �
   }
   svc.deleteEventLine(zero.id); svc.deleteEventLine(one.id);
 });
+
+// ─────────────────────────────────────────────────────────
+// ⑧ 编辑表单候选数据（2026-10-07 用户要求：角色/地点改可检索多选）
+// ─────────────────────────────────────────────────────────
+
+test('★★★ 角色候选必须排除归档角色（归档＝不参与任何主动行为）', () => {
+  const db = getDb();
+  db.prepare(`INSERT INTO characters (name, display_name, base_prompt, archived) VALUES ('opt-a', '在场角色', '旅客', 0)`).run();
+  db.prepare(`INSERT INTO characters (name, display_name, base_prompt, archived) VALUES ('opt-b', '归档角色', '旅客', 1)`).run();
+  const opts = svc.listParticipantOptions();
+  const names = opts.map(o => o.name);
+  assert.ok(names.includes('在场角色'), '普通角色应在候选里');
+  assert.ok(!names.includes('归档角色'), '归档角色**不应**出现在候选里');
+  // 清理
+  db.prepare(`DELETE FROM characters WHERE name IN ('opt-a','opt-b')`).run();
+  assert.ok(opts.every(o => Number.isFinite(o.id) && typeof o.name === 'string'), '候选项形状应为 {id,name}');
+});
+
+test('★★ 角色候选在无归档标记时也不误杀（COALESCE 兜底，不把 NULL 当归档）', () => {
+  const db = getDb();
+  // 显式写 NULL —— 存量数据可能没这个字段值
+  db.prepare(`INSERT INTO characters (name, display_name, base_prompt, archived) VALUES ('opt-c', '未标记角色', '旅客', NULL)`).run();
+  const names = svc.listParticipantOptions().map(o => o.name);
+  assert.ok(names.includes('未标记角色'), 'archived 为 NULL 不应被当成归档排除');
+  db.prepare(`DELETE FROM characters WHERE name = 'opt-c'`).run();
+});
+
+test('★★ 地点候选来自世界地图（唯一真源）且带归属层级，重名可区分', () => {
+  const db = getDb();
+  // 造一张小地图：L1 大地区 → L2 子地区 → L3 场景
+  db.prepare(`INSERT INTO world_maps (name) VALUES ('候选测试图')`).run();
+  const mapId = db.prepare(`SELECT id FROM world_maps WHERE name='候选测试图'`).get().id;
+  const ins = db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, kind, sort_order, pois_json)
+    VALUES (?, NULL, ?, ?, ?, '', 0, '[]')`);
+  ins.run(mapId, 1, 'k-region', '测试大区');
+  const regionId = db.prepare(`SELECT id FROM world_map_places WHERE map_id=? AND name='测试大区'`).get(mapId).id;
+  db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, kind, sort_order, pois_json)
+    VALUES (?, ?, 2, 'k-area', '测试子区', '', 0, '[]')`).run(mapId, regionId);
+  const areaId = db.prepare(`SELECT id FROM world_map_places WHERE map_id=? AND name='测试子区'`).get(mapId).id;
+  db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, kind, sort_order, pois_json)
+    VALUES (?, ?, 3, 'k-scene', '测试场景', '', 0, '[]')`).run(mapId, areaId);
+  // L4 POI 不该进候选（事件线是叙事地理层级，挂到"某个柜台"无意义）
+  db.prepare(`INSERT INTO world_map_places (map_id, parent_id, level, key, name, kind, sort_order, pois_json)
+    VALUES (?, ?, 4, 'k-poi', '测试摊位', '', 0, '[]')`).run(mapId, areaId);
+
+  const opts = svc.listPlaceOptions();
+  const scene = opts.find(o => o.name === '测试场景');
+  assert.ok(scene, 'L3 场景应在候选里');
+  assert.equal(scene.region, '测试大区', '应带大地区归属');
+  assert.equal(scene.area, '测试子区', '应带子地区归属');
+  assert.ok(!opts.some(o => o.name === '测试摊位'), 'L4+ POI 不应进候选');
+
+  // 清理
+  db.prepare(`DELETE FROM world_map_places WHERE map_id=?`).run(mapId);
+  db.prepare(`DELETE FROM world_maps WHERE id=?`).run(mapId);
+});
+
+test('★★ /options 与 /generate 路由存在且形状正确', () => {
+  assert.match(routeSrc, /router\.get\('\/options'/, '应有候选接口');
+  assert.match(routeSrc, /participants: listParticipantOptions\(\)/, '角色候选来自服务层');
+  assert.match(routeSrc, /places: listPlaceOptions\(\)/, '地点候选来自服务层');
+  assert.match(routeSrc, /router\.post\('\/generate'/, '应有 AI 生成接口');
+  assert.match(routeSrc, /generateEventLineDraft\(req\.body/, '生成应走服务层');
+});
+
+// ─────────────────────────────────────────────────────────
+// ⑨ AI 生成草稿（不落库）—— 纯函数收口部分
+// ─────────────────────────────────────────────────────────
+
+test('★★★ AI 草稿收口：正常 JSON 应被解析并归一（stage 走别名归一）', () => {
+  const d = svc.absorbLineDraft(JSON.stringify({
+    name: '绯英的连环画稿约', desc: '编辑部找上门，要她一个月内交一整套稿。',
+    nextText: '先谈条件，再决定接不接', whenText: '第 1 天', stage: '萌芽',
+  }));
+  assert.equal(d.name, '绯英的连环画稿约');
+  assert.match(d.nextText, /先谈条件/);
+  assert.equal(d.stage, '起线', '别名「萌芽」应归一为「起线」');
+});
+
+test('★★ AI 草稿收口要能容忍代码块包裹（模型常犯）', () => {
+  const d = svc.absorbLineDraft('```json\n{"name":"X线","desc":"描述"}\n```');
+  assert.equal(d.name, 'X线');
+  assert.equal(d.desc, '描述');
+});
+
+test('★★★ AI 草稿全空时必须抛错，不得返回空草稿（否则会清空用户已填的表单）', () => {
+  assert.throws(() => svc.absorbLineDraft('完全不是 JSON 的一段话'), /没能读出|请把要点/);
+  assert.throws(() => svc.absorbLineDraft(''), /没能读出|请把要点/);
+  assert.throws(() => svc.absorbLineDraft('{}'), /没能读出|请把要点/);
+});
+
+test('★★ AI 生成只出草稿、不写库（与「修正地点」同一范式）', () => {
+  // 源码扫描：generateEventLineDraft 体内不得出现 createEventLine / INSERT
+  const body = svcSrc.slice(
+    svcSrc.indexOf('export async function generateEventLineDraft'),
+    svcSrc.indexOf('export function absorbLineDraft'),
+  );
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/createEventLine\s*\(/.test(code), '生成函数不应直接建线（那是前端点「保存」后的事）');
+  assert.ok(!/INSERT\s+INTO/i.test(code), '生成函数不应直接写库');
+});

@@ -14,7 +14,8 @@ import { Router } from 'express';
 import {
   LINE_STAGES, TERMINAL_LINE_STAGES, AUTO_LINE_CAPACITY, GRAPH_NODE_LIMIT,
   listEventLines, getEventLine, createEventLine, updateEventLine, deleteEventLine,
-  setEventLinePin, buildLineGraph,
+  setEventLinePin, buildLineGraph, listParticipantOptions, listPlaceOptions,
+  generateEventLineDraft,
 } from '../services/story/eventLineService.js';
 
 const router = Router();
@@ -27,6 +28,18 @@ router.get('/meta', (req, res) => {
     capacity: AUTO_LINE_CAPACITY,
     graphNodeLimit: GRAPH_NODE_LIMIT,
   });
+});
+
+/**
+ * 编辑表单的候选数据（2026-10-07 用户要求：涉及角色/地点改为可检索多选）。
+ * 角色候选**已排除归档角色**；地点候选来自世界地图（唯一真源）。
+ */
+router.get('/options', (req, res) => {
+  try {
+    res.json({ participants: listParticipantOptions(), places: listPlaceOptions() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get('/lines', (req, res) => {
@@ -97,6 +110,23 @@ router.delete('/lines/:id', (req, res) => {
   const ok = deleteEventLine(req.params.id);
   if (!ok) return res.status(404).json({ error: '事件线不存在' });
   res.json({ ok: true });
+});
+
+/**
+ * AI 生成事件线草稿（用户要求「需要一个 AI 生成按钮」）。
+ *
+ * ★ 只出草稿、**不落库** —— 与「修正地点」「修正外观」同一范式：
+ *   结果回给前端填进编辑表单，用户可改，点「保存」才写库。
+ * ⚠ **必须放在 `/lines/:id` 之前**声明也不影响（路径不同），但保持"具体路径在前"的习惯。
+ */
+router.post('/generate', async (req, res) => {
+  try {
+    const draft = await generateEventLineDraft(req.body || {});
+    res.json({ ok: true, draft });
+  } catch (err) {
+    const code = err.statusCode || (/请先写下/.test(err.message) ? 400 : 502);
+    res.status(code).json({ error: err.message });
+  }
 });
 
 export default router;

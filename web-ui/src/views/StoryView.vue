@@ -63,7 +63,7 @@
         <span class="sv-flex"></span>
         <label class="sv-filter">
           <span>按角色筛选</span>
-          <linshe-select v-model="filterPid" size="sm" :options="participantOptions" style="min-width: 140px" />
+          <linshe-select v-model="filterPid" size="sm" :options="participantFilterOptions" style="min-width: 140px" />
         </label>
         <button
           type="button" class="sv-chip" :class="{ on: !includeTerminal }"
@@ -90,7 +90,14 @@
 
     <!-- 新建 / 编辑（同一表单，语义不同：新建不含锁线开关） -->
     <linshe-modal v-model="editorOpen" :title="form.id ? '编辑事件线' : '新建事件线'">
+      <!-- AI 生成入口：只出草稿填进本表单，仍需点「保存」才落库 -->
       <div class="sv-form">
+        <div v-if="!form.id" class="sv-gen-bar">
+          <linshe-button variant="secondary" size="sm" @click="generateOpen = true">
+            ✨ 让 AI 按要点生成
+          </linshe-button>
+          <span class="sv-gen-hint">先选好角色/地点，生成时会一并带上</span>
+        </div>
         <div class="sv-field">
           <label>线名</label>
           <linshe-input v-model="form.name" placeholder="如：绯英的连环画稿约" />
@@ -120,15 +127,23 @@
           <label>下一步<span class="sv-opt">（给下轮生成的推进锚点）</span></label>
           <linshe-input v-model="form.nextText" type="textarea" :rows="2" />
         </div>
-        <div class="sv-row2">
-          <div class="sv-field">
-            <label>涉及角色 ID<span class="sv-opt">（英文逗号分隔）</span></label>
-            <linshe-input :model-value="form.participantText" @update:model-value="form.participantText = $event" placeholder="1, 2, 3" />
-          </div>
-          <div class="sv-field">
-            <label>涉及地点<span class="sv-opt">（英文逗号分隔）</span></label>
-            <linshe-input :model-value="form.placesText" @update:model-value="form.placesText = $event" placeholder="嬉步街, 鸽川大道" />
-          </div>
+        <!-- ⚠ 角色/地点各占**整行**：多选框里会累积多个 chip，挤在半栏里会被压成一条细缝，
+           而且下拉浮层会盖住右侧字段（实测截图确认过）。 -->
+        <div class="sv-field">
+          <label>涉及角色<span class="sv-opt">（输入名字检索，可多选）</span></label>
+          <MultiPickSelect
+            v-model="form.participantValues"
+            :candidates="participantCandidates"
+            placeholder="输入角色名检索…"
+          />
+        </div>
+        <div class="sv-field">
+          <label>涉及地点<span class="sv-opt">（输入检索，可多选；未收录也可直接输入）</span></label>
+          <MultiPickSelect
+            v-model="form.placeValues"
+            :candidates="placeCandidates"
+            placeholder="输入地名检索…"
+          />
         </div>
         <div class="sv-row2">
           <div class="sv-field">
@@ -149,6 +164,15 @@
         <linshe-button variant="primary" :disabled="!form.name.trim() || busy" :loading="busy" @click="save">保存</linshe-button>
       </template>
     </linshe-modal>
+
+    <!-- AI 生成事件线（只出草稿，应用后填进上面的编辑表单） -->
+    <StoryLineGenerateModal
+      v-model="generateOpen"
+      :participant-ids="form.participantValues.map(Number).filter(Number.isFinite)"
+      :places="form.placeValues"
+      :name-of-id="nameOfCharacter"
+      @applied="onDraftApplied"
+    />
   </div>
 </template>
 
@@ -159,7 +183,9 @@ import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import MultiPickSelect from '../components/ui/MultiPickSelect.vue'
 import StoryGraphCanvas from '../components/story/StoryGraphCanvas.vue'
+import StoryLineGenerateModal from '../components/story/StoryLineGenerateModal.vue'
 
 const toastFn = inject('toast', null)
 
@@ -171,22 +197,37 @@ const graph = ref({ nodes: [], edges: [] })
 const graphTotal = ref(0)
 const graphTruncated = ref(0)
 const canvasRef = ref(null)
+const generateOpen = ref(false)
 /** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
 const stages = ref([])
 /** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
 const filterPid = ref('')
 const includeTerminal = ref(true)
+/** 编辑表单候选：后端给（角色**已排除归档**、地点来自世界地图唯一真源） */
+const participantOptions = ref([])
+const placeOptions = ref([])
 
 const stageOptions = computed(() => stages.value.map(s => ({ label: s, value: s })))
-/** 参与角色下拉：从现有线里聚合，附角色 id（第一版不拉角色名，避免多一个请求） */
-const participantOptions = computed(() => {
-  const ids = new Set()
-  for (const l of lines.value) for (const id of (l.participantIds || [])) ids.add(id)
-  return [
-    { label: '全部角色', value: '' },
-    ...[...ids].sort((a, b) => a - b).map(id => ({ label: `角色 #${id}`, value: String(id) })),
-  ]
-})
+
+/** 多选组件候选：角色值用 id（落库要 id），展示用人名（用户不该记 id） */
+const participantCandidates = computed(() => participantOptions.value.map(p => ({
+  value: String(p.id), label: p.name, hint: '',
+})))
+/** 地点候选带归属提示 —— 重名很常见（多个区都有「中心广场」），不带归属用户选不准 */
+const placeCandidates = computed(() => placeOptions.value.map(p => ({
+  value: p.name, label: p.name, hint: [p.region, p.area].filter(Boolean).join(' · '),
+})))
+
+function nameOfCharacter(id) {
+  return participantOptions.value.find(p => String(p.id) === String(id))?.name || `#${id}`
+}
+
+/** 节点图按角色筛选的下拉：用真实角色候选（显示名字，而不是 `角色 #0`） */
+const participantFilterOptions = computed(() => [
+  { label: '全部角色', value: '' },
+  ...participantOptions.value.map(p => ({ label: p.name, value: String(p.id) })),
+])
+
 const deriveOptions = computed(() => [
   { label: '（无）', value: '' },
   ...lines.value.filter(l => l.id !== form.id).map(l => ({ label: l.name || `#${l.id}`, value: String(l.id) })),
@@ -194,7 +235,10 @@ const deriveOptions = computed(() => [
 
 const form = reactive({
   id: null, name: '', stage: '起线', whenText: '', agency: 'world',
-  desc: '', nextText: '', participantText: '', placesText: '', derivedFrom: '',
+  desc: '', nextText: '', derivedFrom: '',
+  /** 多选值：角色存**字符串 id**（与 MultiPickSelect 的字符串值契约一致，提交时转数字） */
+  participantValues: [],
+  placeValues: [],
   stall: false, adult: false,
 })
 
@@ -205,9 +249,13 @@ function stageClass(s) {
 async function load() {
   loading.value = true
   try {
-    const [meta, ls] = await Promise.all([api.getStoryMeta(), api.listStoryLines()])
+    const [meta, ls, opts] = await Promise.all([
+      api.getStoryMeta(), api.listStoryLines(), api.getStoryOptions(),
+    ])
     stages.value = Array.isArray(meta?.stages) ? meta.stages : []
     lines.value = Array.isArray(ls?.lines) ? ls.lines : []
+    participantOptions.value = Array.isArray(opts?.participants) ? opts.participants : []
+    placeOptions.value = Array.isArray(opts?.places) ? opts.places : []
     await loadGraph()
   } catch (err) {
     toastFn?.('读取事件线失败：' + (err?.message || ''), 'error')
@@ -242,18 +290,35 @@ function fitGraph() { canvasRef.value?.fit() }
 function openCreate() {
   Object.assign(form, {
     id: null, name: '', stage: stages.value[0] || '起线', whenText: '', agency: 'world',
-    desc: '', nextText: '', participantText: '', placesText: '', derivedFrom: '',
+    desc: '', nextText: '', derivedFrom: '',
+    participantValues: [], placeValues: [],
     stall: false, adult: false,
   })
   editorOpen.value = true
 }
 
+/**
+ * 打开编辑。
+ *
+ * ⚠ **历史数据里的角色 id 可能已不在候选里**（角色被删/被归档 —— 归档角色会被候选排除）。
+ *   这时不能把它悄悄丢掉：人工编辑不受自动护栏约束（项目红线 L10），
+ *   已存在的值必须原样保留，只是候选下拉里找不到它而已。
+ *   做法：把「不在候选里的既有值」也作为候选补进去（标「已不在列表」）。
+ */
 function openEdit(l) {
+  const known = new Set(participantOptions.value.map(p => String(p.id)))
+  const extraParticipants = (l.participantIds || [])
+    .map(String)
+    .filter(id => !known.has(id))
+    .map(id => ({ id: Number(id), name: `#${id}（已不在角色列表）` }))
+  if (extraParticipants.length) {
+    participantOptions.value = [...participantOptions.value, ...extraParticipants]
+  }
   Object.assign(form, {
     id: l.id, name: l.name, stage: l.stage, whenText: l.when || '', agency: l.agency,
     desc: l.desc, nextText: l.next,
-    participantText: (l.participantIds || []).join(', '),
-    placesText: (l.places || []).join(', '),
+    participantValues: (l.participantIds || []).map(String),
+    placeValues: (l.places || []).map(String),
     derivedFrom: l.derivedFrom ? String(l.derivedFrom) : '',
     stall: !!l.stall, adult: !!l.adult,
   })
@@ -261,6 +326,18 @@ function openEdit(l) {
 }
 
 const editorOpen = ref(false)
+
+/**
+ * AI 草稿应用：把生成的字段填进编辑表单。
+ * ⚠ **只填非空字段**，不覆盖用户已填的内容（与「修正地点」同构）。
+ */
+function onDraftApplied(patch = {}) {
+  if (patch.name) form.name = patch.name
+  if (patch.desc) form.desc = patch.desc
+  if (patch.nextText) form.nextText = patch.nextText
+  if (patch.whenText) form.whenText = patch.whenText
+  toastFn?.('已填入编辑表单，确认后点「保存」', 'success')
+}
 
 async function save() {
   if (busy.value) return
@@ -276,8 +353,9 @@ async function save() {
       stall: form.stall,
       adult: form.adult,
       derivedFrom: form.derivedFrom ? Number(form.derivedFrom) : null,
-      participantIds: form.participantText.split(/[,，]/).map(s => Number(s.trim())).filter(Number.isFinite),
-      places: form.placesText.split(/[,，]/).map(s => s.trim()).filter(Boolean),
+      // 多选值是字符串（组件契约）；角色要转数字 id，地点保持名字（后端按名字存）
+      participantIds: form.participantValues.map(Number).filter(Number.isFinite),
+      places: form.placeValues.map(s => String(s).trim()).filter(Boolean),
     }
     if (form.id) await api.updateStoryLine(form.id, payload)
     else await api.createStoryLine(payload)
@@ -380,6 +458,13 @@ onMounted(load)
   overflow: hidden;
 }
 .sv-form { display: flex; flex-direction: column; gap: 12px; }
+/* AI 生成入口：只在「新建」时出现（编辑已有线时用不着） */
+.sv-gen-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.sv-gen-hint { font-size: var(--fs-xs); color: var(--text-secondary); }
 .sv-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sv-field { display: flex; flex-direction: column; gap: 6px; }
 .sv-field label { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
