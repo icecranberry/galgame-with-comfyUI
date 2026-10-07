@@ -193,7 +193,7 @@ function assertNoCycle(id, parentId) {
 function membersOf(factionId) {
   return db().prepare(`
     SELECT m.id, m.character_id, m.role, m.note,
-           c.display_name, c.name AS char_name, COALESCE(c.archived, 0) AS archived
+           c.display_name, c.name AS char_name, c.avatar_path, COALESCE(c.archived, 0) AS archived
     FROM faction_members m
     JOIN characters c ON c.id = m.character_id
     WHERE m.faction_id = ?
