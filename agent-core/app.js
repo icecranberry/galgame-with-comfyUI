@@ -7,40 +7,21 @@ import { fileURLToPath } from 'url';
 import net from 'node:net';
 import { config, autoDetectWorkflowMode, activateLlmProfile, getActiveProfileId } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
+import {
+  loadFeatureMigrations,
+} from './src/db/migrations/index.js';
+import {
+  runRegisteredMigrations,
+  listRegisteredMigrations,
+  isRegistryLoaded,
+} from './src/db/migrationRegistry.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
 import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
-import chatRoutes from './src/routes/chat.js';
-import memoryRoutes from './src/routes/memory.js';
-import imagesRoutes from './src/routes/images.js';
-import charactersRoutes from './src/routes/characters.js';
-import emojiRoutes from './src/routes/emoji.js';
-import userEmojiRoutes from './src/routes/userEmoji.js';
-import configRoutes from './src/routes/config.js';
-import momentsRoutes from './src/routes/moments.js';
-import relationshipsRoutes from './src/routes/relationships.js';
-import userRelationshipsRoutes from './src/routes/userRelationships.js';
-import portraitsRoutes from './src/routes/portraits.js';
-import notificationsRoutes from './src/routes/notifications.js';
-import eventsRoutes from './src/routes/events.js';
-import streamRoutes from './src/routes/stream.js';
-import expressionStandingRoutes from './src/routes/expressionStandings.js';
-import scheduleRoutes from './src/routes/schedule.js';
-import workflowsRoutes from './src/routes/workflows.js';
-import mailboxRoutes from './src/routes/mailbox.js';
-import groupsRoutes from './src/routes/groups.js';
-import libraryRoutes from './src/routes/library.js';
-import itemsRoutes from './src/routes/items.js';
-import lootRoutes from './src/routes/loot.js';
-import newspaperRoutes from './src/routes/newspaper.js';
-// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary 路由、本地新增 media/cleanup 路由 —— 都保留。
-import diaryRoutes from './src/routes/diary.js';
-import mediaRoutes from './src/routes/media.js';
-import cleanupRoutes from './src/routes/cleanup.js';
-import worldMapRoutes from './src/routes/worldMap.js';
-import townRoutes from './src/routes/town.js';
-import characterReactionsRoutes from './src/routes/characterReactions.js';
+// API 路由统一由 src/routes/_autoMount.js 自动挂载（架构加固 P2）。
+// 存量挂载点迁移到 LEGACY_MOUNTS 表，新增路由走约定式 —— 都不需要在本文件出现。
+import { autoMountRoutes } from './src/routes/_autoMount.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -120,39 +101,15 @@ app.use('/avatars', express.static(path.join(DATA_DIR, 'avatars'), { maxAge: '30
 // 小镇像素素材（独立于 data/images，不进图库/压缩扫描；不带强缓存，素材重生成后刷新即生效）
 app.use('/town-assets', express.static('data/town/assets'));
 
-// API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
-app.use('/api', wrapRouterAsync(expressionStandingRoutes));
-app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
-app.use('/api/memory', wrapRouterAsync(memoryRoutes));
-app.use('/api/images', wrapRouterAsync(imagesRoutes));
-app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
-app.use('/api/user-emoji', wrapRouterAsync(userEmojiRoutes));    // 我的表情库（用户自己的，跨角色通用）
-app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
-app.use('/api/config', wrapRouterAsync(configRoutes));
-app.use('/api/moments', wrapRouterAsync(momentsRoutes));
-app.use('/api/relationships', wrapRouterAsync(relationshipsRoutes));
-app.use('/api/user-relationships', wrapRouterAsync(userRelationshipsRoutes));
-app.use('/api/portraits', wrapRouterAsync(portraitsRoutes));
-app.use('/api/notifications', wrapRouterAsync(notificationsRoutes));
-app.use('/api/events', wrapRouterAsync(eventsRoutes));
-app.use('/api/stream', wrapRouterAsync(streamRoutes));
-app.use('/api/schedule', wrapRouterAsync(scheduleRoutes));
-app.use('/api/workflows', wrapRouterAsync(workflowsRoutes));
-app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
-app.use('/api/groups', wrapRouterAsync(groupsRoutes));
-app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
-app.use('/api/items', wrapRouterAsync(itemsRoutes));
-app.use('/api/loot', wrapRouterAsync(lootRoutes));       // 宝箱橱窗（分页候选 + 带走）
-app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
-// ⚠ 2026-10-08 合并 v3.7.0：上游挂载 diaries、本地挂载 media/cleanup —— 都保留。
-app.use('/api/diaries', wrapRouterAsync(diaryRoutes));         // /api/diaries/:id 角色日记（后台生成 + SSE）
-app.use('/api/media', wrapRouterAsync(mediaRoutes));           // 媒体内容页（传媒/板块/帖子/刷新）
-app.use('/api/cleanup', wrapRouterAsync(cleanupRoutes));       // 按时间清理图片与内容记录（两段式：survey → purge）
-app.use('/api/worldmap', wrapRouterAsync(worldMapRoutes));     // 「地图」页：世界地图骨架（叙事地理，非游戏网格图）
-app.use('/api/town', wrapRouterAsync(townRoutes));
-// 角色操作反馈：/api/character-reactions/instant 低概率即时反应（额度 + 幂等在后端）
-app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));
-
+// ── API 路由：统一走自动挂载（架构加固 P2）──────────────────────
+//   · 存量挂载点逐字保留在 LEGACY_MOUNTS 里，行为与改造前完全一致；
+//   · 新路由按约定式自动登记：放 src/routes/<名字>.js，挂载点 = /api/<kebab 文件名>；
+//     要自定义挂载点就在该文件里 `export const mount = '/api/xxx'`；
+//   · 挂载后模块内部会复核"声明表 vs app 实际挂载面"，不一致直接抛，防静默漏挂。
+// 顺序敏感的挂载点（/api/characters/emoji 必须先于 /api/characters）由表内行序保证，勿重排。
+const routeMount = await autoMountRoutes(app, { wrapRouterAsync });
+console.log(`[routes] 已挂载 ${routeMount.legacy.length} 个存量路由`
+  + (routeMount.convention.length ? ` + ${routeMount.convention.length} 个约定式路由` : ''));
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 
 // 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
@@ -190,6 +147,25 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// ── 可插拔迁移（架构加固 P1）──────────────────────────────
+// 新功能的建表/加列走 src/db/migrations/*.migration.js，不再改 db/index.js。
+// 三条不可回退的约定：
+//   · 单条迁移失败**不阻断启动**（留痕 + 下次重试），由 registry 内部隔离；
+//   · 迁移为空**不能当成"没迁移"**——若清单没加载成功要显式喊出来（红线 0）；
+//   · 必须在 getDb() 之后（台账表要建在真库上）。
+try {
+  await loadFeatureMigrations();
+  if (!isRegistryLoaded()) {
+    console.warn('[migration] ⚠ 迁移清单未加载（为什么没加载？别当成本轮没有迁移）');
+  }
+  const reg = runRegisteredMigrations(getDb());
+  if (reg.applied.length) console.log(`[migration] 本轮应用 ${reg.applied.length} 个新迁移`);
+  else if (listRegisteredMigrations().length === 0) console.log('[migration] 插件式迁移清单为空（正常：存量迁移仍在 db/index.js）');
+} catch (err) {
+  // 机制本身坏了也不许拖垮启动（迁移只是数据修补，不是服务可用性的前提）
+  console.error('[migration] 迁移机制异常（不阻断启动）:', err?.message || err);
+}
 
 // 恢复激活的 LLM profile 到内存 config。
 // 不做这一步的话，config.llm 会一直停在 .env 的值（LLM_API_KEY），而
