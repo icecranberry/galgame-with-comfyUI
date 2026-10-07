@@ -5,6 +5,8 @@ import { getMemorySettings, MEMORY_MODE } from './memoryConfig.js';
 import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
 import { createMemoryIndexWorker } from './memoryIndexWorker.js';
+// ★ T3 写入门闸（2026-10-07）：拒绝"一批 AI 结果把既有记忆几乎全失效"的畸形批次。
+import { assertAiOverwrite } from '../writeGuard.js';
 
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
@@ -156,6 +158,25 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   }
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
+
+  // ★ T3 写入门闸（默认关闭，见 services/writeGuard.js）：
+  //   update/merge 会把被引用的旧记忆置失效（supersede）。若模型给出一份"把既有记忆一网打尽"的
+  //   退化结果（如把全部 active 记忆都拿去 merge），等价于整集清空 —— 这类静默数据损失必须拦。
+  //   ⚠ 只查"整体覆盖"，不查"空结果"：空 actions 在本函数本就是**无操作**（不是清空），
+  //     误判会把"模型正确地回答没有可记之事"也拦掉。
+  {
+    const existingCount = db
+      .prepare(`SELECT COUNT(*) AS c FROM memory_fragments WHERE conversation_id = ? AND status = 'active'`)
+      .get(conversationId)?.c || 0;
+    const supersededCount = normalized.reduce((n, item) => n + item.sourceMemoryIds.length, 0);
+    assertAiOverwrite({
+      label: '记忆整理',
+      existingCount,
+      incomingCount: supersededCount,
+      guardEmpty: false,
+    });
+  }
+
   const profile = getPreferredMemoryEmbeddingProfile();
   const created = [];
   const transaction = db.transaction(() => {
