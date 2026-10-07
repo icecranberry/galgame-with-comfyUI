@@ -12,7 +12,6 @@
  */
 import { createHash } from 'node:crypto';
 import { townError } from './townEventService.js';
-import { townCapabilities, defaultTownCapabilities } from './townCapabilities.js';
 import { registryVersion, SCHEMA_VERSION } from './townBuildingFeatureRegistry.js';
 import { stateProfileCatalog } from './buildingFeatures/state.js';
 
@@ -67,11 +66,11 @@ export function resolveBuildingFeatureSource(context, { mapId, locationKey }) {
   // 用户手填优先；素材 desc 是绘图提示词时不能冒充用途（置空并提示补充）
   const assetDescUsable = meta.desc && !isDrawingPrompt(meta.desc);
   const descriptionSource = location.feature_desc ? 'location.feature_desc'
+    : meta.featureDescription ? 'asset.meta.featureDescription'
     : assetDescUsable ? 'asset.meta.desc'
     : meta.desc ? 'asset.meta.drawing_prompt' : null;
-  const description = location.feature_desc || (assetDescUsable ? meta.desc : '');
+  const description = location.feature_desc || meta.featureDescription || (assetDescUsable ? meta.desc : '');
 
-  const capabilities = townCapabilities(location, defaultTownCapabilities(location.business_kind));
 
   const source = {
     schemaVersion: SCHEMA_VERSION,
@@ -95,7 +94,6 @@ export function resolveBuildingFeatureSource(context, { mapId, locationKey }) {
     worldSettingId: mapRow.world_setting_id ?? null,
     // 世界观语义版本：只跟世界观绑定走，重排/改图不参与（计划 §3.3 重排不漂移）
     worldVersion: mapRow.world_setting_id ? `setting:${mapRow.world_setting_id}` : 'default',
-    capabilities,
     special: !!meta.special,
     catalogs: {
       stateProfiles: stateProfileCatalog(),
@@ -105,15 +103,15 @@ export function resolveBuildingFeatureSource(context, { mapId, locationKey }) {
   return source;
 }
 
-/** sourceHash：玩法相关的标题/描述、世界观语义版本、有效权限、契约版本（计划 §3.3）。
+/** sourceHash：玩法相关的标题/描述、世界观语义版本、契约版本（计划 §3.3）。
  * 建筑无主：不含任何经营者维度，居民变动不影响配置有效性。 */
-export function computeSourceHash(source) {
+export function computeSourceHash(source, legacyCapabilities) {
   return createHash('sha256').update(JSON.stringify({
     contractVersion: GENERATION_CONTRACT_VERSION,
     title: source.title,
     description: source.description,
     worldVersion: source.worldVersion,
-    capabilities: source.capabilities,
+    ...(legacyCapabilities === undefined ? {} : { capabilities: legacyCapabilities }),
   })).digest('hex');
 }
 
@@ -122,7 +120,14 @@ export function computeSourceHash(source) {
  */
 export function sourceDrifted(source, profile) {
   if (!profile?.source_hash) return false;
-  return profile.source_hash !== source.sourceHash;
+  if (profile.source_hash === source.sourceHash) return false;
+  // 兼容旧配置摘要：废弃权限字段本身不应使已经生成的功能失效。
+  // 仅当其余用途/标题/世界观字段仍逐字节相同时接受旧摘要。
+  const legacy = ['service', 'trade', 'work'];
+  for (let mask = 0; mask < 8; mask++) {
+    if (profile.source_hash === computeSourceHash(source, legacy.filter((_, i) => mask & (1 << i)))) return false;
+  }
+  return true;
 }
 
 /** 当前地图上的候选建筑清单（special 优先；供后台建档与管理页展示，不触发任何 LLM） */

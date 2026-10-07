@@ -177,7 +177,7 @@ export const BUILDING_FEATURE_TEMPLATES = {
     // 服务品类：店铺在选项目前标给玩家看的归类
     categoryLabel: '商品',
     semanticDescription: '出售建档资源目录中的真实商品：扣玩家金币、扣经营者真实库存、物品进背包。',
-    requiredCapabilities: ['trade'], supportedTargetKinds: [],
+    requiredCapabilities: [], supportedTargetKinds: [],
     resourceRequirements: 'operator_stock', executionMode: 'deterministic',
     costPolicy: { allowedTiers: ['free'], defaultTier: 'free', offerTiers: PAID_TIERS },
     cooldownPolicy: { kind: 'stock' },
@@ -204,7 +204,7 @@ export const BUILDING_FEATURE_TEMPLATES = {
     // 服务品类：店铺在选项目前标给玩家看的归类
     categoryLabel: '交换',
     semanticDescription: '玩家用一个背包物品单位换经营者一个商品单位；固定一件换一件，无手续费。',
-    requiredCapabilities: ['trade'], supportedTargetKinds: [],
+    requiredCapabilities: [], supportedTargetKinds: [],
     resourceRequirements: 'operator_stock', executionMode: 'deterministic',
     costPolicy: { allowedTiers: ['free'], defaultTier: 'free' },
     cooldownPolicy: { kind: 'stock' },
@@ -231,7 +231,7 @@ export const BUILDING_FEATURE_TEMPLATES = {
     // 服务品类：店铺在选项目前标给玩家看的归类
     categoryLabel: '回收',
     semanticDescription: '回收玩家背包中一件合格物品并支付金币；报价由服务端估值档位计算。',
-    requiredCapabilities: ['trade'], supportedTargetKinds: [],
+    requiredCapabilities: [], supportedTargetKinds: [],
     resourceRequirements: 'operator', executionMode: 'deterministic',
     costPolicy: { allowedTiers: ['free'], defaultTier: 'free', valuationTiers: PAID_TIERS },
     cooldownPolicy: { kind: 'none' },
@@ -358,7 +358,7 @@ export const BUILDING_FEATURE_TEMPLATES = {
     // 服务品类：店铺在选项目前标给玩家看的归类
     categoryLabel: '抽奖',
     semanticDescription: '从有限库存奖池中抽取并交付一个结果；服务端固定随机种子，空奖池禁止扣款。',
-    requiredCapabilities: ['trade'], supportedTargetKinds: [],
+    requiredCapabilities: [], supportedTargetKinds: [],
     resourceRequirements: 'operator_stock', executionMode: 'deterministic',
     costPolicy: { allowedTiers: ['free', ...PAID_TIERS], defaultTier: 'basic' },
     cooldownPolicy: { kind: 'daily', defaultLimit: 1 },

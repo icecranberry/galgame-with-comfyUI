@@ -417,6 +417,26 @@ export class Hd2dTownRenderer {
     const v = new T.Vector3(point.x, point.y || 0, point.z).project(this.camera)
     return { x: (v.x + 1) * this.width / 2, y: (1 - v.y) * this.height / 2 }
   }
+  objectLabelTop(key) {
+    const root = this.objects.get(key)
+    if (!root) return null
+    root.updateWorldMatrix(true, true)
+    let left = Infinity, right = -Infinity, top = Infinity
+    root.traverse(mesh => {
+      if (!mesh.geometry || (mesh !== root && !mesh.userData.volumePart)) return
+      if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox()
+      const box = mesh.geometry.boundingBox
+      for (const x of [box.min.x, box.max.x]) {
+        for (const y of [box.min.y, box.max.y]) {
+          for (const z of [box.min.z, box.max.z]) {
+            const p = this.project(new T.Vector3(x, y, z).applyMatrix4(mesh.matrixWorld))
+            left = Math.min(left, p.x); right = Math.max(right, p.x); top = Math.min(top, p.y)
+          }
+        }
+      }
+    })
+    return Number.isFinite(top) ? { x: (left + right) / 2, y: top } : null
+  }
   pick(point, { groundOnly = false, agentsOnly = false } = {}) {
     this.scene.updateMatrixWorld(true)
     this.ray.setFromCamera(new T.Vector2(point.x / this.width * 2 - 1, 1 - point.y / this.height * 2), this.camera)

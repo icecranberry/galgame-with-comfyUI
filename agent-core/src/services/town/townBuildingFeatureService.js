@@ -162,10 +162,6 @@ export function compileGeneration(db, source, generated) {
       if (feature.templateVersion !== template.version) throw new Error('templateVersion 与目录不一致');
       if (typeof feature.title !== 'string' || feature.title.length < 2 || feature.title.length > 16) throw new Error('title 长度非法');
       if (typeof feature.description !== 'string' || feature.description.length < 20 || feature.description.length > 80) throw new Error('description 长度非法');
-      // 权限：模板要求的能力必须在建筑有效权限内（计划 §3.3：权限不足不执行）
-      for (const capability of template.requiredCapabilities) {
-        if (!source.capabilities.includes(capability)) throw new Error(`需要 ${capability} 权限`);
-      }
       // 建筑一律无主：不检查经营者，收支走建筑自己的 business 账户
       // 证据：source 为合法路径，quote 为原文精确子串（计划 §6.2）
       const evidence = feature.evidence;
@@ -210,7 +206,7 @@ export function compileGeneration(db, source, generated) {
         supportedTargetKinds: template.supportedTargetKinds,
         cooldownPolicy: template.cooldownPolicy,
         costPolicy: template.costPolicy,
-        requiredCapabilities: template.requiredCapabilities,
+        requiredCapabilities: [], // 兼容旧配置结构；建筑模板不再受 NPC 职能限制。
       });
     } catch (err) {
       if (err?.code === 'TEMPLATE_UNAVAILABLE') throw err;
@@ -291,7 +287,6 @@ export function getBuildingFeaturesView(context, { mapId, locationKey }) {
     priceTier: feature.priceTier,
     params: feature.params,
     presentation: feature.presentation,
-    capabilityDenied: feature.requiredCapabilities.some(c => !source.capabilities.includes(c)),
     targets: feature.supportedTargetKinds.some(k => k.startsWith('character')) ? targets : [],
   }));
   return {
@@ -484,7 +479,7 @@ export function templateCatalogForPrompt() {
     id: template.id,
     version: template.version,
     semanticDescription: template.semanticDescription,
-    requiredCapabilities: template.requiredCapabilities,
+    requiredCapabilities: [], // 兼容旧配置结构；建筑模板不再受 NPC 职能限制。
     supportedTargetKinds: template.supportedTargetKinds,
     costPolicy: template.costPolicy,
     paramsExample: template.paramsExample,

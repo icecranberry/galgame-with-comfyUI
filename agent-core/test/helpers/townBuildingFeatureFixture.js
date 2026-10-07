@@ -3,6 +3,7 @@
  * 遵循 docs/testing.md：不碰用户实际钱包、角色或素材。
  */
 import assert from 'node:assert/strict';
+import { getTemplate } from '../../src/services/town/townBuildingFeatureRegistry.js';
 
 export async function setupTownEnvironment(t) {
   process.env.DB_PATH = ':memory:';
@@ -109,7 +110,7 @@ export async function installCompiledConfig(env, source, generated, { status } =
         JSON.stringify(Object.fromEntries(compiled.resources.map(r => [r.key, r]))));
   }).immediate();
   // 与生产生成器同口径：交易类功能激活时做一次性开业配置（幂等）
-  const tradeFeatures = compiled.features.filter(f => f.requiredCapabilities.includes('trade'));
+  const tradeFeatures = compiled.features.filter(f => ['operator', 'operator_stock'].includes(getTemplate(f.templateId)?.resourceRequirements));
   if (tradeFeatures.length) {
     const { economy, scope } = env.runtime.getTownEconomyContext();
     const resourceKeys = new Set();

@@ -125,44 +125,12 @@ test('store leads, special stories and direct purchases share one interaction lo
   db.prepare('UPDATE town_npcs SET capabilities_json=? WHERE id=?').run('["trade"]', ids[5]);
   assert.ok(!interaction.getTownInteractions(target).catalog.some(item => item.kind === 'story'),
     'a trade-only resident no longer offers a personal encounter');
-  assert.ok(interaction.getTownInteractions(building).catalog.some(item => item.kind === 'story'),
-    'building permission is independent from its employee');
-  assert.ok(interaction.getTownInteractions(building).catalog.some(item => item.kind === 'service'),
-    'service leads belong to the building, not the employee');
-  const buildingOffer = interaction.offerTownInteraction(building, `story:${ids[5]}`, scope);
-  await assert.rejects(interaction.respondTownInteraction(target, buildingOffer.requestId, 'accept', scope), { code: 'REQUEST_NOT_FOUND' });
-  assert.ok(!interaction.getTownInteractions(target).requests.some(item => item.requestId === buildingOffer.requestId));
-  db.prepare("UPDATE town_npc_events SET status='completed' WHERE id=?").run(storyRawId);
-  assert.ok(!interaction.getTownInteractions(neighbor).requests.some(item => item.requestId === story.requestId),
-    'a finished story receipt no longer renders as continue');
-  const beforeEvents = db.prepare('SELECT count(*) n FROM town_npc_events').get().n;
-  await assert.rejects(interaction.respondTownInteraction(building, buildingOffer.requestId, 'accept', scope, {
-    generateNpcStory: async (_npc, options) => {
-      db.prepare('UPDATE town_locations SET capabilities_json=? WHERE key=?').run('["trade"]', places[5].key);
-      options.beforePersist();
-      assert.fail('revoked service permission must never persist a generated event');
-    },
-  }), { code: 'REQUEST_UNAVAILABLE' });
-  assert.equal(db.prepare('SELECT count(*) n FROM town_npc_events').get().n, beforeEvents);
-  assert.equal(interaction.getTownInteractions(building).requests[0].status, 'offered');
+  const buildingView = interaction.getTownInteractions(building);
+  assert.deepEqual(buildingView.capabilities, [], '建筑不再拥有旧 NPC 职能');
+  assert.deepEqual(buildingView.catalog, [], '建筑不再提供旧服务/交易/奇遇目录');
   assert.throws(() => interaction.offerTownInteraction(building, `story:${ids[5]}`, scope), { code: 'REQUEST_UNAVAILABLE' });
-  // Restoring the permission resumes the original invitation; it does not produce another request.
-  db.prepare('UPDATE town_locations SET capabilities_json=? WHERE key=?').run('["service"]', places[5].key);
-  const completed = await interaction.respondTownInteraction(building, buildingOffer.requestId, 'accept', scope, {
-    generateNpcStory: async (npc, options) => db.transaction(() => {
-      options.beforePersist();
-      assert.equal(npc.id, ids[5], 'the building encounter is anchored to its resident');
-      const eventId = Number(db.prepare("INSERT INTO town_npc_events(npc_id,event_type_key,status,title,expires_at) VALUES(?,'town.custom','open','店铺奇遇',?)")
-        .run(npc.id, '2026-09-09 03:00:00').lastInsertRowid);
-      options.afterPersist(eventId);
-    }).immediate(),
-  });
-  assert.equal(completed.status, 'accepted');
-  const completedRawId = Number(String(completed.result.eventId).slice(5));
-  assert.equal(interaction.townStoryOrigins(db).get(completedRawId).locationKey, places[5].key);
-  assert.equal(interaction.townStoryOrigins(db).get(completedRawId).sourceName, places[5].name);
-  assert.ok(interaction.getTownInteractions(building).catalog.some(item => item.key === `story:${ids[5]}`),
-    'the encounter keeps following the resident behind the counter');
+  db.prepare('UPDATE town_locations SET capabilities_json=? WHERE key=?').run('["service","trade","work"]', places[5].key);
+  assert.deepEqual(interaction.getTownInteractions(building).capabilities, [], '旧字段也不能重新启用建筑职能');
   db.prepare('UPDATE town_npcs SET town_enabled=0 WHERE id=?').run(ids[5]);
   const { createTownActorRegistry } = await import('../src/services/town/townActorRegistry.js');
   createTownActorRegistry(db).synchronize();

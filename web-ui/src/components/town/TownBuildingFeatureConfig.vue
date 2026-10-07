@@ -134,7 +134,8 @@ const STATUS_LABELS = {
 }
 const statusLabel = building => STATUS_LABELS[building.status] || building.status
 const SOURCE_LABELS = {
-  'location.feature_desc': '手工描述', 'asset.meta.desc': '素材描述',
+  'location.feature_desc': '建筑用途', 'asset.meta.desc': '素材描述',
+  'asset.meta.featureDescription': '初始化用途',
 }
 /** 描述来源：生成时用店名回填的那份，与玩家手填区分开，避免被当成用户写过的内容 */
 const sourceLabel = building => {

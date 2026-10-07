@@ -1737,30 +1737,53 @@ function venueBadgeStatus(venue) {
   return 'open'
 }
 
+const buildingBadges = computed(() => {
+  const map = renderMap.value
+  const places = map?.locations?.length ? map.locations : (locations.value || [])
+  const assets = new Map((map?.assets || []).map(asset => [asset.id, asset]))
+  const venues = new Map((lifeVenues.value || []).map(venue => [venue.key, venue]))
+  const covered = new Set()
+  const badges = []
+  for (const [index, object] of (map?.layers?.objects || []).entries()) {
+    const asset = assets.get(object.assetId)
+    const loc = places.find(place => place.objectId != null && place.objectId === object.id)
+    const venue = loc && venues.get(loc.key)
+    if (!(asset?.kind === 'building' && asset.meta?.special) && !venue?.business) continue
+    if (loc) covered.add(loc.key)
+    badges.push({ key: `object:${object.id ?? index}`, objectKey: object.id ?? index,
+      name: loc?.name || asset?.name || venue?.name || '特殊建筑', venue, loc })
+  }
+  for (const venue of venues.values()) {
+    if (!venue.business || covered.has(venue.key)) continue
+    const loc = places.find(place => place.key === venue.key)
+    if (loc) badges.push({ key: `venue:${venue.key}`, name: venue.name || loc.name || venue.key, venue, loc })
+  }
+  return badges
+})
+
 function drawVenueBadges(ctx, nowMs) {
-  if (editing.value || !lifeVenues.value?.length) return
+  if (editing.value) return
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? false
   const seen = new Set()
-  for (const venue of lifeVenues.value) {
-    if (!venue?.business || !venue.key) continue
-    const loc = (locations.value || []).find(l => l.key === venue.key)
-    if (!loc || !Number.isInteger(loc.x) || !Number.isInteger(loc.y)) continue
-    const status = venueBadgeStatus(venue)
-    seen.add(venue.key)
-    const meta = venueBadgeMeta.get(venue.key)
-    if (!meta || meta.status !== status) venueBadgeMeta.set(venue.key, { status, since: nowMs })
-    const alpha = reducedMotion ? 1 : Math.min(1, (nowMs - venueBadgeMeta.get(venue.key).since) / 300)
-    const center = cellCenterWorld(loc.x, loc.y)
-    const px = center.x
-    const py = center.y - HH * 2.35
+  for (const badge of buildingBadges.value) {
+    const { venue, loc, key, name } = badge
+    const top = badge.objectKey != null ? hdRenderer?.objectLabelTop(badge.objectKey) : null
+    if (!top && (!loc || !Number.isInteger(loc.x) || !Number.isInteger(loc.y))) continue
+    const status = venue?.business ? venueBadgeStatus(venue) : null
+    seen.add(key)
+    const meta = venueBadgeMeta.get(key)
+    if (!meta || meta.status !== status) venueBadgeMeta.set(key, { status, since: nowMs })
+    const alpha = reducedMotion ? 1 : Math.min(1, (nowMs - venueBadgeMeta.get(key).since) / 300)
+    const center = top ? null : cellCenterWorld(loc.x, loc.y)
+    const px = top ? (top.x - cssW / 2) / cam.zoom + cam.x : center.x
+    const py = top ? (top.y - cssH / 2) / cam.zoom + cam.y - 14 : center.y - HH * 2.35
 
-    const name = venue.name || venue.key
-    const eats = venue.offers?.includes('eat')
+    const eats = venue?.offers?.includes('eat')
     const statusText = VENUE_STATUS_TEXT[status]
     const detail = status === 'open' && eats && Number.isFinite(venue.seatsUsed)
       ? `座位 ${venue.seatsUsed}/${venue.seatsTotal ?? '?'}`
       : statusText
-    const label = `${name} · ${detail}`
+    const label = detail ? `${name} · ${detail}` : name
     ctx.save()
     ctx.globalAlpha = alpha
     ctx.font = '10px "HarmonyOS Sans SC", sans-serif'
@@ -1785,11 +1808,13 @@ function drawVenueBadges(ctx, nowMs) {
     ctx.lineWidth = 1
     ctx.stroke()
     // 名字墨色，状态词用语义色
-    const namePart = `${name} · `
+    const namePart = detail ? `${name} · ` : name
     ctx.fillStyle = '#4a3a2c'
     ctx.fillText(namePart, px - (w - 14) / 2 + ctx.measureText(namePart).width / 2, py + 0.5)
-    ctx.fillStyle = VENUE_STATUS_COLOR[status]
-    ctx.fillText(detail, px + w / 2 - 7 - ctx.measureText(detail).width / 2, py + 0.5)
+    if (detail) {
+      ctx.fillStyle = VENUE_STATUS_COLOR[status]
+      ctx.fillText(detail, px + w / 2 - 7 - ctx.measureText(detail).width / 2, py + 0.5)
+    }
     ctx.restore()
   }
   for (const key of [...venueBadgeMeta.keys()]) {

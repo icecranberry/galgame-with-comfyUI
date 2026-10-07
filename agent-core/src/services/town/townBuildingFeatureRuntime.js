@@ -24,7 +24,7 @@ import {
   resolveBuildingFeatureSource, sourceDrifted, listBuildingFeatureSources,
 } from './townBuildingFeatureSource.js';
 import { generateBuildingFeatureConfig, refreshBuildingFeatureStock as refreshFeatureStock, referencedResourceKeys } from './townBuildingFeatureGenerator.js';
-import { PRICE_TIERS } from './townBuildingFeatureRegistry.js';
+import { PRICE_TIERS, getTemplate } from './townBuildingFeatureRegistry.js';
 import { resolveCharacterTarget, applyAppearance, expireSameSlot } from './buildingFeatures/appearance.js';
 import { applyTemporaryState } from './buildingFeatures/state.js';
 import {
@@ -112,9 +112,6 @@ function loadFeature(context, { mapId, locationKey, featureId, profileRevision }
   const config = compiledConfig(profile);
   const feature = config.features.find(f => f.featureId === featureId);
   if (!feature) throw townError('INVALID_SELECTION');
-  for (const capability of feature.requiredCapabilities) {
-    if (!source.capabilities.includes(capability)) throw townError('CAPABILITY_DENIED');
-  }
   // 建筑一律无主：无经营者检查，收支走建筑自己的 business 账户
   return { source, profile, config, feature };
 }
@@ -845,7 +842,6 @@ export function listTownBuildingFeatureCandidates({ mapId } = {}) {
       locationKey: source.locationKey, buildingInstanceId: source.buildingInstanceId,
       title: source.title, description: source.description, descriptionSource: source.descriptionSource,
       descriptionMissing: !source.description, special: source.special,
-      capabilities: source.capabilities,
       status: effectiveStatus(source, profile),
       revision: profile?.revision || 0,
       llmCalls: profile?.llm_calls || 0,
@@ -892,7 +888,7 @@ function propagateToSameNameSiblings(context, source) {
   const compiled = copyable ? compiledConfig(profile) : null;
   const tradeResourceKeys = new Set();
   for (const feature of compiled?.features || []) {
-    if (!feature.requiredCapabilities?.includes('trade')) continue;
+    if (!['operator', 'operator_stock'].includes(getTemplate(feature.templateId)?.resourceRequirements)) continue;
     for (const key of referencedResourceKeys([feature])) tradeResourceKeys.add(key);
   }
   for (const sibling of sameNameSiblingSources(context, source)) {

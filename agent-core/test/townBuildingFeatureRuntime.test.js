@@ -43,7 +43,7 @@ const fortuneGenerated = {
   }],
 };
 
-test('permission revocation and disabled status stop execution immediately', async t => {
+test('legacy NPC permissions do not restrict building templates; disabled status still stops execution', async t => {
   const env = await setupTownEnvironment(t);
   const { db } = env;
   const now = { value: Date.parse('2026-10-03T11:00:00+08:00') };
@@ -53,7 +53,7 @@ test('permission revocation and disabled status stop execution immediately', asy
     buildings: [{ key: 'stall', name: '旧货铺', businessKind: 'supplier', operatorJob: '货郎',
       featureDesc: '售卖居民们闲置的小物件，偶尔也收一些旧货。' }],
   });
-  // 只保留 service 权限：交易功能必须被拒绝
+  // 旧地点只有 service，也能按新模板生成交易功能。
   db.prepare('UPDATE town_locations SET capabilities_json = ? WHERE map_id = ? AND key = ?')
     .run('["service"]', mapId, 'stall');
   const purchaseGenerated = {
@@ -72,12 +72,13 @@ test('permission revocation and disabled status stop execution immediately', asy
     }],
   };
   const source = sourceModule.resolveBuildingFeatureSource(env.runtime.getTownEconomyContext(), { mapId, locationKey: 'stall' });
-  // 权限不足时编译期就拒绝交易模板
-  assert.throws(() => compileGeneration(db, source, purchaseGenerated), err => err.code === 'GENERATION_INVALID');
-  // 恢复交易权限后可安装；随后撤销权限立即禁止执行
+  // 建筑模板编译不再读取旧职能权限
+  assert.doesNotThrow(() => compileGeneration(db, source, purchaseGenerated));
+  // 修改旧字段不会改变建筑来源或限制执行
   db.prepare('UPDATE town_locations SET capabilities_json = ? WHERE map_id = ? AND key = ?')
     .run('["service","trade"]', mapId, 'stall');
   const freshSource = sourceModule.resolveBuildingFeatureSource(env.runtime.getTownEconomyContext(), { mapId, locationKey: 'stall' });
+  assert.equal(freshSource.sourceHash, source.sourceHash);
   const compiled = await installCompiledConfig(env, freshSource, purchaseGenerated);
   const featureId = compiled.features[0].featureId;
   seedPlayerWallet(env.runtime, 100);
@@ -113,48 +114,90 @@ test('master switch off: quote/execute/accept rejected and events hidden, operat
   } finally {
     config.features.townBuildingFeatures = true;
   }
-});test('execute pipeline: quote, commit, idempotent replay and refusal paths', async t => {
-  const env = await setupTownEnvironment(t);
-  const { db } = env;
-  const now = { value: Date.parse('2026-10-03T11:00:00+08:00') };
-  t.mock.method(Date, 'now', () => now.value);
-  const { mapId, places } = buildTown({
-    ...env,
-    buildings: [{ key: 'tailor', name: '裁缝铺', businessKind: 'none', featureDesc: '出租一天的古装。' }],
-  });
-  const source = sourceModule.resolveBuildingFeatureSource(env.runtime.getTownEconomyContext(), { mapId, locationKey: 'tailor' });
-  const compiled = await installCompiledConfig(env, source, outfitGenerated);
-  const featureId = compiled.features[0].featureId;
-  const characterId = createResidentCharacter(env, { name: '阿岚' });
-  seedPlayerWallet(env.runtime, 100);
-  const { scope } = await arriveAt(env, now, places[0]);
-  const selection = { optionKey: 'han_fu', targetActorKeys: [`char:${characterId}`] };
-
-  // 报价  执行：确定性模板当场提交，并真实落下一条限时外观
-  const quote = runtime.quoteTownBuildingFeature({ mapId, locationKey: 'tailor', featureId, selection, ...scope });
-  assert.ok(quote.quoteId, '报价收据');
-  const op = runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
-    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1', selection });
-  assert.equal(op.status, 'committed');
-  assert.equal(op.result.kind, 'appearance');
-  const outfitRows = () => db.prepare('SELECT COUNT(*) AS c FROM global_outfits WHERE character_id = ?').get(characterId).c;
-  assert.equal(outfitRows(), 1, '外观真实落库');
-
-  // 同幂等键重放：返回同一操作，不重复扣费、不叠第二套外观
-  const replay = runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
-    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1', selection });
-  assert.equal(replay.operationId, op.operationId, '同键同体返回同一操作');
-  assert.equal(outfitRows(), 1, '重放不叠外观');
-
-  // 同键不同体：幂等冲突（不许拿旧键换一套外观）
-  assert.throws(() => runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
-    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1',
-    selection: { optionKey: 'ru_qun', targetActorKeys: [`char:${characterId}`] } }),
-  err => err.code === 'IDEMPOTENCY_CONFLICT');
-
-  // 别的地图上的同名地点：拒绝（只能办自己所在小镇的店）
-  assert.throws(() => runtime.executeTownBuildingFeature({ ...scope, mapId: mapId + 999, locationKey: 'tailor', featureId,
-    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-2', selection }),
-  err => err.code === 'NOT_ARRIVED');
-});
-
+});test('execute pipeline: quote, commit, idempotent replay and refusal paths', async t => {
+
+  const env = await setupTownEnvironment(t);
+
+  const { db } = env;
+
+  const now = { value: Date.parse('2026-10-03T11:00:00+08:00') };
+
+  t.mock.method(Date, 'now', () => now.value);
+
+  const { mapId, places } = buildTown({
+
+    ...env,
+
+    buildings: [{ key: 'tailor', name: '裁缝铺', businessKind: 'none', featureDesc: '出租一天的古装。' }],
+
+  });
+
+  const source = sourceModule.resolveBuildingFeatureSource(env.runtime.getTownEconomyContext(), { mapId, locationKey: 'tailor' });
+
+  const compiled = await installCompiledConfig(env, source, outfitGenerated);
+
+  const featureId = compiled.features[0].featureId;
+
+  const characterId = createResidentCharacter(env, { name: '阿岚' });
+
+  seedPlayerWallet(env.runtime, 100);
+
+  const { scope } = await arriveAt(env, now, places[0]);
+
+  const selection = { optionKey: 'han_fu', targetActorKeys: [`char:${characterId}`] };
+
+
+
+  // 报价  执行：确定性模板当场提交，并真实落下一条限时外观
+
+  const quote = runtime.quoteTownBuildingFeature({ mapId, locationKey: 'tailor', featureId, selection, ...scope });
+
+  assert.ok(quote.quoteId, '报价收据');
+
+  const op = runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
+
+    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1', selection });
+
+  assert.equal(op.status, 'committed');
+
+  assert.equal(op.result.kind, 'appearance');
+
+  const outfitRows = () => db.prepare('SELECT COUNT(*) AS c FROM global_outfits WHERE character_id = ?').get(characterId).c;
+
+  assert.equal(outfitRows(), 1, '外观真实落库');
+
+
+
+  // 同幂等键重放：返回同一操作，不重复扣费、不叠第二套外观
+
+  const replay = runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
+
+    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1', selection });
+
+  assert.equal(replay.operationId, op.operationId, '同键同体返回同一操作');
+
+  assert.equal(outfitRows(), 1, '重放不叠外观');
+
+
+
+  // 同键不同体：幂等冲突（不许拿旧键换一套外观）
+
+  assert.throws(() => runtime.executeTownBuildingFeature({ ...scope, mapId, locationKey: 'tailor', featureId,
+
+    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-1',
+
+    selection: { optionKey: 'ru_qun', targetActorKeys: [`char:${characterId}`] } }),
+
+  err => err.code === 'IDEMPOTENCY_CONFLICT');
+
+
+
+  // 别的地图上的同名地点：拒绝（只能办自己所在小镇的店）
+
+  assert.throws(() => runtime.executeTownBuildingFeature({ ...scope, mapId: mapId + 999, locationKey: 'tailor', featureId,
+
+    quoteId: quote.quoteId, quoteExpiresAt: quote.expiresAt, idempotencyKey: 'rent-2', selection }),
+
+  err => err.code === 'NOT_ARRIVED');
+
+});

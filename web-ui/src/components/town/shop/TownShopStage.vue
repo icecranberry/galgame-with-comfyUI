@@ -160,7 +160,7 @@ async function load() {
   try {
     const view = await fetchBuildingFeatures(props.locationKey, props.mapId)
     resourceNames.value = view.resourceNames || {}
-    features.value = (view.features || []).filter(f => !f.capabilityDenied)
+    features.value = (view.features || [])
     const wanted = props.featureId ? features.value.find(f => f.featureId === props.featureId) : null
     active.value = wanted || (features.value.length === 1 ? features.value[0] : null)
   } catch (err) { error.value = showError(err); features.value = []; active.value = null }

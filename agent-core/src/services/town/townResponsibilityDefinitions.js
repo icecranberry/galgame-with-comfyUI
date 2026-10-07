@@ -43,22 +43,21 @@ export function townBuildingKind(building = {}) {
 export function prepareTownBlueprintResponsibilities(bp) {
   for (const b of bp.buildings) {
     b.businessKind = townBuildingKind(b);
-    b.capabilities = townCapabilities(b, defaultTownCapabilities(b.businessKind));
+    delete b.capabilities; // 旧蓝图兼容：建筑不再拥有 NPC 职能权限。
   }
   for (const kind of ['supplier', 'workshop']) {
     if (bp.buildings.some(b => b.businessKind === kind)) continue;
     const role = TOWN_BUSINESS_ROLES[kind];
     let key = kind;
     while ([...bp.buildings, ...bp.groundAssets, ...bp.roadAssets, ...bp.props].some(b => b.key === key)) key += '_site';
-    bp.buildings.push({ key, name: role.name, businessKind: kind, capabilities: defaultTownCapabilities(kind), desc: '', special: true,
+    bp.buildings.push({ key, name: role.name, businessKind: kind, desc: '', special: true,
       reusable: false, maxInstances: 1, footprint: { w: 3, h: 2 } });
   }
   const occupied = new Set();
   const buildings = [{ key: 'central_plaza', businessKind: 'board' }, ...bp.buildings];
   const kinds = new Set();
   for (const building of buildings) {
-    const kind = building.businessKind, role = TOWN_BUSINESS_ROLES[kind]
-      || (building.capabilities?.includes('trade') ? { name: building.name, job: '商贩' } : null);
+    const kind = building.businessKind, role = TOWN_BUSINESS_ROLES[kind];
     const dutyKey = kind === 'none' ? building.key : kind;
     if (!role || kinds.has(dutyKey)) continue;
     kinds.add(dutyKey);
@@ -73,7 +72,7 @@ export function prepareTownBlueprintResponsibilities(bp) {
       bp.npcs.push(npc);
     }
     npc.workplaceKey = building.key;
-    npc.capabilities = townCapabilities(npc, building.capabilities || defaultTownCapabilities(kind));
+    npc.capabilities = townCapabilities(npc, defaultTownCapabilities(kind, npc.job));
     occupied.add(npc);
   }
   for (const npc of bp.npcs) npc.capabilities = townCapabilities(npc, defaultTownCapabilities(inferTownBusinessKind(npc.job), npc.job));

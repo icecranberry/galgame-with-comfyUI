@@ -97,7 +97,7 @@ function selectSystemPrompt() {
 export function selectUserPrompt({ source, catalog, oldKeys }) {
   const catalogText = catalog.map(template =>
     `- ${template.id} (version ${template.version})：${template.semanticDescription}\n` +
-    `  目标类型: ${template.supportedTargetKinds.join('/') || '无（建筑自身）'}；权限要求: ${template.requiredCapabilities.join('/') || '无'}\n` +
+    `  目标类型: ${template.supportedTargetKinds.join('/') || '无（建筑自身）'}\n` +
     `  允许价档: ${template.costPolicy.allowedTiers.join('/')}，默认 ${template.costPolicy.defaultTier}`).join('\n');
   return [
     '【可用模板目录（只允许选择以下 ready 模板）】',
@@ -112,7 +112,6 @@ export function selectUserPrompt({ source, catalog, oldKeys }) {
       : '完整用途描述: （缺失——结合标题与建筑类型也必须选出 1 个模板，用 building.title 作依据）',
     `世界观: ${source.mapName}（版本 ${source.worldVersion}）`,
     source.ambient ? `环境氛围（location.ambient，仅弱提示）: ${source.ambient}` : '',
-    `有效权限: ${source.capabilities.join('/')}`,
     oldKeys.length ? `旧配置功能 key（修改时优先沿用）: ${oldKeys.join('/')}` : '',
     '',
     '请输出模板选择 JSON（严格按系统提示词的完整格式，不要任何其他文字）。',
@@ -159,9 +158,6 @@ function validateSelection(source, generated) {
       if (feature.templateVersion !== template.version) throw new Error('templateVersion 与目录不一致');
       if (typeof feature.title !== 'string' || feature.title.length < 2 || feature.title.length > 16) throw new Error('title 长度非法');
       if (typeof feature.description !== 'string' || feature.description.length < 20 || feature.description.length > 80) throw new Error('description 长度非法');
-      for (const capability of template.requiredCapabilities) {
-        if (!source.capabilities.includes(capability)) throw new Error(`需要 ${capability} 权限`);
-      }
       const evidence = feature.evidence;
       if (!evidence || typeof evidence !== 'object') throw new Error('缺少 evidence');
       const allowedSources = source.description ? ['building.description', 'building.title', 'location.ambient'] : ['building.title'];
@@ -444,7 +440,7 @@ export async function generateBuildingFeatureConfig(context, { mapId, locationKe
     if (fresh.sourceHash !== source.sourceHash) throw townError('SOURCE_CHANGED');
     const finalRevision = commitCandidate(db, profile.id, source, merged, compiled, llmCalls);
     // 交易类功能激活时做一次性开业配置（幂等，受预算约束）
-    const tradeFeatures = compiled.features.filter(f => f.requiredCapabilities.includes('trade'));
+    const tradeFeatures = compiled.features.filter(f => ['operator', 'operator_stock'].includes(getTemplate(f.templateId)?.resourceRequirements));
     if (tradeFeatures.length) {
       const resourceKeys = new Set();
       for (const feature of tradeFeatures) {
@@ -567,7 +563,7 @@ export async function refreshBuildingFeatureStock(context, { mapId, locationKey,
   const tradeKeys = new Set();
   for (const feature of nextFeatures) {
     const capability = compiled.features.find(f => f.key === feature.key);
-    if (!capability?.requiredCapabilities.includes('trade')) continue;
+    if (getTemplate(capability?.templateId)?.resourceRequirements !== 'operator_stock') continue;
     for (const key of referencedResourceKeys([feature])) tradeKeys.add(key);
   }
   let restocked = 0;

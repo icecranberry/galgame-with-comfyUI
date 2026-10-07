@@ -31,8 +31,23 @@ test('source priority: user description wins, asset meta fills, blank stays blan
   assert.equal(gazebo.descriptionSource, 'asset.meta.desc');
   assert.ok(gazebo.description.length > 0);
 
+  const asset = db.prepare('SELECT meta_json FROM town_assets WHERE id = ?').get(gazebo.assetId);
+  const featureDescription = '敲响铜钟，听取一段小镇旧事并寻找与故事相关的线索。';
+  db.prepare('UPDATE town_assets SET meta_json = ? WHERE id = ?').run(JSON.stringify({
+    ...JSON.parse(asset.meta_json), featureDescription,
+    desc: 'isometric building game sprite on pure white background, no ground and no base',
+  }), gazebo.assetId);
+  const afterArt = sourceModule.resolveBuildingFeatureSource(context, { mapId, locationKey: 'gazebo' });
+  assert.equal(afterArt.description, featureDescription, '用途不受英文生图提示词覆盖');
+  assert.equal(afterArt.descriptionSource, 'asset.meta.featureDescription');
+
   // sourceHash：用途/标题变化 → 哈希变化；ambient 变化 → 不变
   const hash1 = sourceModule.computeSourceHash(well);
+  const legacyProfile = { source_hash: sourceModule.computeSourceHash(well, ['service', 'trade']) };
+  assert.equal(sourceModule.sourceDrifted(well, legacyProfile), false, '移除旧权限不会让已有模板失效');
+  const changedPurpose = { ...well, description: '改为售卖全新物品。' };
+  changedPurpose.sourceHash = sourceModule.computeSourceHash(changedPurpose);
+  assert.equal(sourceModule.sourceDrifted(changedPurpose, legacyProfile), true, '实际用途变化仍需重新生成');
   db.prepare('UPDATE town_locations SET feature_desc = ? WHERE map_id = ? AND key = ?')
     .run('现在只听回声，不再交换东西。', mapId, 'well');
   const well2 = sourceModule.resolveBuildingFeatureSource(context, { mapId, locationKey: 'well' });

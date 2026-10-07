@@ -14,6 +14,13 @@
           >
             {{ autoRun ? '暂停自动' : '自动推进' }}
           </linshe-button>
+          <linshe-button
+            v-if="localStep !== 'done'" variant="ghost" size="sm"
+            :disabled="!draftReady || autoBusy() || editorAssetBusy || editorHiresBusy || ['blueprint', 'applying'].includes(initState?.status)"
+            @click="stopAuto(); restartVisible = true"
+          >
+            重新开始
+          </linshe-button>
           <linshe-button variant="icon" size="sm" aria-label="关闭" @click="tryClose">✕</linshe-button>
         </div>
 
@@ -94,7 +101,7 @@
                   <linshe-input v-model="item.name" size="sm" class="wiz-list-name" placeholder="名称" />
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="!item.special" @click="item.special = false; item.reusable = true">通用</linshe-button>
                   <linshe-button v-if="group.kind === 'building'" variant="chip" size="sm" :active="item.special" @click="item.special = true; item.reusable = false">特殊</linshe-button>
-                  <TownCapabilityPicker v-if="group.kind === 'building'" v-model="item.capabilities" />
+                  <linshe-input v-if="group.kind === 'building' && item.special" v-model="item.featureDescription" type="textarea" :rows="2" size="sm" class="wiz-list-purpose" aria-label="特殊建筑用途描述" placeholder="提供什么服务、玩家可以在这里做什么" />
                   <linshe-select
                     v-if="group.kind === 'prop'"
                     class="wiz-list-size"
@@ -163,7 +170,6 @@
                         <div class="wiz-asset-name">
                           {{ item.name }}
                           <span v-if="item.badge" class="wiz-badge" :class="'is-' + item.badge">{{ item.badgeText }}</span>
-                          <span v-for="type in item.capabilities || ['service']" :key="type" class="wiz-badge">{{ type === 'trade' ? '交易类' : '服务类' }}</span>
                         </div>
                         <linshe-input v-model="item.desc" size="sm" class="wiz-asset-desc" placeholder="生成提示词…" />
                       </div>
@@ -436,6 +442,13 @@
     </div>
 
     <!-- 图片管理弹窗 -->
+    <linshe-modal v-model="restartVisible" title="重新开始创建小镇？" :transition-ms="300">
+      <p>这会清除本次创建的暂存进度，回到配置步骤。已有的小镇不受影响。</p>
+      <template #footer>
+        <linshe-button @click="restartVisible = false">继续当前进度</linshe-button>
+        <linshe-button variant="danger" @click="restartWizard">确认重新开始</linshe-button>
+      </template>
+    </linshe-modal>
     <TownAssetManager
       :open="manager.open"
       :asset="manager.asset"
@@ -452,7 +465,9 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import { AUTO_ACTION, resolveAutoAction } from '../../utils/townInitAuto.js'
+import { townInitDraftKey, encodeTownInitDraft, readTownInitDraft } from '../../utils/townInitDraft.js'
 import LinsheButton from '../ui/LinsheButton.vue'
+import LinsheModal from '../ui/LinsheModal.vue'
 import TownCapabilityPicker from './TownCapabilityPicker.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 import LinsheSelect from '../ui/LinsheSelect.vue'
@@ -500,6 +515,7 @@ const playerKit = reactive({ portrait: null, portraitId: null, down: null, downI
 // 自动推进：从当前步一路推进到开镇完成，可随时暂停 / 继续
 const autoRun = ref(false)
 const autoNotice = ref('')
+let restoreNoticeTimer = null
 const playerKitReady = computed(() => !!(
   playerKit.portraitAsset && playerKit.spriteAssets?.down && playerKit.spriteAssets?.up
 ))
@@ -593,6 +609,48 @@ function listSignature(step) {
 }
 /** 各步最后一次生成提示词时的清单指纹：载入蓝图时按蓝图重置，生成成功后按当前清单重置 */
 const listBaselines = reactive({ tiles: '', buildings: '' })
+const restartVisible = ref(false)
+const draftReady = ref(false)
+let draftKey = ''
+let draftCompleted = false
+let unmounted = false
+
+function clearDraft() {
+  try { localStorage.removeItem(draftKey) } catch (err) { console.warn('[wizard] draft clear failed:', err?.message) }
+}
+
+function saveDraft() {
+  if (!draftReady.value || draftCompleted || localStep.value === 'done') return
+  try {
+    localStorage.setItem(draftKey, encodeTownInitDraft({
+      localStep: localStep.value, addingTown: addingTown.value,
+      form, bpForm, npcSlider: npcSlider.value, stepParams, listBaselines,
+      lastBpJson, uidSeq,
+    }))
+  } catch (err) { console.warn('[wizard] draft save failed:', err?.message) }
+}
+
+function restartWizard() {
+  if (autoBusy() || editorAssetBusy.value || editorHiresBusy.value) return
+  stopAuto()
+  draftReady.value = false
+  clearDraft()
+  addingTown.value = true // 忽略服务器上一轮蓝图，直到用户再次生成。
+  localStep.value = 'config'
+  Object.assign(form, { worldSettingId: null, npcCount: 8, mapSize: 50 })
+  Object.assign(bpForm, { styleTags: DEFAULT_STYLE_TAGS, groundAssets: [], roadAssets: [], buildings: [], props: [], npcs: [] })
+  npcSlider.value = 8
+  Object.assign(listBaselines, { tiles: '', buildings: '' })
+  lastBpJson = ''
+  stepError.value = ''
+  autoNotice.value = ''
+  restartVisible.value = false
+  draftReady.value = true
+  // 保存空白起点，重新打开时不能误续跑服务器的旧任务。
+  saveDraft()
+}
+
+watch([localStep, addingTown, form, bpForm, npcSlider, stepParams, listBaselines], saveDraft, { deep: true, flush: 'sync' })
 const listHasPrompts = computed(() => {
   const items = listGroups.value.flatMap(group => group.items)
   return items.length > 0 && items.every(item => String(item.desc || '').trim())
@@ -702,6 +760,7 @@ function canJump(id) {
 
 let lastBpJson = ''
 function syncBpForm(force = false) {
+  if (addingTown.value) return
   const bp = initState.value?.blueprint
   if (!bp) return
   const json = JSON.stringify(bp)
@@ -831,6 +890,7 @@ async function guard(fn) {
     town.fetchInitState().catch(() => {})
   } finally {
     busy.value = false
+    saveDraft()
     town.fetchInitState().catch(() => {})
   }
 }
@@ -845,6 +905,8 @@ function start() {
     })
     // 新的 job 已经在跑，从这一刻起按普通流程往下推进
     addingTown.value = false
+    localStep.value = 'working'
+    saveDraft()
     await town.fetchInitState()
     syncBpForm()
   })
@@ -934,8 +996,8 @@ async function genAssetItem(item, force = false) {
             artist: activeParams.artist,
             footprint: kind === 'building' || kind === 'prop' ? item.footprint || { w: 1, h: 1 } : undefined,
             special: kind === 'building' ? !!item.special : undefined,
+            featureDescription: kind === 'building' ? item.featureDescription : undefined,
             businessKind: kind === 'building' ? item.businessKind : undefined,
-            capabilities: kind === 'building' ? item.capabilities : undefined,
             reusable: kind === 'building' ? !!item.reusable : undefined,
             maxInstances: kind === 'building' ? item.maxInstances : undefined,
             blocking: kind === 'prop' ? item.blocking : undefined,
@@ -1304,6 +1366,8 @@ function applyPlayerKit(kit) {
 function confirmInit() {
   return guard(async () => {
     await api.confirmTownInit()
+    draftCompleted = true
+    clearDraft()
     await town.fetchInitState()
     localStep.value = 'done'
   })
@@ -1317,6 +1381,7 @@ function finish() {
 
 function tryClose() {
   stopAuto()
+  saveDraft()
   emit('close')
 }
 
@@ -1359,7 +1424,7 @@ function autoBusy() {
 function autoState() {
   return {
     step: localStep.value,
-    status: initState.value?.status || '',
+    status: addingTown.value && localStep.value === 'config' ? 'idle' : (initState.value?.status || ''),
     addingTown: addingTown.value,
     hasBlueprint: !!initState.value?.blueprint,
     listCanSkip: listCanSkip.value,
@@ -1370,7 +1435,7 @@ function autoState() {
     portraitReady: npcReadyCount.value,
     playerReady: playerKitReady.value,
     error: stepError.value
-      || (initState.value?.status === 'failed' ? (initState.value?.error || '生成失败') : ''),
+      || (!addingTown.value && initState.value?.status === 'failed' ? (initState.value?.error || '生成失败') : ''),
   }
 }
 
@@ -1522,13 +1587,15 @@ function stopPolling() {
 
 // 蓝图到位后同步表单
 watch(() => initState.value?.blueprint, (bp) => {
-  if (!bp) return
+  if (!bp || !draftReady.value || addingTown.value) return
+  if (JSON.stringify(bp) === lastBpJson) return
   syncBpForm()
   // 刷新后停在「AI 正在思考」时，蓝图一到就把它送进清单步
   if (localStep.value === 'working') localStep.value = 'groundList'
 })
 watch([() => bpForm.styleTags, stepParams], scheduleGenerationSettingsSave, { deep: true })
 watch(localStep, (v) => {
+  if (!draftReady.value) return
   // 地皮清单/建筑清单与各自生成步骤独立，切换时不会重建提示词
   // 「我」这一步先落一次服务器状态再补缺：本地可能还留着上一次世界 / 已删素材的缩略图
   if (v === 'player') refreshPlayerKit()
@@ -1542,6 +1609,9 @@ watch(() => initState.value?.status, (s) => {
 })
 
 onMounted(async () => {
+  draftKey = townInitDraftKey(town.snapshot)
+  let draft = null
+  try { draft = readTownInitDraft(localStorage, draftKey) } catch { /* 浏览器可能禁用存储 */ }
   await loadGenerationSettings()
   try {
     const worlds = await api.getWorldSettings()
@@ -1560,7 +1630,34 @@ onMounted(async () => {
   } catch { /* LoRA 列表拉不到就不启用 */ }
 
   await town.fetchInitState().catch(() => {})
+  if (unmounted) return
   const s = initState.value?.status
+  if (draft && !draft.addingTown && s === 'done') {
+    clearDraft()
+    draft = null
+  }
+  if (draft) {
+    Object.assign(form, draft.form)
+    Object.assign(bpForm, draft.bpForm)
+    for (const step of GENERATION_STEPS) Object.assign(stepParams[step], draft.stepParams[step] || {})
+    Object.assign(listBaselines, draft.listBaselines)
+    npcSlider.value = draft.npcSlider ?? form.npcCount
+    addingTown.value = !!draft.addingTown
+    lastBpJson = draft.lastBpJson || ''
+    uidSeq = draft.uidSeq || 1
+    localStep.value = draft.localStep
+    if (!addingTown.value && localStep.value === 'working' && initState.value?.blueprint) {
+      syncBpForm()
+      localStep.value = 'groundList'
+    }
+    autoNotice.value = '已恢复上次暂存进度，可继续操作或开启自动推进'
+    restoreNoticeTimer = setTimeout(() => {
+      if (autoNotice.value === '已恢复上次暂存进度，可继续操作或开启自动推进') autoNotice.value = ''
+      restoreNoticeTimer = null
+    }, 5000)
+    await refreshAssets()
+    if (localStep.value === 'town' && s === 'confirm') await town.refreshDraftPreview().catch(() => {})
+  } else {
   // 断点续跑：从已完成程度恢复到对应步骤
   // 「再建一座」不续跑：上一次的完成态/布图预览属于另一座镇，直接停在配置步。
   if (addingTown.value && (s === 'done' || s === 'confirm')) {
@@ -1581,11 +1678,20 @@ onMounted(async () => {
       localStep.value = 'npcs'
     }
   }
+  }
+  if (unmounted) return
+  draftReady.value = true
+  saveDraft()
+  window.addEventListener('pagehide', saveDraft)
   startPolling()
   refreshPlayerKit()
 })
 
 onBeforeUnmount(() => {
+  if (restoreNoticeTimer) clearTimeout(restoreNoticeTimer)
+  unmounted = true
+  saveDraft()
+  window.removeEventListener('pagehide', saveDraft)
   stopAuto()
   stopPolling()
   if (generationSaveTimer) {
@@ -1652,6 +1758,7 @@ onBeforeUnmount(() => {
 
 .wiz-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 16px 18px 8px;
@@ -1835,8 +1942,10 @@ onBeforeUnmount(() => {
 .wiz-style-tag.is-now { background: rgba(124, 176, 116, 0.16); color: #5c8a52; }
 .wiz-style-hint { margin: 0; font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
 
+.wiz-list-purpose { flex: 1 0 100%; order: 1; }
 .wiz-list-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   margin-bottom: 6px;

@@ -140,11 +140,12 @@ test('only service and trade permissions persist, survive editing, and transfer 
   const blueprint = prepareTownBlueprintResponsibilities({ groundAssets: [], roadAssets: [], props: [], npcs: [],
     buildings: [{ key: 'mystery', name: '月下小屋', businessKind: 'none', capabilities: ['trade'] }] });
   const employee = blueprint.npcs.find(n => n.workplaceKey === 'mystery');
-  assert.deepEqual(employee.capabilities, ['trade'], 'even a newly named trading building receives a generated employee');
+  assert.equal(employee, undefined, '旧建筑 trade 标记不再自动创建员工');
+  assert.equal(blueprint.buildings.find(b => b.key === 'mystery').capabilities, undefined);
   const readyAssets = [{ id: 1, kind: 'ground', key: 'grass', meta: {} }, { id: 2, kind: 'road', key: 'road', meta: {} },
     ...blueprint.buildings.map((b, i) => ({ id: i + 3, key: b.key, name: b.name, kind: 'building', meta: { footprint: { w: 3, h: 2 } } }))];
   const layout = generateLocalLayout({ readyAssets, blueprint, cols: 40, rows: 40, seed: 123, buildingDensity: 0.2 });
-  assert.deepEqual(layout.locations.find(l => l.key === 'mystery')?.capabilities, ['trade']);
+  assert.equal(layout.locations.find(l => l.key === 'mystery')?.capabilities, undefined);
 });
 
 test('old repeated buildings receive stable clickable addresses and inherit their generated permissions', t => {
