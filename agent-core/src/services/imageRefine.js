@@ -30,6 +30,7 @@ import sharp from 'sharp';
 import { config } from '../config.js';
 import {
   HIRES_WORKFLOW, HIRES_ADVANCED_WORKFLOW, ACTIVE_WORKFLOW, PRO_WORKFLOW, autoRestoreMissing,
+  resolveCustomWorkflowPath,
 } from './workflowTemplates.js';
 import { injectLoraNodes, NODE_TITLES, findNegativeEncodeNode } from './imageSkill.js';
 
@@ -40,12 +41,23 @@ const PROMPT_PLACEHOLDER = '请输入画面描述';
 
 function hiresPath() { return path.join(WORKFLOW_DIR, config.comfyui.hiresWorkflowMode === 'advanced' ? HIRES_ADVANCED_WORKFLOW : HIRES_WORKFLOW); }
 
-/** 与 imageSkill.resolveWorkflowPath 一致的模式兜底：无记录时按全局模式 + 场景映射 */
+/**
+ * 与 imageSkill.resolveWorkflowPath 一致的模式兜底：无记录时按全局模式 + 场景映射。
+ * 返回 'base' | 'turbo' | 自定义工作流文件名。
+ */
 function fallbackModeForScene(scene) {
   const mode = config.workflow?.mode || 'turbo';
   if (mode === 'turbo' || mode === 'base') return mode;
+  if (mode === 'custom') return config.workflow?.customTemplate || 'turbo';
   const scenePref = config.workflow?.scene?.[scene] || 'turbo';
   return scenePref === 'base' ? 'base' : 'turbo';
+}
+
+/** 把模式值（'turbo' | 'base' | 自定义文件名）解析为工作流绝对路径 */
+function pathForModeValue(value) {
+  if (value === 'base') return path.join(WORKFLOW_DIR, PRO_WORKFLOW);
+  if (value === 'turbo') return path.join(WORKFLOW_DIR, ACTIVE_WORKFLOW);
+  return resolveCustomWorkflowPath(value) || path.join(WORKFLOW_DIR, ACTIVE_WORKFLOW);
 }
 
 /** 加载生成原图时使用的源工作流模板（自定义 > 显式模式 > 按场景兜底），用于继承参数 */
@@ -55,10 +67,12 @@ function loadSourceWorkflow({ sourceMode, customWorkflow, scene } = {}) {
   if (customWorkflow && fs.existsSync(path.join(WORKFLOW_DIR, customWorkflow))) {
     p = path.join(WORKFLOW_DIR, customWorkflow);
   } else {
+    // sourceMode 可能是 'turbo' | 'base'，也可能是自定义工作流文件名
+    // （全局 custom 模式下 image_tasks.workflow_template 原样记录了文件名）
     resolvedMode = (sourceMode === 'base' || sourceMode === 'turbo')
       ? sourceMode
-      : fallbackModeForScene(scene);
-    p = resolvedMode === 'base' ? path.join(WORKFLOW_DIR, PRO_WORKFLOW) : path.join(WORKFLOW_DIR, ACTIVE_WORKFLOW);
+      : (resolveCustomWorkflowPath(sourceMode) || fallbackModeForScene(scene));
+    p = pathForModeValue(resolvedMode);
   }
   if (!fs.existsSync(p)) return { wf: null, resolvedMode };
   try {
@@ -252,7 +266,9 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   if (hasLoras) injectLoraNodes(wf, activeLoras);
 
   const srcLabel = overrides.customWorkflow
-    || (srcResult.resolvedMode === 'base' ? PRO_WORKFLOW : ACTIVE_WORKFLOW);
+    || (srcResult.resolvedMode === 'base' ? PRO_WORKFLOW
+      : srcResult.resolvedMode && srcResult.resolvedMode !== 'turbo' ? srcResult.resolvedMode
+        : ACTIVE_WORKFLOW);
   console.log(`[imageRefine] Hires workflow built: ${path.basename(hiresPath())}${src ? ` (params inherited from ${srcLabel})` : ' (source workflow unavailable, template defaults)'}`);
   return { wf, wfPath: hiresPath() };
 }

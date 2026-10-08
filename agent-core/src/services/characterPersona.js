@@ -17,9 +17,10 @@
  */
 
 import { getActiveOutfits } from './outfitService.js';
+import { getSceneOutfitForNow, asPersonaOutfits } from './outfitScene.js';
 import { config } from '../config.js';
 
-const APPEARANCE_HEADING_RE = /##\s*你的外观/;
+export const APPEARANCE_HEADING_RE = /##\s*你的外观/;
 
 // 「你」→ 第三人称名时跳过非人称代词的复合词：
 //   迷｜你（迷你）、你｜们（你们）、你｜我（你我/你追我赶）、你｜好（你好）、你｜死（你死我活）。
@@ -212,7 +213,13 @@ function resolveOutfits(character, outfits) {
     if (Array.isArray(outfits)) return { limited: outfits, exclusive: null };
     return outfits;
   }
-  return getActiveOutfits(character?.id);
+  const active = getActiveOutfits(character?.id);
+  // 道具换装（变身卡/限时服饰）或当天报纸的世界观服饰生效中 → 直接用它。
+  // 「用户主动用了换装道具」不该被自动的场景服装盖掉。
+  if (active.limited.length > 0 || active.exclusive) return active;
+  // 否则按日程决定此刻穿哪套场景服装（工装/外出/居家/睡眠）
+  const sceneBlock = asPersonaOutfits(getSceneOutfitForNow(character?.id));
+  return sceneBlock || active;
 }
 
 /**

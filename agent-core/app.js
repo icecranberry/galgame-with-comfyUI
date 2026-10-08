@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { readFileSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { config, autoDetectWorkflowMode } from './src/config.js';
+import { config, autoDetectWorkflowMode, activateLlmProfile, getActiveProfileId } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
@@ -15,6 +15,7 @@ import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
 import emojiRoutes from './src/routes/emoji.js';
+import userEmojiRoutes from './src/routes/userEmoji.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
@@ -30,6 +31,7 @@ import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
+import lootRoutes from './src/routes/loot.js';
 import newspaperRoutes from './src/routes/newspaper.js';
 import diaryRoutes from './src/routes/diary.js';
 import townRoutes from './src/routes/town.js';
@@ -119,6 +121,7 @@ app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/c
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
 app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
+app.use('/api/user-emoji', wrapRouterAsync(userEmojiRoutes));    // 我的表情库（用户自己的，跨角色通用）
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/moments', wrapRouterAsync(momentsRoutes));
@@ -134,6 +137,7 @@ app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
 app.use('/api/groups', wrapRouterAsync(groupsRoutes));
 app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
 app.use('/api/items', wrapRouterAsync(itemsRoutes));
+app.use('/api/loot', wrapRouterAsync(lootRoutes));       // 宝箱橱窗（分页候选 + 带走）
 app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
 app.use('/api/diaries', wrapRouterAsync(diaryRoutes));         // /api/diaries/:id 角色日记（后台生成 + SSE）
 app.use('/api/town', wrapRouterAsync(townRoutes));
@@ -177,6 +181,19 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// 恢复激活的 LLM profile 到内存 config。
+// 不做这一步的话，config.llm 会一直停在 .env 的值（LLM_API_KEY），而
+// syncActiveLlmProfile() 会在每次保存设置时把 config.llm.apiKey 写回 profile ——
+// 于是「用户为某个 profile 单独设的 key」会被 .env 里的旧值悄悄覆盖掉。
+{
+  const activeId = getActiveProfileId();
+  if (activeId) {
+    const r = activateLlmProfile(activeId);
+    if (r?.ok) console.log(`[config] restored active LLM profile: ${activeId}`);
+    else console.log(`[config] active LLM profile not found: ${activeId}`);
+  }
+}
 
 // 启动自动压缩：清理任务删除大量行后，SQLite 只把页还回内部空闲列表，文件对操作系统的
 // 占用不变。空闲页占比超阈值时在监听端口前做一次 VACUUM（阻塞启动数秒到数分钟，一次性

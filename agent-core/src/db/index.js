@@ -998,6 +998,21 @@ function initSchema(db) {
   // 迁移: 角色立绘 — characters 表新增 standing_url 列
   migrateStandingSchema(db);
 
+  // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
+  migrateCharacterFolderSchema(db);
+
+  // 迁移: 角色归档 — characters 表新增 archived 列
+  migrateCharacterArchiveSchema(db);
+
+  // 迁移: 我的表情库 — user_emojis 表
+  migrateUserEmojiSchema(db);
+
+  // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+  migrateMomentTopicCheckedSchema(db);
+
+  // 迁移: 允许系统/自定义话题同名共存 — 唯一约束改为 (source, name)
+  migrateMomentTopicAllowDuplicateName(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1063,6 +1078,15 @@ function initSchema(db) {
   migrateCharacterReactionPacksSchema(db);
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
+
+  // 迁移: 宝箱橱窗（loot_catalog 商品清单 + loot_offers 当前橱窗）
+  migrateLootCatalogSchema(db);
+
+  // 迁移: 角色间关系的亲密度分级（决定朋友圈多人场景的概率与画面尺度）
+  migrateRelationshipIntimacy(db);
+
+  // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
+  migrateCharacterOutfitScene(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
@@ -1605,6 +1629,121 @@ function migrateDisturbSchema(db) {
 }
 
 /**
+ * 迁移: 允许「系统话题」与「自定义话题」同名共存
+ *
+ * 上游把 moment_topics.name 设成全局 UNIQUE，于是「自定义一条与系统同名的话题」根本插不进去。
+ * 但同名共存是合理需求：用户想用自己的文案，同时保留系统那份，靠 checked 决定抽谁。
+ * 所以把约束从 UNIQUE(name) 放宽成 UNIQUE(source, name)（同一来源内仍然不允许重名）。
+ *
+ * SQLite 不支持直接删除列约束，只能重建表；重建前后字段与数据原样保留。
+ */
+function migrateMomentTopicAllowDuplicateName(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='moment_topics'"
+    ).get();
+    if (!row?.sql) return;
+    if (!/name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) return;   // 已经是新结构，跳过
+
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE moment_topics__migrate (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        desc TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        checked INTEGER DEFAULT 1,
+        UNIQUE(source, name)
+      )
+    `);
+    db.exec(`
+      INSERT INTO moment_topics__migrate (id, name, desc, source, is_active, created_at, updated_at, checked)
+      SELECT id, name, desc, source, is_active, created_at, updated_at, checked FROM moment_topics
+    `);
+    db.exec('DROP TABLE moment_topics');
+    db.exec('ALTER TABLE moment_topics__migrate RENAME TO moment_topics');
+    db.exec('COMMIT');
+    console.log('[db] moment_topics: name 唯一约束放宽为 UNIQUE(source, name)，允许系统/自定义同名共存');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* 事务可能已提交 */ }
+    console.log('[db] migrateMomentTopicAllowDuplicateName error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+ *
+ * 不能复用 is_active：那张表里 is_active 是「软删除」标记（DELETE 接口把它置 0，
+ * 列表就不再返回），拿它当「临时停用」用的话，用户一取消勾选就再也找不回来了。
+ * 所以另起 checked：只有 is_active = 1 且 checked = 1 才参与抽题。
+ * 默认 1，保证老库升级后行为与现在完全一致。
+ */
+function migrateMomentTopicCheckedSchema(db) {
+  try {
+    const cols = db.prepare('PRAGMA table_info(moment_topics)').all();
+    if (!cols.find(c => c.name === 'checked')) {
+      db.exec('ALTER TABLE moment_topics ADD COLUMN checked INTEGER DEFAULT 1');
+      console.log('[db] Added moment_topics.checked column (default 1)');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentTopicCheckedSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 我的表情库 — user_emojis 表
+ *
+ * 用户自己的表情包，跨角色通用（与角色的 character_emojis 分开存）。
+ * 不复用 character_emojis 的原因：那张表的 character_id 是 NOT NULL 外键到 characters(id)，
+ * 借一个特殊 id 代表「用户」既违反外键约束，语义上也说不通；这里也不分 set（用户只有一套）。
+ */
+function migrateUserEmojiSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'done'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.log('[db] migrateUserEmojiSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色归档 — characters 表新增 archived 列
+ *
+ * 归档 = 该角色不再参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 日程刷新 / 拉群），
+ * 仅保留角色卡数据与「你主动找它时仍会回复」的能力。
+ *
+ * 刻意做成独立的拦截层，而不是去改动 moments_disabled / proactive_disabled /
+ * events_disabled / schedule_enabled 这四个开关 —— 否则归档再取消会把用户单独设过的
+ * 偏好一起抹掉。各调度器的选人查询统一叠加 `COALESCE(archived, 0) = 0`。
+ */
+function migrateCharacterArchiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'archived')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN archived INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.archived column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterArchiveSchema error:', err.message);
+  }
+}
+
+/**
  * 迁移: 日程系统 — characters 表新增 schedule 相关列
  */
 function migrateScheduleSchema(db) {
@@ -1786,6 +1925,31 @@ function migrateStandingSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色文件夹 — 新建 character_folders 表，characters 表新增 folder_id 列
+ * 单层分类：一个角色只属于一个文件夹，folder_id 为 NULL 表示「未分类」。
+ * 删除文件夹只把成员置回未分类（folder_id = NULL），不动角色本体。
+ */
+function migrateCharacterFolderSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS character_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'folder_id')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN folder_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added characters.folder_id column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterFolderSchema error:', err.message);
   }
 }
 
@@ -2517,6 +2681,103 @@ function migrateChatBgSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateChatBgSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 宝箱橱窗 —— 商品清单与当前橱窗
+ *
+ * loot_catalog：由外部清单（E:\邻舍-local\loot-catalog\catalog.json）导入的商品池。
+ *   图片按「单件」缓存（image_url），因为候选组合随机、几乎不重复，按整套生图等于每次刷新都烧算力。
+ * loot_offers：当前橱窗里每页的 8 个格子。放库里而不是内存 —— 刷新页面不该把橱窗清空。
+ */
+function migrateLootCatalogSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tag TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        meaning TEXT NOT NULL DEFAULT '',
+        cat TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        page TEXT NOT NULL,
+        image_url TEXT,
+        image_status TEXT NOT NULL DEFAULT '',
+        image_error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_loot_catalog_page ON loot_catalog(page)`);
+    // 生图用英文 Danbooru tag 组合。
+    // 原先生图 prompt 只用 tag 字段，但词典里大量 tag 是生僻写法（如 sheer_babydoll），
+    // 模型不认识就自由发挥 —— A/B 实测「纯 tag」会画出一个玻璃罐子；
+    // 「中文描述」同样无效（Danbooru 系模型不吃中文）；「英文 tag 组合」才准确。
+    {
+      const cols = db.prepare(`PRAGMA table_info(loot_catalog)`).all();
+      if (!cols.find(c => c.name === 'image_tags')) {
+        db.exec(`ALTER TABLE loot_catalog ADD COLUMN image_tags TEXT`);
+        console.log('[db] Added loot_catalog.image_tags column');
+      }
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_offers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        page TEXT NOT NULL,
+        slot_index INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(page, slot_index)
+      )
+    `);
+    console.log('[db] loot catalog schema ready');
+  } catch (err) {
+    console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色服装的场景标记 — character_outfits 加 scene 列
+ *
+ * 用途：角色可同时拥有多套「场景服装」（工装 work / 外出 casual / 居家 home / 睡眠 sleep），
+ * 由日程决定当前穿哪套。取值见 services/outfitScene.js 的 OUTFIT_SCENES。
+ *
+ * **刻意不复用 `enabled`**：现有的 `enabled` 承载「同时只启用一套」的互斥语义
+ * （道具变身/临时形态靠它，见 getActiveOutfits 的 LIMIT 1）。场景服装改用
+ * `scene IS NOT NULL` 标记，两条通道互不干扰。
+ */
+function migrateCharacterOutfitScene(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_outfits)`).all();
+    if (!cols.find(c => c.name === 'scene')) {
+      db.exec(`ALTER TABLE character_outfits ADD COLUMN scene TEXT`);
+      console.log('[db] Added character_outfits.scene column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterOutfitScene error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色间关系的亲密度 — character_relationships 加 intimacy 列
+ *
+ * 0=泛泛 1=熟悉 2=亲近 3=亲密。分级用于决定朋友圈多人场景的概率与画面尺度。
+ *
+ * **列默认为 NULL，并且刻意不做全量回填**：NULL 表示「未设定」，读取时按关系文本
+ * 关键词实时推断（见 services/relationshipIntimacy.js 的 resolveIntimacy）。
+ * 这样关系文本一改，判定就跟着变；而一旦回填成显式值，PUT 会保留该值，
+ * 改文本就不会再重推断了。用户在图里手动选定后才落为显式值。
+ */
+function migrateRelationshipIntimacy(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_relationships)`).all();
+    if (!cols.find(c => c.name === 'intimacy')) {
+      db.exec(`ALTER TABLE character_relationships ADD COLUMN intimacy INTEGER`);
+      console.log('[db] Added character_relationships.intimacy column');
+    }
+  } catch (err) {
+    console.log('[db] migrateRelationshipIntimacy error:', err.message);
   }
 }
 

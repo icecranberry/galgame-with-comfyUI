@@ -2,7 +2,9 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <!-- ⚠ 2026-10-08 合并 v3.7.0：上游新增 inlineLayout 类（内联布局）、本地新增 showPersonaRefineModal
+           互斥条件（人设润色弹窗打开时收起遮罩）—— 两者叠加，**都保留**。 -->
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal && !showPersonaRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -116,6 +118,11 @@
                 </svg>
                 更多设置
               </div>
+              <div class="toolbar-item toolbar-item-toggle" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span>不参与活动</span>
+                <linshe-switch v-model="detail.archived" size="sm" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="toolbar-divider"></div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -127,6 +134,10 @@
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="toolbar-item toolbar-item-toggle" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span>不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" size="sm" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
               </div>
               <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
                 <span>设置 Lora</span>
@@ -153,6 +164,10 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m13 7 3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                 修正外观
               </linshe-button>
+              <linshe-button variant="secondary" @click="openPersonaRefineModal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="m18.4 2.6 2.9 2.9-8.5 8.5-3.6.7.7-3.6 8.5-8.5Z" /></svg>
+                人设润色
+              </linshe-button>
               <div class="recruit-appearance-hint">
                 外观描述补充tag查阅
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{ character?.name }}</a>
@@ -172,6 +187,11 @@
               更多设置
             </div>
             <div class="float-panel-body">
+              <div class="float-row" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span class="float-label">不参与活动</span>
+                <linshe-switch v-model="detail.archived" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="float-divider"></div>
               <div class="float-row">
                 <span class="float-label">不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -183,6 +203,10 @@
               <div class="float-row">
                 <span class="float-label">不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="float-row" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span class="float-label">不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
               </div>
               <div class="float-row float-row-action" @click="openLoraModal">
                 <span class="float-label">设置 Lora</span>
@@ -403,6 +427,10 @@
               </linshe-button>
             </div>
 
+            <!-- 场景服装（工装/外出/居家/睡眠）：与上面的「形态」不同——形态互斥单套，
+                 场景服装四套并存，由日程的 outfit 标注决定此刻注入哪套 -->
+            <SceneOutfitsPanel :character="character" />
+
             <div class="modal-actions" style="margin-top:16px">
               <span class="outfit-save-hint">启用中的形态会注入到所有生图链路，优先级高于人物卡原有外观</span>
               <div style="flex:1"></div>
@@ -423,6 +451,14 @@
       :base-prompt="detail.editPrompt"
       @applied="onAppearanceRefined"
     />
+
+    <!-- ── 人设润色弹窗：纯文本改写人设（外观段原样保留）── -->
+    <PersonaRefineModal
+      v-model="showPersonaRefineModal"
+      :display-name="character?.display_name || ''"
+      :base-prompt="detail.editPrompt"
+      @applied="onPersonaRefined"
+    />
   </Teleport>
 </template>
 
@@ -438,6 +474,8 @@ import LinsheModal from './ui/LinsheModal.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
+import SceneOutfitsPanel from './SceneOutfitsPanel.vue'
+import PersonaRefineModal from './PersonaRefineModal.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
@@ -485,10 +523,14 @@ const detail = reactive({
   momentsDisabled: false,
   proactiveDisabled: false,
   eventsDisabled: false,
+  scheduleDisabled: false,
+  archived: false,
   dirty: false,
   momentsToggling: false,
   proactiveToggling: false,
   eventsToggling: false,
+  scheduleToggling: false,
+  archivedToggling: false,
 })
 
 // ── Lora 设置状态 ──
@@ -598,6 +640,9 @@ function init(c) {
   detail.momentsDisabled = !!c.moments_disabled
   detail.proactiveDisabled = !!c.proactive_disabled
   detail.eventsDisabled = !!c.events_disabled
+  // 日程开关是「不生成」，库里存的是 schedule_enabled（NULL/1 = 开启，0 = 关闭）
+  detail.scheduleDisabled = c.schedule_enabled === 0
+  detail.archived = !!c.archived
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
@@ -722,6 +767,54 @@ async function toggleEventsDisabled() {
     console.error('toggleEventsDisabled failed:', e)
   } finally {
     detail.eventsToggling = false
+  }
+}
+
+// 日程开关是反向的：UI 上是「不生成日程」，落库是 schedule_enabled
+async function toggleScheduleDisabled() {
+  const c = props.character
+  if (!c) return
+  const enabled = !detail.scheduleDisabled
+  detail.scheduleToggling = true
+  try {
+    await api.setCharacterScheduleEnabled(c.id, enabled)
+    c.schedule_enabled = enabled ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.schedule_enabled = c.schedule_enabled
+    toastFn(
+      enabled ? '已恢复日程生成' : '已停止日程生成，该角色之后不再消耗日程额度',
+      'success'
+    )
+  } catch (e) {
+    detail.scheduleDisabled = !detail.scheduleDisabled
+    toastFn('设置失败', 'error')
+    console.error('toggleScheduleDisabled failed:', e)
+  } finally {
+    detail.scheduleToggling = false
+  }
+}
+
+// 归档：一键停掉该角色的所有主动行为（主动聊天/朋友圈/奇遇/日程刷新/拉群/小镇奇遇）。
+// 独立拦截层，不会覆盖上面四个细分开关，取消归档后原设置原样回来。
+async function toggleArchived() {
+  const c = props.character
+  if (!c) return
+  detail.archivedToggling = true
+  try {
+    await api.setCharacterArchived(c.id, detail.archived)
+    c.archived = detail.archived ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.archived = c.archived
+    toastFn(
+      detail.archived ? '已归档：不再参与任何主动活动，你找它聊天仍会回复' : '已取消归档，恢复参与活动',
+      'success'
+    )
+  } catch (e) {
+    detail.archived = !detail.archived
+    toastFn('设置失败', 'error')
+    console.error('toggleArchived failed:', e)
+  } finally {
+    detail.archivedToggling = false
   }
 }
 
@@ -947,6 +1040,7 @@ async function saveOutfits() {
 // ═══════════════════════════════════════
 
 const showRefineModal = ref(false)
+const showPersonaRefineModal = ref(false)
 
 function openRefineModal() {
   if (!props.character) return
@@ -964,6 +1058,19 @@ async function onAppearanceRefined({ basePrompt }) {
     console.error('onAppearanceRefined save failed:', err)
     toastFn('外观已应用到人格卡，但自动保存失败，请手动点击「保存」', 'error')
   }
+}
+
+// 人设润色：与「修正外观」不同，这里**不自动保存** —— 改的是整张人设，
+// 交回文本框让用户自己核对；确认无误再点「保存」提交。
+function openPersonaRefineModal() {
+  if (!props.character) return
+  showPersonaRefineModal.value = true
+}
+
+function onPersonaRefined({ basePrompt }) {
+  detail.editPrompt = basePrompt
+  detail.dirty = true
+  toastFn('润色已填入人格提示词，请核对后点「保存」生效', 'success')
 }
 
 // ═══════════════════════════════════════
@@ -1395,6 +1502,13 @@ const standingPanel = reactive({
   gap: 12px; padding: 8px 10px;
 }
 .float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+/* 归档是总开关，与下面四个细分开关用一条细线分开 */
+.float-divider,
+.toolbar-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--glass-border);
+}
 .float-row-action {
   margin-top: 2px; padding: 8px 10px;
   border-radius: 10px; cursor: pointer;

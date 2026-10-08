@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+import { rankCandidates, rollMultiPerson, buildSceneConstraint } from '../services/relationshipIntimacy.js';
 import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
@@ -673,7 +674,7 @@ async function generateMomentPostImpl(character, opts = {}) {
       isFreeMode = true;
     } else {
       // 话题库存于 moment_topics 表（用户可在「朋友圈话题库」弹窗中管理），代码侧硬随机避免 LLM 偏见
-      const topics = db.prepare(`SELECT name, desc FROM moment_topics WHERE is_active = 1`).all();
+      const topics = db.prepare(`SELECT name, desc FROM moment_topics WHERE is_active = 1 AND COALESCE(checked, 1) = 1`).all();
       if (topics.length === 0) {
         isFreeMode = true; // 库被清空时兜底自由发挥
       } else {
@@ -712,57 +713,56 @@ async function generateMomentPostImpl(character, opts = {}) {
   );
   const postId = postResult.lastInsertRowid;
 
-  // 2.5 Sigmoid 模型：根据角色关系网数量决定多人概率
-  // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k × (R - R_mid)))
-  const MULTI_P_MIN = 0.50;  // 最低多人概率
-  const MULTI_P_MAX = 0.80;  // 最高多人概率（社交达人，永远留 20% 单人空间）
-  const MULTI_K = 1.0;       // 陡峭度：越大曲线越陡，1.0 时 R≈4~6 为快速拉升区
-  const MULTI_R_MID = 5;     // 拐点：R=5 时概率正好 = (P_min+P_max)/2 = 55%
-
+  // 2.5 多人场景判定：按**关系亲密度**分级，而不是按关系条数
+  //
+  // 原实现是「Sigmoid(关系条数)」：有 1 条关系就 ≥50% 概率，R=5 时 65%。
+  // 但关系文本表达的是**关系类型**，不是亲密许可 —— 本机实测银狼的 5 条关系全是
+  // 「网红漫画家 / 公司女总裁 / 吵闹的网友 / 麻烦的警官」这类泛泛或职业性认识，
+  // 却按 65% 概率被拉进「晚上一起睡」的画面。根因是**把「有关系」当成了「可以同框」**。
+  //
+  // 现在：先给每条关系定亲密度（0 泛泛 / 1 熟悉 / 2 亲近 / 3 亲密，见 relationshipIntimacy.js），
+  // 泛泛直接排除出候选，整体概率取**候选人中最高的那一档**。
   let multiPersons = [];
-  const relCount = db.prepare(`
-    SELECT COUNT(*) AS cnt
+  const allRels = db.prepare(`
+    SELECT cr.relationship_text, cr.intimacy,
+           c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt, c.short_prompt AS other_short
     FROM character_relationships cr
     JOIN characters c ON c.id = cr.to_character_id
     WHERE cr.from_character_id = ? AND cr.relationship_text != ''
-  `).get(character.id)?.cnt || 0;
+  `).all(character.id);
 
-  // R=0 时没有关系网对象，强制单人
-  if (relCount > 0) {
-    const multiProb = MULTI_P_MIN + (MULTI_P_MAX - MULTI_P_MIN) / (1 + Math.exp(-MULTI_K * (relCount - MULTI_R_MID)));
-    console.log(`[moments] ${character.display_name} relCount=${relCount}, multiProb=${(multiProb * 100).toFixed(0)}%`);
+  // rankCandidates 已按亲密度降序；泛泛（0）不会进入候选
+  const ranked = rankCandidates(allRels);
+  const roll = rollMultiPerson(ranked);
+  if (roll.best) {
+    console.log(`[moments] ${character.display_name} 关系 ${ranked.length} 条，最高档「${roll.best.meta.label}」→ 多人概率 ${(roll.prob * 100).toFixed(0)}%`);
+  }
 
-    if (Math.random() < multiProb) {
-      const allRels = db.prepare(`
-        SELECT cr.relationship_text,
-               c.id AS other_id, c.display_name AS other_name, c.base_prompt AS other_prompt, c.short_prompt AS other_short
-        FROM character_relationships cr
-        JOIN characters c ON c.id = cr.to_character_id
-        WHERE cr.from_character_id = ? AND cr.relationship_text != ''
-      `).all(character.id);
+  if (roll.go) {
+    // 已按亲密度降序，所以优先抽到更亲近的人；同档内随机
+    for (const cand of ranked) {
+      if (cand.level < 1) break;                       // 泛泛不参与
+      if (multiPersons.length >= 3) break;             // 最多 3 个额外角色（含主角色共 4 人）
+      const rel = cand.rel;
+      const otherPersona = buildCharacterPersona(
+        { id: rel.other_id, short_prompt: rel.other_short, base_prompt: rel.other_prompt },
+        { variant: 'short', person: rel.other_name }
+      );
 
-      // 洗牌后依次抽取，最多 3 个额外角色（总上限 4 人含主角色）
-      const shuffled = [...allRels].sort(() => Math.random() - 0.5);
-      for (const rel of shuffled) {
-        if (multiPersons.length >= 3) break;
-        const otherPersona = buildCharacterPersona(
-          { id: rel.other_id, short_prompt: rel.other_short, base_prompt: rel.other_prompt },
-          { variant: 'short', person: rel.other_name }
-        );
+      multiPersons.push({
+        otherId: rel.other_id,
+        otherName: rel.other_name,
+        otherPersona,
+        relText: rel.relationship_text,
+        relDesc: `${rel.other_name}是你的${rel.relationship_text}`,
+        intimacyLevel: cand.level,
+      });
 
-        multiPersons.push({
-          otherId: rel.other_id,
-          otherName: rel.other_name,
-          otherPersona,
-          relDesc: `${rel.other_name}是你的${rel.relationship_text}`,
-        });
-
-        // 第一个人已加，后续每人 30% 概率继续
-        if (Math.random() > 0.3) break;
-      }
-      if (multiPersons.length > 0) {
-        console.log(`[moments] Multi-person mode: ${character.display_name} + ${multiPersons.map(p => p.otherName).join(', ')} (${multiPersons.length} others)`);
-      }
+      // 第一个人已加，后续每人 30% 概率继续
+      if (Math.random() > 0.3) break;
+    }
+    if (multiPersons.length > 0) {
+      console.log(`[moments] Multi-person: ${character.display_name} + ${multiPersons.map(p => `${p.otherName}(${p.intimacyLevel})`).join(', ')}`);
     }
   }
 
@@ -775,8 +775,10 @@ async function generateMomentPostImpl(character, opts = {}) {
     ? getWorldIntegrationRule('moments')
     : null;
 
+  // 多人画面：人数说明 + **按亲密度硬约束尺度**（取所选角色里最低的一档，保守优先）
   const multiPersonImageNote = multiPersons.length > 0 ? `
-- **多人画面**：包含你和${multiPersons.map(p => p.otherName).join('、')}，另指定同框的用户也计入人数；每人独立描述，参与同一活动。` : '';
+- **多人画面**：包含你和${multiPersons.map(p => p.otherName).join('、')}，另指定同框的用户也计入人数；每人独立描述，参与同一活动。
+- ${buildSceneConstraint(multiPersons).split('\n').join('\n- ')}` : '';
 
   const postingTaskIntro = worldSetting
     ? '你正在发朋友圈。你的人设生存在<world_setting>中，融入世界观，把世界观当做常识，像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。'
@@ -978,8 +980,10 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     WHERE id = ?
   `).run(text, imagePrompt, JSON.stringify(imageUrls), opts.postedAt ? toSQLite(opts.postedAt.toISOString()) : null, postId);
 
-  // 5. 设置下次发帖时间（2~8 小时后）
-  const nextDelay = 2 * 3600_000 + Math.random() * 6 * 3600_000;
+  // 5. 设置下次发帖时间：基准 2~8 小时，按 momentFreq 缩放（1=默认，越大越快）
+  //    freq=24（设置页最快档）→ 5~20 分钟；下限 5 分钟兜底，与调度器 5 分钟扫描间隔对齐
+  const momentFreq = Math.max(0.01, config.features.momentFreq ?? 1);
+  const nextDelay = Math.max(5 * 60_000, (2 * 3600_000 + Math.random() * 6 * 3600_000) / momentFreq);
   const nextAt = new Date(Date.now() + nextDelay).toISOString();
   db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
     .run(toSQLite(nextAt), character.id);

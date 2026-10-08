@@ -86,6 +86,8 @@ function topicToApi(row) {
     desc: row.desc,
     source: row.source,
     isActive: row.is_active,
+    // 老库还没跑迁移时为 undefined，按「已勾选」处理，行为与升级前一致
+    checked: row.checked === undefined || row.checked === null ? 1 : (row.checked ? 1 : 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -219,6 +221,27 @@ router.get('/topics', (req, res) => {
   res.json(rows.map(topicToApi));
 });
 
+// POST /api/library/topics/set-checked — 批量勾选 / 取消勾选（{ ids: [...] } 或 { all: true }）
+// 勾选只决定这条话题参不参与抽题，条目本身保留，随时能再勾回来（区别于 DELETE 的软删除）。
+router.post('/topics/set-checked', (req, res) => {
+  const db = getDb();
+  const checked = req.body?.checked ? 1 : 0;
+  const all = req.body?.all === true;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
+  if (!all && ids.length === 0) {
+    return res.status(400).json({ error: 'empty_ids', message: '没有指定条目' });
+  }
+
+  const info = all
+    ? db.prepare(`UPDATE moment_topics SET checked = ?, updated_at = CURRENT_TIMESTAMP WHERE is_active = 1`)
+      .run(checked)
+    : db.prepare(`UPDATE moment_topics SET checked = ?, updated_at = CURRENT_TIMESTAMP
+                  WHERE id IN (${ids.map(() => '?').join(',')}) AND is_active = 1`)
+      .run(checked, ...ids);
+
+  res.json({ ok: true, checked, changed: info.changes });
+});
+
 // POST /api/library/topics — 新建一条自定义话题
 router.post('/topics', (req, res) => {
   const name = toStringVal(req.body?.name);
@@ -246,6 +269,10 @@ router.put('/topics/:id', (req, res) => {
   const body = req.body || {};
   const name = body.name !== undefined ? toStringVal(body.name, row.name) : row.name;
   const desc = body.desc !== undefined ? toStringVal(body.desc, row.desc) : row.desc;
+  // 勾选状态：不传则保持原值（老库 undefined → 视为已勾选）
+  const checked = body.checked !== undefined
+    ? (body.checked ? 1 : 0)
+    : (row.checked === undefined || row.checked === null ? 1 : (row.checked ? 1 : 0));
 
   if (!name) return res.status(400).json({ error: 'invalid_name', message: 'name 不能为空' });
 
@@ -253,8 +280,8 @@ router.put('/topics/:id', (req, res) => {
   if (dup) return res.status(409).json({ error: 'duplicate_name', message: `话题「${name}」已被其他条目使用` });
 
   db.prepare(
-    `UPDATE moment_topics SET name = ?, desc = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).run(name, desc, row.id);
+    `UPDATE moment_topics SET name = ?, desc = ?, checked = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(name, desc, checked, row.id);
 
   const updated = db.prepare(`SELECT * FROM moment_topics WHERE id = ?`).get(row.id);
   res.json(topicToApi(updated));

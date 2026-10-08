@@ -354,8 +354,10 @@
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
             style="margin-bottom:0"
+            name="linshe-llm-key"
+            autocomplete="new-password"
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            @input="markLlmDirty"
+            @input="onLlmKeyInput"
           />
           <linshe-button class="sp-btn-small" size="sm" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
           <linshe-button class="sp-btn-small" variant="ghost" size="sm" style="flex-shrink:0" @click="showApiKey = !showApiKey">
@@ -647,6 +649,21 @@ type="range" min="0" max="1" step="0.1"
               @change="onEventFreqChange"
             />
             <span class="freq-val">{{ eventFreqSlider.toFixed(1) }}</span>
+          </div>
+        </div>
+
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">朋友圈发帖频率</div>
+            <div class="td">{{ momentFreqHint }}</div>
+          </div>
+          <div class="freq-control">
+            <input
+type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
+              v-model.number="momentFreqStepIdx"
+              @change="onMomentFreqChange"
+            />
+            <span class="freq-val">{{ momentFreqLabel }}</span>
           </div>
         </div>
 
@@ -1086,7 +1103,18 @@ v-for="m in workflowModeOptions" :key="m.value"
           <span class="wf-mo-desc" v-html="m.desc"></span>
         </div>
       </div>
-      <div class="wf-mode-downloads">
+      <Transition name="expand">
+        <div v-if="wfModeDraft === 'custom'" class="wf-mode-custom">
+          <p class="wf-mode-hint">从 workflow 目录中选择工作流，所有生图场景统一使用</p>
+          <linshe-select
+v-model="wfCustomDraft" :options="customWorkflowOptions"
+            :disabled="customWorkflowLoading" placeholder="请选择自定义工作流" />
+          <p v-if="!customWorkflowLoading && customWorkflowOptions.length === 0" class="wf-mode-custom-empty">
+            未找到可选工作流，请把 .json 文件放入 workflow 目录
+          </p>
+        </div>
+      </Transition>
+      <div v-if="wfModeDraft !== 'custom'" class="wf-mode-downloads">
         <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
         <div class="wf-dl-item">
           <span class="wf-dl-label">Anima-turbo：</span>
@@ -1136,7 +1164,7 @@ base
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1292,6 +1320,34 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+// 朋友圈发帖频率档位：value 是 momentFreq（周期 = 基准 2~8 小时 / value）。
+// 用档位而不是连续滑块：周期跨度从 5 分钟到 32 小时，连续拖动既拖不准也说不清。
+// 顺序按「越往右越频繁」，与「频率」的直觉一致。
+const MOMENT_FREQ_STEPS = [
+  { value: 0,    label: '关闭',    hint: '关闭自动发帖（仍可手动发）。' },
+  { value: 0.25, label: '8 小时',  hint: '每个角色约 8~32 小时一条。' },
+  { value: 0.5,  label: '4 小时',  hint: '每个角色约 4~16 小时一条。' },
+  { value: 1,    label: '2 小时',  hint: '每个角色约 2~8 小时一条（默认节奏）。' },
+  { value: 2,    label: '1 小时',  hint: '每个角色约 1~4 小时一条。' },
+  { value: 4,    label: '30 分钟', hint: '每个角色约 30 分钟~2 小时一条。' },
+  { value: 8,    label: '15 分钟', hint: '每个角色约 15~60 分钟一条。' },
+  { value: 24,   label: '5 分钟',  hint: '每个角色约 5~20 分钟一条，LLM 与生图消耗很高。' },
+]
+const DEFAULT_MOMENT_STEP = 3   // 对应 value=1（2 小时）
+const momentFreqStepIdx = ref(DEFAULT_MOMENT_STEP)
+const momentFreqHint = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.hint || '')
+const momentFreqLabel = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.label || '')
+/** 库里存的 momentFreq → 最接近的档位下标（老值可能是任意数） */
+function momentStepFromValue(v) {
+  if (v == null) return DEFAULT_MOMENT_STEP
+  let best = 0
+  let bestDiff = Infinity
+  MOMENT_FREQ_STEPS.forEach((s, i) => {
+    const d = Math.abs(s.value - v)
+    if (d < bestDiff) { bestDiff = d; best = i }
+  })
+  return best
+}
 const backgroundConcurrency = ref(3)
 
 // ── 防打扰模式 ──
@@ -1405,6 +1461,19 @@ async function removeFavorite(id) {
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
 const freeEgg = ref(false)
 const llmApiKey = ref('')
+/**
+ * 用户是否**手动输入过** API Key。
+ *
+ * 这个字段是「只写」的：后端只回脱敏 preview、从不回填真实值，所以正常情况下输入框
+ * 应该是空的，只有用户主动输入才提交。但输入框是 type=password，浏览器会把它当密码框
+ * 记住并自动填充旧值 —— 一保存就把浏览器里的旧 key 写回库，覆盖掉正确的那个。
+ * 所以提交时以这个标志为准：没手动输入过就**不提交 apiKey**，浏览器填什么都不影响。
+ */
+const llmApiKeyTouched = ref(false)
+function onLlmKeyInput() {
+  llmApiKeyTouched.value = true
+  markLlmDirty()
+}
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
 const llmModels = ref([])
@@ -1644,6 +1713,7 @@ async function toggleFreeEgg() {
       llmPreview.value = { ...result }
       settingsStore.setHasApiKey(result.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
       toastFn?.(freeEgg.value ? '已开启每日免费鸡蛋 🥚' : '已恢复自有 LLM 配置', 'success')
@@ -1709,7 +1779,8 @@ async function loadAvailableModels() {
     const headers = llmHeadersEnabled.value ? JSON.parse(llmHeadersText.value) : {}
     const result = await fetchLlmModels({
       baseURL: llmBaseURL.value.trim(),
-      apiKey: llmApiKey.value.trim() || undefined,
+      // 未手动输入时不传 key，由后端回落到库里存的那个（避免用浏览器自动填充的旧值去请求）
+      apiKey: llmApiKeyTouched.value ? (llmApiKey.value.trim() || undefined) : undefined,
       headers,
     })
     llmModels.value = result.models || []
@@ -1770,6 +1841,7 @@ async function switchProfile(id) {
           ? JSON.stringify(result.llmConfig.extraBody, null, 2) : '{}'
         settingsStore.setHasApiKey(result.llmConfig.hasApiKey)
         llmApiKey.value = ''
+        llmApiKeyTouched.value = false
         llmDirty.value = false
         llmSaved.value = false
         // 刷新完整的 features 和 concurrency（profile 切换会影响这些）
@@ -1778,6 +1850,7 @@ async function switchProfile(id) {
         backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
         freqSlider.value = cfg.features.proactiveChatFreq ?? 0.5
         eventFreqSlider.value = cfg.features.eventFreq ?? 1
+        momentFreqStepIdx.value = momentStepFromValue(cfg.features.momentFreq)
       }
     }
   } catch (err) {
@@ -1838,6 +1911,7 @@ async function removeProfile(id) {
       backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
       settingsStore.setHasApiKey(cfg.llm.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
     }
@@ -1893,6 +1967,7 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
+    momentFreqStepIdx.value = momentStepFromValue(features.momentFreq)
     backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
@@ -1921,6 +1996,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
+      workflowCustomTemplate.value = data.workflow.customTemplate || ''
       workflowScene.value = { chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
@@ -2130,7 +2206,8 @@ async function fetchNovelaiModels() {
 
 function buildLlmPayload() {
   const payload = {}
-  if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+  // 只有用户手动输入过才提交 apiKey —— 否则浏览器自动填充的旧值会被当成"用户的输入"写回库
+  if (llmApiKeyTouched.value && llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
   if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
   if (llmModel.value) payload.model = llmModel.value
   payload.thinkingMode = llmThinkingMode.value
@@ -2186,6 +2263,7 @@ async function saveLlmConfig() {
       llmExtraBodyText.value = result.extraBody && Object.keys(result.extraBody).length
         ? JSON.stringify(result.extraBody, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
+      llmApiKeyTouched.value = false
 
       // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）
       if (isCustomBaseURL.value) {
@@ -2250,6 +2328,19 @@ async function onEventFreqChange() {
   const v = eventFreqSlider.value
   features.eventFreq = v
   try { await updateEventFreq(v) } catch { /* 非关键 */ }
+}
+
+async function onMomentFreqChange() {
+  const step = MOMENT_FREQ_STEPS[momentFreqStepIdx.value]
+  if (!step) return
+  const v = step.value
+  features.momentFreq = v
+  try {
+    await updateMomentFreq(v)
+    toastFn?.(v <= 0 ? '已关闭自动发帖' : `朋友圈频率已设为「${step.label}」`, 'success')
+  } catch (err) {
+    toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
+  }
 }
 
 // ── 防打扰模式 ──
@@ -2385,11 +2476,20 @@ const hiresError = ref('')
 const hiresCompare = ref(null)
 
 // ── 工作流 ──
-const workflowModeOptions = [
+const BASE_WORKFLOW_MODE_OPTIONS = [
   { value: 'turbo', label: 'turbo', desc: '只用 Anima_turbo 模型，<span class="wf-mo-highlight">速度提升300%+</span>，但代价是构图能力下降，画师串影响略微下降' },
   { value: 'base', label: 'base', desc: '只用 Anima_base 模型，泛用性最强的基底模型，构图能力强，画师串遵循强，速度较慢' },
   { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，切换时需要加载模型导致首图较慢' },
 ]
+// 自定义工作流卡片：仅当 workflow 目录里存在可选工作流时才出现
+const CUSTOM_WORKFLOW_MODE_OPTION = {
+  value: 'custom',
+  label: '自定义',
+  desc: '使用你自己放在 workflow 目录下的工作流，所有生图场景统一生效（角色专属工作流仍优先）',
+}
+// 放大细化工作流由 HiresFix 单独管理，不作为生图工作流选项
+const NON_GENERATION_WORKFLOWS = ['放大细化工作流.json', '放大细化工作流-进阶.json']
+
 const sceneOptions = [
   { key: 'chat', label: '私聊' },
   { key: 'group', label: '群聊' },
@@ -2401,31 +2501,66 @@ const sceneOptions = [
 
 const workflowMode = ref('turbo')
 const workflowScene = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const workflowCustomTemplate = ref('')
+const customWorkflowList = ref([])
+const customWorkflowLoading = ref(false)
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
+const workflowModeOptions = computed(() =>
+  customWorkflowList.value.length > 0
+    ? [...BASE_WORKFLOW_MODE_OPTIONS, CUSTOM_WORKFLOW_MODE_OPTION]
+    : BASE_WORKFLOW_MODE_OPTIONS
+)
+const customWorkflowOptions = computed(() =>
+  customWorkflowList.value.map(w => ({ value: w.filename, label: w.label }))
+)
+
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
 const wfSceneDraft = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const wfCustomDraft = ref('')
+
+async function fetchCustomWorkflows() {
+  customWorkflowLoading.value = true
+  try {
+    const data = await getWorkflows()
+    customWorkflowList.value = (data.workflows || [])
+      .filter(w => !NON_GENERATION_WORKFLOWS.includes(w.filename))
+  } catch {
+    customWorkflowList.value = []
+  } finally {
+    customWorkflowLoading.value = false
+  }
+}
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value
   wfSceneDraft.value = { ...workflowScene.value }
+  wfCustomDraft.value = workflowCustomTemplate.value
   showWfModeDialog.value = true
+  // 每次打开都重新拉取，workflow 目录新增文件后无需刷新页面
+  fetchCustomWorkflows()
 }
 
 async function saveWfModeDialog() {
+  if (wfModeDraft.value === 'custom' && !wfCustomDraft.value) {
+    toastFn?.('请先选择一个自定义工作流', 'warning')
+    return
+  }
   wfSaving.value = true
   try {
     const modeChanged = wfModeDraft.value !== workflowMode.value
     const sceneChanged = JSON.stringify(wfSceneDraft.value) !== JSON.stringify(workflowScene.value)
+    const customChanged = wfCustomDraft.value !== workflowCustomTemplate.value
 
-    if (modeChanged) await updateWorkflowMode(wfModeDraft.value)
+    if (modeChanged || customChanged) await updateWorkflowMode(wfModeDraft.value, wfCustomDraft.value)
     if (sceneChanged || modeChanged) await updateWorkflowScene({ ...wfSceneDraft.value })
 
     workflowMode.value = wfModeDraft.value
     workflowScene.value = { ...wfSceneDraft.value }
+    workflowCustomTemplate.value = wfCustomDraft.value
     showWfModeDialog.value = false
   } catch {} finally { wfSaving.value = false }
 }
@@ -2889,7 +3024,11 @@ function resetTestPrompts() {
   background: var(--accent); border: none; cursor: pointer;
 }
 .freq-val {
-  font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
+  font-size: 14px; font-weight: 600; color: var(--accent);
+  /* 固定宽度 + 右对齐：这几行是 space-between 布局、值区靠右，
+     宽度不一致会把滑块往左挤（「5 分钟」比「1.0」宽就错位了）。
+     统一宽度后所有滑块左右边缘才能对齐。56px 容得下最宽的「30 分钟」。 */
+  min-width: 56px; text-align: right; white-space: nowrap;
 }
 
 /* ── 防打扰模式 ── */
@@ -3430,6 +3569,16 @@ function resetTestPrompts() {
 .wf-mode-hint {
   font-size: 12px; color: var(--text-secondary);
   margin-bottom: 10px; text-align: center;
+}
+.wf-mode-custom {
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 8px; padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.wf-mode-custom-empty {
+  font-size: 12px; color: var(--text-secondary);
+  margin: 8px 0 0; text-align: center;
 }
 .wf-mode-scenes {
   background: rgba(var(--accent-rgb), 0.04);

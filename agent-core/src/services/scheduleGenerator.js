@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
+import { buildOutfitAnnotateLayer } from './outfitScene.js';
 
 /**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
@@ -128,7 +129,7 @@ async function generateScheduleImpl(character, direction) {
 完整 JSON 结构示例（示例仅 2 个活动，实际必须输出 8~15 个活动）：
 {"activities":[{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗——整理长发","location":"公寓浴室","replyDelay":0,"tags":["日常","晨间"],"description":"甘雨站在镜前慢慢理顺长发，水汽沾湿额发，动作安静而认真。"},{"startTime":"22:00","endTime":"07:00","activity":"就寝安眠","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"甘雨裹好被子沉入睡眠，角上铃兰微光映着窗帘，呼吸逐渐平稳。"}]}
 
-只输出 JSON 对象，不要输出任何解释、Markdown 代码块或 JSON 以外的文字。activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式、24 小时制，数组里每个对象都必须严格包含并输出上述七个字段。`;
+只输出 JSON 对象，不要输出任何解释、Markdown 代码块或 JSON 以外的文字。activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式、24 小时制，数组里每个对象都必须严格包含上述全部字段（若上方系统消息另有额外字段要求，一并按那里的说明输出）。`;
 
   // ── 用户指定的日程方向 ──
   const directionMsg = direction ? `## 用户指定的日程方向
@@ -148,6 +149,11 @@ ${direction}**
   msgs.push({ role: 'system', content: scheduleInst });
   // msgs[3]: 角色人格（随角色变化，不影响前缀缓存）
   msgs.push({ role: 'system', content: personaMsg });
+  // msgs[3.5]: 着装标注（仅当角色配了 ≥2 套场景服装时才有；没配则完全不加，原提示词不变）
+  //   放在这里而非 scheduleInst：scheduleInst 是跨角色共享常量（吃 LLM 前缀缓存），
+  //   服装列表每个角色都不同，塞进去会让缓存全部失效。
+  const outfitLayer = buildOutfitAnnotateLayer(character.id);
+  if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
     ? `请遵循<world_setting>来安排日程，角色设定如果和<world_setting>有冲突，则以<world_setting>最高优先级，角色设定会因为<world_setting>改变,日程内容必须体现<world_setting>的设定。
