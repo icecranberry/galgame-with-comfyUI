@@ -1,8 +1,59 @@
 <template>
   <nav class="nav-bar">
     <div class="nav-top" ref="navTopEl">
-      <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色 -->
+      <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色。
+           指示器按 data-nav 查元素取 offsetTop —— 所以**导航项顺序可自由调整**。
+           ⚠ 但新增导航项时，`activeNavKey` 必须能推导出它的 data-nav 键，
+             否则指示器会跑到别处（该键现在由路由首段推导，一般无需再改）。 -->
       <div class="nav-indicator" :style="indicatorStyle" aria-hidden="true"></div>
+
+      <!-- 顺序（2026-10-04 按用户要求重排）：世界 → 奇遇 → 地图 → 网络 → 聊天 → 朋友圈 → 日程 → 相册 → 酒馆
+           世界/奇遇/地图是「规划与沉浸玩法」入口，提到最前；聊天/朋友圈是日常高频，居中。 -->
+      <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+          </svg>
+        </div>
+        <span class="nav-label">世界(内测)</span>
+      </router-link>
+
+      <div class="nav-item" data-nav="events" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+          </svg>
+          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
+        </div>
+        <span class="nav-label">奇遇</span>
+      </div>
+
+      <!-- 地图：世界地图骨架（叙事地理）的规划工具。
+           与世界(内测)不同 —— 那边是可行走的游戏网格图，这边是从世界观落出地理结构。 -->
+      <router-link to="/worldmap" data-nav="worldmap" class="nav-item" :class="{ active: $route.path.startsWith('/worldmap') }" title="地图">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/>
+            <path d="M9 4v14M15 6v14"/>
+          </svg>
+        </div>
+        <span class="nav-label">地图</span>
+      </router-link>
+
+      <!-- 「网络」= 原「传媒」（2026-10-04 改名；路由与 data-nav 仍为 media，避免破坏深链与前端逻辑） -->
+      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="网络">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
+            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
+          </svg>
+        </div>
+        <span class="nav-label">网络</span>
+      </router-link>
+
       <router-link to="/chat" data-nav="chat" class="nav-item" :class="{ active: $route.path.startsWith('/chat') }" title="聊天">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -22,28 +73,6 @@
         </div>
         <span class="nav-label">朋友圈</span>
       </div>
-
-      <div class="nav-item" data-nav="events" :class="{ active: $route.path.startsWith('/events') }" title="奇遇" @click="handleEventsClick">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
-          </svg>
-          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
-        </div>
-        <span class="nav-label">奇遇</span>
-      </div>
-
-      <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="2" y1="12" x2="22" y2="12" />
-            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-          </svg>
-        </div>
-        <span class="nav-label">世界(内测)</span>
-      </router-link>
 
       <div class="nav-item" data-nav="schedule" :class="{ active: $route.path.startsWith('/schedule') }" title="日程" @click="handleScheduleClick">
         <div class="nav-icon-wrap">
@@ -66,6 +95,36 @@
           <path stroke="currentColor" stroke-width="35" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z"/>
         </svg>
         <span class="nav-label">相册</span>
+      </router-link>
+
+      <!-- 绘图：生图 TAG 自由组合的创意工坊。
+           ★ 与「相册」分开 —— 那边是**看已有作品**，这边是**造新作品**；
+             标签库的全量词库（含动作/表情/瞬时状态）只在页内，角色页只留常驻身体特征。 -->
+      <router-link to="/draw" data-nav="draw" class="nav-item" :class="{ active: $route.path.startsWith('/draw') }" title="绘图">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+            <path d="M2 2l7.586 7.586"/>
+            <circle cx="11" cy="11" r="2"/>
+          </svg>
+        </div>
+        <span class="nav-label">绘图</span>
+      </router-link>
+
+      <!-- 故事（T2，2026-10-07）：跨天演进的剧情线。
+           ★ 与「奇遇」（/events）刻意分开 —— 那是**一次性事件**（到期即失效），
+             这里是**跨多天演进**的线（起线→延展→成形→收束/淡出）。
+             用户口径：不要碰奇遇，两套并存、各管各的。 -->
+      <router-link to="/story" data-nav="story" class="nav-item" :class="{ active: $route.path.startsWith('/story') }" title="故事">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <path d="M9 7h7M9 11h5"/>
+          </svg>
+        </div>
+        <span class="nav-label">故事</span>
       </router-link>
 
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
@@ -150,18 +209,26 @@ function handleScheduleClick() {
 const navTopEl = ref(null)
 const indicatorStyle = ref({ opacity: 0 })
 
+/**
+ * 当前路由 → 导航项的 data-nav 键（决定指示器滑到哪一格）。
+ *
+ * ★ 改为**从路径首段推导**，而不是一串硬编码分支。
+ *   原因：原先是一长串 `if (p.startsWith('/xxx')) return 'xxx'`，末尾 `return 'chat'` 兜底 ——
+ *   于是**任何没被列举到的路由都会把指示器错误地滑到「聊天」**
+ *   （实测：新增 `/worldmap` 后未同步这里，点「地图」指示器跑去了「聊天」；
+ *    `/mailbox`、`/backpack`、`/standing-display` 也一样会错高亮聊天）。
+ *
+ *   改为推导后：段名即键；只有真实存在的导航项才会有元素可匹配，
+ *   匹配不到时 updateIndicator 会把指示器**隐藏**（如 /mailbox、/standing-display），
+ *   这比"随便高亮一个"正确。以后新增导航项/路由**不需要再动这里**。
+ */
+const SEG_ALIAS = { group: 'chat' }   // 特例：群聊属于「聊天」
 const activeNavKey = computed(() => {
-  const p = route.path
-  if (p.startsWith('/chat') || p.startsWith('/group')) return 'chat'
-  if (p.startsWith('/moments')) return 'moments'
-  if (p.startsWith('/events')) return 'events'
-  if (p.startsWith('/town')) return 'town'
-  if (p.startsWith('/schedule')) return 'schedule'
-  if (p.startsWith('/gallery')) return 'gallery'
-  if (p.startsWith('/tavern')) return 'tavern'
-  if (p.startsWith('/settings')) return 'settings'
-  return 'chat'
+  const seg = (route.path.split('/')[1] || '').trim()
+  if (!seg) return 'chat'             // 根路径 → 默认落在聊天
+  return SEG_ALIAS[seg] || seg
 })
+
 
 function updateIndicator() {
   const wrap = navTopEl.value

@@ -19,6 +19,11 @@ import {
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
+// 剧情大纲（「面」）注入文本；开关关闭时不会被调用
+import { outlineInjectionForNow } from '../services/story/outlineService.js';
+// 事件线（「线」）注入文本；开关关闭时不会被调用
+import { lineInjectionForCharacter } from '../services/story/eventLineService.js';
+import { buildCastBodySummary } from '../services/characterBuild.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { getWorldStateBlock, getCharacterEventBlockFor } from '../services/newspaperService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
@@ -28,7 +33,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
-import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
+import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap, getUserEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { detectAndApplyAppointment } from '../services/appointmentDetector.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
@@ -114,6 +119,29 @@ function toISODate(sqliteDT) {
 }
 
 // DELETE /api/characters/:id/messages — 清空角色对话记录
+// POST /api/chat/upload-image — 用户发图前的上传（base64 data URI → /images/chat/...）
+// 注意：本 router 挂在 '/api'（见 app.js），所以这里要写完整的 '/chat/upload-image'，
+// 不能只写 '/upload-image'（那会变成 /api/upload-image，前端调 /api/chat/upload-image 就 404）。
+router.post('/chat/upload-image', (req, res) => {
+  try {
+    const base64 = req.body?.base64;
+    if (typeof base64 !== 'string' || !base64) return res.status(400).json({ error: '缺少图片数据' });
+    const mimeMatch = base64.match(/^data:(image\/(?:png|jpeg|webp|gif|bmp));base64,/);
+    if (!mimeMatch) return res.status(400).json({ error: '仅支持 PNG / JPG / WEBP / GIF / BMP 图片' });
+    const buf = Buffer.from(base64.slice(mimeMatch[0].length), 'base64');
+    if (buf.length === 0) return res.status(400).json({ error: '图片为空' });
+    if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: '图片不能超过 8MB' });
+
+    const extMap = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp' };
+    const filename = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extMap[mimeMatch[1]]}`;
+    const url = saveBase64Image('chat', filename, base64);
+    res.json({ ok: true, url });
+  } catch (err) {
+    console.error('[chat] upload-image error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete('/characters/:id/messages', (req, res, next) => {
   const db = getDb();
   // 入口即校验：id 必须是正整数，conversationId 由校验后的数字构造（不直接拼接原始输入）
@@ -306,12 +334,19 @@ router.get('/messages/:id', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTownState }), async (req, res) => {
-  const { message, client_msg_id, force_image_gen, image_mode, deep_think } = req.body;
+  const { message, client_msg_id, force_image_gen, image_mode, deep_think, images: rawImages } = req.body;
   const deepThink = deep_think === true || deep_think === 'true';
   const imageMode = ['off', 'smart', 'force'].includes(image_mode) ? image_mode : (force_image_gen ? 'force' : 'smart');
   // 深度思考下的生图策略：off = planner 看不到图片工具；must = 强制生图（本轮必配图，形式由 planner 定）；auto = planner 按需决策
   const imagePolicy = imageMode === 'off' ? 'off' : (deepThink && imageMode === 'force' ? 'must' : 'auto');
-  if (!message || typeof message !== 'string') {
+
+  // 用户随消息带的图片（/images/... 路径数组）。只收本项目的图片路径，其余忽略。
+  const attachedImages = (Array.isArray(rawImages) ? rawImages : [])
+    .filter(u => typeof u === 'string' && u.startsWith('/images/'))
+    .slice(0, 4);
+  const hasAttached = attachedImages.length > 0;
+
+  if ((!message || typeof message !== 'string') && !hasAttached) {
     return res.status(400).json({ error: 'message is required' });
   }
 
@@ -328,7 +363,12 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
   const conversationId = convId(characterId);
   const emojiMap = getCharacterEmojiMap(characterId, db);
   const emojiNote = buildEmojiNote([...emojiMap.keys()]);
-  const parsedUserMessage = parseEmojiText(message, emojiMap);
+  const parsedUserMessage = parseEmojiText(message, new Map([...emojiMap, ...getUserEmojiMap(db)]));
+  // 用户附带的图片并进 images —— 这样存库、回显、以及 contextAssembler 把它转成模型输入
+  // 全都走同一条既有链路，不必另开分支
+  if (hasAttached) {
+    parsedUserMessage.images = [...new Set([...parsedUserMessage.images, ...attachedImages])];
+  }
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {
@@ -903,6 +943,34 @@ ${coreRules}
           dynamicBlocks.push(`<rag_memories>\n${memoryLines}\n</rag_memories>`);
         }
       } catch (err) { console.error('[chat] memory search failed:', err.message); }
+    }
+
+    // 11.5 剧情大纲（「面」）注入
+    //
+    // ★★ 这是**动态内容**（每轮随游标变化），必须放在这里（`dynamicBlocks`），
+    //   **绝不能进跨角色共享的 `scheduleInst`** —— 那会打穿 LLM 前缀缓存（调研 §2.5 记的冲突点）。
+    // ★ 开关默认关（`FEATURE_STORY_OUTLINE`）：关闭时本块**完全不执行**，提示词逐字节不变。
+    if (config.features.storyOutline) {
+      try {
+        const outlineBlock = outlineInjectionForNow();
+        if (outlineBlock) dynamicBlocks.push(`<story_outline>\n${outlineBlock}\n</story_outline>`);
+      } catch (err) { console.error('[chat] outline injection failed:', err.message); }
+    }
+
+    // 11.6 事件线（「线」）注入
+    //
+    // ★ 与上面的「面」是**两层**：面=整个故事往哪走；线=某条具体线索演进到哪。
+    //   这里只给**该角色牵涉其中**的线（结构性判据，见 pickLinesForCharacter），
+    //   且同样只是"隐约方向"，明令不要点破 —— 照念会让对话变成剧情汇报。
+    //
+    // ★★ 与「面」一样属**动态内容**，必须放 `dynamicBlocks`，
+    //   **绝不能进跨角色共享的 `scheduleInst`**（会打穿 LLM 前缀缓存，红线见调研 §2.5）。
+    // ★ 开关默认关（`FEATURE_STORY_LINES`）：关闭时本块完全不执行，提示词逐字节不变（红线 4）。
+    if (config.features.storyLines) {
+      try {
+        const lineBlock = lineInjectionForCharacter(characterId);
+        if (lineBlock) dynamicBlocks.push(`<story_lines>\n${lineBlock}\n</story_lines>`);
+      } catch (err) { console.error('[chat] event line injection failed:', err.message); }
     }
 
     // 12. 重逢提示（streak ≥ 2 时注入；低好感时改为冷淡不满版，避免"珍惜感"要求与关系深度档位打架）
@@ -1830,6 +1898,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   let crossRefCharIdsForImage = [];
   let crossRefImageMsgs = [];
   const crossBlocks = [];
+  let crossCharsForCast = [];
   if (crossMatches.length > 0) {
     const crossChars = crossMatches.map(m =>
       db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
@@ -1838,6 +1907,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
     crossBlocks.push(...crossChars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
 
     crossRefCharIdsForImage = crossChars.map(c => c.id);
+    crossCharsForCast = crossChars;
   }
 
   // 文本里提到用户本人时同样注入其资料（用户不是角色：没有 id、没有 LoRA）
@@ -1846,9 +1916,14 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   }
 
   if (crossBlocks.length > 0) {
+    // 多人同框时额外给一份「体型对照」：把各人身高排好序并要求画面体现高度差。
+    // 身高本来就写在各自外观段里，但同框时模型会默认把大家画成一样高（实测偏差明显）。
+    // 单人或读不出身高时返回 null，不加噪声。
+    const castSummary = buildCastBodySummary([character, ...crossCharsForCast].filter(Boolean));
     crossRefImageMsgs.push({
       role: 'system',
       content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`
+        + (castSummary ? `\n\n${castSummary}` : '')
     });
   }
 

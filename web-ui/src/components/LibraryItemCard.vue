@@ -1,5 +1,5 @@
 <template>
-  <div class="item-card" :class="{ editing: item._editing }">
+  <div class="item-card" :class="{ editing: item._editing, unchecked: selectable && item.checked === 0 }">
     <!-- 编辑态 -->
     <!-- 编辑态 / 展示态 -->
     <CardHeightTransition :editing="item._editing">
@@ -20,6 +20,23 @@
 
       <div v-else class="card-main">
         <div class="card-title-row">
+          <!-- 勾选框：只决定这条话题参不参与抽题，条目本身不会被删掉 -->
+          <div
+            v-if="selectable"
+            class="card-check"
+            :class="{ on: item.checked !== 0 }"
+            role="checkbox"
+            :aria-checked="item.checked !== 0"
+            tabindex="0"
+            :title="item.checked !== 0 ? '已勾选：会参与抽题' : '未勾选：不参与抽题（条目保留）'"
+            @click.stop="emit('toggle-check', item)"
+            @keydown.enter.prevent.stop="emit('toggle-check', item)"
+            @keydown.space.prevent.stop="emit('toggle-check', item)"
+          >
+            <svg v-if="item.checked !== 0" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="20,6 9,17 4,12" />
+            </svg>
+          </div>
           <span class="card-name">{{ item.name }}</span>
         </div>
         <div class="card-desc">{{ item.desc }}</div>
@@ -46,8 +63,10 @@ import LinsheInput from './ui/LinsheInput.vue'
 const props = defineProps({
   item: { type: Object, required: true },
   isEvents: { type: Boolean, default: false },
+  // 朋友圈话题支持勾选（决定参不参与抽题）；奇遇事件库不启用
+  selectable: { type: Boolean, default: false },
 })
-const emit = defineEmits(['edit', 'cancel', 'save', 'remove'])
+const emit = defineEmits(['edit', 'cancel', 'save', 'remove', 'toggle-check'])
 
 // 标签以逗号分隔字符串编辑，实时同步回数组
 const funFromText = ref('')
@@ -78,8 +97,24 @@ function onToggleEdit() {
 .item-card:hover { border-color: rgba(var(--accent-rgb),0.35); box-shadow: 0 3px 16px rgba(var(--accent-rgb),0.06); }
 .item-card.editing { border-color: var(--accent, var(--accent)); box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.15); }
 .card-main { min-width: 0; }
-.card-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.card-title-row { display: flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .card-name { font-size: 14px; font-weight: 700; color: var(--text-bright, #2b2b2b); }
+
+/* 勾选框：未勾选的条目压暗，一眼看出哪些不参与抽题 */
+.card-check {
+  flex-shrink: 0;
+  width: 16px; height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border-strong, #ccc);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.card-check:hover { border-color: var(--accent); }
+.card-check.on { background: var(--accent); border-color: var(--accent); }
+.item-card.unchecked { opacity: 0.55; }
+.item-card.unchecked:hover { opacity: 0.85; }
 .card-desc {
   font-size: 12px; color: var(--text-primary, #555);
   line-height: 1.6; margin-top: 6px;

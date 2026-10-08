@@ -41,7 +41,7 @@ function minToTime(min) {
  * @param {boolean} opts.clampCrossMidnight - 聊天约定路径：结束时间落在凌晨（如 23:47~00:40）
  *   视为跨天，截至当天 23:59；关闭时保留原样（手动编辑沿用原条目的跨天时段，如睡眠 22:00~07:00）
  */
-export function sanitizeActivityInput(patch = {}, { clampCrossMidnight = false } = {}) {
+export function sanitizeActivityInput(patch = {}, { clampCrossMidnight = false, fallback = null } = {}) {
   const startMin = toMin(patch.startTime);
   let endMin = toMin(patch.endTime);
   if (startMin === null || endMin === null) return null;
@@ -62,10 +62,21 @@ export function sanitizeActivityInput(patch = {}, { clampCrossMidnight = false }
   const activity = String(patch.activity || '').trim();
   if (!activity) return null;
 
+  // ★ replyDelay 缺省值不能一律取 0 —— 那会把「睡眠块」静默改成「可回复」。
+  //
+  //   用户实报：三月七的模板里 `02:00-10:30 睡到自然醒` 明明是 `replyDelay=-1`，
+  //   但当天快照里变成了 0（活动名还写着"睡到自然醒"，`edited=manual`）。
+  //   根因是手动编辑路径：`updateScheduleActivity` 把清洗结果 `...clean` 展开覆盖原条目，
+  //   而前端提交时若 `act.replyDelay` 为 undefined，这里的兜底 `0` 就把原来的 `-1` 抹掉了 ——
+  //   表现为"角色整夜不睡、全天可回复"，且**生成侧的睡眠校验也拦不住**（它只查生成结果）。
+  //
+  //   正确语义：**调用方指定优先，未指定时沿用原条目的值**（由 `opts.fallback` 传入）。
+  //   仍取不到时才回落 0（新建条目/约定插入这类确实没有原值可沿用的场景）。
   const replyDelayRaw = Number(patch.replyDelay);
-  const replyDelay = patch.replyDelay === undefined || Number.isNaN(replyDelayRaw)
-    ? 0
-    : (replyDelayRaw === -1 ? -1 : Math.max(0, Math.round(replyDelayRaw)));
+  const hasDelay = patch.replyDelay !== undefined && patch.replyDelay !== null && !Number.isNaN(replyDelayRaw);
+  const replyDelay = hasDelay
+    ? (replyDelayRaw === -1 ? -1 : Math.max(0, Math.round(replyDelayRaw)))
+    : (Number.isFinite(Number(fallback)) ? (Number(fallback) === -1 ? -1 : 0) : 0);
 
   const tags = Array.isArray(patch.tags)
     ? patch.tags.map(t => String(t).trim()).filter(Boolean).slice(0, 6)
@@ -149,7 +160,9 @@ export function updateScheduleActivity(characterId, index, patch = {}) {
     ...patch,
     startTime: patch.startTime || base.startTime,
     endTime: patch.endTime || base.endTime,
-  });
+    // ★ 未传 replyDelay 时**沿用原条目的值** —— 否则睡眠块的 -1 会被静默改成 0
+    //   （见 sanitizeActivityInput 里那段注释：用户实报三月七"睡到自然醒"被改成可回复）。
+  }, { fallback: base.replyDelay });
   if (!clean) {
     return { ok: false, error: '字段不合法：活动名不能为空' };
   }

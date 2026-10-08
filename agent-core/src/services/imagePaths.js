@@ -25,6 +25,7 @@ export const IMAGE_CATEGORIES = {
   standing:  { dir: 'standing',  label: '立绘' },
   expression_standing: { dir: 'expression_standing', label: '表情立绘' },
   newspaper: { dir: 'newspaper', label: '报纸' }, // 《邻舍日报》新闻配图
+  media:     { dir: 'media',     label: '传媒' }, // 媒体内容页（论坛 / 报纸 / 暗网 …）的帖子封面
   town_service: { dir: 'town_service', label: '小镇生活' }, // 打工与服务共用此目录
   // 建筑功能的写真/合影/纪念品（buildingFeatures/media.js 的 generatePortraitImage 落这里）。
   // 没登记就 getImageDir 直接抛 Unknown image category，三种生成型模板全部走不到结算。
@@ -98,6 +99,33 @@ export function imageUrlExists(url) {
   return true;
 }
 
+/**
+ * 把 /images/... 的图片读成 data URI，供多模态请求使用。
+ * 找不到文件（含 PNG 已压成 AVIF 的回退情形）时返回 null，由调用方降级为纯文本。
+ */
+export function imageUrlToDataUri(url) {
+  const cleanUrl = String(url || '').replace(/\?.*$/, '');
+  let decoded;
+  try { decoded = decodeURIComponent(cleanUrl); } catch { decoded = cleanUrl; }
+
+  const m = decoded.match(/^\/images\/(.+)$/);
+  if (!m) return null;
+  let filePath = path.resolve(DATA_DIR, m[1]);
+  if (!filePath.startsWith(DATA_DIR + path.sep)) return null;
+  if (!fs.existsSync(filePath) && /\.png$/i.test(filePath)) {
+    // 与 imageUrlExists 同一回退口径：PNG 被 AVIF 压缩替换后按原 URL 是找不到文件的
+    filePath = filePath.replace(/\.png$/i, '.avif');
+  }
+  try {
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const mime = { jpg: 'jpeg', jpeg: 'jpeg', png: 'png', webp: 'webp', gif: 'gif', avif: 'avif' }[ext];
+    if (!mime) return null;
+    return `data:image/${mime};base64,${fs.readFileSync(filePath).toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 export function saveBase64Image(category, filename, dataUri) {
   const dir = getImageDir(category);
   fs.mkdirSync(dir, { recursive: true });
@@ -112,11 +140,15 @@ export function deleteImageFileByUrl(url) {
   const category = extractCategoryFromUrl(cleanUrl);
   if (!category) return false;
 
-  // 文件名白名单提取：仅接受字母/数字/点/横线/下划线/空格的纯文件名，
-  // 从源头杜绝任何路径穿越形态（`..`、路径分隔符都会匹配失败直接返回 false）
-  const m = /^([\w.\- ]+)$/.exec(cleanUrl.split('/').pop() || '');
-  if (!m) return false;
-  const filename = m[1];
+  // 文件名安全提取：**只禁止路径分隔符与控制字符**，其余（含中文——表情包文件名就是中文）
+  // 一律放行。踩过的坑：原来用 `[\w.\- ]+` 白名单，而 JS 的 `\w` 不匹配非 ASCII，
+  // 于是「char_80_哭_1788362733025.png」被判非法直接 return false —— 中文表情包静默删不掉。
+  // 安全性不依赖字符白名单，而由下面的「解析后必须仍在目录内」双保险保证。
+  let filename = cleanUrl.split('/').pop() || '';
+  try { filename = decodeURIComponent(filename); } catch { /* 非法编码：按原样处理 */ }
+  if (!filename || filename === '.' || filename === '..') return false;
+  if (/[\\/\u0000-\u001f]/.test(filename)) return false;
+  if (path.basename(filename) !== filename) return false;
 
   const dir = getImageDir(category);
   const filePath = path.join(dir, filename);
@@ -129,12 +161,10 @@ export function deleteImageFileByUrl(url) {
     removed = true;
   }
   // AVIF 压缩会把原 PNG 换成同名 .avif；按 .png URL 删除时把孪生文件一并清掉
-  if (/\.png$/i.test(filename)) {
-    const avifTwin = filePath.replace(/\.png$/i, '.avif');
-    if (fs.existsSync(avifTwin)) {
-      try { fs.unlinkSync(avifTwin); } catch {}
-      removed = true;
-    }
+  const avifTwin = /\.png$/i.test(filename) ? filePath.replace(/\.png$/i, '.avif') : null;
+  if (avifTwin && fs.existsSync(avifTwin)) {
+    try { fs.unlinkSync(avifTwin); } catch { /* 孪生删除失败不影响主流程 */ }
+    removed = true;
   }
   return removed;
 }

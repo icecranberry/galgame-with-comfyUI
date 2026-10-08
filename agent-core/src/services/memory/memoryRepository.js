@@ -5,6 +5,8 @@ import { getMemorySettings, MEMORY_MODE } from './memoryConfig.js';
 import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
 import { createMemoryIndexWorker } from './memoryIndexWorker.js';
+// ★ T3 写入门闸（2026-10-07）：拒绝"一批 AI 结果把既有记忆几乎全失效"的畸形批次。
+import { assertAiOverwrite } from '../writeGuard.js';
 
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
@@ -122,7 +124,18 @@ export function normalizeMemory(memory = {}) {
   }
   const tags = [...new Set(parseTags(memory.tags).map(tag => String(tag).trim()).filter(Boolean))].slice(0, 12);
   if (tags.length === 0) throw new Error('tags 至少需要一个检索锚点');
-  return { memoryType, subject, judgment, reasoning, tags, keywords, perspectives, episodicNote, semanticNote, importance, entities, triple };
+  // ★ T1 证据字段（2026-10-07）：**原样保留**，不在这里做校验 ——
+  //   校验发生在写入前的闸门（`memoryEvidenceGate.isolateUnverifiedActions`），
+  //   且必须限定在"本批次消息窗口"内，而本函数拿不到那个窗口。
+  //   ⚠ 闸门关闭时这几个字段一律为 undefined → 落库为 NULL（默认不改行为）。
+  const ev = memory.evidence && typeof memory.evidence === 'object' ? memory.evidence : null;
+  const evidence = ev ? {
+    text: clampText(ev.text, 2000),
+    count: clampInt(ev.count, 1, 1, 9999),
+    msgId: Number.isFinite(Number(ev.msgId)) && Number(ev.msgId) > 0 ? Number(ev.msgId) : null,
+    verified: ev.verified === 1 || ev.verified === true ? 1 : 0,
+  } : null;
+  return { memoryType, subject, judgment, reasoning, tags, keywords, perspectives, episodicNote, semanticNote, importance, entities, triple, evidence };
 }
 
 export function validateMemoryAction(input = {}) {
@@ -132,7 +145,11 @@ export function validateMemoryAction(input = {}) {
   if (action === 'create' && sourceMemoryIds.length !== 0) throw new Error('create 不能引用旧记忆');
   if (action === 'update' && sourceMemoryIds.length !== 1) throw new Error('update 必须引用一条旧记忆');
   if (action === 'merge' && sourceMemoryIds.length < 2) throw new Error('merge 必须引用至少两条旧记忆');
-  return { action, sourceMemoryIds, memory: normalizeMemory(input.memory) };
+  // ★ T1：证据由闸门挂在 action 顶层（`_evidence`），与 memory 里的模型原始字段分开 ——
+  //   前者是**代码复算过的结果**，后者是模型的自述。合并进 memory 供落库。
+  const raw = { ...(input.memory || {}) };
+  if (input._evidence) raw.evidence = input._evidence;
+  return { action, sourceMemoryIds, memory: normalizeMemory(raw) };
 }
 
 export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRawEndId, sourceMessageId = null, actions, eventTime = null, dedupeKey = null }) {
@@ -141,6 +158,25 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   }
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
+
+  // ★ T3 写入门闸（默认关闭，见 services/writeGuard.js）：
+  //   update/merge 会把被引用的旧记忆置失效（supersede）。若模型给出一份"把既有记忆一网打尽"的
+  //   退化结果（如把全部 active 记忆都拿去 merge），等价于整集清空 —— 这类静默数据损失必须拦。
+  //   ⚠ 只查"整体覆盖"，不查"空结果"：空 actions 在本函数本就是**无操作**（不是清空），
+  //     误判会把"模型正确地回答没有可记之事"也拦掉。
+  {
+    const existingCount = db
+      .prepare(`SELECT COUNT(*) AS c FROM memory_fragments WHERE conversation_id = ? AND status = 'active'`)
+      .get(conversationId)?.c || 0;
+    const supersededCount = normalized.reduce((n, item) => n + item.sourceMemoryIds.length, 0);
+    assertAiOverwrite({
+      label: '记忆整理',
+      existingCount,
+      incomingCount: supersededCount,
+      guardEmpty: false,
+    });
+  }
+
   const profile = getPreferredMemoryEmbeddingProfile();
   const created = [];
   const transaction = db.transaction(() => {
@@ -160,9 +196,11 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
           memory_id, memory_type, subject, judgment, reasoning, tags, content_hash, status,
           source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at,
           keywords, perspectives, episodic_note, semantic_note,
-          event_time, valid_from, valid_to, importance, strength, retrieval_count
+          event_time, valid_from, valid_to, importance, strength, retrieval_count,
+          evidence_text, evidence_count, evidence_msg_id, evidence_verified
         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP,
-                  ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0)
+                  ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0,
+                  ?, ?, ?, ?)
       `).run(
         conversationId, sourceMessageId, legacyType, item.memory.judgment, JSON.stringify(item.memory.tags),
         memoryId, item.memory.memoryType, item.memory.subject, item.memory.judgment, item.memory.reasoning,
@@ -170,7 +208,12 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
         profile?.fingerprint || null, profile ? 'pending' : 'disabled',
         JSON.stringify(item.memory.keywords), JSON.stringify(item.memory.perspectives),
         item.memory.episodicNote, item.memory.semanticNote,
-        eventTime, item.memory.importance
+        eventTime, item.memory.importance,
+        // ★ T1 证据列：闸门关闭时 evidence 为 null → 全部落 NULL（默认不改行为）
+        item.memory.evidence?.text ?? null,
+        item.memory.evidence?.count ?? null,
+        item.memory.evidence?.msgId ?? null,
+        item.memory.evidence?.verified ?? null
       );
       for (const entity of item.memory.entities) {
         const entityId = upsertMemoryEntity(db, entity.name);

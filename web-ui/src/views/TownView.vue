@@ -2421,7 +2421,7 @@ async function startTravel() {
 </script>
 
 <style scoped>
-.town-dialogue-notice { position: absolute; left: 50%; top: 80px; transform: translateX(-50%); z-index: 65; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 14px; color: #574a40; background: #f4f1eeed; font-size: 13px; }
+.town-dialogue-notice { position: absolute; left: 50%; top: 80px; transform: translateX(-50%); z-index: 65; max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 14px; color: var(--text-primary); background: var(--bg-secondary); font-size: 13px; }
 
 /* ── 出行面板：镇子目录。内容在 TownPaperPanel 的暖纸外壳里，配色沿用钱袋那套暖纸口径 ── */
 .travel-body { display: flex; flex-direction: column; gap: 14px; }
@@ -2432,7 +2432,7 @@ async function startTravel() {
 .travel-body h3 { font-size: 16px; margin: 0; font-weight: 600; }
 .travel-body .tl-muted { margin: 0; color: #918278; font-size: 13px; }
 .travel-list { display: flex; flex-direction: column; gap: 8px; }
-.travel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: #fffaf5; border: 2px solid transparent; border-radius: 14px; cursor: pointer; text-align: left; }
+.travel-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--bg-secondary); border: 2px solid transparent; border-radius: 14px; cursor: pointer; text-align: left; }
 .travel-row:not(.is-disabled):hover { background: #fff4ea; }
 .travel-row:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .travel-row.is-picked { border-color: var(--accent); box-shadow: var(--shadow-hard-sm); }
@@ -2489,7 +2489,7 @@ async function startTravel() {
   }
 }
 
-.town-render-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: #fffaf2; color: #796957; font-size: 12px; }
+.town-render-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; position: absolute; bottom: 44px; left: 50%; transform: translateX(-50%); max-width: 90%; padding: 8px 14px; border-radius: 12px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; }
 .town-canvas {
   position: absolute;
   inset: 0;
@@ -2653,10 +2653,10 @@ async function startTravel() {
   gap: 14px;
   padding: 8px 16px;
   flex-wrap: wrap;
-  background: rgba(252, 250, 247, 0.92);
-  border: 1px solid rgba(232, 221, 208, 0.8);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color, var(--border));
   border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(54, 42, 38, 0.08);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
   max-width: calc(100% - 24px);
 }
 
@@ -2671,13 +2671,18 @@ async function startTravel() {
 .town-chip {
   font-size: 11px;
   color: var(--text-primary);
-  background: rgba(240, 236, 232, 0.85);
+  /* ⚠ 原为硬编码 rgba(240,236,232,.85) 浅米底 + --text-primary(暗夜变亮白) → 白字浅底不可读。
+     改用主题变量，随主题自动翻转。 */
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color, var(--border));
   border-radius: 999px;
   padding: 3px 9px;
   white-space: nowrap;
 }
 
+/* 暗夜下 --accent-hover 是深红，压在深底上偏暗 → 提示态改用高亮的 --accent */
 .town-chip.is-warn { color: var(--accent-hover); }
+[data-theme="dark"] .town-chip.is-warn { color: var(--accent); }
 
 .town-topbar-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; }
 
@@ -2729,9 +2734,13 @@ async function startTravel() {
 }
 
 .town-empty-card {
-  background: #f4f1eeed;
+  /* ⚠ 原为硬编码 #f4f1eeed（浅米色）+ .town-empty-title 用 --text-bright
+     → 暗夜下 --text-bright 变近白，白字压在浅米底上，对比度仅 1.07（用户实报"文字看不清"）。
+     改用主题变量：卡片跟随主题底色，文字沿用 --text-bright（此时主题已保证其对比度）。 */
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color, var(--border));
   border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
   padding: 30px 34px;
   text-align: center;
   max-width: 340px;
@@ -2904,9 +2913,9 @@ async function startTravel() {
   width: min(560px, calc(100vw - 40px));
   max-height: min(88vh, 780px);
   overflow-y: auto;
-  background: #f4f1eeed;
+  background: var(--bg-secondary);
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30);
   padding: 14px;
 }
 
@@ -2952,9 +2961,9 @@ async function startTravel() {
   top: 110px;
   right: 66px;
   width: 240px;
-  background: #f4f1eeed;
+  background: var(--bg-secondary);
   border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(54, 42, 38, 0.18);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.26);
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -2998,9 +3007,9 @@ async function startTravel() {
 .town-card {
   width: 300px;
   max-width: calc(100vw - 40px);
-  background: #f4f1eeed;
+  background: var(--bg-secondary);
   border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
   padding: 18px;
 }
 

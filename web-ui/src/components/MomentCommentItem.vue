@@ -152,7 +152,7 @@ const replyAvatarStyle = computed(() => (
   width: 26px; height: 26px; border-radius: 50%;
   flex-shrink: 0;
   margin-top: 1px;
-  background: var(--accent);
+  background: var(--accent-solid);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   color: #fff; font-size: 12px; font-weight: 600;
@@ -195,7 +195,7 @@ const replyAvatarStyle = computed(() => (
 .comment-mini-avatar {
   width: 18px; height: 18px; border-radius: 50%;
   flex-shrink: 0;
-  background: var(--accent);
+  background: var(--accent-solid);
   display: inline-flex; align-items: center; justify-content: center;
   overflow: hidden;
   color: #fff; font-size: 10px; font-weight: 600;

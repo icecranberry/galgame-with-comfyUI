@@ -10,6 +10,24 @@ const sched = await import('../src/services/momentScheduler.js');
 
 config.dbPath = ':memory:';
 
+/**
+ * ★★ 前置：把发帖频率闸门打开（2026-10-07 本地修复）。
+ *
+ * `seedData.js` 的 `feature_momentFreq` 默认值是 **`'0'`（关闭）** —— 这符合本项目
+ * 「长驻功能默认值一律关闭」的红线，是**正确**的产品行为。但 `momentScheduler.tick()`
+ * 的第一道门就是 `if (momentFreq <= 0) return;`，于是默认配置下调度器根本不派单。
+ *
+ * ⚠⚠ **必须在 `getDb()` 之后调用** —— `system_settings` 里的 `feature_momentFreq='0'`
+ *   会在 DB 初始化时回灌 config，把先设的值覆盖掉。
+ *
+ * ⚠ 同一文件里另一条「睡眠角色跳过吐槽帖」的测试**必须也打开闸门**：它断言的是
+ *   `calls.length === 0`，而闸门关闭时 tick 直接 return 也得到 0 —— 那样是**假通过**，
+ *   测不出「调度器真的跑到了可发性校验并正确挡住睡眠角色」。
+ */
+function enableMomentScheduling() {
+  config.features.momentFreq = 1;
+}
+
 const VALID_EVENT = {
   title: '铁匠铺今晨提前开炉',
   content: '本报讯：铁匠铺老板娘今日提前两小时开炉，据说是为赶制一批意外涌来的订单。',
@@ -167,6 +185,7 @@ test('maybeGenerateDailyNewspaper dedupes on the existing paper of today (no hou
 
 test('scheduler posts the complaint as an extra moment and restores next_moment_at', async t => {
   const db = getDb();
+  enableMomentScheduling();   // ⚠ 必须在 getDb() 之后（settings 会回灌 config）
   t.after(() => closeDb());
 
   db.prepare(`INSERT INTO characters (name, display_name, base_prompt, next_moment_at) VALUES ('lin', '林小姐', '旅客', datetime('now', '+3 hours'))`).run();
@@ -198,6 +217,7 @@ test('scheduler posts the complaint as an extra moment and restores next_moment_
 
 test('scheduler skips complaint while the character is sleeping', async t => {
   const db = getDb();
+  enableMomentScheduling();   // ⚠ 否则 tick 直接 return，本测试会假通过
   t.after(() => closeDb());
 
   db.prepare(`INSERT INTO characters (name, display_name, base_prompt, is_sleeping, next_moment_at) VALUES ('sleeper', '瞌睡小姐', '旅客', 1, datetime('now', '+3 hours'))`).run();

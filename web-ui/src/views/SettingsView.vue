@@ -354,8 +354,10 @@
             :type="showApiKey ? 'text' : 'password'"
             class="fi"
             style="margin-bottom:0"
+            name="linshe-llm-key"
+            autocomplete="new-password"
             placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            @input="markLlmDirty"
+            @input="onLlmKeyInput"
           />
           <linshe-button class="sp-btn-small" size="sm" style="flex-shrink:0" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
           <linshe-button class="sp-btn-small" variant="ghost" size="sm" style="flex-shrink:0" @click="showApiKey = !showApiKey">
@@ -571,8 +573,15 @@ type="range" min="1" max="10" step="1"
 
         <div class="toggle-row theme-mode-row">
           <div>
-            <div class="tl">界面主题</div>
-            <div class="td">暖色、暗夜，或按时间自动切换</div>
+            <!-- 自动类模式（跟随系统 / 按时间）下把「当前实际生效哪个」写在标题旁，
+                 用户能立刻确认跟进生效了，不必靠肉眼比对整页配色。
+                 ★ 放标题行而不是说明行：本行是 `space-between` 两栏 flex，
+                   徽标若并进左侧说明文字会把左栏撑宽、把右侧 4 个模式 chip 挤到折行。 -->
+            <div class="tl">
+              界面主题
+              <span v-if="themeResolved" class="td-resolved">当前：{{ themeResolved }}</span>
+            </div>
+            <div class="td">暖色、暗夜，或跟随系统 / 按时间自动切换</div>
           </div>
           <div class="theme-mode-options" role="group" aria-label="界面主题">
             <linshe-button
@@ -647,6 +656,45 @@ type="range" min="0" max="1" step="0.1"
               @change="onEventFreqChange"
             />
             <span class="freq-val">{{ eventFreqSlider.toFixed(1) }}</span>
+          </div>
+        </div>
+
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">朋友圈发帖频率</div>
+            <div class="td">{{ momentFreqHint }}</div>
+          </div>
+          <div class="freq-control">
+            <input
+type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
+              v-model.number="momentFreqStepIdx"
+              @change="onMomentFreqChange"
+            />
+            <span class="freq-val">{{ momentFreqLabel }}</span>
+          </div>
+        </div>
+
+        <!-- 传媒自动抓帖：★ 2026-10-05 从「传媒页顶栏」搬到这里。
+             它是常驻配置（决定后台要不要在夜里自己抓内容），不是内容页的操作按钮。
+             模型也与朋友圈同一取向：只在夜间窗口（20:00→次日 02:00）内**错峰随机**，
+             白天不产新内容，且**每批只出 1 条**（不再一次涌进来三条）。 -->
+        <div class="toggle-row freq-row">
+          <div>
+            <div class="tl">传媒自动抓帖</div>
+            <div class="td">
+              {{ mediaAutoHint }}
+              <template v-if="mediaAutoStepIdx > 0 && mediaNextText">
+                · <b>{{ mediaInNightWindow ? mediaNextText : '白天不生成，' + mediaNextText }}</b>
+              </template>
+            </div>
+          </div>
+          <div class="freq-control">
+            <input
+              type="range" min="0" :max="Math.max(0, mediaAutoSteps.length - 1)" step="1"
+              v-model.number="mediaAutoStepIdx"
+              @change="onMediaAutoChange"
+            />
+            <span class="freq-val">{{ mediaAutoLabel }}</span>
           </div>
         </div>
 
@@ -922,6 +970,9 @@ type="range" min="0" max="1" step="0.1"
         </div>
       </div>
 
+      <!-- 数据清理：按时间清理生成的图片与内容记录 -->
+      <DataCleanupCard />
+
       <!-- 更新说明：重新查看历次更新内容（平时只在版本变化后自动弹一次） -->
       <div class="card memory-settings-card">
         <div class="memory-settings-header">
@@ -1086,7 +1137,18 @@ v-for="m in workflowModeOptions" :key="m.value"
           <span class="wf-mo-desc" v-html="m.desc"></span>
         </div>
       </div>
-      <div class="wf-mode-downloads">
+      <Transition name="expand">
+        <div v-if="wfModeDraft === 'custom'" class="wf-mode-custom">
+          <p class="wf-mode-hint">从 workflow 目录中选择工作流，所有生图场景统一使用</p>
+          <linshe-select
+v-model="wfCustomDraft" :options="customWorkflowOptions"
+            :disabled="customWorkflowLoading" placeholder="请选择自定义工作流" />
+          <p v-if="!customWorkflowLoading && customWorkflowOptions.length === 0" class="wf-mode-custom-empty">
+            未找到可选工作流，请把 .json 文件放入 workflow 目录
+          </p>
+        </div>
+      </Transition>
+      <div v-if="wfModeDraft !== 'custom'" class="wf-mode-downloads">
         <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
         <div class="wf-dl-item">
           <span class="wf-dl-label">Anima-turbo：</span>
@@ -1136,7 +1198,7 @@ base
 <script setup>
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getMediaAuto, setMediaAuto } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1154,11 +1216,18 @@ import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import GearIcon from '../components/GearIcon.vue'
 import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
+import DataCleanupCard from '../components/DataCleanupCard.vue'
 import UpdateTag from '../components/UpdateTag.vue'
 import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
 const settingsStore = useSettingsStore()
 const themeModes = THEME_MODES
+// 自动类模式下显示实际生效的主题名（跟随系统 / 按时间才需要，固定模式不必啰嗦）
+const themeResolved = computed(() => {
+  const m = settingsStore.themeMode
+  if (m !== 'system' && m !== 'auto') return ''
+  return settingsStore.theme === 'dark' ? '暗夜' : '暖色'
+})
 const router = useRouter()
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
@@ -1292,7 +1361,123 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+// 朋友圈发帖频率档位：value 是 momentFreq（周期 = 基准 2~8 小时 / value）。
+// 用档位而不是连续滑块：周期跨度从 5 分钟到 32 小时，连续拖动既拖不准也说不清。
+// 顺序按「越往右越频繁」，与「频率」的直觉一致。
+const MOMENT_FREQ_STEPS = [
+  { value: 0,    label: '关闭',    hint: '关闭自动发帖（仍可手动发）。' },
+  { value: 0.25, label: '8 小时',  hint: '每个角色约 8~32 小时一条。' },
+  { value: 0.5,  label: '4 小时',  hint: '每个角色约 4~16 小时一条。' },
+  { value: 1,    label: '2 小时',  hint: '每个角色约 2~8 小时一条。' },
+  { value: 2,    label: '1 小时',  hint: '每个角色约 1~4 小时一条。' },
+  { value: 4,    label: '30 分钟', hint: '每个角色约 30 分钟~2 小时一条。' },
+  { value: 8,    label: '15 分钟', hint: '每个角色约 15~60 分钟一条。' },
+  { value: 24,   label: '5 分钟',  hint: '每个角色约 5~20 分钟一条，LLM 与生图消耗很高。' },
+]
+// 默认档位 = 关闭（value 0），与后端 config.features.momentFreq 的默认值保持一致 ——
+// 否则「库里还没有这个键」的新装用户，界面会显示「2 小时」而后台实际是关闭，对不上。
+const DEFAULT_MOMENT_STEP = 0   // 对应 value=0（关闭）
+const momentFreqStepIdx = ref(DEFAULT_MOMENT_STEP)
+const momentFreqHint = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.hint || '')
+const momentFreqLabel = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.label || '')
+/** 库里存的 momentFreq → 最接近的档位下标（老值可能是任意数） */
+function momentStepFromValue(v) {
+  if (v == null) return DEFAULT_MOMENT_STEP
+  let best = 0
+  let bestDiff = Infinity
+  MOMENT_FREQ_STEPS.forEach((s, i) => {
+    const d = Math.abs(s.value - v)
+    if (d < bestDiff) { bestDiff = d; best = i }
+  })
+  return best
+}
 const backgroundConcurrency = ref(3)
+
+// ── 传媒自动抓帖（每晚几批）──
+// ★ 2026-10-05 从「传媒页顶栏」搬到「设置 → 功能开关」：
+//   它是**常驻配置**（决定后台要不要在夜里自己抓内容），不是内容页的操作按钮。
+// 语义也从「每 N 分钟一批（每批 3 条）」改成「**每晚几批 + 夜间窗口内错峰随机**、每批 1 条」——
+//   与上面的「朋友圈发帖频率」同一取向：白天不产内容，晚上散着来，一次不要太多。
+// 档位表以后端下发的 `MEDIA_AUTO_STEPS` 为准（前端口径唯一），这里只留一份兜底副本。
+const FALLBACK_MEDIA_AUTO_STEPS = [
+  { value: 0,  label: '关闭',      hint: '不自动抓帖，只有你在传媒页点「刷新」时才生成。' },
+  { value: 1,  label: '每晚 1 批', hint: '一晚上随机补 1 条，几乎无感。' },
+  { value: 2,  label: '每晚 2 批', hint: '一晚上随机补 2 条。' },
+  { value: 4,  label: '每晚 4 批', hint: '一晚上随机补 4 条，社区慢慢有动静。' },
+  { value: 8,  label: '每晚 8 批', hint: '一晚上随机补 8 条，比较活跃。' },
+  { value: 16, label: '每晚 16 批', hint: '一晚上随机补 16 条，LLM 消耗明显上升。' },
+]
+const mediaAutoSteps = ref([...FALLBACK_MEDIA_AUTO_STEPS])
+const mediaAutoStepIdx = ref(0)   // 默认「关闭」，与后端默认值一致
+const mediaAutoHint = computed(() => mediaAutoSteps.value[mediaAutoStepIdx.value]?.hint || '')
+const mediaAutoLabel = computed(() => mediaAutoSteps.value[mediaAutoStepIdx.value]?.label || '—')
+/** 后端记的「下次抓帖时刻」（只在开启时才有意义，用于文案提示） */
+const mediaNextAt = ref(null)
+const mediaInNightWindow = ref(false)
+const mediaNextText = computed(() => {
+  if (!mediaNextAt.value) return ''
+  const d = new Date(mediaNextAt.value)
+  if (Number.isNaN(d.getTime())) return ''
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `下次约 ${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`
+})
+/** 库里存的 perNight → 最接近的档位下标（老值/异常值都能对上） */
+function mediaAutoStepFromValue(v) {
+  if (v == null) return 0
+  let best = 0
+  let bestDiff = Infinity
+  mediaAutoSteps.value.forEach((s, i) => {
+    const d = Math.abs(s.value - v)
+    if (d < bestDiff) { bestDiff = d; best = i }
+  })
+  return best
+}
+
+async function loadMediaAuto() {
+  try {
+    const d = await getMediaAuto()
+    // ★ 只接受**新形状**的档位表（每项有数字 `value`）。
+    //   后端还没重启时，`/media/auto` 会返回旧形状（每项是 `minutes`）——
+    //   直接拿来渲染会得到一个所有档位 value 都是 undefined 的坏滑块。
+    //   这种情况**保留兜底档位表**（新形状），并提示需要重启后端才生效。
+    const steps = Array.isArray(d.steps) ? d.steps.filter(s => Number.isFinite(s?.value)) : []
+    if (steps.length) mediaAutoSteps.value = steps
+    else if (Array.isArray(d.steps) && d.steps.length) {
+      console.warn('[settings] /media/auto 返回的是旧形状（minutes），需要重启 agent-core 才生效')
+    }
+    const cur = Number(d.auto?.perNight ?? 0)
+    mediaAutoStepIdx.value = mediaAutoStepFromValue(Number.isFinite(cur) ? cur : 0)
+    mediaNextAt.value = d.auto?.nextAt || null
+    mediaInNightWindow.value = !!d.auto?.inNightWindow
+  } catch (err) {
+    // 后端未重启 / 接口不通：保留兜底档位表，滑块仍可用（点保存会给出明确报错）
+    console.warn('[settings] 读取传媒自动抓帖设置失败（用兜底档位表）:', err?.message || err)
+    mediaAutoStepIdx.value = 0
+  }
+}
+
+async function onMediaAutoChange() {
+  const step = mediaAutoSteps.value[mediaAutoStepIdx.value]
+  if (!step || !Number.isFinite(step.value)) return
+  const prev = mediaAutoStepIdx.value
+  try {
+    const d = await setMediaAuto(step.value)
+    const steps = Array.isArray(d.steps) ? d.steps.filter(s => Number.isFinite(s?.value)) : []
+    if (steps.length) mediaAutoSteps.value = steps
+    mediaNextAt.value = d.auto?.nextAt || null
+    mediaInNightWindow.value = !!d.auto?.inNightWindow
+    toastFn?.(
+      step.value === 0
+        ? '已关闭传媒自动抓帖（仍可在传媒页手动刷新）'
+        : `传媒自动抓帖已设为「${step.label}」，只在夜里错峰生成`,
+      'success',
+    )
+  } catch (err) {
+    mediaAutoStepIdx.value = prev
+    toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
+  }
+}
 
 // ── 防打扰模式 ──
 const disturbMode = ref(false)
@@ -1405,6 +1590,19 @@ async function removeFavorite(id) {
 const llmPreview = ref({ provider: 'deepseek', hasApiKey: false, preview: '', model: 'deepseek-chat' })
 const freeEgg = ref(false)
 const llmApiKey = ref('')
+/**
+ * 用户是否**手动输入过** API Key。
+ *
+ * 这个字段是「只写」的：后端只回脱敏 preview、从不回填真实值，所以正常情况下输入框
+ * 应该是空的，只有用户主动输入才提交。但输入框是 type=password，浏览器会把它当密码框
+ * 记住并自动填充旧值 —— 一保存就把浏览器里的旧 key 写回库，覆盖掉正确的那个。
+ * 所以提交时以这个标志为准：没手动输入过就**不提交 apiKey**，浏览器填什么都不影响。
+ */
+const llmApiKeyTouched = ref(false)
+function onLlmKeyInput() {
+  llmApiKeyTouched.value = true
+  markLlmDirty()
+}
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmModel = ref('deepseek-chat')
 const llmModels = ref([])
@@ -1644,6 +1842,7 @@ async function toggleFreeEgg() {
       llmPreview.value = { ...result }
       settingsStore.setHasApiKey(result.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
       toastFn?.(freeEgg.value ? '已开启每日免费鸡蛋 🥚' : '已恢复自有 LLM 配置', 'success')
@@ -1709,7 +1908,8 @@ async function loadAvailableModels() {
     const headers = llmHeadersEnabled.value ? JSON.parse(llmHeadersText.value) : {}
     const result = await fetchLlmModels({
       baseURL: llmBaseURL.value.trim(),
-      apiKey: llmApiKey.value.trim() || undefined,
+      // 未手动输入时不传 key，由后端回落到库里存的那个（避免用浏览器自动填充的旧值去请求）
+      apiKey: llmApiKeyTouched.value ? (llmApiKey.value.trim() || undefined) : undefined,
       headers,
     })
     llmModels.value = result.models || []
@@ -1770,6 +1970,7 @@ async function switchProfile(id) {
           ? JSON.stringify(result.llmConfig.extraBody, null, 2) : '{}'
         settingsStore.setHasApiKey(result.llmConfig.hasApiKey)
         llmApiKey.value = ''
+        llmApiKeyTouched.value = false
         llmDirty.value = false
         llmSaved.value = false
         // 刷新完整的 features 和 concurrency（profile 切换会影响这些）
@@ -1778,6 +1979,7 @@ async function switchProfile(id) {
         backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
         freqSlider.value = cfg.features.proactiveChatFreq ?? 0.5
         eventFreqSlider.value = cfg.features.eventFreq ?? 1
+        momentFreqStepIdx.value = momentStepFromValue(cfg.features.momentFreq)
       }
     }
   } catch (err) {
@@ -1838,6 +2040,7 @@ async function removeProfile(id) {
       backgroundConcurrency.value = cfg.features.backgroundLLMMaxConcurrency ?? 3
       settingsStore.setHasApiKey(cfg.llm.hasApiKey)
       llmApiKey.value = ''
+      llmApiKeyTouched.value = false
       llmDirty.value = false
       llmSaved.value = false
     }
@@ -1893,6 +2096,9 @@ onMounted(async () => {
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
+    momentFreqStepIdx.value = momentStepFromValue(features.momentFreq)
+    // 传媒自动抓帖状态（档位表 + 排期）——单独一个接口，失败不阻断设置页其余部分
+    loadMediaAuto()
     backgroundConcurrency.value = features.backgroundLLMMaxConcurrency ?? 3
     // 防打扰模式
     if (data.disturb) {
@@ -1921,6 +2127,7 @@ onMounted(async () => {
       ? JSON.stringify(data.llm.extraBody, null, 2) : '{}'
     if (data.workflow) {
       workflowMode.value = data.workflow.mode || 'turbo'
+      workflowCustomTemplate.value = data.workflow.customTemplate || ''
       workflowScene.value = { chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
@@ -2130,7 +2337,8 @@ async function fetchNovelaiModels() {
 
 function buildLlmPayload() {
   const payload = {}
-  if (llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
+  // 只有用户手动输入过才提交 apiKey —— 否则浏览器自动填充的旧值会被当成"用户的输入"写回库
+  if (llmApiKeyTouched.value && llmApiKey.value.trim()) payload.apiKey = llmApiKey.value.trim()
   if (llmBaseURL.value) payload.baseURL = llmBaseURL.value
   if (llmModel.value) payload.model = llmModel.value
   payload.thinkingMode = llmThinkingMode.value
@@ -2186,6 +2394,7 @@ async function saveLlmConfig() {
       llmExtraBodyText.value = result.extraBody && Object.keys(result.extraBody).length
         ? JSON.stringify(result.extraBody, null, 2) : '{}'
       if (payload.apiKey) llmApiKey.value = ''
+      llmApiKeyTouched.value = false
 
       // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）
       if (isCustomBaseURL.value) {
@@ -2250,6 +2459,19 @@ async function onEventFreqChange() {
   const v = eventFreqSlider.value
   features.eventFreq = v
   try { await updateEventFreq(v) } catch { /* 非关键 */ }
+}
+
+async function onMomentFreqChange() {
+  const step = MOMENT_FREQ_STEPS[momentFreqStepIdx.value]
+  if (!step) return
+  const v = step.value
+  features.momentFreq = v
+  try {
+    await updateMomentFreq(v)
+    toastFn?.(v <= 0 ? '已关闭自动发帖' : `朋友圈频率已设为「${step.label}」`, 'success')
+  } catch (err) {
+    toastFn?.('保存失败: ' + (err?.message || '未知错误'), 'error')
+  }
 }
 
 // ── 防打扰模式 ──
@@ -2385,11 +2607,20 @@ const hiresError = ref('')
 const hiresCompare = ref(null)
 
 // ── 工作流 ──
-const workflowModeOptions = [
+const BASE_WORKFLOW_MODE_OPTIONS = [
   { value: 'turbo', label: 'turbo', desc: '只用 Anima_turbo 模型，<span class="wf-mo-highlight">速度提升300%+</span>，但代价是构图能力下降，画师串影响略微下降' },
   { value: 'base', label: 'base', desc: '只用 Anima_base 模型，泛用性最强的基底模型，构图能力强，画师串遵循强，速度较慢' },
   { value: 'hybrid', label: 'base+turbo', desc: 'turbo + base，切换时需要加载模型导致首图较慢' },
 ]
+// 自定义工作流卡片：仅当 workflow 目录里存在可选工作流时才出现
+const CUSTOM_WORKFLOW_MODE_OPTION = {
+  value: 'custom',
+  label: '自定义',
+  desc: '使用你自己放在 workflow 目录下的工作流，所有生图场景统一生效（角色专属工作流仍优先）',
+}
+// 放大细化工作流由 HiresFix 单独管理，不作为生图工作流选项
+const NON_GENERATION_WORKFLOWS = ['放大细化工作流.json', '放大细化工作流-进阶.json']
+
 const sceneOptions = [
   { key: 'chat', label: '私聊' },
   { key: 'group', label: '群聊' },
@@ -2401,31 +2632,66 @@ const sceneOptions = [
 
 const workflowMode = ref('turbo')
 const workflowScene = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const workflowCustomTemplate = ref('')
+const customWorkflowList = ref([])
+const customWorkflowLoading = ref(false)
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
 
+const workflowModeOptions = computed(() =>
+  customWorkflowList.value.length > 0
+    ? [...BASE_WORKFLOW_MODE_OPTIONS, CUSTOM_WORKFLOW_MODE_OPTION]
+    : BASE_WORKFLOW_MODE_OPTIONS
+)
+const customWorkflowOptions = computed(() =>
+  customWorkflowList.value.map(w => ({ value: w.filename, label: w.label }))
+)
+
 // 弹窗草稿状态
 const wfModeDraft = ref('turbo')
 const wfSceneDraft = ref({ chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base' })
+const wfCustomDraft = ref('')
+
+async function fetchCustomWorkflows() {
+  customWorkflowLoading.value = true
+  try {
+    const data = await getWorkflows()
+    customWorkflowList.value = (data.workflows || [])
+      .filter(w => !NON_GENERATION_WORKFLOWS.includes(w.filename))
+  } catch {
+    customWorkflowList.value = []
+  } finally {
+    customWorkflowLoading.value = false
+  }
+}
 
 function openWfModeDialog() {
   wfModeDraft.value = workflowMode.value
   wfSceneDraft.value = { ...workflowScene.value }
+  wfCustomDraft.value = workflowCustomTemplate.value
   showWfModeDialog.value = true
+  // 每次打开都重新拉取，workflow 目录新增文件后无需刷新页面
+  fetchCustomWorkflows()
 }
 
 async function saveWfModeDialog() {
+  if (wfModeDraft.value === 'custom' && !wfCustomDraft.value) {
+    toastFn?.('请先选择一个自定义工作流', 'warning')
+    return
+  }
   wfSaving.value = true
   try {
     const modeChanged = wfModeDraft.value !== workflowMode.value
     const sceneChanged = JSON.stringify(wfSceneDraft.value) !== JSON.stringify(workflowScene.value)
+    const customChanged = wfCustomDraft.value !== workflowCustomTemplate.value
 
-    if (modeChanged) await updateWorkflowMode(wfModeDraft.value)
+    if (modeChanged || customChanged) await updateWorkflowMode(wfModeDraft.value, wfCustomDraft.value)
     if (sceneChanged || modeChanged) await updateWorkflowScene({ ...wfSceneDraft.value })
 
     workflowMode.value = wfModeDraft.value
     workflowScene.value = { ...wfSceneDraft.value }
+    workflowCustomTemplate.value = wfCustomDraft.value
     showWfModeDialog.value = false
   } catch {} finally { wfSaving.value = false }
 }
@@ -2889,7 +3155,11 @@ function resetTestPrompts() {
   background: var(--accent); border: none; cursor: pointer;
 }
 .freq-val {
-  font-size: 14px; font-weight: 600; color: var(--accent); min-width: 28px; text-align: right;
+  font-size: 14px; font-weight: 600; color: var(--accent);
+  /* 固定宽度 + 右对齐：这几行是 space-between 布局、值区靠右，
+     宽度不一致会把滑块往左挤（「5 分钟」比「1.0」宽就错位了）。
+     统一宽度后所有滑块左右边缘才能对齐。56px 容得下最宽的「30 分钟」。 */
+  min-width: 56px; text-align: right; white-space: nowrap;
 }
 
 /* ── 防打扰模式 ── */
@@ -3278,7 +3548,7 @@ function resetTestPrompts() {
 .profile-item-row .profile-tag:last-child:not(:first-child) { padding-left: 6px; }
 .profile-tag:hover { border-color: var(--accent); color: var(--text-bright); }
 .profile-tag.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   border-color: var(--accent);
   color: #fff;
   font-weight: 600;
@@ -3431,6 +3701,16 @@ function resetTestPrompts() {
   font-size: 12px; color: var(--text-secondary);
   margin-bottom: 10px; text-align: center;
 }
+.wf-mode-custom {
+  background: rgba(var(--accent-rgb), 0.04);
+  border: 1px solid rgba(var(--accent-rgb), 0.12);
+  border-radius: 8px; padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.wf-mode-custom-empty {
+  font-size: 12px; color: var(--text-secondary);
+  margin: 8px 0 0; text-align: center;
+}
 .wf-mode-scenes {
   background: rgba(var(--accent-rgb), 0.04);
   border: 1px solid rgba(var(--accent-rgb), 0.12);
@@ -3466,11 +3746,50 @@ function resetTestPrompts() {
   opacity: 1;
 }
 
-/* ── 界面主题（功能开关内）── */
-.theme-mode-row { align-items: flex-start; }
-.theme-mode-options { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; padding-top: 2px; }
+/* ── 界面主题（功能开关内）──
+   ★ 这一行放的是 4 个模式 chip（暖色 / 暗夜 / 跟随系统 / 按时间），合计需 ~240px，
+     而设置页的卡片宽度随视口变化很大（实测卡片内宽 825 / 475 / 219 三档）。
+     所以用**放不下就整块折行**的策略，而不是让左右两栏互相硬挤：
+       · 左栏 `flex: 1 1 200px` + `min-width: min(200px,100%)` —— 保住可读宽度，
+         绝不被压成 0（曾用 `min-width:0`，窄卡片下标题被压成一列单字）。
+       · chip 区 `flex: 0 1 auto` —— 自身可收缩，靠 flex-wrap 内部换行，绝不溢出容器。
+       · 行本身 `flex-wrap: wrap` —— 两者排不下时 chip 区整体落到第二行。
+     真正手机宽度（≤767px）由下方移动端规则改成纵向堆叠。 */
+.theme-mode-row {
+  align-items: flex-start; flex-wrap: wrap;
+  /* 容器查询：按**本行自身宽度**判断要不要让 chip 独占一行。
+     用容器查询而不是视口媒体查询 —— 设置卡在宽视口下也可能是双列窄卡（实测 219px），
+     视口查询根本分辨不出来。 */
+  container-type: inline-size;
+}
+.theme-mode-row > div:first-child { flex: 1 1 200px; min-width: min(200px, 100%); }
+.theme-mode-options {
+  display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end;
+  flex: 0 1 auto;
+  padding-top: 2px;
+}
+/* 窄卡片：chip 反正要折行，索性整块独占一行、左对齐起排，
+   比「3 个在右 + 1 个在右下」更整齐。 */
+@container (max-width: 380px) {
+  .theme-mode-options { flex-basis: 100%; justify-content: flex-start; }
+}
+/* 「当前：暗夜 / 暖色」—— 自动类模式下才出现，挂在标题旁，比标题轻一档。
+   nowrap 是**必需**的：窄栏里被压窄时不能让「当前：暗夜」断成两行。 */
+.td-resolved {
+  display: inline-block;
+  white-space: nowrap;
+  margin-left: 7px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
 @media (max-width: 767px) {
   .theme-mode-row { flex-direction: column; align-items: stretch; gap: 10px; }
-  .theme-mode-options { justify-content: flex-start; }
+  .theme-mode-row > div:first-child { flex: none; min-width: 0; }
+  .theme-mode-options { justify-content: flex-start; flex: none; }
 }
 </style>

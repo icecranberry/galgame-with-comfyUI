@@ -333,7 +333,7 @@ async function send() {
 .composer-avatar {
   width: 40px; height: 40px; border-radius: 50%;
   flex-shrink: 0;
-  background: var(--accent);
+  background: var(--accent-solid);
   display: flex; align-items: center; justify-content: center;
   color: #fff; font-size: 16px; font-weight: 700;
   overflow: hidden;

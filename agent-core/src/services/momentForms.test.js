@@ -13,15 +13,27 @@ test('motive directive states the selected subject without restating system rule
   assert.equal(buildMomentMotiveDirective(' '), '');
 });
 
-test('schedule context states only the current place and activity', () => {
+test('schedule context states only the current place and activity (no prose description)', () => {
   const prompt = buildMomentScheduleContext('林', {
     location: '书房',
     activity: '整理书架',
     description: '随手翻到一本旧书',
   });
-  assert.match(prompt, /【此刻正在做】林此刻正在书房整理书架（随手翻到一本旧书）/);
+  assert.match(prompt, /【此刻正在做】林此刻正在书房整理书架/);
+  // ★ 默认不注入 description：日程描述常逐字照抄 <world_setting> 例句，会被模型复读进正文
+  assert.doesNotMatch(prompt, /随手翻到一本旧书/);
   assert.doesNotMatch(prompt, /同等重要/);
   assert.equal(buildMomentScheduleContext('', { location: '书房', activity: '整理书架' }), '');
+});
+
+test('schedule context can opt into the description as explicitly-marked background', () => {
+  const prompt = buildMomentScheduleContext('林', {
+    location: '书房',
+    activity: '整理书架',
+    description: '随手翻到一本旧书',
+  }, { withDescription: true });
+  assert.match(prompt, /整理书架/);
+  assert.match(prompt, /背景：随手翻到一本旧书/);
 });
 
 test('multi-image rule asks for a continuous photo sequence with shared anchors', () => {

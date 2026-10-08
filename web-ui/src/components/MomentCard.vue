@@ -874,7 +874,8 @@ function formatTime(iso) {
   position: absolute; top: 100%; right: 0;
   margin-top: 4px;
   min-width: 120px;
-  background: rgba(255,255,255,0.95);
+  /* 浮层背景走主题变量：硬编码白色会让暗夜主题下变成白板 + 浅字 */
+  background: var(--popover-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
@@ -1204,7 +1205,7 @@ function formatTime(iso) {
 .mention-avatar {
   width: 28px; height: 28px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 12px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;

@@ -17,7 +17,11 @@ function char(id, pinned, lastMessageAt) {
 }
 
 let nextPayload = []
-globalThis.fetch = async () => ({ ok: true, json: async () => ({ characters: nextPayload }) })
+// ⚠ mock 必须同时实现 `text()`：`api/index.js` 的 request() 统一用 `res.text()` 读原始体，
+//   再自行 JSON.parse（为的是识别"后端未重启→HTML 404"这类非 JSON 响应）。
+//   只给 `json()` 的旧 mock 会因 `res.text is not a function` 直接抛错 → store 拿到空数据。
+const mockRes = body => ({ ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body })
+globalThis.fetch = async () => mockRes({ characters: nextPayload })
 
 const { useChatStore } = await import('../src/stores/chat.js')
 setActivePinia(createPinia())

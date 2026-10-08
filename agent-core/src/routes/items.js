@@ -15,7 +15,7 @@ router.get('/', (req, res) => {
   }
 });
 
-// POST /api/items/chest/open — 开启每日宝箱（16 小时冷却；道具图片异步生成）
+// POST /api/items/chest/open — 开启每日宝箱（冷却由 itemService.CHEST_COOLDOWN_SECONDS 决定，本地为 1 分钟；道具图片异步生成）
 router.post('/chest/open', async (req, res) => {
   try {
     const result = await openChest();

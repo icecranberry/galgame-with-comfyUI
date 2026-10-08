@@ -1,0 +1,795 @@
+<template>
+  <!-- 「故事」页（T2，2026-10-07）
+       ── 定位 ────────────────────────────────────────────────
+       这是**跨天演进的剧情线**管理页，与「奇遇」（`character_events`，一次性事件）是两层东西。
+       ★ 用户已明确「不要碰奇遇」：本页**不读写**奇遇数据。
+
+       ── 为什么第一期不做重型节点图（用户裁定 S1：同意分期）──────
+       "节点"在构画里指**聊天楼层**，照搬到邻舍会画出无意义的图。
+       本页的节点 = **事件线本身**，边 = **由后端自动算的结构性关联**
+       （共享角色/地点/派生）—— 不让 AI 生成，否则会造假关系。
+       ⚠ 第一期用**列表 + 关联摘要**呈现拓扑；重型拖拽画布留到第二期。 -->
+  <div class="story-view page-host">
+    <div class="sv-header">
+      <h2 class="sv-title">故事</h2>
+      <span class="sv-sub">跨天演进的剧情线 · 与「奇遇」无关（那是单次事件）</span>
+      <span class="sv-spacer"></span>
+      <div class="sv-tabs" role="group" aria-label="视图">
+        <button type="button" class="sv-tab" :class="{ active: tab === 'outline' }" @click="tab = 'outline'">大纲</button>
+        <button type="button" class="sv-tab" :class="{ active: tab === 'lines' }" @click="tab = 'lines'">线列表</button>
+        <button type="button" class="sv-tab" :class="{ active: tab === 'graph' }" @click="tab = 'graph'">节点图</button>
+      </div>
+      <linshe-button v-if="tab === 'lines'" variant="primary" size="sm" @click="openCreate">+ 新建线</linshe-button>
+      <linshe-button v-else-if="tab === 'outline'" variant="primary" size="sm" :loading="outlineBusy" @click="openOutlineGenerate">
+        {{ outline && outline.beatCount ? '✨ 编辑/重新生成' : '✨ 生成大纲' }}
+      </linshe-button>
+    </div>
+
+    <div v-if="loading" class="sv-empty">加载中…</div>
+
+    <!-- ── 「面」= 剧情大纲：Beat 序列 + 游标 ──
+         节点=大纲的节拍（时间/标题/类型/所属线/结果 + Scene/Subtext/Think）。
+         游标所在节点高亮；可人工改 Scene / 删节点 / 重定位；判定通过才自动推进。 -->
+    <div v-else-if="tab === 'outline'" class="sv-body">
+      <template v-if="outline && outline.beatCount">
+        <div class="sv-ol-bar">
+          <span class="sv-ol-prog">进度：第 {{ outline.cursor }} / {{ outline.beatCount }} 个节点</span>
+          <span v-if="outline.pin" class="sv-pin" title="已锁定：不参与自动推进">已锁定</span>
+          <span class="sv-flex"></span>
+          <linshe-button variant="secondary" size="sm" :disabled="outlineBusy" @click="advanceOutline">判定是否推进</linshe-button>
+          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="toggleOutlinePin">{{ outline.pin ? '解锁' : '锁定' }}</linshe-button>
+          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="openOutlineGenerate">编辑</linshe-button>
+          <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeOutline">清空</linshe-button>
+        </div>
+        <p v-if="outline.basisNote" class="sv-ol-note">依据：{{ outline.basisNote }}</p>
+        <ol class="sv-beats">
+          <li
+            v-for="(b, i) in outline.beats" :key="i"
+            class="sv-beat" :class="{ 'is-current': outline.cursor === i + 1 }"
+          >
+            <div class="sv-beat-head">
+              <span class="sv-beat-idx">{{ i + 1 }}</span>
+              <span v-if="outline.cursor === i + 1" class="sv-beat-cur">当前</span>
+              <span class="sv-beat-time">{{ b.time || '未定' }}</span>
+              <h3 class="sv-beat-title">{{ b.title }}</h3>
+              <span v-if="b.type" class="sv-beat-type">{{ b.type }}</span>
+              <!-- ★ 2026-10-07 「面 → 线」弱关联：线名可点，跳到线列表并定位。
+                   大纲的「所属线」刻意用名字不用外键（线可删，大纲是历史产物），
+                   但名字对不上任何线时必须**明确告知**（标"未匹配"），
+                   而不是点下去没反应（红线 0）。 -->
+              <button
+                v-if="b.line" type="button" class="sv-beat-line sv-beat-line--link"
+                :class="{ 'is-unmatched': !lineRefOf(i) }"
+                :title="lineRefOf(i) ? `跳到「${b.line}」` : `「${b.line}」在当前线列表里找不到（可能已删除或改过名）`"
+                @click="jumpToLine(i, b.line)"
+              >{{ b.line }}<i v-if="!lineRefOf(i)" class="sv-beat-line-warn">未匹配</i></button>
+              <span class="sv-flex"></span>
+              <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="setCursor(i + 1)">定位</linshe-button>
+              <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeBeat(i)">删除</linshe-button>
+            </div>
+            <div class="sv-beat-body">
+              <div v-if="b.scene" class="sv-beat-field">
+                <span class="sv-beat-k">Scene</span>
+                <span class="sv-beat-v">{{ b.scene }}</span>
+                <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="editScene(i, b.scene)">改</linshe-button>
+              </div>
+              <p v-if="b.subtext" class="sv-beat-sub">「{{ b.subtext }}」</p>
+              <p v-if="b.think" class="sv-beat-think"><b>Think</b>：{{ b.think }}</p>
+              <p v-if="b.outcome" class="sv-beat-out"><b>结果</b>：{{ b.outcome }}</p>
+            </div>
+          </li>
+        </ol>
+      </template>
+      <p v-else class="sv-empty">
+        还没有大纲。点右上「✨ 生成大纲」，邻舍会参考<strong>近期剧情</strong>与<strong>已铺开的故事线</strong>铺出一条 Beat 序列。
+      </p>
+    </div>
+
+    <div v-else-if="tab === 'lines'" class="sv-body">
+      <p v-if="!lines.length" class="sv-empty">
+        还没有任何事件线。点「+ 新建线」手工创建，或由生成侧自动产出。
+      </p>
+      <div v-else class="sv-list">
+        <article v-for="l in lines" :key="l.id" class="sv-card" :class="{ 'is-terminal': l.terminal }">
+          <div class="sv-card-head">
+            <span class="sv-stage" :class="stageClass(l.stage)">{{ l.stage }}</span>
+            <h3 class="sv-name">{{ l.name }}</h3>
+            <span v-if="l.pin" class="sv-pin" title="已锁定：AI 不得改动这条线">已锁定</span>
+            <span v-if="l.adult" class="sv-adult">成人向</span>
+            <span class="sv-flex"></span>
+            <span class="sv-when">{{ l.when || '未定时间' }}</span>
+          </div>
+          <p v-if="l.desc" class="sv-desc">{{ l.desc }}</p>
+          <p v-if="l.next" class="sv-next"><b>下一步</b>：{{ l.next }}</p>
+          <div class="sv-card-foot">
+            <span class="sv-meta">推进方：{{ l.agency === 'player' ? '用户推动' : '世界演进' }}</span>
+            <span v-if="l.participantIds.length" class="sv-meta">涉及 {{ l.participantIds.length }} 名角色</span>
+            <span v-if="l.places.length" class="sv-meta">涉及 {{ l.places.length }} 处地点</span>
+            <span class="sv-flex"></span>
+            <linshe-button variant="ghost" size="sm" @click="openEdit(l)">编辑</linshe-button>
+            <linshe-button variant="ghost" size="sm" @click="togglePin(l)">{{ l.pin ? '解锁' : '锁定' }}</linshe-button>
+            <linshe-button variant="ghost" size="sm" tone="danger" @click="removeLine(l)">删除</linshe-button>
+          </div>
+        </article>
+      </div>
+    </div>
+
+    <div v-else class="sv-body sv-body-graph">
+      <!-- 节点图（第二期）：真正的画布。
+           节点＝事件线；连线为**后端自动算**的结构性关联（共享角色/地点/派生），不做语义推断。
+           ⚠ 筛选必须走服务端 —— 见下方 loadGraph 的注释。 -->
+      <div class="sv-graph-bar">
+        <span class="sv-graph-note">
+          节点＝事件线；连线为<strong>自动计算的结构性关联</strong>（共享角色 / 地点 / 派生关系），不是模型推断的「语义相似」。
+        </span>
+        <span class="sv-flex"></span>
+        <label class="sv-filter">
+          <span>按角色筛选</span>
+          <linshe-select v-model="filterPid" size="sm" :options="participantFilterOptions" style="min-width: 140px" />
+        </label>
+        <button
+          type="button" class="sv-chip" :class="{ on: !includeTerminal }"
+          title="只显示仍在推进的线（隐藏收束/淡出的终态线）"
+          @click="toggleTerminal"
+        >只看在推进的</button>
+        <linshe-button variant="ghost" size="sm" @click="fitGraph">适配视图</linshe-button>
+      </div>
+      <p v-if="graphTruncated" class="sv-trunc">
+        ⚠ 图上有 {{ graphTruncated }} 条线超出单屏上限（已显示 {{ graph.nodes.length }} / {{ graphTotal }}），
+        请用上方筛选收窄，或到「线列表」页查看全部。
+      </p>
+      <div class="sv-canvas">
+        <StoryGraphCanvas
+          ref="canvasRef"
+          :nodes="graph.nodes"
+          :edges="graph.edges"
+          :stages="stages"
+          :active-id="form.id"
+          @select="openEdit"
+        />
+      </div>
+    </div>
+
+    <!-- 新建 / 编辑（同一表单，语义不同：新建不含锁线开关） -->
+    <linshe-modal v-model="editorOpen" :title="form.id ? '编辑事件线' : '新建事件线'">
+      <!-- AI 生成入口：只出草稿填进本表单，仍需点「保存」才落库 -->
+      <div class="sv-form">
+        <div v-if="!form.id" class="sv-gen-bar">
+          <linshe-button variant="secondary" size="sm" @click="generateOpen = true">
+            ✨ 让 AI 按要点生成
+          </linshe-button>
+          <span class="sv-gen-hint">先选好角色/地点，生成时会一并带上</span>
+        </div>
+        <div class="sv-field">
+          <label>线名</label>
+          <linshe-input v-model="form.name" placeholder="如：绯英的连环画稿约" />
+        </div>
+        <div class="sv-row2">
+          <div class="sv-field">
+            <label>阶段</label>
+            <linshe-select v-model="form.stage" :options="stageOptions" size="sm" />
+          </div>
+          <div class="sv-field">
+            <label>推进方</label>
+            <linshe-select v-model="form.agency" size="sm" :options="[
+              { label: '世界自行演进', value: 'world' },
+              { label: '用户推动', value: 'player' },
+            ]" />
+          </div>
+        </div>
+        <div class="sv-field">
+          <label>时间<span class="sv-opt">（自由文本；故事内历法待 T4）</span></label>
+          <linshe-input v-model="form.whenText" placeholder="如：第 3 天傍晚" />
+        </div>
+        <div class="sv-field">
+          <label>内容描述</label>
+          <linshe-input v-model="form.desc" type="textarea" :rows="3" placeholder="这条线在讲什么" />
+        </div>
+        <div class="sv-field">
+          <label>下一步<span class="sv-opt">（给下轮生成的推进锚点）</span></label>
+          <linshe-input v-model="form.nextText" type="textarea" :rows="2" />
+        </div>
+        <!-- ⚠ 角色/地点各占**整行**：多选框里会累积多个 chip，挤在半栏里会被压成一条细缝，
+           而且下拉浮层会盖住右侧字段（实测截图确认过）。 -->
+        <div class="sv-field">
+          <label>涉及角色<span class="sv-opt">（输入名字检索，可多选）</span></label>
+          <MultiPickSelect
+            v-model="form.participantValues"
+            :candidates="participantCandidates"
+            placeholder="输入角色名检索…"
+          />
+        </div>
+        <div class="sv-field">
+          <label>涉及地点<span class="sv-opt">（输入检索，可多选；未收录也可直接输入）</span></label>
+          <MultiPickSelect
+            v-model="form.placeValues"
+            :candidates="placeCandidates"
+            placeholder="输入地名检索…"
+          />
+        </div>
+        <div class="sv-row2">
+          <div class="sv-field">
+            <label>派生自<span class="sv-opt">（哪条线长出来的，可空）</span></label>
+            <linshe-select v-model="form.derivedFrom" size="sm" :options="deriveOptions" />
+          </div>
+          <div class="sv-field">
+            <label>标记</label>
+            <div class="sv-chips">
+              <button type="button" class="sv-chip" :class="{ on: form.stall }" @click="form.stall = !form.stall">停滞</button>
+              <button type="button" class="sv-chip" :class="{ on: form.adult }" @click="form.adult = !form.adult">成人向</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <linshe-button variant="ghost" @click="editorOpen = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="!form.name.trim() || busy" :loading="busy" @click="save">保存</linshe-button>
+      </template>
+    </linshe-modal>
+
+    <!-- AI 生成事件线（只出草稿，应用后填进上面的编辑表单） -->
+    <StoryLineGenerateModal
+      v-model="generateOpen"
+      :participant-ids="form.participantValues.map(Number).filter(Number.isFinite)"
+      :places="form.placeValues"
+      :name-of-id="nameOfCharacter"
+      @applied="onDraftApplied"
+    />
+
+    <!-- ── 剧情大纲：字段化编辑器（2026-10-07 用户口径）────────────
+         用户原话：「生成功能模块应该类似于线列表的新建事件线」——
+         改为**字段化表单 + ✨ 按要点生成 + 节点可增删/重写**，
+         不再是只读草稿预览。
+         ⚠ 弹窗只收集与编辑，**写库仍归 StoryView**（submitOutlineEditor → /outline/editor，
+           服务端统一序列化，未改动节点逐字节保留）。状态单一来源，弹窗不碰 API 写库。 -->
+    <StoryOutlineEditorModal
+      v-model="outlineEditorOpen"
+      :participant-options="participantOptions"
+      :place-options="placeOptions"
+      :line-names="lines.map(l => l.name).filter(Boolean)"
+      @saved="submitOutlineEditor"
+    />
+
+    <!-- 编辑某个节点的 Scene（2026-10-07 用户口径：替代原生 window.prompt）
+         ⚠ 弹窗只收集文本，写库仍由 submitSceneEdit 走 /outline/beats/:index（状态归 StoryView） -->
+    <StoryOutlineSceneModal
+      v-model="sceneEditOpen"
+      :beat="sceneEdit"
+      :busy="sceneBusy"
+      :error="sceneError"
+      @save="submitSceneEdit"
+    />
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted, watch, inject } from 'vue'
+import * as api from '../api/index.js'
+import LinsheButton from '../components/ui/LinsheButton.vue'
+import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheModal from '../components/ui/LinsheModal.vue'
+import LinsheSelect from '../components/ui/LinsheSelect.vue'
+import MultiPickSelect from '../components/ui/MultiPickSelect.vue'
+import StoryGraphCanvas from '../components/story/StoryGraphCanvas.vue'
+import StoryLineGenerateModal from '../components/story/StoryLineGenerateModal.vue'
+import StoryOutlineEditorModal from '../components/story/StoryOutlineEditorModal.vue'
+import StoryOutlineSceneModal from '../components/story/StoryOutlineSceneModal.vue'
+
+const toastFn = inject('toast', null)
+
+const loading = ref(true)
+const busy = ref(false)
+const tab = ref('lines')
+const lines = ref([])
+const graph = ref({ nodes: [], edges: [] })
+const graphTotal = ref(0)
+const graphTruncated = ref(0)
+const canvasRef = ref(null)
+const generateOpen = ref(false)
+/** 「面」= 剧情大纲 */
+const outline = ref(null)
+const outlineBusy = ref(false)
+/** 字段化大纲编辑器（2026-10-07 用户口径：照「新建事件线」做，不再是只读草稿预览） */
+const outlineEditorOpen = ref(false)
+/** 编辑节点 Scene 的弹窗（2026-10-07 用户口径：替代原生 window.prompt） */
+const sceneEditOpen = ref(false)
+const sceneEdit = ref(null)
+const sceneBusy = ref(false)
+const sceneError = ref('')
+/** 「面 → 线」弱关联：Beat 下标 → 匹配到的线（null=未匹配）；见 loadLineRefs */
+const lineRefs = ref({})
+/** 阶段选项来自后端 `/story/meta`（唯一真源），前端不硬编码 —— 项目红线 8 */
+const stages = ref([])
+/** 节点图筛选项：角色 / 是否含终态（第二期，用户设计文档 §2.2「默认按角色筛选」） */
+const filterPid = ref('')
+const includeTerminal = ref(true)
+/** 编辑表单候选：后端给（角色**已排除归档**、地点来自世界地图唯一真源） */
+const participantOptions = ref([])
+const placeOptions = ref([])
+
+const stageOptions = computed(() => stages.value.map(s => ({ label: s, value: s })))
+
+/** 多选组件候选：角色值用 id（落库要 id），展示用人名（用户不该记 id） */
+const participantCandidates = computed(() => participantOptions.value.map(p => ({
+  value: String(p.id), label: p.name, hint: '',
+})))
+/** 地点候选带归属提示 —— 重名很常见（多个区都有「中心广场」），不带归属用户选不准 */
+const placeCandidates = computed(() => placeOptions.value.map(p => ({
+  value: p.name, label: p.name, hint: [p.region, p.area].filter(Boolean).join(' · '),
+})))
+
+function nameOfCharacter(id) {
+  return participantOptions.value.find(p => String(p.id) === String(id))?.name || `#${id}`
+}
+
+/** 节点图按角色筛选的下拉：用真实角色候选（显示名字，而不是 `角色 #0`） */
+const participantFilterOptions = computed(() => [
+  { label: '全部角色', value: '' },
+  ...participantOptions.value.map(p => ({ label: p.name, value: String(p.id) })),
+])
+
+const deriveOptions = computed(() => [
+  { label: '（无）', value: '' },
+  ...lines.value.filter(l => l.id !== form.id).map(l => ({ label: l.name || `#${l.id}`, value: String(l.id) })),
+])
+
+const form = reactive({
+  id: null, name: '', stage: '起线', whenText: '', agency: 'world',
+  desc: '', nextText: '', derivedFrom: '',
+  /** 多选值：角色存**字符串 id**（与 MultiPickSelect 的字符串值契约一致，提交时转数字） */
+  participantValues: [],
+  placeValues: [],
+  stall: false, adult: false,
+})
+
+function stageClass(s) {
+  return { 'st-qi': s === '起线', 'st-yan': s === '延展', 'st-cheng': s === '成形', 'st-shou': s === '收束', 'st-dan': s === '淡出' }
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const [meta, ls, opts] = await Promise.all([
+      api.getStoryMeta(), api.listStoryLines(), api.getStoryOptions(),
+    ])
+    stages.value = Array.isArray(meta?.stages) ? meta.stages : []
+    lines.value = Array.isArray(ls?.lines) ? ls.lines : []
+    participantOptions.value = Array.isArray(opts?.participants) ? opts.participants : []
+    placeOptions.value = Array.isArray(opts?.places) ? opts.places : []
+    await loadGraph()
+    await loadOutline()
+  } catch (err) {
+    toastFn?.('读取事件线失败：' + (err?.message || ''), 'error')
+  } finally {
+    loading.value = false
+  }
+}
+
+// ── 「面」= 剧情大纲 ──────────────────────────────────────
+async function loadOutline() {
+  try {
+    const r = await api.getStoryOutline()
+    outline.value = r?.outline || null
+  } catch { outline.value = null }
+  await loadLineRefs()
+}
+
+/**
+ * 「面 → 线」弱关联：拉取每个 Beat 的「所属线」是否匹配到真实线。
+ *
+ * ★ 这是**弱关联**（名字不用外键），所以必须容忍"匹配不到" ——
+ *   但**匹配不到要看得到**（界面标"未匹配"），否则用户只会在点了没反应时困惑。
+ * ⚠ 读失败**不能拖垮大纲渲染**：退化为空表（此时统一按"未匹配"显示，且有 tooltip 说明）。
+ */
+async function loadLineRefs() {
+  try {
+    const r = await api.getStoryOutlineLineRefs()
+    const map = {}
+    for (const ref of (r?.refs || [])) map[ref.index] = ref.matched || null
+    lineRefs.value = map
+  } catch { lineRefs.value = {} }
+}
+
+/** 某个 Beat 的线名匹配到的线（null = 没匹配到） */
+function lineRefOf(index) {
+  return lineRefs.value[index] || null
+}
+
+/**
+ * 点 Beat 上的线名 → 跳到「线列表」并定位到那条线。
+ *
+ * ★ 匹配不到时**必须说出来**（红线 0），而不是静默切页 —— 用户会以为"点了没反应"。
+ */
+function jumpToLine(index, name) {
+  const hit = lineRefOf(index)
+  if (!hit) {
+    toastFn?.(`线列表里找不到「${name}」——可能已删除或改过名`, 'warning')
+    return
+  }
+  tab.value = 'lines'
+  const target = lines.value.find(l => l.id === hit.id)
+  if (target) openEdit(target)
+}
+
+/** 打开字段化编辑器 —— 载荷与保存都由组件内部走 /outline/editor，这里只负责显隐 */
+function openOutlineGenerate() {
+  outlineEditorOpen.value = true
+}
+
+/**
+ * 编辑器点「保存」—— **由本视图独占写库**（组件只收集，不碰 API 写库）。
+ *
+ * ★★ 载荷是「哪些节点改成了什么」（`items`），序列化与"未改动节点逐字节保留"
+ *   都在服务端 `saveOutlineFromEditor` 里做 —— 前端不自己拼 `raw`，
+ *   否则序列化规则要在两处各写一份，迟早分叉（红线 8）。
+ */
+async function submitOutlineEditor(payload) {
+  if (outlineBusy.value) return
+  outlineBusy.value = true
+  try {
+    const r = await api.saveStoryOutlineEditor(payload)
+    outline.value = r?.outline || outline.value
+    outlineEditorOpen.value = false
+    await loadLineRefs()
+    toastFn?.('大纲已保存', 'success')
+  } catch (err) {
+    toastFn?.('保存失败：' + (err?.message || ''), 'error')
+  } finally { outlineBusy.value = false }
+}
+
+async function setCursor(n) {
+  try { outline.value = (await api.setStoryOutlineCursor(n))?.outline || outline.value }
+  catch (err) { toastFn?.('操作失败：' + (err?.message || ''), 'error') }
+}
+async function toggleOutlinePin() {
+  try {
+    outline.value = (await api.setStoryOutlinePin(!outline.value?.pin))?.outline || outline.value
+  } catch (err) { toastFn?.('操作失败：' + (err?.message || ''), 'error') }
+}
+async function editScene(i, cur) {
+  // ★ 2026-10-07 用户口径：原为 `window.prompt`（原生单行框），Scene 是多行叙述，
+  //   在那边根本没法好好改 → 改为正式弹窗（StoryOutlineSceneModal）。
+  //   带上 time/title 作上下文（弹窗里要显示"改的是哪个节点"）。
+  const b = outline.value?.beats?.[i] || {}
+  sceneEdit.value = { index: i, scene: cur || '', time: b.time || '', title: b.title || '' }
+  sceneBusy.value = false
+  sceneError.value = ''
+  sceneEditOpen.value = true
+}
+
+/** 弹窗里点「保存」—— 与旧 prompt 分支同样的写库调用，只是入口换了 */
+async function submitSceneEdit(value) {
+  const target = sceneEdit.value
+  if (!target || sceneBusy.value) return
+  sceneBusy.value = true
+  sceneError.value = ''
+  try {
+    outline.value = (await api.updateStoryOutlineBeat(target.index, value))?.outline || outline.value
+    sceneEditOpen.value = false
+    sceneEdit.value = null
+  } catch (err) {
+    sceneError.value = err?.message || '保存失败'
+  } finally {
+    sceneBusy.value = false
+  }
+}
+async function removeBeat(i) {
+  if (!window.confirm(`删除第 ${i + 1} 个节点？`)) return
+  try { outline.value = (await api.deleteStoryOutlineBeat(i))?.outline || outline.value }
+  catch (err) { toastFn?.('删除失败：' + (err?.message || ''), 'error') }
+}
+async function removeOutline() {
+  if (!window.confirm('清空整份大纲？')) return
+  try { await api.clearStoryOutline(); outline.value = null } catch (err) { toastFn?.('清空失败：' + (err?.message || ''), 'error') }
+}
+
+/**
+ * 判定是否推进（半自动）。
+ * ★ 后端在「已锁定」或「已是最后节点」时**不会发起 LLM 调用**，直接返回原因。
+ */
+async function advanceOutline() {
+  if (outlineBusy.value) return
+  outlineBusy.value = true
+  try {
+    const r = await api.advanceStoryOutline('')
+    if (r?.outline) outline.value = r.outline
+    toastFn?.(r?.advanced ? '已推进到下一节点' : `未推进（${r?.reason || ''}）`, r?.advanced ? 'success' : 'info')
+  } catch (err) {
+    toastFn?.('判定失败：' + (err?.message || ''), 'error')
+  } finally { outlineBusy.value = false }
+}
+
+/**
+ * 拉节点图数据。
+ *
+ * ★★ 筛选**必须走服务端**：后端是"先选出可见节点、再只在可见集内算边"。
+ *    前端若自己 `filter(nodes)` 而边仍来自全量，会出现指向被隐藏节点的**悬空边**
+ *    （vue-flow 收到会告警/漏画）。所以筛选一变就重新请求，而不是本地过滤。
+ */
+async function loadGraph() {
+  const g = await api.getStoryGraph({
+    participantId: filterPid.value || null,
+    includeTerminal: includeTerminal.value,
+  })
+  graph.value = { nodes: g?.nodes || [], edges: g?.edges || [] }
+  graphTotal.value = Number(g?.total ?? graph.value.nodes.length)
+  graphTruncated.value = Number(g?.truncated ?? 0)
+}
+
+watch([filterPid, includeTerminal], () => { loadGraph().catch(() => {}) })
+watch(tab, v => { if (v === 'graph') loadGraph().catch(() => {}) })
+
+function toggleTerminal() { includeTerminal.value = !includeTerminal.value }
+function fitGraph() { canvasRef.value?.fit() }
+
+function openCreate() {
+  Object.assign(form, {
+    id: null, name: '', stage: stages.value[0] || '起线', whenText: '', agency: 'world',
+    desc: '', nextText: '', derivedFrom: '',
+    participantValues: [], placeValues: [],
+    stall: false, adult: false,
+  })
+  editorOpen.value = true
+}
+
+/**
+ * 打开编辑。
+ *
+ * ⚠ **历史数据里的角色 id 可能已不在候选里**（角色被删/被归档 —— 归档角色会被候选排除）。
+ *   这时不能把它悄悄丢掉：人工编辑不受自动护栏约束（项目红线 L10），
+ *   已存在的值必须原样保留，只是候选下拉里找不到它而已。
+ *   做法：把「不在候选里的既有值」也作为候选补进去（标「已不在列表」）。
+ */
+function openEdit(l) {
+  const known = new Set(participantOptions.value.map(p => String(p.id)))
+  const extraParticipants = (l.participantIds || [])
+    .map(String)
+    .filter(id => !known.has(id))
+    .map(id => ({ id: Number(id), name: `#${id}（已不在角色列表）` }))
+  if (extraParticipants.length) {
+    participantOptions.value = [...participantOptions.value, ...extraParticipants]
+  }
+  Object.assign(form, {
+    id: l.id, name: l.name, stage: l.stage, whenText: l.when || '', agency: l.agency,
+    desc: l.desc, nextText: l.next,
+    participantValues: (l.participantIds || []).map(String),
+    placeValues: (l.places || []).map(String),
+    derivedFrom: l.derivedFrom ? String(l.derivedFrom) : '',
+    stall: !!l.stall, adult: !!l.adult,
+  })
+  editorOpen.value = true
+}
+
+const editorOpen = ref(false)
+
+/**
+ * AI 草稿应用：把生成的字段填进编辑表单。
+ * ⚠ **只填非空字段**，不覆盖用户已填的内容（与「修正地点」同构）。
+ */
+function onDraftApplied(patch = {}) {
+  if (patch.name) form.name = patch.name
+  if (patch.desc) form.desc = patch.desc
+  if (patch.nextText) form.nextText = patch.nextText
+  if (patch.whenText) form.whenText = patch.whenText
+  toastFn?.('已填入编辑表单，确认后点「保存」', 'success')
+}
+
+async function save() {
+  if (busy.value) return
+  busy.value = true
+  // 记下改名前的名字（用于「改名同步」询问）—— 必须在 update 之前取
+  const oldName = form.id ? String(lines.value.find(l => l.id === form.id)?.name || '') : ''
+  try {
+    const payload = {
+      name: form.name.trim(),
+      stage: form.stage,
+      whenText: form.whenText.trim(),
+      agency: form.agency,
+      desc: form.desc.trim(),
+      nextText: form.nextText.trim(),
+      stall: form.stall,
+      adult: form.adult,
+      derivedFrom: form.derivedFrom ? Number(form.derivedFrom) : null,
+      // 多选值是字符串（组件契约）；角色要转数字 id，地点保持名字（后端按名字存）
+      participantIds: form.participantValues.map(Number).filter(Number.isFinite),
+      places: form.placeValues.map(s => String(s).trim()).filter(Boolean),
+    }
+    if (form.id) await api.updateStoryLine(form.id, payload)
+    else await api.createStoryLine(payload)
+    editorOpen.value = false
+    // ★ 2026-10-07「面 → 线」弱关联：改了线名后，大纲里引用**旧名**的 Beat 会成为孤儿引用。
+    //   ⚠ 由**用户显式决定**是否同步 —— 不自动改（LB10：人工编辑不受自动护栏约束）。
+    //   但必须**问一句**（红线 0：不能让引用悄悄烂掉）。
+    if (form.id && oldName && oldName !== payload.name) {
+      await offerRenameSync(oldName, payload.name)
+    }
+    await load()
+    toastFn?.('已保存', 'success')
+  } catch (err) {
+    toastFn?.('保存失败：' + (err?.message || ''), 'error')
+  } finally { busy.value = false }
+}
+
+/**
+ * 改线名后询问是否同步大纲里的引用。
+ *
+ * ★ 先 dryRun 问后端"会改几处"：**没有引用就完全不打扰**（静默跳过）。
+ *   有引用才弹确认，并把数量说清楚。用户拒绝也完全合理 —— 那名字可能是他有意写的旧称。
+ */
+async function offerRenameSync(oldName, newName) {
+  // ⚠ 2026-10-08：不写 `let changed = 0` —— catch 分支直接 return，
+  //   初始化值永远不会被读到（lint 报 no-useless-assignment），去掉后行为完全一致。
+  let changed
+  try {
+    const r = await api.renameStoryOutlineLineRef(oldName, newName, true)
+    changed = Number(r?.changed) || 0
+  } catch { return }   // 查询失败不该拦住保存
+  if (!changed) return  // 大纲里没引用旧名 → 不打扰
+  const ok = window.confirm(
+    `大纲里有 ${changed} 个节点的「所属线」还写着旧名「${oldName}」。\n\n要一并改成「${newName}」吗？`
+    + `\n（选“取消”则保留旧名，那些引用不会自动跟随）`
+  )
+  if (!ok) {
+    toastFn?.(`大纲里的 ${changed} 处旧名未同步（保留「${oldName}」）`, 'info')
+    return
+  }
+  try {
+    const r = await api.renameStoryOutlineLineRef(oldName, newName, false)
+    await loadOutline()
+    toastFn?.(`已同步大纲里的 ${Number(r?.changed) || changed} 处引用`, 'success')
+  } catch (err) {
+    toastFn?.('引用同步失败：' + (err?.message || ''), 'error')
+  }
+}
+
+async function togglePin(l) {
+  try {
+    await api.setStoryLinePin(l.id, !l.pin)
+    await load()
+    toastFn?.(l.pin ? '已解锁（AI 可以改动了）' : '已锁定（AI 不得改动）', 'success')
+  } catch (err) {
+    toastFn?.('操作失败：' + (err?.message || ''), 'error')
+  }
+}
+
+async function removeLine(l) {
+  if (!window.confirm(`确定删除事件线「${l.name}」？`)) return
+  try {
+    await api.deleteStoryLine(l.id)
+    await load()
+    toastFn?.('已删除', 'success')
+  } catch (err) {
+    toastFn?.('删除失败：' + (err?.message || ''), 'error')
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+/* ⚠ `min-height: 0` 必需：本页在纵向 flex 链上，且节点图页签内部有需要确定高度的画布。 */
+.story-view { display: flex; flex-direction: column; min-height: 0; height: 100%; padding: 18px 20px; box-sizing: border-box; }
+.sv-header { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--glass-border); }
+.sv-title { margin: 0; font-size: var(--fs-lg); font-weight: 700; }
+.sv-sub { font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-spacer, .sv-flex { flex: 1; }
+.sv-tabs { display: flex; gap: 4px; }
+.sv-tab {
+  padding: 4px 12px; border-radius: var(--radius-full); border: var(--border);
+  background: var(--glass-bg); color: var(--text-secondary); font-size: var(--fs-xs); cursor: pointer;
+}
+/* ⚠ 实心强调底**必须**用 `--accent-solid`，不能用裸 `--accent` ——
+   后者是为文字/描边调的色，暗色主题下当**实心底**配白字会对比度不足
+   （项目有测试钉住这条，`darkThemeReadability.test.js`）。 */
+.sv-tab.active { background: var(--accent-solid); color: #fff; border-color: transparent; }
+.sv-chip.on { background: var(--accent-solid); color: #fff; border-color: transparent; }
+
+/* 阶段色标：底/字成对取色，且**同时适配明暗主题** —— 只在暗色下用低饱和深底，
+   避免浅底浅字在暗色主题里糊成一片。 */
+.sv-stage { border: 1px solid transparent; }
+.st-qi { background: var(--stage-qi-bg, #E6F1FB); color: var(--stage-qi-fg, #185FA5); }
+.st-yan { background: var(--stage-yan-bg, #E1F5EE); color: var(--stage-yan-fg, #0F6E56); }
+.st-cheng { background: var(--stage-cheng-bg, #FAEEDA); color: var(--stage-cheng-fg, #854F0B); }
+.st-shou { background: var(--stage-shou-bg, #F1EFE8); color: var(--stage-shou-fg, #5F5E5A); }
+.st-dan { background: var(--stage-dan-bg, #F1EFE8); color: var(--stage-dan-fg, #888780); }
+.sv-body { flex: 1; min-height: 0; overflow-y: auto; padding-top: 14px; }
+/* 节点图页签：父链必须一路给到确定高度，否则 vue-flow 在 0 高容器里不渲染任何节点 */
+.sv-body-graph { display: flex; flex-direction: column; overflow: hidden; }
+.sv-empty { padding: 28px 0; text-align: center; font-size: var(--fs-sm); color: var(--text-secondary); }
+.sv-list { display: flex; flex-direction: column; gap: 10px; }
+.sv-card {
+  padding: 12px 14px; border-radius: var(--radius-lg);
+  border: var(--border-strong); background: var(--glass-bg);
+}
+.sv-card.is-terminal { opacity: 0.62; }
+.sv-card-head { display: flex; align-items: center; gap: 8px; }
+.sv-name { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.sv-stage {
+  padding: 1px 8px; border-radius: var(--radius-full); font-size: 10.5px; font-weight: 600;
+}
+.sv-pin { padding: 1px 7px; border-radius: var(--radius-full); font-size: 10px; background: #FBEAF0; color: #993556; }
+.sv-adult { padding: 1px 7px; border-radius: var(--radius-full); font-size: 10px; background: #FAECE7; color: #993C1D; }
+.sv-when { font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-desc { margin: 8px 0 0; font-size: var(--fs-sm); line-height: 1.7; }
+.sv-next { margin: 6px 0 0; font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-card-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--glass-border); }
+.sv-meta { font-size: var(--fs-xs); color: var(--text-secondary); }
+
+/* ── 节点图（第二期）：工具条 + 画布 ──
+   ⚠ 画布需要有**确定的高度**：vue-flow 在 0 高度的容器里不会渲染任何节点
+     （它按容器实际尺寸算 viewport）。父级链上必须一路给到 flex 高度。 */
+.sv-graph-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.sv-graph-note { font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); }
+.sv-filter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-trunc {
+  margin: 0 0 10px; padding: 6px 10px; border-radius: var(--radius-sm);
+  font-size: var(--fs-xs); background: #FAEEDA; color: #854F0B;
+}
+[data-theme="dark"] .sv-trunc { background: #412402; color: #FAC775; }
+.sv-canvas {
+  flex: 1; min-height: 420px;
+  border-radius: var(--radius-lg); border: var(--glass-border);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+/* ── 「面」= 剧情大纲 ──
+   节点列表按"编号 + 时间 + 标题 + 类型/线"排；游标所在节点高亮（当前进度） */
+.sv-ol-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.sv-ol-prog { font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright); }
+.sv-ol-note { margin: 0 0 10px; font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-ol-hint { margin: 0; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); }
+.sv-ol-draft { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sv-ol-draft-head { margin: 0 0 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright); }
+
+.sv-beats { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sv-beat {
+  padding: 10px 12px; border-radius: var(--radius-lg);
+  border: var(--border-strong); background: var(--glass-bg);
+}
+.sv-beat.is-current { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12); }
+.sv-beat-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sv-beat-idx {
+  min-width: 20px; height: 20px; border-radius: 999px; display: inline-flex;
+  align-items: center; justify-content: center;
+  background: var(--bg-tertiary); color: var(--text-secondary); font-size: 11px; font-weight: 600;
+}
+.sv-beat.is-current .sv-beat-idx { background: var(--accent-solid); color: #fff; }
+.sv-beat-cur { padding: 1px 7px; border-radius: 999px; font-size: 10px; background: var(--accent-solid); color: #fff; }
+.sv-beat-time { font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-beat-title { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.sv-beat-type, .sv-beat-line { padding: 1px 7px; border-radius: 999px; font-size: 10px; background: var(--bg-tertiary); color: var(--text-secondary); }
+/* ★ 「面 → 线」弱关联：线名做成可点（跳线列表定位）。
+   匹配不到时压暗 + 标「未匹配」—— 让"引用烂了"看得见（红线 0 同源）。 */
+.sv-beat-line--link {
+  border: 1px solid transparent; cursor: pointer; font-family: inherit;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.sv-beat-line--link:hover { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), .08); }
+.sv-beat-line--link.is-unmatched { opacity: .7; border-style: dashed; border-color: var(--glass-border); }
+.sv-beat-line--link.is-unmatched:hover { color: var(--text-bright); border-color: var(--text-secondary); }
+.sv-beat-line-warn { font-style: normal; margin-left: 5px; opacity: .85; }
+.sv-beat-body { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.sv-beat-field { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-sm); line-height: 1.7; }
+.sv-beat-k { flex-shrink: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); letter-spacing: .04em; }
+.sv-beat-v { flex: 1; min-width: 0; }
+.sv-beat-sub { margin: 0; font-size: var(--fs-sm); color: var(--text-secondary); font-style: italic; }
+.sv-beat-think, .sv-beat-out { margin: 0; font-size: var(--fs-xs); color: var(--text-secondary); line-height: 1.7; }
+
+.sv-form { display: flex; flex-direction: column; gap: 12px; }
+/* AI 生成入口：只在「新建」时出现（编辑已有线时用不着） */
+.sv-gen-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.sv-gen-hint { font-size: var(--fs-xs); color: var(--text-secondary); }
+.sv-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sv-field { display: flex; flex-direction: column; gap: 6px; }
+.sv-field label { font-size: var(--fs-xs); font-weight: 600; color: var(--text-secondary); }
+.sv-opt { font-weight: 400; }
+.sv-chips { display: flex; gap: 6px; }
+.sv-chip {
+  padding: 3px 11px; border-radius: var(--radius-full); border: var(--border);
+  background: var(--glass-bg); color: var(--text-secondary); font-size: var(--fs-xs); cursor: pointer;
+}
+</style>

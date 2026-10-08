@@ -425,7 +425,7 @@ async function onDeleteLetter(id) {
 .mailbox-modal {
   width: min(980px, 96vw);
   height: min(680px, 88vh);
-  background: #FCFAF7;
+  background: var(--bg-primary);
   border-radius: 16px;
   box-shadow: 0 4px 32px rgba(0,0,0,0.08);
   display: flex; flex-direction: column;
@@ -455,7 +455,7 @@ async function onDeleteLetter(id) {
   width: 280px; flex-shrink: 0;
   border-right: 1px solid rgba(0,0,0,0.04);
   overflow-y: auto; display: flex; flex-direction: column;
-  background: #FAF7F4;
+  background: var(--bg-secondary);
 }
 
 /* Sidebar empty */

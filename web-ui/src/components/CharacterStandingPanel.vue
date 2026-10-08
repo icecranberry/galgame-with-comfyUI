@@ -19,28 +19,46 @@
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </div>
+      <!-- 四套形象（工装/私服/居家/睡衣）左右切换 -->
+      <div v-if="ctl.hasScenes" class="standing-switch">
+        <button
+          class="standing-switch-arrow"
+          type="button"
+          :disabled="ctl.busy || (ctl.scenes?.length || 0) <= 1"
+          title="上一个形象"
+          @click.stop="ctl.prevScene"
+        >‹</button>
+        <span class="standing-switch-label">{{ ctl.sceneLabel || '形象' }}</span>
+        <button
+          class="standing-switch-arrow"
+          type="button"
+          :disabled="ctl.busy || (ctl.scenes?.length || 0) <= 1"
+          title="下一个形象"
+          @click.stop="ctl.nextScene"
+        >›</button>
+      </div>
       <div
         class="standing-stage"
         role="button"
         tabindex="0"
-        :title="ctl.funcOpen && character?.standing_url ? '再点一次查看大图' : '点击展开立绘操作'"
+        :title="ctl.funcOpen && ctl.displayUrl ? '再点一次查看大图' : '点击展开立绘操作'"
         @click="ctl.onStageClick"
         @keydown.enter.prevent="ctl.onStageClick"
         @keydown.space.prevent="ctl.onStageClick"
       >
-        <img v-if="character?.standing_url" :src="ctl.displayUrl" class="standing-img" alt="" />
+        <img v-if="ctl.displayUrl" :src="ctl.displayUrl" class="standing-img" alt="" />
         <div v-else-if="!ctl.busyForChar" class="standing-empty">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
           </svg>
-          <p class="standing-empty-title">尚未生成立绘</p>
-          <p class="standing-empty-hint"></p>
+          <p class="standing-empty-title">尚未生成{{ ctl.sceneLabel }}形象</p>
+          <p class="standing-empty-hint">点下方「生成形象」让邻舍按这套服装画一张</p>
         </div>
         <!-- 生成中：扫描线 + 轮播趣语（与角色招募同款） -->
         <div v-if="ctl.busyForChar" class="standing-loading">
           <div class="standing-scan-line"></div>
           <div class="standing-spinner"></div>
-          <span class="standing-loading-text">{{ ctl.reimageing ? '正在重绘立绘…' : '正在生成立绘…' }}</span>
+          <span class="standing-loading-text">正在生成「{{ ctl.sceneLabel }}」形象…</span>
           <span class="standing-loading-tip">{{ ctl.tip }}</span>
         </div>
       </div>
@@ -70,15 +88,15 @@
           <div class="standing-func-btns">
             <template v-if="ctl.hasPrompt">
               <linshe-button variant="secondary" :size="controlSize" :loading="ctl.generating" :disabled="ctl.busy" @click="ctl.generate">重新生成提示词</linshe-button>
-              <linshe-button variant="primary" :size="controlSize" :loading="ctl.reimageing" :disabled="ctl.busy" @click="ctl.regenerate">再次Roll图</linshe-button>
+              <linshe-button variant="primary" :size="controlSize" :loading="ctl.generating" :disabled="ctl.busy" @click="ctl.regenerate">再次Roll图</linshe-button>
             </template>
             <template v-else>
-              <linshe-button variant="primary" :size="controlSize" :loading="ctl.generating" :disabled="ctl.busy" @click="ctl.generate">生成形象</linshe-button>
+              <linshe-button variant="primary" :size="controlSize" :loading="ctl.generating" :disabled="ctl.busy" @click="ctl.generate">生成「{{ ctl.sceneLabel }}」形象</linshe-button>
             </template>
           </div>
           <div class="standing-manage-btns">
             <linshe-button variant="secondary" :size="controlSize" :disabled="ctl.busy || ctl.uploading" @click="pickFile">上传形象</linshe-button>
-            <linshe-button v-if="character?.standing_url" variant="ghost" :size="controlSize" :disabled="ctl.busy" @click="ctl.remove">删除形象</linshe-button>
+            <linshe-button v-if="ctl.displayUrl" variant="ghost" :size="controlSize" :disabled="ctl.busy" @click="ctl.remove">删除形象</linshe-button>
           </div>
         </div>
       </Transition>
@@ -97,7 +115,7 @@ import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   character: { type: Object, default: null },
-  /** 父组件的立绘接口：{ funcOpen, requirement, hasPrompt, generating, reimageing, busy, busyForChar, uploading, tip, displayUrl, mode, ...动作 } */
+  /** 父组件的立绘接口：{ funcOpen, requirement, hasPrompt, generating, busy, busyForChar, uploading, tip, displayUrl, mode, scenes, sceneLabel, prevScene, nextScene, ...动作 } */
   ctl: { type: Object, required: true },
   /** true = 内联在正文里（手机端）；false = 悬浮在主面板左侧（桌面端） */
   inline: { type: Boolean, default: false },
@@ -157,6 +175,34 @@ function onFileChange(e) {
 .standing-panel-header:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
 .standing-chevron { margin-left: auto; transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 .standing-chevron.open { transform: rotate(180deg); }
+/* 四套形象左右切换条 */
+.standing-switch {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 8px;
+}
+.standing-switch-arrow {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: 8px;
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.standing-switch-arrow:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.standing-switch-arrow:disabled { opacity: 0.35; cursor: default; }
+.standing-switch-label {
+  flex: 1; min-width: 0;
+  text-align: center;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  letter-spacing: 0.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .standing-stage {
   position: relative;
   aspect-ratio: 1 / 2;
