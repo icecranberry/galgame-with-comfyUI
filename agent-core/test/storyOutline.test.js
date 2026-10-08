@@ -378,10 +378,14 @@ test('★★ 用来路不明的碎片拼不出有效节点时，saveOutline 兜�
 });
 
 test('★★★ 细化节点：只动一个节点、不动其他节点、游标不变、且**不落库**', () => {
-  const refineBody = svcSrc.slice(
-    svcSrc.indexOf('export async function refineOutlineBeat'),
-    svcSrc.indexOf('// ═══════════════════════════════════════════════════════════\n// 五、推进判定'),
-  );
+  // ⚠ 2026-10-08：原先用"到下一个分节标题"切片，但该锚点文案随上游更新而变
+  //   （「五、推进判定」→「五、推进判定（移植构画 …）」），切片会越界到 setOutlineCursor
+  //   的**定义处**而误报。改为直接取函数体本身 —— 判据不变，但不再依赖外部文案。
+  const _start = svcSrc.indexOf('export async function refineOutlineBeat');
+  assert.ok(_start >= 0, '应有 refineOutlineBeat 函数');
+  const _endRel = svcSrc.slice(_start + 1).search(/\r?\n\}\r?\n/);
+  assert.ok(_endRel > 0, '应能定位函数结尾');
+  const refineBody = svcSrc.slice(_start, _start + 1 + _endRel + 3);
   const code = refineBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   assert.ok(!/saveOutline\s*\(/.test(code), '细化不得自己落库（只回草稿，由前端确认后保存）');
   assert.ok(!/setOutlineCursor/.test(code), '细化不得改游标（用户可能已经手定位了）');

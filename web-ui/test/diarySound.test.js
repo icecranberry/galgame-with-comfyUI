@@ -17,6 +17,11 @@ test('打开日记只为本次加载的非空正文发声；空白、失败、�
       else delete globalThis[key]
     })
   }
+  // ⚠ 2026-10-08 合并 v3.7.0：本项目 api 层的 request() 读的是 `res.text()`（见
+  //   src/api/index.js 顶部的「测试契约」注释，另有一个仍用 json() 的 jsonRequest()）。
+  //   上游新增的本测试只 mock 了 `json()`，未提供 `text()` → diary 加载必然失败。
+  //   这里只**补全 mock**（返回等价 JSON 文本），不改任何断言。
+  const asText = data => ({ ok: true, json: async () => data, text: async () => JSON.stringify(data) })
   globalThis.window = {}
   globalThis.Audio = class {
     readyState = 4
@@ -26,10 +31,10 @@ test('打开日记只为本次加载的非空正文发声；空白、失败、�
   t.mock.method(Date, 'now', () => now += 500)
   t.mock.method(console, 'error', () => {})
   t.mock.method(globalThis, 'fetch', async url => {
-    if (String(url).includes('/history')) return { ok: true, json: async () => ({ diaries: [] }) }
-    if (delayed) return new Promise(resolve => { resolveDiary = data => resolve({ ok: true, json: async () => data }) })
+    if (String(url).includes('/history')) return { ok: true, json: async () => ({ diaries: [] }), text: async () => JSON.stringify({ diaries: [] }) }
+    if (delayed) return new Promise(resolve => { resolveDiary = data => resolve({ ok: true, json: async () => data, text: async () => JSON.stringify(data) }) })
     if (failed) throw new Error('离线')
-    return { ok: true, json: async () => response }
+    return asText(response)
   })
   setActivePinia(createPinia())
   const store = useDiaryStore()

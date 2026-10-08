@@ -22,7 +22,8 @@ import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 // API 路由统一由 src/routes/_autoMount.js 自动挂载（架构加固 P2）。
 // 存量挂载点迁移到 LEGACY_MOUNTS 表，新增路由走约定式 —— 都不需要在本文件出现。
 import { autoMountRoutes } from './src/routes/_autoMount.js';
-import maibotBridgeRoutes from './src/maibot-bridge/router.js';
+// ⚠ 注意：/api/maibot 也走自动挂载（表中以 `module: '../maibot-bridge/router.js'` 登记），
+//    此处**不要**再手写 import 与 app.use —— 有测试钉住"app.js 不再手写挂载"。
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startSpecialMomentScheduler } from './src/services/scheduleSpecialMoment.js';
@@ -110,7 +111,6 @@ app.use('/town-assets', express.static('data/town/assets'));
 const routeMount = await autoMountRoutes(app, { wrapRouterAsync });
 console.log(`[routes] 已挂载 ${routeMount.legacy.length} 个存量路由`
   + (routeMount.convention.length ? ` + ${routeMount.convention.length} 个约定式路由` : ''));
-app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 
 // 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
 // 前端「有更新噢」拿它当本地版本去比 GitHub 上的 tag —— 这一步只读本地文件、不碰网络，
