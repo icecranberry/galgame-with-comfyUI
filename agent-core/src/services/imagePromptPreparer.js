@@ -198,11 +198,36 @@ function applyKnowledgeRules(prompt, items, selected, ragQuery = '') {
   const appliedRules = [];
 
   if (knowledgeIds.has('ipk.count.solo')) {
-    const multiPerson = /\b(two|three|duo|couple|group|crowd|multiple|2girls|2boys|3girls|3boys)\b/.test(matchText)
-      || /\b1girl\s+1boy\b/.test(matchText);
-    if (!multiPerson) {
+    // ★★ 人数判定的**唯一真源** —— 这里踩过一个代价很大的坑（2026-10-05）：
+    //    原判据把 `two` / `three` 当**裸词**匹配，于是 "in her **two** hands"
+    //    "**two** legs raised" "**two** pigtails" 全被当成"多人" → `solo` 标签**不再添加**
+    //    → 模型把**同一个角色画成两个人**（用户实报：日程/朋友圈/对话的图都出现）。
+    //    84 条体位的 prompt 里有大量 "two hands/two legs"，命中率极高。
+    //
+    //    修法：数字词**必须后接人（或明确的复数容器）**才算多人；同时显式排除身体部位词。
+    const PART_WORDS = 'hands?|arms?|legs?|feet|foot|eyes?|breasts?|nipples?|thighs?|knees?|pigs?|pigtails?|ears?|hands|pupils?';
+    const NUM_WORD = '(?:two|three|four|five|both|several|multiple|many)';
+    const multiPerson =
+      // ① 明确的人名词（最可靠）
+      /\b(?:2|3|4)girls?\b|\b(?:2|3|4)boys?\b|\b1girl\s+1boy\b|\bmultiple_(?:girls|boys)\b/.test(matchText)
+      // ② duo / couple / threesome / group / crowd 这类**本身就是多人**的词
+      || /\b(?:duo|couple|couple's|threesome|threesomes|group|crowd|gangbang|orgy|polyamory)\b/.test(matchText)
+      // ③ 「数字词 + 人/人群」才算；`two hands` 这类身体部位**不算**
+      || new RegExp(`\\b${NUM_WORD}\\s+(?!${PART_WORDS}\\b)(?:people|persons?|men|women|girls?|boys?|guys|characters?|figures?|participants?|partners?|lovers?)`, 'i').test(matchText)
+      // ④ 裸 `multiple` 后接人（`multiple hands` 不算）
+      || new RegExp(`\\bmultiple\\s+(?!${PART_WORDS}\\b)\\w+`, 'i').test(matchText);
+    // ⑤ 反例兜底：句子明确说了单人 → 即使命中上面也按单人（"alone"/"by herself" 是强信号）
+    const explicitlyAlone = /\b(?:alone|by (?:her|him|them)sel(?:f|ves)|on her own|solo)\b/i.test(matchText);
+    if (!multiPerson || explicitlyAlone) {
       addRuleTag(selected, 'solo', 'ipk.count.solo', 'count_identity', 'single-subject default', promptText);
       removeSelectedTags(selected, ['2girls', '2boys', '3girls', '3boys', 'multiple_girls', 'multiple_boys'], 'ipk.count.solo', 'conflicts with solo', removedTags);
+      // ★ 光从候选表里删是不够的 —— 用户**原文**里若已经写了 `2girls`，它会原样留在提示词里，
+      //   结果拼成 `… 2girls, street, solo`（自相矛盾，模型照样画两个人）。
+      //   `removedPhrases` 才是从原文剥词的机制，必须一并登记。
+      removedPhrases.push(
+        /\b(?:2|3|4)girls?\b/gi, /\b(?:2|3|4)boys?\b/gi,
+        /\bmultiple_(?:girls|boys)\b/gi,
+      );
       appliedRules.push('ipk.count.solo');
     }
   }
@@ -272,25 +297,124 @@ function cleanOriginalPrompt(prompt, removedPhrases) {
     .trim();
 }
 
-export function composeImagePrompt(prompt, items = [], { ragQuery = '' } = {}) {
+export function composeImagePrompt(prompt, items = [], { ragQuery = '', timeOfDay } = {}) {
   const selected = selectExecutableTags(prompt, items, ragQuery);
   const ruleResult = applyKnowledgeRules(prompt, items, selected, ragQuery);
   resolveSelectedConflicts(selected, ruleResult.removedTags);
   selected.sort((a, b) => b.score - a.score || b.priority - a.priority);
 
   const cleanedOriginal = cleanOriginalPrompt(prompt, ruleResult.removedPhrases);
-  const selectedTags = selected.map(item => item.tag);
-  const promptRefined = [cleanedOriginal, ...selectedTags].filter(Boolean).join(', ');
+
+  // ★ 时段锚点：把画面钉在正确光照下（用户报"凌晨生成出白天"）。
+  //   ⚠ **只有调用方显式传了 timeOfDay 才注入** —— 不传时行为与改动前逐字节一致
+  //     （红线：默认可不改变行为）。注意 `timeOfDayAnchor(undefined)` 会用"当前时间"，
+  //     那是给直接调用者用的语义；这里必须先判空，不能把 undefined 透传进去。
+  const anchor = (timeOfDay === undefined || timeOfDay === null || timeOfDay === '')
+    ? null
+    : timeOfDayAnchor(timeOfDay);
+  let tags = selected.map(item => item.tag);
+  const removedTags = ruleResult.removedTags.slice();
+  let cleaned = cleanedOriginal;
+  if (anchor) {
+    // ① 压制相反时段词：**必须同时清理"原始描述"与"RAG 选出的标签"**，
+    //    只清标签不够 —— 描述里往往就写着 daytime / bright_sunlight（实测踩到）。
+    //
+    // ⚠ 不能用 `\b` 做边界：下划线是 `\w`，`\bbright_sunlight\b` 在 "bright_sunlight" 上
+    //   照样成立，但在"逗号相连"时反而漏配；这里统一用「前后不是字母」判定，并把
+    //   下划线/空格视为等价（bright_sunlight ≡ bright sunlight）。
+    // ⚠⚠ **必须先转义、再插入字符类**：反过来写会把 `[` `]` 一起转义成 `\[ \]` →
+    //   正则变成字面量 `[ _]`，永远匹配不到（这个坑已实测踩到，bright_sunlight 匹配失败）。
+    // ⚠⚠ **test 必须用不带 g 的正则**：带 `g` 的 RegExp 在 test() 成功后会推进 lastIndex，
+    //   下一次调用从上次位置继续 → 同一正则第二次匹配同一文本会返回 false（实测踩到，
+    //   表现为"第一个词能压、后续都不压"）。replace 才需要 g。
+    const rxSrc = (s) => `(?<![a-z])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/_/g, '[ _]')}(?![a-z])`;
+    const rx = (s) => new RegExp(rxSrc(s), 'gi');      // 仅用于 replace
+    const rxTest = (s) => new RegExp(rxSrc(s), 'i');   // 用于 test（无 g，避免 lastIndex 污染）
+    const hitText = (text) => anchor.suppress.some(s => rxTest(s).test(String(text)));
+    tags = tags.filter(t => {
+      if (hitText(t)) { removedTags.push({ tag: t, reason: `时段冲突（${anchor.label}）` }); return false; }
+      return true;
+    });
+    // 原始描述里也要剔（逐词替换，保留其余内容）
+    for (const s of anchor.suppress) cleaned = cleaned.replace(rx(s), '');
+    // 反复清直到稳定：一次 `/,\s*,/g` 只合并一层，删词后会**新产生**相邻逗号（实测残留 ", ,"）
+    let prev;
+    do {
+      prev = cleaned;
+      cleaned = cleaned.replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ');
+    } while (cleaned !== prev);
+    cleaned = cleaned.replace(/^[,\s]+|[,\s]+$/g, '').trim();
+    // ② 追加本时段的画面锚点 —— 整句作为一条 tag（已不含逗号，不会被下游 split 拆碎）
+    tags.push(anchor.en);
+  }
+
+  const selectedTags = selected.map(({ tag, category, knowledgeId, score, reason }) => ({ tag, category, knowledgeId, score, reason }));
+  const promptRefined = [cleaned, ...tags].filter(Boolean).join(', ');
+
   return {
     promptRefined: promptRefined || String(prompt || '').trim(),
-    selectedTags: selected.map(({ tag, category, knowledgeId, score, reason }) => ({ tag, category, knowledgeId, score, reason })),
-    removedTags: ruleResult.removedTags,
-    appliedRules: ruleResult.appliedRules,
+    selectedTags,
+    removedTags,
+    appliedRules: anchor ? [...ruleResult.appliedRules, `timeOfDay:${anchor.key}`] : ruleResult.appliedRules,
+    timeOfDay: anchor,
   };
 }
 
 function emptySelection() {
   return { selectedTags: [], removedTags: [], appliedRules: [] };
+}
+
+/**
+ * 按时钟算「时段锚点」—— 用于把生图钉在正确的光照下。
+ *
+ * ── 为什么需要它（2026-10-06 用户报）──────────────────────────
+ * 用户报"日程写的是凌晨 2 点自慰，生图出来是白天"。
+ * 根因：**生图链路完全不感知时间** —— `imageSkill` / `prepareImagePrompt` 里没有任何时段输入，
+ * 而日程描述里往往**不写"深夜/凌晨"字样**（只写"在睡梦里无意识的自慰"），
+ * 于是 `applyKnowledgeRules` 那条"显式出现 night 才加 night 标签"的规则也匹配不到 →
+ * 模型默认按"白天、明亮"画。
+ *
+ * 修法：由**调用方传入的真实时刻**（不是让模型猜）推出时段，作为硬性画面锚点注入，
+ * 并**压制相反时段词**（如凌晨 2 点要把 daytime / bright_sunlight 剔掉）。
+ *
+ * @param {Date|number|string} [at] 该画面发生的时刻；缺省用当前时间
+ * @returns {{key:string, label:string, en:string, suppress:string[]}|null}
+ *          null = 无法判定（不注入，行为与改动前一致）
+ */
+export function timeOfDayAnchor(at) {
+  let h;
+  if (at === undefined || at === null || at === '') {
+    h = new Date().getHours();
+  } else if (at instanceof Date) {
+    h = at.getHours();
+  } else if (typeof at === 'number' && Number.isFinite(at)) {
+    h = new Date(at).getHours();
+  } else if (typeof at === 'string' && /^\d{1,2}:\d{2}$/.test(at.trim())) {
+    h = Number(at.split(':')[0]);                       // 直接传 "02:30" 这种日程时间
+  } else {
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return null;
+    h = d.getHours();
+  }
+  if (!Number.isFinite(h)) return null;
+  h = ((h % 24) + 24) % 24;
+
+  // 档位与压制词：**白天档压夜间词、夜晚档压白天词**，方向不能反（写反等于不压制）。
+  // ⚠ 实测踩到：凌晨档曾错挂 DAY_SUPPRESS → 想压 daytime 却去压 night，等于没压。
+  // 两条压制表，**命名即语义**（避免"白天用哪张表"这种混淆）：
+  //   SUPPRESS_NIGHT_WORDS = 白天档用：把描述里的「夜间词」剔掉（含裸词 night）
+  //   SUPPRESS_DAY_WORDS   = 夜间档用：把描述里的「白天词」剔掉（**不含 night** —— 夜晚本来就有 night）
+  // ⚠ 写反方向 = 等于没压制（曾把凌晨档错挂成白天表，实测踩到）。
+  const SUPPRESS_NIGHT_WORDS = ['night', 'nighttime', 'moonlight', 'darkness', 'dim lighting', 'candlelight'];
+  const SUPPRESS_DAY_WORDS = ['daytime', 'bright_sunlight', 'bright sunlight', 'sunny', 'daylight', 'midday sun'];
+  if (h >= 5 && h < 8)  return { key: 'dawn',    label: '清晨',   en: 'early morning soft dawn light with low sun and long shadows', suppress: SUPPRESS_NIGHT_WORDS };
+  if (h >= 8 && h < 11) return { key: 'morning', label: '上午',   en: 'bright morning daylight with clear natural light', suppress: SUPPRESS_NIGHT_WORDS };
+  if (h >= 11 && h < 14) return { key: 'noon',   label: '中午',   en: 'harsh midday sunlight with strong shadows and high contrast', suppress: SUPPRESS_NIGHT_WORDS };
+  if (h >= 14 && h < 17) return { key: 'afternoon', label: '下午', en: 'warm afternoon light with soft golden tones', suppress: SUPPRESS_NIGHT_WORDS };
+  if (h >= 17 && h < 19) return { key: 'dusk',   label: '傍晚',   en: 'golden hour dusk with orange-pink sky and long shadows', suppress: SUPPRESS_NIGHT_WORDS };
+  if (h >= 19 && h < 22) return { key: 'evening', label: '夜晚',  en: 'lamplit evening interior with warm artificial light and dark windows', suppress: SUPPRESS_DAY_WORDS };
+  if (h >= 22 || h < 1) return { key: 'night',   label: '深夜',   en: 'deep night with dim warm lamplight or darkness in a dark room', suppress: SUPPRESS_DAY_WORDS };
+  return { key: 'late_night', label: '凌晨', en: 'late night after midnight with very dim lighting in a dark room', suppress: SUPPRESS_DAY_WORDS };
 }
 
 function emptyRetrieval() {
@@ -312,6 +436,9 @@ export async function prepareImagePrompt(prompt, {
   disableRAG = false,
   alreadyPrepared = false,
   skipOptimization = false,
+  // ★ 该画面发生的时刻（Date / 毫秒 / 'HH:MM'）—— 用于注入时段光照锚点，
+  //   修「凌晨的活动生成出白天图」。不传 = 不注入（行为与改动前一致）。
+  timeOfDay = undefined,
   // 不再落库：检索快照只是诊断留档，全项目无读者（曾占库 68%），需要时从返回值里看即可
   db = null,
   ragTimeoutMs = undefined,
@@ -332,7 +459,7 @@ export async function prepareImagePrompt(prompt, {
   const retrievalQuery = resolveImageRagQuery(original, ragQuery);
   const database = db || getDb();
   const retrieval = await retrieveImagePromptKnowledge(retrievalQuery, { scene, db: database, timeoutMs: ragTimeoutMs });
-  const selection = composeImagePrompt(original, retrieval.items, { ragQuery: retrievalQuery });
+  const selection = composeImagePrompt(original, retrieval.items, { ragQuery: retrievalQuery, timeOfDay });
   const foundTags = selection.selectedTags.map(item => item.tag);
   console.log(`[imagePromptKnowledge] query=${JSON.stringify(retrievalQuery.slice(0, 160))} mode=${retrieval.mode} duration=${retrieval.durationMs}ms tags=${JSON.stringify(foundTags)}`);
   const status = selection.promptRefined === original ? 'fallback' : 'deterministic';

@@ -11,9 +11,9 @@
 
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
-import { snapshotTodaySchedule } from './scheduleGenerator.js';
+import { snapshotTodaySchedule, isScheduleForbidden } from './scheduleGenerator.js';
 import { broadcast } from './unifiedStreamBus.js';
-import { getLocalDateKey } from '../utils/localDate.js';
+import { getLocalDateKey, shiftDateKey } from '../utils/localDate.js';
 import { onCharacterWake } from './dreamService.js';
 import { extendEventSchedule, reapplyActiveEventSchedule } from './eventSchedule.js';
 
@@ -73,13 +73,30 @@ export function initialize() {
   const now = new Date();
   const today = getLocalDateKey(now);
 
-  // 全量清理超过 2 天的旧日程快照
-  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', 'localtime', '-2 days')`).run();
+  // 全量清理超过 2 天的旧日程快照。
+  // ⚠ 基准必须用**上面同一个 `today`**（由 getLocalDateKey 算出），
+  //   不能写 SQL 的 `DATE('now','localtime','-2 days')` —— 那是**另一套时间源**：
+  //   日期键走 JS 的 Date（测试里会被 mock），SQL 的 now 读真实时钟，
+  //   两者跨零点/被 mock 时会不一致。实测：真实日期比 JS 日期快 3 天时，
+  //   刚插入的当天快照会被判成"过期两天以上"当场删掉
+  //   （`eventSchedule.test.js` 的「daily refresh and next-day snapshot fallback」整项失败）。
+  //   ★ 同一处口径在 `scheduleGenerator.js:1265` 早已修正，这里当时漏了 —— 现补齐。
+  db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < ?`).run(shiftDateKey(today, -2));
 
-  // 检查所有启用日程的角色
+  /*
+   * 检查所有角色：日程数据的存废由 daily_schedules 自身决定，**不看 schedule_enabled**。
+   * 后者只用来控制「要不要花 token 重新生成日程」（见 replyQueueScheduler），
+   * 关掉它的角色仍应继续按已生成的日程作息，否则日程页显示在梦乡、实际却能回消息。
+   * 没有日程的角色会在下面的 getTodayScheduleRaw 处直接跳过。
+   *
+   * ★ 但**归档角色例外** —— 归档 = 不参与任何主动行为，日程也在其列。
+   *   早先这里是全量 `SELECT id, display_name FROM characters`，配合下面
+   *   `getTodayScheduleRaw` 里"查不到就插一条"的 fallback，导致归档角色
+   *   **每天启动都被重建一遍今日快照**（实测 51 个归档角色 10-05 仍有 51 条
+   *   当天快照，而它们的模板早在 10-03 就停止更新了）。日程页/概览也照旧列着它们。
+   */
   const chars = db.prepare(`
-    SELECT id, display_name FROM characters
-    WHERE schedule_enabled = 1 OR schedule_enabled IS NULL
+    SELECT id, display_name FROM characters WHERE COALESCE(archived, 0) = 0
   `).all();
 
   let sleepers = 0;
@@ -123,9 +140,8 @@ function startSleepingStateCron() {
 
   async function tick() {
     const db = getDb();
-    const chars = db.prepare(
-      'SELECT id FROM characters WHERE schedule_enabled = 1 OR schedule_enabled IS NULL'
-    ).all();
+    // 同 initialize：睡眠同步只看角色有没有日程数据，与「是否重新生成」的开关无关
+    const chars = db.prepare('SELECT id FROM characters').all();
 
     for (const char of chars) {
       syncSleepingState(char.id);
@@ -196,6 +212,11 @@ function getTodayScheduleRaw(characterId) {
   ).get(characterId, today);
 
   if (!row) {
+    // ★ 归档角色禁止日程：**不要**在这里顺手插一条当天快照。
+    //   这是"每天重建 51 条"的第二个入口 —— 只要有任何地方读了今日日程
+    //   （概览、日程页、事件调度），这个 fallback 就会把归档角色的快照补回来。
+    if (isScheduleForbidden(characterId)) return null;
+
     // fallback: 从 template 快照一条
     const template = db.prepare(
       'SELECT schedule_json FROM schedule_templates WHERE character_id = ?'
@@ -207,10 +228,12 @@ function getTodayScheduleRaw(characterId) {
         VALUES (?, ?, ?)
       `).run(characterId, today, template.schedule_json);
       reapplyActiveEventSchedule(characterId, db);
-      // 清理超过 2 天的旧快照
+      // 清理超过 2 天的旧快照。
+      // ⚠ 与 `initialize()` 同一口径：基准用 JS 算出的 `today`，不用 SQL 的 `DATE('now')`
+      //   —— 那是另一套时间源，测试 mock 时间时会把刚插入的快照误删（详见 initialize 的注释）。
       db.prepare(
-        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE('now', 'localtime', '-2 days')`
-      ).run(characterId);
+        `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < ?`
+      ).run(characterId, shiftDateKey(today, -2));
       row = db.prepare('SELECT schedule_json FROM daily_schedules WHERE character_id = ? AND schedule_date = ?')
         .get(characterId, today);
     }
@@ -637,7 +660,7 @@ export function getAllOverview() {
   const now = new Date();
 
   const chars = db.prepare(`
-    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode, pinned
+    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode, pinned, archived
     FROM characters
     ORDER BY display_name ASC
   `).all();
@@ -664,6 +687,7 @@ export function getAllOverview() {
       wake_mode: char.wake_mode,
       is_temp_woken: tempWoken,
       pinned: char.pinned ? 1 : 0,
+      archived: char.archived ? 1 : 0,
     };
   });
 }

@@ -2,7 +2,9 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <!-- ⚠ 2026-10-08 合并 v3.7.0：上游新增 inlineLayout 类（内联布局）、本地新增 showPersonaRefineModal
+           互斥条件（人设润色弹窗打开时收起遮罩）—— 两者叠加，**都保留**。 -->
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal && !showPersonaRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -11,14 +13,66 @@
 
           <div class="modal-body modal-body-detail">
             <!-- 头像 -->
+            <!-- 头像行：头像及其操作（左）｜ 身份四字段（中）｜ 誓约徽章（右）。
+                 名称放这里而不是正文里，是为了把纵向空间全让给人设编辑区。
+                 ★ 「更换头像 / 移除」贴着头像正下方 —— 原先它排在名字格右侧，
+                   与头像隔着一整列，看起来像"名字的操作"而不是"头像的操作"。 -->
             <div class="detail-avatar-row">
-              <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
-                <img v-if="character?.avatar_path" :src="character.avatar_path" class="detail-avatar-img" alt="" />
-                <span v-else>{{ character?.display_name?.charAt(0) }}</span>
+              <div class="detail-avatar-col">
+                <div class="detail-avatar clickable" @click="$emit('open-avatar-editor', character)">
+                  <img v-if="character?.avatar_path" :src="character.avatar_path" class="detail-avatar-img" alt="" />
+                  <span v-else>{{ character?.display_name?.charAt(0) }}</span>
+                </div>
+                <div class="detail-avatar-btns">
+                  <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
+                  <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
+                </div>
               </div>
-              <div>
-                <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
-                <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
+              <!-- 四个身份字段 2×2 排布：角色名 / 英文名 / 论坛马甲 / 网络人设。
+                   两行等宽格，比原来「一行两格 + 一行三格」规整，也不多占高度。 -->
+              <div class="detail-name-grid">
+                <div class="detail-name-col">
+                  <label class="fl">角色名</label>
+                  <linshe-input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
+                </div>
+                <div class="detail-name-col">
+                  <label class="fl">英文名</label>
+                  <linshe-input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
+                </div>
+                <div class="detail-name-col">
+                  <label class="fl">论坛马甲</label>
+                  <div class="detail-alias-input-row">
+                    <linshe-input
+                      v-model="detail.forumAlias"
+                      class="fi"
+                      placeholder="留空则用角色名"
+                      maxlength="24"
+                      @input="detail.dirty = true"
+                    />
+                    <linshe-button
+                      size="sm"
+                      variant="secondary"
+                      class="alias-gen-btn"
+                      :loading="detail.aliasGenerating"
+                      :disabled="detail.aliasGenerating"
+                      title="按角色人设生成一个不暴露身份的网名，可反复重掷"
+                      @click="generateAlias"
+                    >
+                      {{ detail.forumAlias ? '重掷' : '生成' }}
+                    </linshe-button>
+                  </div>
+                </div>
+                <div class="detail-name-col">
+                  <label class="fl">网络人设 <span class="fl-hint">（可空）</span></label>
+                  <linshe-input
+                    v-model="detail.forumPersona"
+                    class="fi"
+                    placeholder="Ta 在网上什么调门、爱在什么话题下场"
+                    maxlength="120"
+                    :title="detail.forumPersona"
+                    @input="detail.dirty = true"
+                  />
+                </div>
               </div>
               <div v-if="character?.is_oath" class="detail-avatar-oath">
                 <span class="oath-badge" @click="removeOath">
@@ -30,15 +84,25 @@
 
             <div class="preview-card">
               <!-- 角色关系 -->
-              <div class="detail-rel-section">
+              <div class="detail-rel-section" :class="{ 'is-collapsed': detail.relationships.length > 0 && !detail.relOpen }">
                 <div class="detail-rel-header">
-                  <span class="detail-rel-title">
+                  <button
+                    type="button"
+                    class="detail-rel-title"
+                    :disabled="detail.relationships.length === 0"
+                    :title="detail.relationships.length ? (detail.relOpen ? '收起关系列表' : '展开关系列表') : '还没有设定关系'"
+                    @click="detail.relOpen = !detail.relOpen"
+                  >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
                       <line x1="9" y1="6" x2="11" y2="14" /><line x1="15" y1="6" x2="13" y2="14" />
                     </svg>
                     角色关系网
-                  </span>
+                    <span v-if="detail.relationships.length" class="rel-count">{{ detail.relationships.length }}</span>
+                    <svg v-if="detail.relationships.length" class="rel-chevron" :class="{ open: detail.relOpen }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
                   <div class="detail-rel-btns">
                     <linshe-button
                       v-if="detail.relationships.length > 0"
@@ -58,7 +122,7 @@
 </linshe-button>
                   </div>
                 </div>
-                <div v-if="detail.relationships.length > 0" class="detail-rel-list">
+                <div v-if="detail.relationships.length > 0 && detail.relOpen" class="detail-rel-list">
                   <div v-for="rel in detail.relationships.slice(0, 5)" :key="rel.id" class="detail-rel-item">
                     <span class="rel-from">{{ character?.display_name }}</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
@@ -69,7 +133,8 @@
                     共 {{ detail.relationships.length }} 条关系，查看全部 &rarr;
                   </div>
                 </div>
-                <div v-else class="detail-rel-empty">
+                <!-- 折叠时不渲染任何内容（否则会错误地露出「还没有关系」的空状态引导） -->
+                <div v-else-if="detail.relationships.length === 0" class="detail-rel-empty">
                   <template v-if="detail.relationshipsLoading">
                     <span class="rel-empty-spinner"></span> 加载中…
                   </template>
@@ -94,18 +159,125 @@
                 </div>
               </div>
 
-              <div class="detail-name-row">
-                <div class="detail-name-col">
-                  <label class="fl">角色名</label>
-                  <linshe-input v-model="detail.editName" class="fi" @input="detail.dirty = true" />
-                </div>
-                <div class="detail-name-col">
-                  <label class="fl">英文名</label>
-                  <linshe-input v-model="detail.editCharName" class="fi" @input="detail.dirty = true" placeholder="英文/拼音，唯一标识" />
-                </div>
+              <label class="fl">人设提示词</label>
+              <div class="split-hint">
+                角色的人格 / 身份 / 性格。<b>不含外观</b> —— 外观在下方「外观服装」里单独设置，会随日程自动切换。
               </div>
-              <label class="fl" style="margin-top:12px">人格提示词</label>
-              <linshe-input v-model="detail.editPrompt" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
+              <linshe-input v-model="detail.editPersona" type="textarea" class="fi prompt-textarea" @input="detail.dirty = true" />
+
+              <!-- 外观：身体 + 五套场景服装。
+                   身体是**单一真源**（发色/发型/瞳色/肤色/体型…），五套共用；
+                   每套只填"衣服"，生图时由后端拼成「身体 + 该套服装」。
+
+                   ★ 「身体」的输入框就放在**「全身」这一格**里，不再单独占一块：
+                     「全身」= 只有身体、没有衣服，本来就是"填身体"最自然的位置；
+                     它原先在标签页上方独占一块（外加一段解释全身是常量的说明），
+                     现在收进格子内，外观区少一整块高度。
+                     ⚠ 全身那套的 description 仍是系统常量（见 scene-auto-body 的说明）、
+                       界面不提交它；这一格填的是 detail.body，保存链路与原来完全一致。 -->
+              <div class="scene-block">
+                <div class="scene-block-head">
+                  <span class="fl">外观服装</span>
+                  <span class="scene-block-hint">由日程决定此刻穿哪套 · <b>身体五套共用</b></span>
+                  <div class="scene-block-fill"></div>
+                  <linshe-button
+                    v-if="detail.sceneOutfits.length > 1"
+                    variant="secondary"
+                    size="sm"
+                    class="scene-gen-btn"
+                    :disabled="outfitGenerating"
+                    :loading="outfitGenerating"
+                    :title="'按已经填好的分项反推还没填的那些（身体取自已填项，只补衣服）'"
+                    @click="generateOtherSceneOutfits"
+                  >✨ 反推未填的分项</linshe-button>
+                </div>
+
+                <div class="scene-tabs" role="tablist">
+                  <button
+                    v-for="(o, i) in detail.sceneOutfits"
+                    :key="o.scene"
+                    type="button"
+                    role="tab"
+                    :aria-selected="i === detail.sceneTab"
+                    class="scene-tab"
+                    :class="{
+                      active: i === detail.sceneTab,
+                      filled: isTabFilled(o),
+                      auto: o.scene === 'nude',
+                    }"
+                    @click="detail.sceneTab = i"
+                  >
+                    {{ o.sceneLabel }}
+                    <span v-if="o.scene === 'sleep'" class="scene-tab-tag">强制</span>
+                    <span v-else-if="o.scene === 'nude'" class="scene-tab-tag is-nude">自动</span>
+                  </button>
+                </div>
+                <div v-if="activeSceneOutfit" class="scene-edit">
+                  <!-- 全身：不放"衣服"输入框（它的描述是全角色一致的常量、由后端维护），
+                       这一格留给真正决定画面的**身体**。 -->
+                  <div v-if="activeSceneOutfit.scene === 'nude'" class="scene-auto-note">
+                    <label class="scene-body-label">
+                      身体
+                      <span class="scene-body-hint">五套共用 · 发色/发型/瞳色/肤色/体型/显著特征</span>
+                    </label>
+                    <linshe-input
+                      v-model="detail.body"
+                      type="textarea"
+                      class="fi scene-edit-desc"
+                      rows="6"
+                      placeholder="long silver hair with blue gradient tips, high ponytail, purple eyes, pale skin, slim build"
+                      @input="detail.dirty = true"
+                    />
+
+                    <!-- ★ 2026-10-06 新增：外观特化点选框。
+                         用户口径：像真珠这样的角色需要**常驻**种族/身体特征
+                         （android, mechanical joints…），手打英文 tag 很别扭 → 给点选。
+                         标签来自 imagePromptTags.yaml（与生图词表同源）。 -->
+                    <!-- ★ 2026-10-06 改造：标签库从**内嵌面板**改为**独立弹窗**。
+                         原内嵌面板在 27 个分组时把弹窗内容撑爆（用户实报"视觉上很难用"）。
+                         同时按用户口径**只保留身体设计类标签**（种族/机械/体型/阴毛/生理特征）——
+                         动作与表情状态已移交「绘图」页，过滤由后端按唯一真源执行。
+
+                         ★ 2026-10-07 用户口径：**移除"已选 TAG"的 chip 与 × 交互**。
+                         理由：标签点选后本来就写进了上方「身体」输入框，在框里直接改就行；
+                         再摆一行不可编辑的 chip 让用户去点 × 删，是**多此一举**，
+                         而且那行长文本把「身体」输入框挤得没地方了。
+                         现在：只保留一个「＋ 选标签」入口 + 一行说明，空间全留给输入框。
+                         已选状态以**输入框内容本身**为准（那才是唯一真源）。 -->
+                    <div class="trait-block trait-block--slim">
+                      <div class="trait-head">
+                        <span class="trait-title">外观特化</span>
+                        <span class="trait-hint">常驻身体 / 种族特征 · 点选即写入上方「身体」，在框里直接改</span>
+                        <span style="flex:1"></span>
+                        <linshe-button
+                          variant="secondary" size="sm"
+                          :loading="traitCatalogLoading"
+                          @click="openTraitPicker"
+                        >＋ 选标签</linshe-button>
+                      </div>
+                    </div>
+
+                    <!-- ★ 2026-10-07 用户口径：这段说明要**缩句**（原文啰嗦）。
+                         ⚠ 保留 `NUDE_DESCRIPTION` 插值 —— 它是系统常量，写死在文案里会漂移。 -->
+                    <p class="scene-auto-body">
+                      「全身」即由系统写入 <code>{{ NUDE_DESCRIPTION }}</code>。多为洗浴与私密场景
+                    </p>
+                  </div>
+
+                  <!-- 其余四套：只填「这一套的衣服」。身体在上面统一填，这里不重复 -->
+                  <template v-else>
+                    <linshe-input
+                      v-model="activeSceneOutfit.description"
+                      type="textarea"
+                      class="fi scene-edit-desc"
+                      rows="6"
+                      :placeholder="scenePlaceholder(activeSceneOutfit.scene)"
+                      @input="detail.dirty = true"
+                    />
+                  </template>
+                </div>
+                <div v-else class="scene-edit-empty">加载中…</div>
+              </div>
             </div>
 
             <!-- 「更多设置」内联卡：手机端 + 平板等放不下右侧悬浮窗的宽度（见 inlineLayout） -->
@@ -116,6 +288,11 @@
                 </svg>
                 更多设置
               </div>
+              <div class="toolbar-item toolbar-item-toggle" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span>不参与活动</span>
+                <linshe-switch v-model="detail.archived" size="sm" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="toolbar-divider"></div>
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" size="sm" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -127,6 +304,10 @@
               <div class="toolbar-item toolbar-item-toggle">
                 <span>不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" size="sm" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="toolbar-item toolbar-item-toggle" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span>不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" size="sm" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
               </div>
               <div class="toolbar-item toolbar-item-btn" @click="openLoraModal">
                 <span>设置 Lora</span>
@@ -153,9 +334,13 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m13 7 3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                 修正外观
               </linshe-button>
+              <linshe-button variant="secondary" @click="openPersonaRefineModal">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="m18.4 2.6 2.9 2.9-8.5 8.5-3.6.7.7-3.6 8.5-8.5Z" /></svg>
+                人设润色
+              </linshe-button>
               <div class="recruit-appearance-hint">
-                外观描述补充tag查阅
-                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank">animadex：{{ character?.name }}</a>
+                外观 tag 参考
+                <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank" :title="character?.name">animadex · {{ character?.display_name || character?.name }}</a>
               </div>
               <linshe-button variant="primary" :disabled="!detail.dirty" @click="saveCharDetail">保存</linshe-button>
             </div>
@@ -172,6 +357,11 @@
               更多设置
             </div>
             <div class="float-panel-body">
+              <div class="float-row" title="归档该角色：不再主动找你、不发朋友圈、不触发奇遇、不生成日程、不自己拉群；你主动找它聊天时仍会回复">
+                <span class="float-label">不参与活动</span>
+                <linshe-switch v-model="detail.archived" :disabled="detail.archivedToggling" @change="toggleArchived" aria-label="不参与活动" />
+              </div>
+              <div class="float-divider"></div>
               <div class="float-row">
                 <span class="float-label">不看ta的朋友圈</span>
                 <linshe-switch v-model="detail.momentsDisabled" :disabled="detail.momentsToggling" @change="toggleMomentsDisabled" aria-label="不看ta的朋友圈" />
@@ -183,6 +373,10 @@
               <div class="float-row">
                 <span class="float-label">不发生奇遇</span>
                 <linshe-switch v-model="detail.eventsDisabled" :disabled="detail.eventsToggling" @change="toggleEventsDisabled" aria-label="不发生奇遇" />
+              </div>
+              <div class="float-row" title="关闭后台日程刷新，可省下每日 token；已生成的日程保留，角色仍按既有日程活动">
+                <span class="float-label">不生成日程</span>
+                <linshe-switch v-model="detail.scheduleDisabled" :disabled="detail.scheduleToggling" @change="toggleScheduleDisabled" aria-label="不生成日程" />
               </div>
               <div class="float-row float-row-action" @click="openLoraModal">
                 <span class="float-label">设置 Lora</span>
@@ -420,8 +614,31 @@
       v-model="showRefineModal"
       :character-id="character?.id ?? null"
       :display-name="character?.display_name || ''"
-      :base-prompt="detail.editPrompt"
+      :base-prompt="refineBasePrompt"
+      :scene-label="refineSceneLabel"
+      :apply-text="refineSceneOutfit?.scene === 'nude'
+        ? '应用到「身体」并保存'
+        : `拆分为「身体 + ${refineSceneLabel}」并保存`"
+      apply-hint="应用后写回该场景并自动保存"
       @applied="onAppearanceRefined"
+    />
+
+    <!-- ── 人设润色弹窗：纯文本改写人设（外观段原样保留）── -->
+    <PersonaRefineModal
+      v-model="showPersonaRefineModal"
+      :display-name="character?.display_name || ''"
+      :base-prompt="fullPrompt"
+      @applied="onPersonaRefined"
+    />
+
+    <!-- ── 外观特化标签选择器（独立弹窗）──
+         原为内嵌面板，分组一多撑爆弹窗；且当时会把动作/表情状态一并倒进来。
+         现在只给身体设计类标签（后端按唯一真源过滤），动作状态移交「绘图」页。 -->
+    <AppearanceTraitPicker
+      v-model="traitPickerOpen"
+      :display-name="character?.display_name || ''"
+      :selected="selectedTraits"
+      @confirm="onTraitPickerConfirm"
     />
   </Teleport>
 </template>
@@ -438,6 +655,8 @@ import LinsheModal from './ui/LinsheModal.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import CharacterStandingPanel from './CharacterStandingPanel.vue'
 import AppearanceRefineModal from './AppearanceRefineModal.vue'
+import PersonaRefineModal from './PersonaRefineModal.vue'
+import AppearanceTraitPicker from './AppearanceTraitPicker.vue'
 import { bustUrlIfOverwritten, overwriteBustTick } from '../utils/imageUrlRefresh.js'
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { emitCharacterDisplayNameChanged } from '../utils/characterReactionProducers.js'
@@ -479,17 +698,291 @@ const inlineLayout = computed(() => isMobile.value || !hasSideRoom.value)
 const detail = reactive({
   editCharName: '',
   editName: '',
-  editPrompt: '',
+  forumAlias: '',         // 论坛马甲：这个角色在论坛/报刊评论区里用的网名（空 = 用真名）
+  forumPersona: '',       // 网络人设：Ta 在网上是什么调门、爱在什么话题下场（可空）
+  aliasGenerating: false,
+  editPersona: '',        // 人设（= base_prompt 去掉「## 你的外观」段）
+  appearanceTail: '',     // 外观段之后的内容（罕见；保留以免重组时丢段）
+  originalAppearance: '', // 打开时的原外观段：工装被误清空时用它兜底，避免生图链路失去外观
+  body: '',               // 身体描述（五套共用，单一真源）—— 发色/发型/瞳色/肤色/体型…
+  bodyLoaded: '',         // 打开时从库里读到的 body（用于区分"用户主动清空"与"没读到"，避免误清库）
+  sceneOutfits: [],       // 五套场景外观 [{ scene, sceneLabel, name, description }]，description 只存"衣服"
+  sceneTab: 0,            // 外观服装当前编辑第几套（标签页）
+  relOpen: false,         // 角色关系列表是否展开（折叠后把人设编辑区让出来）
   relationships: [],
   relationshipsLoading: false,
   momentsDisabled: false,
   proactiveDisabled: false,
   eventsDisabled: false,
+  scheduleDisabled: false,
+  archived: false,
   dirty: false,
   momentsToggling: false,
   proactiveToggling: false,
   eventsToggling: false,
+  scheduleToggling: false,
+  archivedToggling: false,
 })
+
+// ── 人格 / 外观拆分（口径与后端 services/characterPersona.js 的 splitAppearanceSection 一致）──
+// 整卡 = 人设 + 「## 你的外观」段。拆分后人设独立成框，外观段归入「外观服装 · 工装」，
+// 于是人设保持纯粹，四套造型也能统一管理。保存时再重组成整卡，后端锚点不变。
+const APPEARANCE_HEADING_RE = /##\s*你的外观/
+
+/** 整卡 → { persona, appearance, tail } */
+function splitPersona(full) {
+  const s = String(full || '')
+  const m = s.match(APPEARANCE_HEADING_RE)
+  if (!m) return { persona: s.trimEnd(), appearance: '', tail: '' }
+  const next = s.indexOf('\n## ', m.index + 1)
+  const before = s.slice(0, m.index)
+  const bodyStart = s.indexOf('\n', m.index)
+  const body = bodyStart >= 0
+    ? s.slice(bodyStart + 1, next >= 0 ? next : undefined).trim()
+    : ''
+  return { persona: before.trimEnd(), appearance: body, tail: next >= 0 ? s.slice(next) : '' }
+}
+
+/** { persona, appearanceBody, tail } → 整卡（外观正文为空时不写该段） */
+function composePersona(persona, appearanceBody, tail = '') {
+  const head = String(persona || '').trimEnd()
+  const body = String(appearanceBody || '').trim()
+  const t = String(tail || '')
+  if (!body) return `${head}${t}`
+  return `${head}\n\n## 你的外观\n${body}${t}`
+}
+
+/**
+ * 拼出「身体 + 服装」的自包含文本。
+ * ⚠ 必须与后端 outfitScene.composeOutfitText 保持一致 —— 后端注入用的就是同一个口径，
+ *   这里只是为了让「角色卡外观段」看到与生图一致的完整文本。
+ */
+function composeOutfitText(body, garment) {
+  const b = String(body || '').trim().replace(/[,\s]+$/, '')
+  const g = String(garment || '').trim().replace(/[,\s]+$/, '')
+  if (b && g) return `${b}, ${g}`
+  return b || g
+}
+
+/** 工装那一套的**衣服**描述（不含身体 —— 身体在 detail.body 里） */
+function workOutfitDesc() {
+  return detail.sceneOutfits.find(o => o.scene === 'work')?.description || ''
+}
+
+/** 外观服装当前编辑的那一套（标签页选中的）。返回的是 detail.sceneOutfits 里的同一对象引用，
+ *  所以 v-model 直接写它的字段即可回写原数组。 */
+const activeSceneOutfit = computed(() => detail.sceneOutfits[detail.sceneTab] || null)
+
+/**
+ * 实际生效的外观正文 = 身体 + 工装那套衣服。
+ *
+ * ★ 关键：工装被清空时也要带上身体 —— 否则保存会把角色卡外观段写成一具"没有身体只有衣服"
+ *   的文本，角色会一次性失去发色/瞳色/体型。
+ */
+function effectiveAppearance() {
+  const composed = composeOutfitText(detail.body, workOutfitDesc())
+  return String(composed || '').trim() || detail.originalAppearance
+}
+
+/** 当前编辑中的整卡（供「修正外观 / 人设润色」弹窗读取，口径与保存完全一致） */
+const fullPrompt = computed(() => composePersona(detail.editPersona, effectiveAppearance(), detail.appearanceTail))
+
+/** 工装（常态外观）当前文本：用于判断"以它为基准"的按钮是否可用 */
+const workOutfitText = computed(() => effectiveAppearance())
+
+// ═══════════════════════════════════════════════════════════
+// 外观特化（常驻种族 / 身体特征）
+//
+// 用户口径 2026-10-06：像真珠这类角色需要**常驻**种族/身体特征
+// （`android, mechanical joints, visible seams`…），但手打英文 tag 别扭 → 给点选框。
+// 标签库来自 `imagePromptTags.yaml`（与生图词表**同源**，不是另抄一份），
+// 点选后**写进 detail.body**（身体是五套共用的单一真源），随既有保存链路落库 ——
+// 因此"点选"与"手打"最终落在同一个字段，不存在两套真源。
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 外观特化标签选择器 —— 2026-10-06 改为**独立弹窗**。
+ *
+ * 原实现是内嵌在角色弹窗里的折叠面板，分组一多就把内容撑爆（用户实报"视觉上很难用"）。
+ * 现在：点「＋ 选标签」打开 `AppearanceTraitPicker` 弹窗，带搜索与分组折叠。
+ *
+ * ★ 标签内容口径：**只给身体设计类**（种族/机械/体型/阴毛/生理特征）。
+ *   动作与表情状态（流口水、乳晕微露、胸部晃动…）已移交「绘图」页 ——
+ *   过滤由后端按唯一真源 `appearanceTagPartition.js` 执行，前端不维护名单。
+ */
+const traitPickerOpen = ref(false)
+const traitCatalogLoading = ref(false)
+/** 用户显式点选的特化标签（仅用于 UI 回显/移除；真正生效的是 detail.body 里那串英文） */
+const selectedTraits = ref([])
+
+function openTraitPicker() {
+  // 打开时用当前 body 里已存在的标签做初始回显（不重新读目录，目录由弹窗自己按需拉）
+  selectedTraits.value = parseTraitsFromBody(String(detail.body || ''))
+  traitPickerOpen.value = true
+}
+
+/** 从身体描述里解析出「疑似标签」用于回显（逗号分隔，去空白） */
+function parseTraitsFromBody(body) {
+  return body.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+}
+
+/** 弹窗确认：把选中的标签**整体同步**进 body（增量的加、取消的删） */
+function onTraitPickerConfirm(next) {
+  const before = parseTraitsFromBody(String(detail.body || ''))
+  const want = new Set(next.map(t => String(t).trim()).filter(Boolean))
+  // 已选里被取消的 → 从 body 移除；新选的 → 追加
+  for (const t of before) {
+    if (!want.has(t)) removeTagFromBody(t)
+  }
+  for (const t of next) {
+    const s = String(t).trim()
+    if (s && !parseTraitsFromBody(String(detail.body || '')).includes(s)) appendTagToBody(s)
+  }
+  selectedTraits.value = [...next.map(t => String(t).trim()).filter(Boolean)]
+}
+
+function appendTagToBody(t) {
+  const body = String(detail.body || '')
+  detail.body = body.trim() ? `${body.trim().replace(/[,\s]+$/, '')}, ${t}` : t
+  detail.dirty = true
+}
+
+function removeTagFromBody(t) {
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const body = String(detail.body || '')
+  detail.body = body
+    .replace(new RegExp(`\\s*,?\\s*${esc}\\s*,?`, 'i'), ', ')
+    .replace(/\s*,\s*/g, ', ').replace(/^[,\s]+|[,\s]+$/g, '').trim()
+  detail.dirty = true
+  selectedTraits.value = selectedTraits.value.filter(x => x !== t)
+}
+
+/** 从已选胶囊里移除一个标签（走同一个 body 同步逻辑） */
+function removeTrait(i) {
+  const t = selectedTraits.value[i]
+  if (t) removeTagFromBody(t)
+}
+
+/** 各套的输入提示语 */
+// 注意：没有 'nude' 分支 —— 全身那格放的是身体输入框（有自己的 placeholder），
+// 不会走到这里来要"衣服"的占位文案。
+function scenePlaceholder(scene) {
+  if (scene === 'work') return '这套上班/职务场合穿的衣服（英文 tag），如 black hoodie, denim shorts, sneakers'
+  if (scene === 'sleep') return '睡衣（英文 tag）——记得写 barefoot，且不要出现任何鞋袜'
+  if (scene === 'home') return '居家时穿的衣服（英文 tag）——脚上要写 indoor slippers（居家穿拖鞋，别写 barefoot）'
+  return '这套的衣服（英文 tag）'
+}
+
+async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
+  if (!characterId) { detail.sceneOutfits = []; detail.body = ''; detail.bodyLoaded = ''; return }
+  try {
+    const d = await api.listSceneOutfits(characterId)
+    const scenes = d.scenes || []
+    const exist = d.outfits || []
+    // 身体：五套共用同一份，取任意一条即可（后端写入时会同步到所有行）。
+    // 若后端是旧代码（不返回 body 字段）这里会拿到空 —— 保存时靠 bodyLoaded 兜住，不会误清库。
+    const loadedBody = String(exist.find(o => o.body)?.body || '')
+    detail.body = loadedBody
+    detail.bodyLoaded = loadedBody
+    detail.sceneOutfits = scenes.map(s => {
+      const hit = exist.find(o => o.scene === s.key)
+      /**
+       * 各套都只取库里的 **衣服** 描述。
+       * 唯一例外：**工装还没建行时**（老数据），用角色卡原外观段兜底 ——
+       * 那段是"身体+衣服"的混合文本，先原样放进来让用户看到，用户拆分后保存即可。
+       */
+      const desc = hit
+        ? String(hit.description || '')
+        : (s.key === 'work' ? String(fallbackWorkDesc || '').trim() : '')
+      return {
+        scene: s.key,
+        sceneLabel: s.label,
+        // 名称界面不展示（也不让改）：仅用于日程标注「这一刻换了哪套」的匹配。
+        // 沿用库里已有的（保住已生成日程里的标注），没有才用场景默认名。
+        defaultName: s.defaultName || s.label,
+        name: hit?.name || s.defaultName || s.label,
+        description: desc,
+      }
+    })
+  } catch (err) {
+    console.error('loadSceneOutfits failed:', err)
+    detail.sceneOutfits = []
+  }
+}
+
+// ── 按「已填好的分项」反推「还没填的分项」 ──
+// 为什么这么设计（2026-10-04 用户口径）：
+//   身体与服装分层后，**已填的任一（优先全身，其次常服/私服）都能作为身体真源**；
+//   未填的那些只需补"这一套的衣服"。这样同一个人不会因为各套各自从人设凭空设计而漂移。
+//   原先固定"按工装推其余三套"——工装没填就完全用不了，现在任一已填项即可驱动。
+// 注意变量名别与立绘的 sceneGenerating 撞（那是「生成某场景立绘」用的）。
+const outfitGenerating = ref(false)
+
+async function generateOtherSceneOutfits() {
+  const c = props.character
+  if (!c || outfitGenerating.value) return
+
+  /**
+   * 锚点（seeds）= **真正填了衣服**的那几套，**不含全身**。
+   *
+   * 两条约束都不能破：
+   *  ① 不能把「身体非空」也算成「这一套已填」—— 身体是五套共用的一层，
+   *    而 seeds 的语义是"已填好的分项"，后端会据此把它们**从待生成目标里剔除**。
+   *    若身体非空就把五套全当种子，目标会被剔空、后端直接返回空数组，
+   *    表现为"点了没反应"（2026-10-04 实测踩到）。
+   *  ② 全身也不进 seeds —— 它的描述是系统常量，当"参考服装"没有意义
+   *    （身体另有 `baseAppearance` 通道传给后端，后端 `pickBody` 会用）。
+   */
+  const seeds = detail.sceneOutfits
+    .filter(o => o.scene !== 'nude' && String(o.description || '').trim())
+    .map(o => ({
+      scene: o.scene,
+      name: o.name,
+      body: String(detail.body || '').trim(),
+      description: String(o.description || '').trim(),
+    }))
+  /**
+   * 目标 = **还没填衣服**的那几套，且**排除全身**。
+   * 全身是系统常量（后端 `upsertSceneOutfits` 自动维护那一行），既没有可生成的内容，
+   * 也不该被 LLM "设计" —— 把它算进目标只会白白多一次调用、还可能把常量写坏。
+   */
+  const targets = detail.sceneOutfits
+    .filter(o => o.scene !== 'nude' && !String(o.description || '').trim())
+    .map(o => o.scene)
+
+  if (!targets.length) { toastFn('四套都已经填好了，没有需要反推的', 'info'); return }
+  // 既没有已填的套、也没有身体 → 真的没有可依据的东西
+  if (!seeds.length && !String(detail.body || '').trim()) {
+    toastFn('先填任意一套、或先填「身体」，才能据此反推其余', 'warning'); return
+  }
+
+  outfitGenerating.value = true
+  try {
+    // 只出草稿不落库：用户核对/修改后再点「保存」
+    const d = await api.generateSceneOutfits(c.id, false, { seeds, scenes: targets, baseAppearance: String(detail.body || '').trim() })
+    const byScene = new Map((d.outfits || []).map(o => [o.scene, o]))
+    detail.sceneOutfits = detail.sceneOutfits.map(o => {
+      const hit = byScene.get(o.scene)
+      if (!hit) return o
+      return { ...o, name: hit.name || o.name, description: hit.description || o.description }
+    })
+    // 模型可能补出更完整的身体描述 —— 以它为准（回填到共用字段，五套仍一致）
+    const newBody = String(d.outfits?.[0]?.body || '').trim()
+    if (newBody && !String(detail.body || '').trim()) detail.body = newBody
+    detail.dirty = true
+
+    // ★ 提示说实话：按**实际填进去的条数**报，别按请求的套数报
+    //   （后端可能返回空或部分，若还说"已反推 N 套"就是误导）
+    const filled = detail.sceneOutfits.filter(o => targets.includes(o.scene) && String(o.description || '').trim()).length
+    if (filled) toastFn(`已反推 ${filled} 套，核对后点「保存」生效`, 'success')
+    else toastFn('这次没有反推出内容 —— 可能是模型返回为空，请重试一次', 'warning')
+  } catch (err) {
+    console.error('generateOtherSceneOutfits failed:', err)
+    toastFn('反推失败：' + (err?.message || ''), 'error')
+  } finally {
+    outfitGenerating.value = false
+  }
+}
 
 // ── Lora 设置状态 ──
 const showLoraModal = ref(false)
@@ -594,10 +1087,25 @@ defineExpose({ refreshRelationships })
 function init(c) {
   detail.editCharName = c.name || ''
   detail.editName = c.display_name || ''
-  detail.editPrompt = c.base_prompt || ''
+  detail.forumAlias = c.forum_alias || ''
+  detail.forumPersona = c.forum_persona || ''
+  detail.aliasGenerating = false
+  // 人格提示词拆两半：人设（前文）+ 外观（「## 你的外观」段）。
+  // 外观段归入「外观服装 · 工装」，于是人设保持纯粹，四套造型也能统一管理。
+  const split = splitPersona(c.base_prompt || '')
+  detail.editPersona = split.persona
+  detail.appearanceTail = split.tail
+  detail.originalAppearance = split.appearance
+  detail.sceneTab = 0          // 每次打开都停在「工装」（用户最常改的那套）
+  detail.relOpen = false       // 关系列表默认折叠，把纵向空间让给人设与外观
+  loadSceneOutfits(c.id, split.appearance)
+  loadSceneStandings(c.id)
   detail.momentsDisabled = !!c.moments_disabled
   detail.proactiveDisabled = !!c.proactive_disabled
   detail.eventsDisabled = !!c.events_disabled
+  // 日程开关是「不生成」，库里存的是 schedule_enabled（NULL/1 = 开启，0 = 关闭）
+  detail.scheduleDisabled = c.schedule_enabled === 0
+  detail.archived = !!c.archived
   detail.dirty = false
   detail.relationships = []
   detail.relationshipsLoading = true
@@ -635,20 +1143,101 @@ async function removeOath() {
   }
 }
 
+/**
+ * 生成一个候选论坛马甲（网名 + 网络人设）。
+ *
+ * 只填进表单、**不自动保存** —— 马甲是"可改可重掷"的编辑项，
+ * 顺手写库会让用户想反悔时无从下手（也绕过了统一的保存按钮）。
+ * 生成失败时给出可区分的提示并保留原值，不静默清空。
+ */
+async function generateAlias() {
+  const c = props.character
+  if (!c || detail.aliasGenerating) return
+  detail.aliasGenerating = true
+  try {
+    const r = await api.generateForumAlias(c.id)
+    if (r?.alias) {
+      detail.forumAlias = r.alias
+      if (r.persona) detail.forumPersona = r.persona
+      detail.dirty = true
+      toastFn?.(`已生成马甲「${r.alias}」，可改可重掷`, 'success')
+    } else {
+      toastFn?.(r?.error ? `生成失败：${r.error}（可手动填写）` : '生成失败，可手动填写', 'error')
+    }
+  } catch (err) {
+    toastFn?.(`生成失败：${err?.message || '未知错误'}（可手动填写）`, 'error')
+  } finally {
+    detail.aliasGenerating = false
+  }
+}
+
 async function saveCharDetail() {
   const c = props.character
+  // ⚠ 2026-10-08 合并 v3.7.0：上游新增 dirty 守卫与 previousName（用于改名后通知外部刷新）；
+  //    本地是整卡重组。两者互不冲突，**合并保留**。
   if (!c || !detail.dirty) return
   const previousName = c.display_name || ''
+  // 重组整卡：人设 + 「## 你的外观」（= 工装描述）+ 外观段之后的残留段。
+  // 后端仍按「## 你的外观」锚点做外观注入，口径完全不变。
+  const composed = composePersona(detail.editPersona, effectiveAppearance(), detail.appearanceTail)
   await api.updateCharacter(c.id, {
     name: detail.editCharName,
     display_name: detail.editName,
-    base_prompt: detail.editPrompt,
+    base_prompt: composed,
+    // 论坛马甲：不参与人格/人称裁剪（后端也不据此重裁 short_prompt），改它只影响论坛署名
+    forum_alias: detail.forumAlias.trim(),
+    forum_persona: detail.forumPersona.trim(),
     moments_disabled: detail.momentsDisabled,
     proactive_disabled: detail.proactiveDisabled,
     events_disabled: detail.eventsDisabled,
   })
   c.name = detail.editCharName
   c.display_name = detail.editName
+  c.base_prompt = composed
+  c.forum_alias = detail.forumAlias.trim() || null
+  c.forum_persona = detail.forumPersona.trim() || null
+
+  // 四套场景服装一并保存（只提交填了描述的；工装内容与 base_prompt 外观段一致）。
+  // 名称由前端自动补（沿用已有 / 场景默认名）—— 界面不暴露该字段，它只服务日程标注的匹配。
+  const payload = detail.sceneOutfits
+    /**
+     * ⚠ 两处过滤都是有意的：
+     *  · 排除 `nude` —— 它的描述是系统常量、由后端维护；界面传空值反而会把它写坏
+     *    （曾经就是这样把姬子的全身描述存成了空串，注入里没了「全身」声明，模型会画上衣服）。
+     *  · 其余四套都要提交（即使描述为空）—— 用户可能先保存一部分，后端会 upsert；
+     *    名称取自库里已有的，保住已生成日程里的标注。
+     */
+    .filter(o => o.scene && o.scene !== 'nude')
+    .map(o => ({
+      scene: o.scene,
+      name: (o.name || '').trim() || o.defaultName || o.sceneLabel || o.scene,
+      description: String(o.description || '').trim(),
+    }))
+  if (payload.length) {
+    try {
+      /**
+       * body 单独判断，别无条件提交。
+       *
+       * ⚠ 无条件传 `detail.body` 有个数据安全隐患：若**后端是旧代码**（`/outfits/scene`
+       *   不返回 body 字段），加载后 `detail.body` 就是空字符串，一保存就会把
+       *   该角色**所有行的 body 清空**（后端 setCharacterBody 会照写）。
+       *   所以只在两种情况下提交：
+       *     ① 当前非空（用户确实填了内容）；
+       *     ② 加载时本来有值、现在被清空（用户**主动**删掉的）。
+       *   其余情况（加载失败/旧后端没返回）一律不碰，保持库里原值。
+       */
+      const nowBody = String(detail.body || '').trim()
+      const loaded = String(detail.bodyLoaded || '').trim()
+      const sendBody = nowBody || (loaded && !nowBody) ? nowBody : undefined
+      await api.saveSceneOutfits(c.id, payload, sendBody)
+    } catch (err) {
+      console.error('saveSceneOutfits failed:', err)
+      toastFn('人设已保存，但外观服装保存失败：' + (err?.message || ''), 'error')
+      detail.dirty = false
+      emit('saved', c)
+      return
+    }
+  }
   detail.dirty = false
   emit('saved', c)
   // P1：保存成功后新旧显示名确实不同才反馈；不声称已有独立昵称系统
@@ -722,6 +1311,54 @@ async function toggleEventsDisabled() {
     console.error('toggleEventsDisabled failed:', e)
   } finally {
     detail.eventsToggling = false
+  }
+}
+
+// 日程开关是反向的：UI 上是「不生成日程」，落库是 schedule_enabled
+async function toggleScheduleDisabled() {
+  const c = props.character
+  if (!c) return
+  const enabled = !detail.scheduleDisabled
+  detail.scheduleToggling = true
+  try {
+    await api.setCharacterScheduleEnabled(c.id, enabled)
+    c.schedule_enabled = enabled ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.schedule_enabled = c.schedule_enabled
+    toastFn(
+      enabled ? '已恢复日程生成' : '已停止日程生成，该角色之后不再消耗日程额度',
+      'success'
+    )
+  } catch (e) {
+    detail.scheduleDisabled = !detail.scheduleDisabled
+    toastFn('设置失败', 'error')
+    console.error('toggleScheduleDisabled failed:', e)
+  } finally {
+    detail.scheduleToggling = false
+  }
+}
+
+// 归档：一键停掉该角色的所有主动行为（主动聊天/朋友圈/奇遇/日程刷新/拉群/小镇奇遇）。
+// 独立拦截层，不会覆盖上面四个细分开关，取消归档后原设置原样回来。
+async function toggleArchived() {
+  const c = props.character
+  if (!c) return
+  detail.archivedToggling = true
+  try {
+    await api.setCharacterArchived(c.id, detail.archived)
+    c.archived = detail.archived ? 1 : 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.archived = c.archived
+    toastFn(
+      detail.archived ? '已归档：不再参与任何主动活动，你找它聊天仍会回复' : '已取消归档，恢复参与活动',
+      'success'
+    )
+  } catch (e) {
+    detail.archived = !detail.archived
+    toastFn('设置失败', 'error')
+    console.error('toggleArchived failed:', e)
+  } finally {
+    detail.archivedToggling = false
   }
 }
 
@@ -947,23 +1584,171 @@ async function saveOutfits() {
 // ═══════════════════════════════════════
 
 const showRefineModal = ref(false)
+const showPersonaRefineModal = ref(false)
+
+// ── 修正外观：跟随「外观服装」当前选中的那一套（工装/私服/居家/睡衣）──
+// 打开时记下场景索引（弹窗期间主弹窗关闭、标签页切不了，取快照即可）；
+// 传给弹窗的是「人设 + 该场景描述放在外观段位置」的整卡，
+// 于是后端重写出来的外观段就是这一套，应用时写回同一套。
+const refineSceneIdx = ref(0)
+const refineSceneOutfit = computed(() => detail.sceneOutfits[refineSceneIdx.value] || null)
+const refineSceneLabel = computed(() => refineSceneOutfit.value?.sceneLabel || '外观')
+/**
+ * 交给「修正外观」弹窗的整卡。
+ *
+ * ⚠ 外观段**必须自包含（身体 + 这套的衣服）**。
+ *   只传 `description`（服装）会让模型以为这个角色没有身体描述 → 它产出的也就没有身体
+ *   → 应用时 `splitBodyGarment` 拆不出 body → 「身体」框不被填。
+ *   （2026-10-04 用户实测踩到：点「拆分为 身体+工装」后只有工装变了。）
+ *
+ * 全身那套本身就是身体，不要再拼上「completely nude…」那句声明去让模型改写。
+ */
+const refineBasePrompt = computed(() => {
+  const o = refineSceneOutfit.value
+  if (!o) return fullPrompt.value
+  const text = o.scene === 'nude'
+    ? String(detail.body || '').trim()
+    : composeOutfitText(detail.body, o.description)
+  if (!text) return fullPrompt.value
+  return composePersona(detail.editPersona, text, detail.appearanceTail)
+})
 
 function openRefineModal() {
   if (!props.character) return
+  refineSceneIdx.value = detail.sceneTab
   showRefineModal.value = true
 }
 
+/**
+ * 把「修正外观」产出的整段拆分回 **身体 / 服装** 两部分。
+ *
+ * ── 为什么需要拆（2026-10-04）──────────────────────────────
+ * 外观产出格式由后端提示词严格约束为：
+ *   `角色名 (作品名) has <身体特征>, wearing <服装>`
+ * 是一个**连续完整**的句子。但「外观」现在是**身体（五套共用）+ 每套各自的衣服**两层，
+ * 若整段塞进某一套的 description，就会：① 其余四套拿不到身体；
+ * ② 与该角色已有的 body 打架（实测花火：图片反推说黑发红眼，body 还是绿发粉眼）。
+ * 所以应用时必须按 `, wearing ` 拆开：身体 → body 字段，衣服 → 该套 description。
+ *
+ * `wearing` 是提示词里写死的连接词，拆点稳定；万一没命中，再用关键词兜底判断
+ * 这段到底是"身体"还是"衣服"，而不是瞎猜。
+ */
+/**
+ * 全身那一套的固定描述 —— 与后端 `outfitScene.NUDE_DESCRIPTION` 必须一致。
+ * 它是**系统常量**（所有角色都一样），所以这里只用于展示，不提供输入。
+ */
+const NUDE_DESCRIPTION = 'completely nude, wearing no clothing at all, bare skin visible'
+
+/**
+ * 标签上要不要显示「已填」的圆点。
+ *
+ * 全身**不参与**这个标记：它的描述是系统常量、后端总会写成常量，
+ * 若照常判断就会一直显示"已填"，让人以为它也是需要自己填的一项。
+ */
+/**
+ * 标签页的「已填」圆点。全身那格承载的是**身体**（五套共用），
+ * 所以它的填充状态要看 detail.body —— 原先恒返回 false 是因为那格没有输入框；
+ * 现在里面就是身体输入框，恒 false 会让用户填完身体却仍显示未填。
+ */
+function isTabFilled(o) {
+  if (o?.scene === 'nude') return !!String(detail.body || '').trim()
+  return !!String(o?.description || '').trim()
+}
+
+const CLOTHING_HINT = /\b(dress|skirt|pants|trousers|shirt|blouse|jacket|coat|hoodie|sweater|cardigan|kimono|yukata|robe|shorts|jeans|stockings?|socks?|shoes?|boots?|slippers?|heels?|gloves?|bra|panties|camisole|nightgown|blazer|uniform|apron|sash|obi|scarf|hat|beret|headwear|choker|necklace|earrings?|goggles|mask|armor|suit)\b/i
+const BODY_HINT = /\b(hair|eyes?|skin|build|figure|height|complexion|tail|ears?|horns?)\b/i
+
+function splitBodyGarment(text) {
+  const raw = String(text || '').trim()
+  if (!raw) return { body: '', garment: '' }
+
+  // ① 去掉「角色名 (作品名) has 」/「角色名 has 」前缀
+  let t = raw.replace(/^[^,]{0,70}?\bhas\s+/i, '').trim()
+
+  // ② 按 wearing 拆点（提示词固定的连接词）
+  // ⚠ 逗号后**可能没有空格** —— 实测后端产出过 `fair skin,wearing a ...`，
+  //   所以这里是 `[,;]?\s*` 而不是 `\s+`（用 \s+ 会整个匹配失败，导致整段被当成身体）。
+  const m = t.match(/^(.*?)[,;]?\s*\b(?:wearing|wears|dressed in)\s+(.*)$/i)
+  if (m) {
+    const left = m[1].replace(/[,\s]+$/, '').trim()
+    const right = m[2].replace(/^[,\s]+/, '').trim()
+    // 「wearing no clothing / nothing」这类 = 没穿衣服，右半边不算服装
+    if (/^(n(o|othing)|no clothing|nothing)\b/i.test(right)) return { body: left, garment: '' }
+    return { body: left, garment: right }
+  }
+
+  // ③ 没有 wearing：判断这段是身体还是衣服
+  const looksBody = BODY_HINT.test(t) && !CLOTHING_HINT.test(t)
+  if (looksBody) return { body: t, garment: '' }
+  const looksCloth = CLOTHING_HINT.test(t)
+  if (looksCloth) return { body: '', garment: t }
+  // ④ 都判不出来 → 当身体（身体缺失的代价更大：五套都会丢身体）
+  return { body: t, garment: '' }
+}
+
 async function onAppearanceRefined({ basePrompt }) {
-  detail.editPrompt = basePrompt
+  // 弹窗返回整卡：只取外观段
+  const split = splitPersona(basePrompt)
+  const target = detail.sceneOutfits[refineSceneIdx.value]
+  const appearance = String(split.appearance || '').trim()
+  let refinedGotBody = false
+  let refinedGotGarment = false
+
+  if (target) {
+    if (target.scene === 'nude') {
+      // 全身那套没有"衣服" —— 整段就是身体（这正是修全身时最有价值的信息）
+      const { body } = splitBodyGarment(appearance)
+      if (body) detail.body = body
+      // description 保持「全身声明」不动，画面主体由身体决定
+    } else {
+      const { body, garment } = splitBodyGarment(appearance)
+      // 身体回填到**共用**字段（五套一起受益）；它为空时不要用空值覆盖已有的
+      if (body) detail.body = body
+      // 衣服写回这一套；拆不出衣服（整段都是身体）时不要清空原描述
+      if (garment) target.description = garment
+      else if (body) target.description = ''   // 整段被判定为身体 → 该套暂时没有衣服
+      if (target.scene !== 'work' && !String(target.name || '').trim() && target.description) {
+        target.name = target.sceneLabel
+      }
+      // 记下这次到底改了什么，好在提示里说实话（否则用户以为身体也更新了）
+      refinedGotBody = Boolean(body)
+      refinedGotGarment = Boolean(garment)
+    }
+  }
   detail.dirty = true
   // 复用详情卡的保存链路（PUT /:id 会同步重裁 short_prompt、标记日程重生成）
   try {
     await saveCharDetail()
-    toastFn('外观已修正并保存', 'success')
+    let msg
+    if (target?.scene === 'nude') {
+      msg = refinedGotBody ? '已按参考图更新「身体」并保存' : '参考图里没读出身体特征，「身体」未改动'
+    } else if (refinedGotBody && refinedGotGarment) {
+      msg = `「${refineSceneLabel.value}」已修正并保存（同时更新了「身体」，五套共用）`
+    } else if (refinedGotGarment) {
+      // ★ 说实话：模型这次没产身体（常见于外观段本身就没有身体时）
+      msg = `只更新了「${refineSceneLabel.value}」的服装 —— 这次没读出身体特征，「身体」框未变`
+    } else {
+      msg = '这次没读出可用的身体/服装内容，未做改动'
+    }
+    toastFn(msg, refinedGotGarment || refinedGotBody ? 'success' : 'warning')
   } catch (err) {
     console.error('onAppearanceRefined save failed:', err)
-    toastFn('外观已应用到人格卡，但自动保存失败，请手动点击「保存」', 'error')
+    toastFn('外观已修正，但自动保存失败，请手动点击「保存」', 'error')
   }
+}
+
+// 人设润色：与「修正外观」不同，这里**不自动保存** —— 改的是整张人设，
+// 交回文本框让用户自己核对；确认无误再点「保存」提交。
+function openPersonaRefineModal() {
+  if (!props.character) return
+  showPersonaRefineModal.value = true
+}
+
+function onPersonaRefined({ basePrompt }) {
+  // 只取人设部分（弹窗返回整卡；外观段由「外观服装」管理，这里不覆盖）
+  detail.editPersona = splitPersona(basePrompt).persona
+  detail.dirty = true
+  toastFn('润色已填入人设，请核对后点「保存」生效', 'success')
 }
 
 // ═══════════════════════════════════════
@@ -989,23 +1774,42 @@ const standingReimageing = computed(() =>
 const standingTaskRunning = computed(() => {
   const c = props.character
   if (!c) return false
+  // ★ 与 onStandingStageClick 同理：**场景立绘也算**。只看扁平列的话，
+  //   三月七这种只有 `character_standings` 的角色，生图期间扫描线不会出现。
   const base = (c.standing_url || '').replace(/\?.*$/, '')
+  const sceneBase = (currentSceneImage.value || '').replace(/\?.*$/, '')
   return imageEditTasks.tasks.some(t =>
     t.action === 'standing' && t.status === 'running' &&
-    (t.characterId === c.id || (t.characterId == null && !!base && (t.url || '').replace(/\?.*$/, '') === base))
+    (t.characterId === c.id || (t.characterId == null && (
+      (!!base && (t.url || '').replace(/\?.*$/, '') === base) ||
+      (!!sceneBase && (t.url || '').replace(/\?.*$/, '') === sceneBase)
+    )))
   )
 })
 const standingBusy = computed(() =>
-  standingGenCharId.value != null || standingRegenCharId.value != null || standingTaskRunning.value
+  standingGenCharId.value != null || standingRegenCharId.value != null || standingTaskRunning.value || sceneGenerating.value
 )
-const standingBusyForChar = computed(() => standingGenerating.value || standingReimageing.value || standingTaskRunning.value)
+const standingBusyForChar = computed(() =>
+  standingGenerating.value || standingReimageing.value || standingTaskRunning.value || sceneGenerating.value
+)
 const standingLightboxVisible = ref(false)
 
-// 立绘展示 URL：大图「重新生成 / 放大细化」确认覆盖后原 URL 内容已换，
-// 经共享登记表补 ?_t= 防止浏览器缓存旧图（弹窗关闭期间确认覆盖也生效，重开即见新图）
+// ── 四套场景立绘（工装 / 私服 / 居家 / 睡衣）──
+// 形象面板左右切换查看角色在不同场合的样子。工装槽由 characters.standing_url 兜底，
+// 于是「用户已有的那张立绘」天然就是工装形象，切过去不会是空白。
+const standingScenes = ref([])
+const standingSceneIdx = ref(0)
+const sceneGenerating = ref(false)
+const currentStandingScene = computed(() => standingScenes.value[standingSceneIdx.value] || null)
+const currentSceneLabel = computed(() => currentStandingScene.value?.sceneLabel || '')
+const currentSceneKey = computed(() => currentStandingScene.value?.scene || null)
+const currentSceneImage = computed(() => currentStandingScene.value?.image_url || '')
+const standingHasScenes = computed(() => standingScenes.value.length > 0)
+
+// 立绘展示 URL：跟随当前选中场景；覆盖确认后经共享登记表补 ?_t= 防浏览器缓存旧图
 const standingDisplayUrl = computed(() => {
   overwriteBustTick.value // 依赖登记表 tick：覆盖确认后即使弹窗开着也能立即换新图
-  return bustUrlIfOverwritten(props.character?.standing_url || '')
+  return bustUrlIfOverwritten(currentSceneImage.value)
 })
 
 
@@ -1091,61 +1895,80 @@ function onStandingStageClick() {
     standingFuncOpen.value = true
     return
   }
-  if (props.character?.standing_url) {
+  /*
+   * ★ 判断「有没有图可看」必须用 **当前正在展示的那张**（`standingDisplayUrl`
+   *   = 四套场景立绘里选中的那张），**绝不能用 `character.standing_url`**。
+   *
+   *   `characters.standing_url` 是**旧的单张扁平列**：只有"没接入四套场景立绘"的
+   *   角色身上才有值。接入场景立绘后它是 null，而面板显示的其实是
+   *   `character_standings` 里的那张 —— 于是「看得见图、却点不开大图」。
+   *
+   *   实测：#189 满愿 的 standing_url 有旧值 → 恰好正常；
+   *         #100224 三月七 standing_url 为 null 但场景立绘有 4 张 → 点击无反应。
+   *   （满愿"正常"只是巧合，不是这条判断对。）
+   */
+  if (standingDisplayUrl.value) {
     standingLightboxVisible.value = true
   } else {
     standingFuncOpen.value = false
   }
 }
 
-async function generateStanding() {
-  const c = props.character
-  if (!c || standingBusy.value) return
-  standingFuncOpen.value = true
-  standingGenCharId.value = c.id
+// ── 四套场景立绘：加载 / 切换 / 生成 ──
+
+/** 读四套场景立绘（工装槽由后端以默认立绘兜底） */
+async function loadSceneStandings(characterId) {
+  if (!characterId) { standingScenes.value = []; return }
   try {
-    if (c.standing_url) {
-      // 已有立绘：后台出图 → 前后对比确认 → 确认后才覆盖旧立绘
-      const res = await imageEditTasks.start('standing', c.standing_url, {
-        characterId: c.id,
-        requirement: standingRequirement.value.trim(),
-      })
-      standingPrompt.value = res?.promptText || standingPrompt.value
-      return
-    }
-    const res = await api.generateStanding(c.id, standingRequirement.value.trim())
-    c.standing_url = res.standing_url
-    standingPrompt.value = res.promptText || ''
-    toastFn('立绘已生成', 'success')
-  } catch (e) {
-    console.error('generateStanding failed:', e)
-    toastFn(e?.message || '立绘生成失败', 'error')
-  } finally {
-    if (!standingTaskRunning.value) standingGenCharId.value = null
+    const d = await api.listSceneStandings(characterId)
+    standingScenes.value = d.standings || []
+    // 默认停在工装（多数情况就是想看角色的常态形象）
+    const idx = standingScenes.value.findIndex(s => s.scene === 'work')
+    standingSceneIdx.value = idx >= 0 ? idx : 0
+    syncPromptFromScene()
+  } catch (err) {
+    console.error('loadSceneStandings failed:', err)
+    standingScenes.value = []
   }
 }
 
-// 用当前提示词直接重出图，不重新请求 LLM
-async function regenerateStanding() {
+/** 切场景时把该场景的提示词带出来（有则功能区显示「再次 Roll 图」） */
+function syncPromptFromScene() {
+  standingPrompt.value = String(currentStandingScene.value?.prompt_text || '')
+}
+
+function shiftStandingScene(step) {
+  const n = standingScenes.value.length
+  if (n <= 1) return
+  standingSceneIdx.value = (standingSceneIdx.value + step + n) % n
+  standingLightboxVisible.value = false
+  syncPromptFromScene()
+}
+function prevStandingScene() { shiftStandingScene(-1) }
+function nextStandingScene() { shiftStandingScene(1) }
+
+/**
+ * 生成**当前场景**的形象。
+ * @param {string} [prompt] - 传了就直接复用该提示词（「再次 Roll 图」），否则让 LLM 出新提示词
+ */
+async function generateSceneStanding(prompt = '') {
   const c = props.character
-  const prompt = standingPrompt.value.trim()
-  if (!c || !prompt || standingBusy.value) return
+  const scene = currentSceneKey.value
+  if (!c || !scene || sceneGenerating.value) return
   standingFuncOpen.value = true
-  standingRegenCharId.value = c.id
+  sceneGenerating.value = true
   try {
-    if (c.standing_url) {
-      // 已有立绘：后台出图 → 前后对比确认 → 确认后才覆盖旧立绘
-      await imageEditTasks.start('standing', c.standing_url, { characterId: c.id, prompt })
-      return
-    }
-    const res = await api.regenerateStandingImage(c.id, prompt)
-    c.standing_url = res.standing_url
-    toastFn('立绘已生成', 'success')
+    const reuse = String(prompt || '').trim()
+    const res = await api.generateSceneStanding(c.id, scene, standingRequirement.value.trim(), reuse)
+    if (Array.isArray(res?.standings)) standingScenes.value = res.standings
+    else await loadSceneStandings(c.id)
+    if (res?.prompt_text) standingPrompt.value = res.prompt_text
+    toastFn(`「${currentSceneLabel.value}」形象已生成`, 'success')
   } catch (e) {
-    console.error('regenerateStanding failed:', e)
-    toastFn(e?.message || '立绘生成失败', 'error')
+    console.error('generateSceneStanding failed:', e)
+    toastFn(e?.message || '形象生成失败', 'error')
   } finally {
-    if (!standingTaskRunning.value) standingRegenCharId.value = null
+    sceneGenerating.value = false
   }
 }
 
@@ -1156,22 +1979,27 @@ function onStandingOverwritten(e) {
   c.standing_url = e.detail.url
 }
 
-async function removeStanding() {
+/** 清掉**当前场景**的显式立绘（工装会回落到默认立绘，不再是空白） */
+async function removeSceneStanding() {
   const c = props.character
-  if (!c?.standing_url || standingBusy.value) return
+  const scene = currentSceneKey.value
+  if (!c || !scene || sceneGenerating.value) return
+  if (!currentSceneImage.value) return
   const ok = await confirmFn({
-    title: '删除立绘',
-    message: `确定删除「${c.display_name}」的立绘吗？\n删除后可以重新生成。`,
+    title: '删除形象',
+    message: `确定删除「${c.display_name}」的「${currentSceneLabel.value}」形象吗？\n删除后可以重新生成。`,
     okText: '删除',
   })
   if (!ok) return
   try {
-    await api.deleteStanding(c.id)
-    c.standing_url = null
-    toastFn('立绘已删除', 'success')
+    const res = await api.deleteSceneStanding(c.id, scene)
+    if (Array.isArray(res?.standings)) standingScenes.value = res.standings
+    else await loadSceneStandings(c.id)
+    syncPromptFromScene()
+    toastFn('形象已删除', 'success')
   } catch (e) {
-    console.error('removeStanding failed:', e)
-    toastFn(e?.message || '立绘删除失败', 'error')
+    console.error('removeSceneStanding failed:', e)
+    toastFn(e?.message || '删除失败', 'error')
   }
 }
 
@@ -1188,7 +2016,8 @@ function readFileAsDataURL(file) {
   })
 }
 
-async function uploadStandingFile(file) {
+/** 上传本地图片作为**当前场景**的形象（已生成立绘时也允许，会覆盖该场景） */
+async function uploadSceneStandingFile(file) {
   if (!file) return
   if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
     toastFn('请选择 PNG / JPG / WEBP 图片', 'error')
@@ -1199,7 +2028,8 @@ async function uploadStandingFile(file) {
     return
   }
   const c = props.character
-  if (!c) return
+  const scene = currentSceneKey.value
+  if (!c || !scene) return
   let base64
   try {
     base64 = await readFileAsDataURL(file)
@@ -1209,12 +2039,13 @@ async function uploadStandingFile(file) {
   }
   standingUploading.value = true
   try {
-    const res = await api.uploadStanding(c.id, base64)
-    c.standing_url = res.standing_url
-    toastFn('立绘已上传', 'success')
+    const res = await api.uploadSceneStanding(c.id, scene, base64)
+    if (Array.isArray(res?.standings)) standingScenes.value = res.standings
+    else await loadSceneStandings(c.id)
+    toastFn('形象已上传', 'success')
   } catch (err) {
-    console.error('uploadStanding failed:', err)
-    toastFn(err?.message || '立绘上传失败', 'error')
+    console.error('uploadSceneStandingFile failed:', err)
+    toastFn(err?.message || '上传失败', 'error')
   } finally {
     standingUploading.value = false
   }
@@ -1226,21 +2057,27 @@ const standingPanel = reactive({
   funcOpen: standingFuncOpen,
   requirement: standingRequirement,
   hasPrompt: standingHasPrompt,
-  generating: standingGenerating,
-  reimageing: standingReimageing,
+  generating: sceneGenerating,
   busy: standingBusy,
   busyForChar: standingBusyForChar,
   uploading: standingUploading,
   tip: standingTip,
   displayUrl: standingDisplayUrl,
   mode: standingMode,
+  // 四套场景形象（工装/私服/居家/睡衣）
+  scenes: standingScenes,
+  sceneIndex: standingSceneIdx,
+  sceneLabel: currentSceneLabel,
+  hasScenes: standingHasScenes,
   toggleFunc: toggleStandingFunc,
   onStageClick: onStandingStageClick,
   toggleMode: toggleStandingMode,
-  generate: generateStanding,
-  regenerate: regenerateStanding,
-  remove: removeStanding,
-  uploadFile: uploadStandingFile,
+  generate: () => generateSceneStanding(''),
+  regenerate: () => generateSceneStanding(standingPrompt.value),
+  remove: removeSceneStanding,
+  uploadFile: uploadSceneStandingFile,
+  prevScene: prevStandingScene,
+  nextScene: nextStandingScene,
 })
 
 </script>
@@ -1262,10 +2099,14 @@ const standingPanel = reactive({
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 小屏（或关系展开 + 外观描述很长）时兜底滚动，避免内容被裁掉 */
+  overflow-y: auto;
 }
 .modal-body-detail .prompt-textarea {
-  flex: 1;
-  min-height: 0;
+  /* 人设是主编辑区，必须有确定的最小高度 ——
+     原来是 min-height:0，下方多出四套外观服装后就被压成一行了 */
+  flex: 1 1 auto;
+  min-height: 170px;
   resize: none;
   overflow-y: auto;
   scrollbar-width: auto;
@@ -1286,13 +2127,32 @@ const standingPanel = reactive({
 /* ═══ 详情编辑 ═══ */
 .fl { font-size: 13px; font-weight: 600; color: var(--text-bright); display: block; margin-bottom: 4px; }
 
-.detail-name-row { display: flex; gap: 12px; }
-.detail-name-col { flex: 1; min-width: 0; }
+/* 名称行现在挂在头像行里，占满中间那块空白（flex:1），把纵向空间让给人设编辑区 */
+/* 身份四字段 2×2：角色名 / 英文名 / 论坛马甲 / 网络人设。
+   占头像行中间的空白（与原来「一行两格」同宽同高，只是把马甲那行并进来、更规整）。 */
+.detail-name-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+  flex: 1; min-width: 0;
+}
+.detail-name-col { min-width: 0; }
+/* 马甲格：输入框 + 生成按钮同行，按钮不挤占别的格子 */
+.detail-alias-input-row { display: flex; align-items: center; gap: 8px; }
+.detail-alias-input-row .fi { flex: 1; min-width: 0; }
+.detail-alias-input-row .alias-gen-btn { flex-shrink: 0; }
+.fl-hint { font-weight: 400; font-size: 11.5px; color: var(--text-tertiary); }
 
-.detail-avatar-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+/* 头像行：三块并列 = 头像+操作 / 身份四字段 / 誓约徽章。
+   align-items 用 flex-start（不是 center）—— 左侧头像列比名字格高时，
+   center 会把名字格整体往下推，两块的顶边对不齐。 */
+.detail-avatar-row { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
+/* 头像 + 它的两个操作合成一列，操作直接贴着头像下方（左边缘与头像对齐） */
+.detail-avatar-col { display: flex; flex-direction: column; gap: 7px; flex-shrink: 0; }
+.detail-avatar-btns { display: flex; align-items: center; gap: 6px; }
 .detail-avatar {
   width: 64px; height: 64px; border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-solid);
   display: flex; align-items: center; justify-content: center;
   color: var(--on-accent); font-size: 26px; font-weight: 700; flex-shrink: 0;
 }
@@ -1314,12 +2174,35 @@ const standingPanel = reactive({
   border: 1px solid rgba(var(--accent-rgb), 0.1);
 }
 .detail-rel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.detail-rel-title { font-size: 13px; font-weight: 700; color: var(--text-bright); display: flex; align-items: center; gap: 6px; }
+.detail-rel-title {
+  font-size: 13px; font-weight: 700; color: var(--text-bright);
+  display: flex; align-items: center; gap: 6px;
+  /* 标题行可点击折叠：原来是 span，改成 button 后要清掉浏览器默认外观 */
+  background: none; border: none; font-family: inherit;
+  padding: 2px 6px; margin-left: -6px; border-radius: 8px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.detail-rel-title:hover:not(:disabled) { color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
+.detail-rel-title:disabled { cursor: default; }
 .detail-rel-title svg { color: var(--accent); }
+.rel-count {
+  min-width: 17px; height: 17px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  border-radius: 9px;
+  background: rgba(var(--accent-rgb), 0.14); color: var(--accent);
+}
+.rel-chevron { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+.rel-chevron.open { transform: rotate(180deg); }
+/* 折叠态：标题行下方不留空，卡片整体收紧 */
+.detail-rel-section.is-collapsed { margin-bottom: 12px; }
+.detail-rel-section.is-collapsed .detail-rel-header { margin-bottom: 0; }
 /* detail-rel-btn 家族样式已收编至全局 components.css */
 .detail-rel-btns { display: flex; align-items: center; gap: 6px; }
 .detail-rel-ctas { display: flex; align-items: center; gap: 8px; }
-.detail-rel-list { display: flex; flex-direction: column; gap: 6px; }
+/* 展开时条目多也不失控：限高滚动（关系可能有十几条） */
+.detail-rel-list { display: flex; flex-direction: column; gap: 6px; max-height: 216px; overflow-y: auto; }
 .detail-rel-item { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; background: var(--bg-primary); font-size: 12px; }
 .rel-from, .rel-to { font-weight: 600; color: var(--text-bright); }
 .rel-text { color: var(--accent); font-weight: 500; padding: 1px 8px; border-radius: 4px; background: rgba(var(--accent-rgb), 0.1); }
@@ -1331,7 +2214,8 @@ const standingPanel = reactive({
 @keyframes rel-spin { to { transform: rotate(360deg); } }
 
 /* ═══ 誓约状态（头像行内） ═══ */
-.detail-avatar-oath { display: flex; align-items: center; margin-left: auto; flex-shrink: 0; }
+/* 名称行已占满中间（flex:1），此处不再需要 margin-left:auto 去推开 */
+.detail-avatar-oath { display: flex; align-items: center; flex-shrink: 0; }
 .oath-badge {
   position: relative; display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 600; padding: 4px 14px; border-radius: 20px;
@@ -1395,6 +2279,13 @@ const standingPanel = reactive({
   gap: 12px; padding: 8px 10px;
 }
 .float-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+/* 归档是总开关，与下面四个细分开关用一条细线分开 */
+.float-divider,
+.toolbar-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--glass-border);
+}
 .float-row-action {
   margin-top: 2px; padding: 8px 10px;
   border-radius: 10px; cursor: pointer;
@@ -1422,6 +2313,10 @@ const standingPanel = reactive({
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;
+  /* 英文名可能很长，撑爆时截断而不是把「保存」挤出可视区 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .recruit-appearance-hint a {
   color: var(--text-secondary);
@@ -1436,6 +2331,172 @@ const standingPanel = reactive({
 .prompt-textarea { min-height: 500px; }
 
 .modal-wide .prompt-textarea { padding: 12px; border-radius: 10px; font-size: 12px; line-height: 1.7; color: var(--text-primary); }
+
+/* ═══ 人设 / 外观服装（人格提示词拆分为两块）═══ */
+.split-hint {
+  font-size: 11px; color: var(--text-secondary); line-height: 1.5;
+  margin: -1px 0 6px;
+}
+.split-hint b { color: var(--text-primary); font-weight: 600; }
+
+/* 外观服装：四套造型用标签页切换，一次只编辑一套
+   —— 四套平铺会把弹窗纵向撑爆，人设编辑区被挤成一行（本次重排的起因） */
+.scene-block { margin-top: 16px; }
+.scene-block-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 7px;
+}
+.scene-block-hint { font-size: 11px; color: var(--text-secondary); }
+.scene-block-hint b { color: var(--text-primary); font-weight: 600; }
+.scene-block-fill { flex: 1; }
+.scene-gen-btn { flex-shrink: 0; }
+
+.scene-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+.scene-tab {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 6px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px; font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.scene-tab:hover:not(.active) { color: var(--text-primary); border-color: var(--color-border-secondary, var(--glass-border)); }
+.scene-tab.active {
+  background: rgba(var(--accent-rgb), 0.1);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* 已填好的一套在标签上点一个小圆点，切过去之前就知道哪套还是空的 */
+.scene-tab.filled:not(.active)::after {
+  content: '';
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--fun-teal, #4ec9a7);
+  flex-shrink: 0;
+}
+.scene-tab-tag {
+  font-size: 9px; font-weight: 600;
+  padding: 1px 4px; border-radius: 4px;
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--accent);
+}
+.scene-tab.active .scene-tab-tag { background: rgba(var(--accent-rgb), 0.22); }
+/* 全身那套由系统维护（描述是常量），标签用中性色标「自动」，别和「强制」的睡眠混同一种强调 */
+.scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
+.scene-tab.active .scene-tab-tag.is-nude { background: var(--glass-bg); color: var(--text-secondary); }
+/* 自动维护的那一格：标签不用「已填」圆点，改用虚线下划线暗示"无需你管" */
+.scene-tab.auto { opacity: 0.85; }
+.scene-tab.auto.active { opacity: 1; }
+
+/* 身体字段：五套共用，视觉上单独成块并与下面的服装标签拉开距离 */
+.scene-body-label {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+}
+.scene-body-hint { font-size: 10.5px; font-weight: 400; color: var(--text-secondary); }
+
+.scene-edit {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--glass-border);
+  /* ★ 五格统一高度：其余四格只有输入框，自然高 ~165px（rows=6 的输入框 + 内边距）；
+     「全身」那格还多了 label「身体」与一段说明文字，放任自然高度会撑到 231px
+     （2026-10-05 实测 231.3 vs 164.8）—— 切标签时面板高度明显跳一下。
+     这里钉住统一高度，并让输入框用 flex:1 + min-height:0 吃掉/让出剩余空间：
+       · 其余四格 → 输入框自动撑到 145px（与原先几乎无差别）
+       · 全身格   → 输入框相应缩到 ~75px 给 label 与说明让位，整格仍与其他格等高
+     基准值取"其余四格的自然高度"，改字号或 rows 时需要重新实测这个数。 */
+  height: 165px;
+}
+/* min-height:0 是让输入框**可被压缩**的关键（flex 项默认 min-height:auto 不允许缩到内容以下）。
+   注意「全身」格的结构多一层：.scene-edit > .scene-auto-note > textarea，
+   所以那一格要**两层都参与弹性分配**，只写直接子元素选择器匹配不到里面的输入框。
+
+   ★ 2026-10-07：`min-height:0` 原先让输入框在空间紧张时被压成**一行**（实测 43.5px，
+   用户实报"把「身体」的输入框挤没了"）。移除已选 chip 行后空间腾出来了，这里给一个
+   **明确的下限**，保证身体描述（通常 100+ 字符的英文 tag 串）至少能看全几行。 */
+.scene-edit > .scene-edit-desc { flex: 1 1 auto; min-height: 96px; }
+.scene-auto-note { flex: 1 1 auto; min-height: 0; }
+.scene-auto-note > .scene-edit-desc { flex: 1 1 auto; min-height: 96px; }
+.scene-edit-note {
+  margin: 0; font-size: 11px; line-height: 1.6;
+  color: var(--text-secondary);
+}
+/* 全身那一套的只读说明（没有可填的东西，解释清楚就行） */
+.scene-auto-note { display: flex; flex-direction: column; gap: 5px; }
+.scene-auto-lead { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.scene-auto-body { margin: 0; font-size: 11.5px; line-height: 1.75; color: var(--text-secondary); }
+.scene-auto-body code {
+  display: inline-block; padding: 1px 6px; border-radius: 5px;
+  background: var(--glass-bg); color: var(--text-primary);
+  font-size: 10.5px; word-break: break-all;
+}
+
+/* ── 外观特化（常驻种族/身体特征）点选框 ── */
+.trait-block { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+/* ★ 2026-10-07：移除已选 chip 行后，本块只剩"标题 + 一个入口"，压到单行高度，
+   把纵向空间让给上方「身体」输入框（用户实报：chip 行把输入框挤没了）。 */
+.trait-block--slim { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trait-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.trait-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.trait-hint { font-size: 11px; color: var(--text-secondary); }
+.trait-picked { display: flex; flex-wrap: wrap; gap: 6px; }
+.trait-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 4px 2px 9px; border-radius: 999px;
+  background: var(--accent-soft, rgba(120,120,255,.14)); color: var(--text-primary);
+  font-size: 11.5px; font-family: ui-monospace, monospace;
+}
+.trait-chip-x {
+  border: 0; background: transparent; cursor: pointer; padding: 0 3px;
+  color: var(--text-secondary); font-size: 13px; line-height: 1;
+}
+.trait-chip-x:hover { color: var(--accent); }
+.trait-empty { margin: 0; font-size: 11.5px; color: var(--text-secondary); }
+.trait-panel {
+  max-height: 240px; overflow-y: auto;
+  border: 1px solid var(--glass-border); border-radius: 9px;
+  padding: 8px; background: var(--glass-bg);
+}
+.trait-sec { display: flex; flex-direction: column; gap: 4px; }
+.trait-sec + .trait-sec { margin-top: 8px; }
+.trait-group { display: flex; flex-direction: column; }
+.trait-group-head {
+  display: flex; align-items: center; gap: 7px;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+  padding: 4px 6px; border-radius: 6px; color: var(--text-primary);
+}
+.trait-group-head:hover { background: var(--glass-bg-hover, rgba(255,255,255,.06)); }
+.trait-group-head.open { color: var(--accent); }
+.trait-sec-name { font-size: 10.5px; color: var(--text-secondary); }
+.trait-group-name { font-size: 12px; font-weight: 600; }
+.trait-group-n {
+  margin-left: auto; font-size: 10.5px; color: var(--text-secondary);
+  background: var(--glass-bg); border-radius: 999px; padding: 0 6px;
+}
+.trait-tags { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px 6px 8px; }
+.trait-tag {
+  border: 1px solid var(--glass-border); background: transparent;
+  border-radius: 999px; padding: 2px 9px; cursor: pointer;
+  font-size: 11px; color: var(--text-secondary);
+}
+.trait-tag:hover { color: var(--text-primary); border-color: var(--accent); }
+.trait-tag.on {
+  /* ⚠ 实心强调底 + 白字必须用 --accent-solid（暗夜下会被压深）；
+     用裸 --accent 在暗夜里白字会糊（项目既有红线，darkThemeReadability 测试钉着）。 */
+  background: var(--accent-solid); border-color: var(--accent-solid);
+  color: var(--on-accent, #fff);
+}
+.scene-auto-body b { color: var(--text-primary); }
+.scene-edit-empty { font-size: 12px; color: var(--text-secondary); padding: 8px 0; }
 
 .preview-card { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 14px; padding: 18px; }
 
@@ -1529,13 +2590,69 @@ const standingPanel = reactive({
 .lora-civitai-link:hover, .lora-tutorial-link:hover { opacity: 1; text-decoration: underline; }
 .lora-tutorial-link { margin-left: 6px; }
 
-/* ═══ 内联「更多设置」卡（手机端 + 平板等放不下侧栏的宽度，由模板 inlineLayout 决定渲染）═══ */
-.mobile-detail-toolbar {
-  display: flex; flex-direction: column;
-  margin-top: 14px; padding: 8px;
-  border-radius: 14px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
+
+  /* ═══ 移动端（本地补丁）═══
+   ⚠ 2026-10-08 合并 v3.7.0：上游改用 `.detail-inline` 类做内联布局（见下方同口径段落），
+   本段是本地补丁的窄屏适配，两者并存、互不冲突（选择器不同：本地不加 .detail-inline 前缀）。
+   补回被冲突处理时误删的 @media 开头 —— 否则下方整段规则会脱离媒体查询、且大括号不配对。 */
+@media (max-width: 767px) {
+  /* 场景格在窄屏**放弃统一高度**：
+     这一档字号是 16px，说明文字要折到 3~4 行，若沿用桌面的 165px 固定高度，
+     「全身」格的输入框会被压到只剩 18px（2026-10-05 实测）。
+     移动端本来就是纵向滚动、不靠"面板等高"来阅读，所以这里让它按内容自然撑开，
+     优先保证输入框可用。 */
+  .scene-edit { height: auto; }
+
+  /* 安全区由上方的遮罩留白让出，头部 / 底部不再各自叠加 */
+  .modal-header { padding: 12px 16px; }
+  .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+  .modal-close { flex-shrink: 0; }
+  .modal-body { padding: 4px 14px 14px; }
+  .modal-footer { padding: 10px 14px 14px; }
+
+  .modal-body-detail { overflow-y: auto; }
+  .modal-body-detail .preview-card { flex: none; padding: 14px; border-radius: 12px; }
+  .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
+  .modal-wide .fi, .modal-wide .prompt-textarea { font-size: 16px; }
+
+  /* 头像行：允许换行，誓约徽章不再把「更换头像 / 移除」挤出屏幕 */
+  .detail-avatar-row { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 0 2px; }
+  .detail-avatar { width: 56px; height: 56px; font-size: 24px; }
+
+  /* 角色关系：标题独占一行，入口按钮并排平分（原先是标题被两个按钮挤成两行） */
+  .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+  .detail-rel-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 10px; }
+  .detail-rel-btns, .detail-rel-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .detail-rel-btn { width: 100%; justify-content: center; }
+
+  /* 身份四字段：窄屏整块换到下面并改单列（头像 + 按钮留在上一行），
+     否则 2×2 每格只有半屏一半，输入框全被挤扁 */
+  .detail-name-grid { flex: 1 1 100%; order: 9; grid-template-columns: 1fr; gap: 10px; }
+
+  /* 底部操作区：说明独占一行，删除 / 保存分列两端 */
+  .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+  .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
+
+  /* 更多设置：与桌面端右侧悬浮面板同款卡片 */
+  .mobile-detail-toolbar {
+    display: flex; flex-direction: column;
+    margin-top: 14px; padding: 8px;
+    border-radius: 14px;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+  }
+  .toolbar-title { display: flex; align-items: center; gap: 5px; margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-secondary); }
+  .toolbar-title svg { color: var(--accent); }
+  .toolbar-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 6px; border-radius: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; user-select: none; }
+  .toolbar-item + .toolbar-item { border-top: 1px solid var(--border); }
+  .toolbar-item:active { background: rgba(var(--accent-rgb), 0.08); }
+  .toolbar-item-toggle { cursor: default; }
+  .toolbar-item-btn { color: var(--accent); font-weight: 600; }
+  .toolbar-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); flex-shrink: 0; }
+  .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
+
+  .form-group .fl { font-size: 12px; }
+  .form-hint { font-size: 10px; }
 }
 .toolbar-title { display: flex; align-items: center; gap: 5px; margin: 2px 6px 6px; font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-secondary); }
 .toolbar-title svg { color: var(--accent); }
@@ -1546,6 +2663,60 @@ const standingPanel = reactive({
 .toolbar-item-btn { color: var(--accent); font-weight: 600; }
 .toolbar-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg-tertiary); color: var(--text-secondary); flex-shrink: 0; }
 .toolbar-badge.active { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
+
+/* ═══ 平板 / 中窄视口（<1532 放不下左右悬浮窗，立绘与更多设置收进正文流）═══
+   主面板仍是居中的 min(880px, 96vw)，只把正文改成可滚动的纵向流 */
+@media (max-width: 1531px) {
+  .modal-body-detail { overflow-y: auto; }
+  .modal-body-detail .preview-card { flex: none; }
+  .modal-body-detail .prompt-textarea { flex: none; min-height: 340px; }
+}
+
+/* ═══ 移动端 ═══
+ 几何与 LinsheModal 的移动端段落同口径：遮罩只收留白（8px + 安全区），面板保留
+ 圆角 / 描边 / 白内衬的浮层观感 —— 不要再退回 100vw/100dvh + border-radius:0 的全屏面板。
+ 正文改成「内容优先」的纵向流：头像 → 内容卡 → 更多设置，底部操作区固定。 */
+
+.detail-inline {
+  padding: calc(8px + env(safe-area-inset-top, 0px))
+           calc(8px + env(safe-area-inset-right, 0px))
+           calc(8px + env(safe-area-inset-bottom, 0px))
+           calc(8px + env(safe-area-inset-left, 0px));
+}
+.detail-inline .modal-panel, .detail-inline .modal-wide { width: 100%; max-width: 100%; max-height: 100%; }
+.detail-inline .detail-panel { height: 100%; max-height: 100%; }
+
+/* 安全区由上方的遮罩留白让出，头部 / 底部不再各自叠加 */
+.detail-inline .modal-header { padding: 12px 16px; }
+.detail-inline .modal-header h3 { font-size: 15px; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 8px; }
+.detail-inline .modal-close { flex-shrink: 0; }
+.detail-inline .modal-body { padding: 4px 14px 14px; }
+.detail-inline .modal-footer { padding: 10px 14px 14px; }
+
+.detail-inline .modal-body-detail { overflow-y: auto; }
+.detail-inline .modal-body-detail .preview-card { flex: none; padding: 14px; border-radius: 12px; }
+.detail-inline .modal-body-detail .prompt-textarea { flex: none; min-height: 300px; }
+.detail-inline .modal-wide .fi, .detail-inline .modal-wide .prompt-textarea { font-size: 16px; }
+
+/* 头像行：允许换行，誓约徽章不再把「更换头像 / 移除」挤出屏幕 */
+.detail-inline .detail-avatar-row { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; padding: 0 2px; }
+.detail-inline .detail-avatar { width: 56px; height: 56px; font-size: 24px; }
+
+/* 角色关系：标题独占一行，入口按钮并排平分（原先是标题被两个按钮挤成两行） */
+.detail-inline .detail-rel-section { padding: 12px; margin-bottom: 14px; }
+.detail-inline .detail-rel-header { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 10px; }
+.detail-inline .detail-rel-btns, .detail-inline .detail-rel-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.detail-inline .detail-rel-btn { width: 100%; justify-content: center; }
+
+/* 角色名 / 英文名：窄屏改单列，别把两个输入框挤进半屏 */
+.detail-inline .detail-name-row { flex-direction: column; gap: 10px; }
+
+/* 底部操作区：说明独占一行，删除 / 保存分列两端 */
+.detail-inline .detail-actions { flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.detail-inline .recruit-appearance-hint { order: -1; flex: 1 1 100%; margin-left: 0; white-space: normal; }
+
+.detail-inline .form-group .fl { font-size: 12px; }
+.detail-inline .form-hint { font-size: 10px; }
 
 /* ═══ 平板 / 中窄视口（<1532 放不下左右悬浮窗，立绘与更多设置收进正文流）═══
    主面板仍是居中的 min(880px, 96vw)，只把正文改成可滚动的纵向流 */

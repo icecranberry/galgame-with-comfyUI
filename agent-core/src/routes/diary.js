@@ -65,3 +65,8 @@ router.post('/:characterId/generate', (req, res) => {
 });
 
 export default router;
+
+// ⚠ 2026-10-08 合并 v3.7.0：本路由上游挂在 `/api/diaries`（前端 api/index.js 也调 `/diaries/...`），
+//    而本仓库的约定式自动挂载会按文件名推导成 `/api/diary` → 差一个 s 就会全站 404。
+//    按 `_autoMount.js` 既定的自定义口径，在此显式声明挂载点。
+export const mount = '/api/diaries';

@@ -33,6 +33,11 @@
                 />
               </template>
 
+              <!-- 用户节点：与角色关系图同屏，便于把「你」也连进关系网 -->
+              <template #node-userNode="nodeProps">
+                <UserNode :data="nodeProps.data" />
+              </template>
+
               <!-- Custom edge label styling -->
             </VueFlow>
           </div>
@@ -67,6 +72,24 @@
                   placeholder="输入关系，如：女同事"
                   @keydown.enter="confirmInput"
                 />
+                <!-- 亲密度：决定这两人能否在朋友圈同框、以及同框时的画面尺度 -->
+                <div class="rel-intimacy">
+                  <div class="rel-intimacy-label">
+                    亲密度
+                    <span class="rel-intimacy-hint">决定能否在朋友圈同框、以及画面尺度</span>
+                  </div>
+                  <div class="rel-intimacy-row">
+                    <button
+                      v-for="opt in INTIMACY_OPTIONS"
+                      :key="opt.level"
+                      type="button"
+                      class="rel-intimacy-btn"
+                      :class="{ active: inputDialog.intimacy === opt.level }"
+                      :title="opt.desc"
+                      @click="inputDialog.intimacy = opt.level"
+                    >{{ opt.label }}</button>
+                  </div>
+                </div>
                 <div class="rel-dialog-actions">
                   <linshe-button v-if="inputDialog.isEdit" variant="danger" @click="deleteEdge">🗑 删除</linshe-button>
                   <div class="rel-dialog-actions-right">
@@ -96,6 +119,8 @@ import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
 import CharacterNode from './CharacterNode.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import UserNode from './UserNode.vue'
+import { userAvatar, userNickname, loadUserConfig, loadUserAvatar } from '../userConfig.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -108,9 +133,23 @@ const confirmFn = inject('confirm')
 const toastFn = inject('toast')
 
 const { addEdges, removeEdges, fitView } = useVueFlow()
-const nodeTypes = markRaw({ charNode: markRaw(CharacterNode) })
+// 与「我的关系图」同一套节点组件，这样两处视觉一致
+const nodeTypes = markRaw({ charNode: markRaw(CharacterNode), userNode: markRaw(UserNode) })
 
 const elements = ref([])
+// 中心角色与「用户」的关系（后端 GET /api/relationships 顺带返回）
+const userRel = ref(null)
+const USER_NODE_ID = 'user'
+let userInfoLoaded = false
+/** 首次用到时才拉用户昵称/头像（关系图不总是打开，没必要启动就请求） */
+async function ensureUserInfo() {
+  if (userInfoLoaded) return
+  userInfoLoaded = true
+  try {
+    await loadUserConfig()
+    await loadUserAvatar()
+  } catch { /* 取不到就用默认「我」 */ }
+}
 const paneReady = ref(false)
 
 const inputRef = ref(null)
@@ -120,6 +159,7 @@ const inputDialog = reactive({
   show: false,
   isEdit: false,
   text: '',
+  intimacy: 1,           // 与后端一致：0 泛泛 / 1 熟悉 / 2 亲近 / 3 亲密
   targetName: '',
   sourceId: '',
   targetId: '',
@@ -128,6 +168,14 @@ const inputDialog = reactive({
   edgeId: null,   // non-null when editing existing
   pendingEdge: null, // { source, target, sourceHandle, targetHandle }
 })
+
+/** 亲密度档位（label 与 desc 与后端 relationshipIntimacy.js 保持一致） */
+const INTIMACY_OPTIONS = [
+  { level: 0, label: '泛泛', desc: '职业性认识 / 上下级 / 对立 —— 不会在朋友圈同框' },
+  { level: 1, label: '熟悉', desc: '相识但保持距离 —— 可同框，仅限公共场合、社交距离' },
+  { level: 2, label: '亲近', desc: '朋友 / 搭档 —— 可同框，允许自然的亲昵举动' },
+  { level: 3, label: '亲密', desc: '恋人 / 家人 —— 不做额外限制' },
+]
 
 // ── Existing relationships (loaded from API) ──
 const existingRels = ref([])
@@ -170,7 +218,8 @@ function isValidConnection(connection) {
 // ── Build nodes / edges from characters ──
 async function buildGraph() {
   const center = props.centerCharacter
-  const others = props.allCharacters.filter(c => c.id !== center.id)
+  // 归档角色不进关系图：它们不参与任何活动，几十个节点挤在环上只会干扰拖拽连线
+  const others = props.allCharacters.filter(c => c.id !== center.id && !c.archived)
   const radius = Math.max(336, Math.ceil(others.length * 16))
 
   // Build nodes synchronously first — show avatars immediately
@@ -220,9 +269,26 @@ async function buildGraph() {
   try {
     const res = await api.getRelationships(center.id)
     existingRels.value = res.relationships || []
+    userRel.value = res.userRelationship || null
   } catch (err) {
     console.warn('[RelationshipGraph] failed to load relationships:', err.message)
     existingRels.value = []
+    userRel.value = null
+  }
+
+  // ── 用户节点：放在中心角色的正上方留白处，避免与环形排布的角色挤在一起 ──
+  // 只有真的存在「用户↔该角色」的关系时才加，免得图里凭空多一个孤立节点。
+  await ensureUserInfo()
+  if (userRel.value) {
+    graphNodes.push({
+      id: USER_NODE_ID,
+      type: 'userNode',
+      position: { x: CENTER_X - 60, y: CENTER_Y - radius - 110 },
+      data: { avatar_url: userAvatar.value, nickname: userNickname.value || '我' },
+      draggable: true,
+      selectable: false,
+      connectable: false,
+    })
   }
 
   // Collect node IDs for edge validation
@@ -256,6 +322,26 @@ async function buildGraph() {
 
   console.log('[RelationshipGraph] built', graphNodes.length, 'nodes,', graphEdges.length, 'edges (filtered from', existingRels.value.length, 'relations)')
 
+  // 用户 ↔ 中心角色：用与角色间不同的配色（虚线），一眼区分「和你的关系」与「角色之间」
+  if (userRel.value && userRel.value.text) {
+    const userPos = nodePosMap[USER_NODE_ID]
+    const handles = userPos ? computeHandles(userPos) : { sourceHandle: 'source-top', targetHandle: 'target-top' }
+    graphEdges.push({
+      id: `e-user-${userRel.value.id}`,
+      source: String(center.id),
+      target: USER_NODE_ID,
+      sourceHandle: handles.sourceHandle,
+      targetHandle: handles.targetHandle,
+      label: userRel.value.text,
+      style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3, strokeDasharray: '6 4' },
+      labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
+      labelBgStyle: { fill: 'var(--bg-secondary)', fillOpacity: 0.92 },
+      labelBgPadding: [8, 4],
+      labelBgBorderRadius: 6,
+      animated: false,
+      markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
+    })
+  }
   // Set nodes first via v-model, wait for vue-flow to build nodeLookup, then add edges
   elements.value = graphNodes
   await new Promise(r => setTimeout(r, 0))
@@ -306,6 +392,7 @@ function onConnect(connection) {
   inputDialog.show = true
   inputDialog.isEdit = false
   inputDialog.text = ''
+  inputDialog.intimacy = 1   // 与后端推断的兜底档一致
   inputDialog.targetName = targetNode.data.display_name
   inputDialog.sourceId = connection.source
   inputDialog.targetId = connection.target
@@ -326,6 +413,8 @@ function onEdgeClick({ edge }) {
   inputDialog.show = true
   inputDialog.isEdit = true
   inputDialog.text = edge.label || ''
+  // 回填已保存的亲密度（GET /relationships 已解析成 0~3；缺省按「熟悉」）
+  inputDialog.intimacy = Number(existingRels.value.find(r => r.id === relId)?.intimacy ?? 1)
   inputDialog.targetName = targetNode?.data?.display_name || ''
   inputDialog.edgeId = relId
   inputDialog.pendingEdge = null
@@ -351,7 +440,7 @@ async function confirmInput() {
   if (inputDialog.isEdit) {
     // Edit existing
     try {
-      const res = await api.updateRelationship(inputDialog.edgeId, text)
+      const res = await api.updateRelationship(inputDialog.edgeId, text, inputDialog.intimacy)
       if (res.error) {
         toastFn('保存失败: ' + res.error, 'error')
         return
@@ -367,7 +456,12 @@ async function confirmInput() {
       if (edge) edge.label = text
       // Update local cache
       const cached = existingRels.value.find(r => r.id === inputDialog.edgeId)
-      if (cached) cached.relationship_text = text
+      // ⚠ 2026-10-08 合并 v3.7.0：本地新增 intimacy 缓存（亲密度分级）、
+      //    上游新增 emitRelationshipChanged 事件（通知外部刷新）—— 两者都要，合并保留。
+      if (cached) {
+        cached.relationship_text = text
+        cached.intimacy = inputDialog.intimacy
+      }
       emitRelationshipChanged({ characterId: props.centerCharacter?.id, action: 'update', targetName: inputDialog.targetName })
     } catch (err) {
       console.error('[RelationshipGraph] update failed:', err.message)
@@ -380,12 +474,14 @@ async function confirmInput() {
       console.log('[RelationshipGraph] creating relationship:', {
         from: parseInt(inputDialog.sourceId),
         to: parseInt(inputDialog.targetId),
-        text
+        text,
+        intimacy: inputDialog.intimacy,
       })
       const res = await api.createRelationship(
         parseInt(inputDialog.sourceId),
         parseInt(inputDialog.targetId),
-        text
+        text,
+        inputDialog.intimacy
       )
       console.log('[RelationshipGraph] API response:', res)
       if (res.error) {
@@ -531,6 +627,33 @@ async function deleteEdge() {
   font-size: 14px;
   box-sizing: border-box;
 }
+/* ── 亲密度选择（决定朋友圈同框与画面尺度） ── */
+.rel-intimacy { margin-top: 10px; }
+.rel-intimacy-label {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--text-bright);
+  margin-bottom: 6px;
+}
+.rel-intimacy-hint { font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.rel-intimacy-row { display: flex; gap: 6px; }
+.rel-intimacy-btn {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.rel-intimacy-btn:hover { color: var(--text-bright); border-color: var(--accent-light); }
+.rel-intimacy-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
 .rel-dialog-actions {
   display: flex; justify-content: space-between; align-items: center; margin-top: 14px;
 }

@@ -43,8 +43,14 @@
 
 ## 主题体系
 
-* 2 套预设：`warm 暖色`（默认，沿用 v3.2 珊瑚暖纸原色）、`dark 暗夜`；入口为设置页「功能开关」→「界面主题」，支持暖色 / 暗夜 / 按时间自动切换。
-* 切换：`theme.js` + `stores/settings.js` → `<html data-theme>`，localStorage 持久化（设备级偏好）；「按时间」在 18:00-06:00 使用暗夜、其余时间使用暖色。
+* 2 套预设：`warm 暖色`（默认，沿用 v3.2 珊瑚暖纸原色）、`dark 暗夜`；入口为设置页「功能开关」→「界面主题」，支持**暖色 / 暗夜 / 跟随系统 / 按时间**四种**模式**。
+* 切换：`theme.js` + `stores/settings.js` → `<html data-theme>`，localStorage 持久化（设备级偏好）。
+  * 模式 = 用户的选择，存储键 `linshe_theme_mode`，**唯一真源是 `theme.js` 的 `THEME_MODES`**：新增模式只加这一项，校验、设置页选项、状态解析全部自动跟上；**不要在 store / 页面里另写 id 白名单数组**（漏项症状＝点击静默无反应，本项目已踩过同类坑，`test/themeModes.test.js` 专门守它）。
+  * 实际主题由 `resolveThemeByMode(mode)` 解析，只可能是 `warm` / `dark`（分开记在 `linshe_theme`，便于重新解析）：
+    `system` 跟随系统 —— 读 `prefers-color-scheme`，系统深色→暗夜、浅色→暖色（取不到偏好回退暖色）；
+    `auto` 按时间 —— 18:00-06:00 暗夜、其余暖色。
+  * 跟随系统靠 `matchMedia('(prefers-color-scheme: dark)')` 的 `change` 监听**实时**跟随（监听器常驻，非 system 模式不回调）；按时间靠 App.vue 每分钟定时 + 回到前台刷新。
+  * 自动类模式（跟随系统 / 按时间）下，设置页标题旁显示「当前：暗夜 / 暖色」徽标，便于确认已生效。
 * 例外：信箱 / Toast / 世界观编辑器保留「暖纸」底色与深棕文字（质感岛），强调色仍用主题变量；金色礼物色、语义状态色不随主题。
 
 ## 动效规范

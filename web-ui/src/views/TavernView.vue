@@ -87,6 +87,27 @@
             <div v-if="!editingPersona" class="edit-pen" role="button" tabindex="0" @click="startEditPersona" @keydown.enter.prevent="startEditPersona" @keydown.space.prevent="startEditPersona" title="编辑其他说明">✎</div>
           </div>
         </div>
+        <!-- ★ 居住地（2026-10-05）：从世界地图里选，角色日程里"回家/去找你"就有真实落点。
+             此前完全没有这个入口，角色的日程只能含糊写"公寓"。 -->
+        <div class="user-field-row">
+          <span class="field-label">居住地</span>
+          <div class="field-value-wrap">
+            <select
+              v-if="editingHome"
+              v-model="userHomeInput"
+              class="inline-input"
+              @change="saveHome"
+              @blur="editingHome = false"
+            >
+              <option value="">（未指定）</option>
+              <optgroup v-for="g in userHomeGroups" :key="g.area" :label="g.area">
+                <option v-for="p in g.places" :key="p.name" :value="p.name">{{ p.name }}</option>
+              </optgroup>
+            </select>
+            <span v-else class="field-value" @click="startEditHome">{{ userHome || '点击选择你的住处…' }}</span>
+            <div v-if="!editingHome" class="edit-pen" role="button" tabindex="0" @click="startEditHome" @keydown.enter.prevent="startEditHome" @keydown.space.prevent="startEditHome" title="编辑居住地">✎</div>
+          </div>
+        </div>
       </div>
       </div>
       <div v-if="!isMobile" class="mailbox-card card" @click="showMailbox = true">
@@ -109,23 +130,10 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         今日报纸 / 用户关系图入口卡片（同一行，各占一半）
+         入口卡片行：我的关系图 / 世界观设置（各占一半）
+         《邻舍日报》已并入「传媒」页（见 NavBar 的传媒标签）
          ═══════════════════════════════════════════ -->
     <div class="relation-entry-row">
-      <div class="relation-entry card" @click="openNewspaper">
-        <div class="relation-entry-icon newspaper-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 22h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
-            <path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>
-          </svg>
-        </div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">邻舍日报<span v-if="newspaperUnread" class="newspaper-dot cel-jelly" title="今天的报纸还没读"></span></span>
-          <span class="relation-entry-hint">{{ newspaperHint }}</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-
       <div class="relation-entry card" @click="showUserRelationGraph = true">
         <div class="relation-entry-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -139,31 +147,177 @@
         </div>
         <span class="relation-entry-arrow">›</span>
       </div>
+
+      <div class="relation-entry card" @click="openWorldSetting">
+        <div class="relation-entry-icon world-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <ellipse cx="12" cy="12" rx="4" ry="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <line x1="12" y1="2" x2="12" y2="22"/>
+          </svg>
+        </div>
+        <div class="relation-entry-text">
+          <span class="relation-entry-title">世界观设置</span>
+          <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
+        </div>
+        <span class="relation-entry-arrow">›</span>
+      </div>
     </div>
 
     <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
-    <div class="section-title">角色 ({{ sortedCharacters.length }})</div>
+    <div class="char-toolbar">
+      <div class="section-title">角色 ({{ charCountLabel }})</div>
+      <div class="char-toolbar-right">
+        <div
+          class="char-archive-all"
+          :title="scopeArchivedCount > 0
+            ? `${scopeLabel}已归档 ${scopeArchivedCount} 个：它们不参与任何主动活动，你找它们聊天仍会回复`
+            : `一键让${scopeLabel}不参与任何主动活动（主动聊天、朋友圈、奇遇、日程生成、拉群）`"
+        >
+          <!-- ★ 2026-10-07：作用域是**当前分类**，不再是全库 —— 标签里显式写出范围，避免误操作 -->
+          <span class="char-archive-all-label">本分类不参与活动</span>
+          <span v-if="scopeArchivedCount > 0" class="char-archive-all-count">{{ scopeArchivedCount }}/{{ scopeCount }}</span>
+          <linshe-switch
+            :model-value="allArchived"
+            :disabled="archiveAllToggling || scopeCount === 0"
+            size="sm"
+            @change="toggleAllArchived"
+            :aria-label="`让${scopeLabel}不参与活动`"
+          />
+          <!-- 部分归档时开关键得点两下才能全恢复，给个直达入口 -->
+          <linshe-button
+            v-if="scopeArchivedCount > 0 && !allArchived"
+            variant="link"
+            size="sm"
+            :disabled="archiveAllToggling"
+            @click="toggleAllArchived(false)"
+          >本分类全部恢复</linshe-button>
+        </div>
+        <div class="char-search">
+          <linshe-input
+            v-model="charSearch"
+            size="sm"
+            class="char-search-input"
+            placeholder="搜索角色名..."
+          />
+          <div
+            v-if="charSearch"
+            class="char-search-clear"
+            role="button"
+            tabindex="0"
+            title="清空搜索"
+            @click="charSearch = ''"
+            @keydown.enter.prevent="charSearch = ''"
+            @keydown.space.prevent="charSearch = ''"
+          >✕</div>
+        </div>
+      </div>
+    </div>
     
     <!-- ═══════════════════════════════════════════
-         世界观设置入口卡片
+         文件夹筛选栏（单层分类：全部 / 未分类 / 各文件夹）
          ═══════════════════════════════════════════ -->
-    <div class="relation-entry card" @click="openWorldSetting">
-      <div class="relation-entry-icon world-icon">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <ellipse cx="12" cy="12" rx="4" ry="10"/>
-          <line x1="2" y1="12" x2="22" y2="12"/>
-          <line x1="12" y1="2" x2="12" y2="22"/>
+    <div v-if="folderFeatureReady" class="folder-bar">
+      <div
+        class="chip folder-chip"
+        :class="{ active: folderFilter === 'all' }"
+        role="button"
+        tabindex="0"
+        @click="folderFilter = 'all'"
+        @keydown.enter.prevent="folderFilter = 'all'"
+        @keydown.space.prevent="folderFilter = 'all'"
+      >
+        全部<span class="folder-chip-count">{{ activeCharacters.length }}</span>
+      </div>
+      <div
+        class="chip folder-chip"
+        :class="{ active: folderFilter === 'uncategorized' }"
+        role="button"
+        tabindex="0"
+        @click="folderFilter = 'uncategorized'"
+        @keydown.enter.prevent="folderFilter = 'uncategorized'"
+        @keydown.space.prevent="folderFilter = 'uncategorized'"
+      >
+        未分类<span class="folder-chip-count">{{ uncategorizedCount }}</span>
+      </div>
+      <!-- 归档管理：归档角色只在「全部 / 未分类 / 各文件夹」之外的这一处集中出现，
+           免得几十个压暗的卡片混在活跃角色里（见 folderScopedCharacters） -->
+      <div
+        v-if="archivedCharacters.length > 0"
+        class="chip folder-chip folder-chip-archived"
+        :class="{ active: folderFilter === 'archived' }"
+        role="button"
+        tabindex="0"
+        title="集中管理已归档角色：它们不参与任何主动活动，你找它们聊天仍会回复"
+        @click="folderFilter = 'archived'"
+        @keydown.enter.prevent="folderFilter = 'archived'"
+        @keydown.space.prevent="folderFilter = 'archived'"
+      >
+        <svg class="folder-chip-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="4" rx="1"/>
+          <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/>
+          <path d="M10 12h4"/>
         </svg>
+        归档管理<span class="folder-chip-count">{{ archivedCharacters.length }}</span>
       </div>
-      <div class="relation-entry-text">
-        <span class="relation-entry-title">世界观设置</span>
-        <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
+      <div
+        v-for="f in folders"
+        :key="f.id"
+        class="chip folder-chip"
+        :class="{
+          active: folderFilter === f.id,
+          'is-dragging': dragFolderId === f.id,
+          'is-drop-target': dragOverFolderId === f.id,
+        }"
+        draggable="true"
+        role="button"
+        tabindex="0"
+        title="点击筛选，按住拖动可调整顺序"
+        @click="folderFilter = f.id"
+        @keydown.enter.prevent="folderFilter = f.id"
+        @keydown.space.prevent="folderFilter = f.id"
+        @dragstart="onFolderDragStart($event, f)"
+        @dragover="onFolderDragOver($event, f)"
+        @dragleave="onFolderDragLeave(f)"
+        @drop.prevent="onFolderDrop($event, f)"
+        @dragend="onFolderDragEnd"
+      >
+        <span class="folder-chip-name">{{ f.name }}</span>
+        <span class="folder-chip-count">{{ folderCountOf(f.id) }}</span>
+        <template v-if="folderFilter === f.id">
+          <span
+            class="chip-x folder-chip-op"
+            role="button"
+            tabindex="0"
+            title="重命名文件夹"
+            @click.stop="openRenameFolder(f)"
+            @keydown.enter.stop.prevent="openRenameFolder(f)"
+            @keydown.space.stop.prevent="openRenameFolder(f)"
+          >✎</span>
+          <span
+            class="chip-x folder-chip-op"
+            role="button"
+            tabindex="0"
+            title="删除文件夹（角色回到未分类）"
+            @click.stop="askDeleteFolder(f)"
+            @keydown.enter.stop.prevent="askDeleteFolder(f)"
+            @keydown.space.stop.prevent="askDeleteFolder(f)"
+          >✕</span>
+        </template>
       </div>
-      <span class="relation-entry-arrow">›</span>
+      <div
+        class="chip folder-chip folder-chip-new"
+        role="button"
+        tabindex="0"
+        @click="openNewFolder"
+        @keydown.enter.prevent="openNewFolder"
+        @keydown.space.prevent="openNewFolder"
+      >＋ 新建文件夹</div>
     </div>
+
     <TransitionGroup name="char-pin" tag="div" class="char-grid" :class="{ stagger: gridStagger }">
         <!-- 表情包管理入口：永远在招募前 -->
         <div key="emoji-manage" class="char-card emoji-manage-card" @click="showEmojiManager = true">
@@ -196,9 +350,10 @@
 
       <!-- 角色卡片 -->
       <div
-        v-for="c in sortedCharacters"
+        v-for="c in visibleCharacters"
         :key="c.id"
         class="char-card"
+        :class="{ archived: c.archived }"
         @click="openCharDetail(c)"
       >
         <!-- 左上角置顶按钮 -->
@@ -216,6 +371,22 @@
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
           </svg>
         </div>
+        <!-- 文件夹入口（左上侧栏，与置顶按钮同列） -->
+        <div
+          v-if="folderFeatureReady"
+          class="char-folder-btn"
+          :class="{ 'has-folder': c.folder_id }"
+          role="button"
+          tabindex="0"
+          :title="c.folder_id ? `已归入「${folderName(c.folder_id)}」 · 点击移动` : '移入文件夹'"
+          @click.stop="openMoveFolder(c)"
+          @keydown.enter.stop.prevent="openMoveFolder(c)"
+          @keydown.space.stop.prevent="openMoveFolder(c)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
+        </div>
         <div v-if="c.moments_disabled || c.proactive_disabled || c.events_disabled" class="char-card-badges">
           <span v-if="c.moments_disabled" class="char-status-dot dot-moments" title="不看ta的朋友圈"></span>
           <span v-if="c.proactive_disabled" class="char-status-dot dot-proactive" title="不主动聊天"></span>
@@ -226,6 +397,19 @@
           :style="c.avatar_path ? { backgroundImage: `url(${c.avatar_path})`, backgroundSize:'cover', backgroundPosition:'center' } : { background: 'var(--accent)' }"
         >{{ c.avatar_path ? '' : c.display_name.charAt(0) }}</div>
         <div class="char-card-name">{{ c.display_name }}</div>
+        <div v-if="c.archived" class="char-card-archived" title="已归档：不参与任何主动活动">已归档</div>
+        <!-- 归档管理视图里直接给「取消归档」，免得逐个点进详情卡去关开关 -->
+        <div
+          v-if="folderFilter === 'archived'"
+          class="char-unarchive-btn"
+          role="button"
+          tabindex="0"
+          :class="{ 'is-busy': unarchiveBusyId === c.id }"
+          :title="`让「${c.display_name}」重新参与活动`"
+          @click.stop="onUnarchive(c)"
+          @keydown.enter.stop.prevent="onUnarchive(c)"
+          @keydown.space.stop.prevent="onUnarchive(c)"
+        >{{ unarchiveBusyId === c.id ? '恢复中…' : '取消归档' }}</div>
         <div class="char-card-foot">
           <span class="char-card-status" :class="c.message_count > 0 ? 'active' : 'idle'">
             {{ c.message_count > 0 ? `${c.message_count} 条消息` : '待唤醒' }}
@@ -249,6 +433,18 @@
         </div>
       </div>
     </TransitionGroup>
+
+    <!-- 空状态：文件夹内无角色 / 搜索无匹配 -->
+    <div v-if="!visibleCharacters.length" class="char-empty empty">
+      <div class="empty-title">{{ emptyTitle }}</div>
+      <div class="empty-hint">{{ emptyDesc }}</div>
+      <linshe-button
+        v-if="canSearchEverywhere"
+        variant="secondary"
+        size="sm"
+        @click="folderFilter = 'all'"
+      >在全部角色中搜索</linshe-button>
+    </div>
 
     <!-- ═══════════════════════════════════════════
          招募弹窗
@@ -631,13 +827,78 @@
          ═══════════════════════════════════════════ -->
     <BackpackModal :visible="showBackpack" :characters="sortedCharacters" @close="showBackpack = false" />
 
-    <!-- ═══════════════════════════════════════════
-         《邻舍日报》报纸阅读窗
-         ═══════════════════════════════════════════ -->
-    <NewspaperModal v-model="showNewspaper" @read="onNewspaperRead" />
+    <!-- 《邻舍日报》的阅读窗已随入口一起迁到「传媒」页（MediaView 里挂载） -->
 
       <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
       <StandingManagerModal :open="showStandingManager" :characters="sortedCharacters" @close="showStandingManager = false" />
+
+    <!-- ═══════════════════════════════════════════
+         角色文件夹：新建 / 重命名
+         ═══════════════════════════════════════════ -->
+    <LinsheModal
+      v-model="showFolderEditor"
+      :title="editingFolder ? '重命名文件夹' : '新建文件夹'"
+      panel-class="folder-editor-modal"
+    >
+      <div class="folder-editor-body">
+        <linshe-input
+          v-model="folderNameInput"
+          :maxlength="20"
+          placeholder="例：原创角色 / 绝区零 / 高冷系"
+          @keyup.enter="submitFolderEditor"
+        />
+        <p class="folder-editor-hint">按角色来源或类型分组，之后可在文件夹栏里快速筛选。</p>
+      </div>
+      <template #footer>
+        <linshe-button variant="secondary" @click="showFolderEditor = false">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="!folderNameInput.trim()" @click="submitFolderEditor">
+          {{ editingFolder ? '保存' : '创建' }}
+        </linshe-button>
+      </template>
+    </LinsheModal>
+
+    <!-- ═══════════════════════════════════════════
+         角色文件夹：把角色移入某个文件夹
+         ═══════════════════════════════════════════ -->
+    <LinsheModal
+      v-model="showMoveFolder"
+      :title="movingChar ? `移动「${movingChar.display_name}」` : '移动到文件夹'"
+      panel-class="move-folder-modal"
+    >
+      <div class="folder-pick-list">
+        <div
+          class="folder-pick-item"
+          :class="{ active: !movingChar || !movingChar.folder_id }"
+          role="button"
+          tabindex="0"
+          @click="doMoveToFolder(null)"
+          @keydown.enter.prevent="doMoveToFolder(null)"
+          @keydown.space.prevent="doMoveToFolder(null)"
+        >
+          <span class="folder-pick-name">未分类</span>
+          <span class="folder-pick-count">{{ uncategorizedCount }}</span>
+        </div>
+        <div
+          v-for="f in folders"
+          :key="f.id"
+          class="folder-pick-item"
+          :class="{ active: !!movingChar && movingChar.folder_id === f.id }"
+          role="button"
+          tabindex="0"
+          @click="doMoveToFolder(f.id)"
+          @keydown.enter.prevent="doMoveToFolder(f.id)"
+          @keydown.space.prevent="doMoveToFolder(f.id)"
+        >
+          <span class="folder-pick-name">{{ f.name }}</span>
+          <span class="folder-pick-count">{{ f.count }}</span>
+        </div>
+        <p v-if="!folders.length" class="folder-pick-hint">还没有文件夹，点下面「新建文件夹」建一个。</p>
+      </div>
+      <template #footer>
+        <linshe-button variant="ghost" @click="openNewFolderFromMove">＋ 新建文件夹</linshe-button>
+        <linshe-button variant="secondary" @click="showMoveFolder = false">完成</linshe-button>
+      </template>
+    </LinsheModal>
   </div>
 </template>
 
@@ -645,7 +906,8 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
-import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, loadUserConfig, saveUserConfig } from '../userConfig.js'
+import { useCharacterFoldersStore } from '../stores/characterFolders.js'
+import { userAvatar, loadUserAvatar, uploadUserAvatar, userNickname, userGender, userAppearance, userPersona, userHome, loadUserConfig, saveUserConfig } from '../userConfig.js'
 import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
@@ -654,13 +916,14 @@ import RelationshipDeductionModal from '../components/RelationshipDeductionModal
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
 import BackpackModal from '../components/BackpackModal.vue'
-import NewspaperModal from '../components/NewspaperModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import StandingManagerModal from '../components/StandingManagerModal.vue'
 import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
+import LinsheModal from '../components/ui/LinsheModal.vue'
+import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import { useBurst } from '../composables/useBurst.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useBackpackStore } from '../stores/backpack.js'
@@ -679,23 +942,9 @@ const showStandingManager = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
 const backpackChestReady = computed(() => backpackStore.chestReady)
 
-// 《邻舍日报》：未读状态由 newspaper store 统一持有（NavBar 酒馆项红点同源）
-const showNewspaper = ref(false)
-const todayPaper = computed(() => newspaperStore.todayPaper)
-const newspaperUnread = computed(() => newspaperStore.unread)
-const newspaperHint = computed(() => todayPaper.value
-  ? `第${todayPaper.value.edition}期已印好 · 今日事，早知道`
-  : '清晨 5 点后印出 · 今日事，早知道')
-
-function openNewspaper() {
-  showNewspaper.value = true
-}
-
-// 打开看过即消红点（今天之内不再提醒）
-function onNewspaperRead(paper) {
-  newspaperStore.markRead(paper)
-}
-
+// 《邻舍日报》入口已迁到「传媒」页（MediaView）。
+// 这里只剩「让当天报纸先拉一次」—— NavBar 的酒馆项红点与它同源，
+// 而 NavBar 本身也会轮询，所以这个调用只是让首屏更快拿到状态。
 function loadTodayPaper() {
   newspaperStore.fetchToday()
 }
@@ -708,6 +957,357 @@ const sortedCharacters = computed(() =>
     return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
   })
 )
+// ═══════════════════════════════════════
+// 角色文件夹（单层分类）+ 名称搜索
+// 文件夹数据由共享 store 持有，左侧会话栏的分组用的是同一份 —— 两边同屏，必须同步
+// ═══════════════════════════════════════
+const folderStore = useCharacterFoldersStore()
+const folders = computed(() => folderStore.folders)
+
+/**
+ * 活跃角色 / 归档角色。
+ *
+ * 归档角色只在「归档管理」里出现；其余视图（全部 / 未分类 / 各文件夹）一律排除 ——
+ * 否则几十个压暗的卡片会和活跃角色平铺在一起，很难找（本机 67 个角色里 56 个是归档的）。
+ * 声明放在这里（而非靠近 folderScopedCharacters）是因为下面的 uncategorizedCount 与
+ * folderCountOf 都要用 —— computed 虽是惰性求值，但不该依赖求值时机。
+ */
+const archivedCharacters = computed(() => chat.characters.filter(c => c.archived))
+const activeCharacters = computed(() => chat.characters.filter(c => !c.archived))
+
+// 计数按「活跃角色」算 —— 与视图里实际渲染的一致（归档角色另有「归档管理」入口）
+const uncategorizedCount = computed(() => activeCharacters.value.filter(c => !c.folder_id).length)
+/** 各文件夹的活跃角色数（后端返回的 f.count 含归档，会与实际看到的不符） */
+function folderCountOf(id) {
+  return activeCharacters.value.filter(c => c.folder_id === id).length
+}
+// 文件夹接口就绪后才显示分类 UI，接口不可用时保持原样（不出现半坏的筛选栏）
+const folderFeatureReady = computed(() => folderStore.ready)
+// 'all' | 'uncategorized' | 文件夹 id
+const folderFilter = ref('all')
+const charSearch = ref('')
+
+// ── 文件夹拖拽排序 ──
+// 用原生 HTML5 拖放：这一排就是个扁平的 chip 列表，没必要为此引入拖拽库。
+// 「全部 / 未分类」是固定项，不参与排序，所以只有 v-for 里的文件夹 chip 是 draggable。
+const dragFolderId = ref(null)
+const dragOverFolderId = ref(null)
+
+function onFolderDragStart(ev, f) {
+  dragFolderId.value = f.id
+  dragOverFolderId.value = null
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = 'move'
+    // Firefox 必须 setData 才会真正开始拖拽
+    ev.dataTransfer.setData('text/plain', String(f.id))
+  }
+}
+
+function onFolderDragOver(ev, f) {
+  if (dragFolderId.value == null || dragFolderId.value === f.id) return
+  ev.preventDefault()   // 不 preventDefault 就不会触发 drop
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+  dragOverFolderId.value = f.id
+}
+
+function onFolderDragLeave(f) {
+  if (dragOverFolderId.value === f.id) dragOverFolderId.value = null
+}
+
+async function onFolderDrop(ev, target) {
+  const fromId = dragFolderId.value
+  dragFolderId.value = null
+  dragOverFolderId.value = null
+  if (fromId == null || fromId === target.id) return
+
+  const list = [...folders.value]
+  const fromIdx = list.findIndex(x => x.id === fromId)
+  const toIdx = list.findIndex(x => x.id === target.id)
+  if (fromIdx < 0 || toIdx < 0) return
+
+  // 语义是「插到目标之前」：向后拖时目标索引会因先移除而前移一位，所以要减 1，
+  // 否则会落到目标后面（拖 A 到 C 会变成 B,C,A,D 而不是 B,A,C,D）。
+  const [moved] = list.splice(fromIdx, 1)
+  const insertAt = fromIdx < toIdx ? toIdx - 1 : toIdx
+  list.splice(insertAt, 0, moved)
+
+  try {
+    await folderStore.reorderFolders(list.map(x => x.id))
+  } catch (err) {
+    const msg = err?.message || '未知错误'
+    // 后端还是旧代码时，'/folders/reorder' 会被 '/folders/:id' 吃掉并回 'invalid folder id'。
+    // 这个报错本身看不出原因，补一句指向性提示，省得再去猜。
+    const stale = /invalid folder id|请求失败 \(40[0-9]\)/.test(msg)
+    toastFn?.(
+      '保存文件夹顺序失败: ' + msg + (stale ? '（后端可能仍是旧代码，请在启动器里重启服务）' : ''),
+      'error',
+    )
+  }
+}
+
+function onFolderDragEnd() {
+  dragFolderId.value = null
+  dragOverFolderId.value = null
+}
+
+const showFolderEditor = ref(false)
+const editingFolder = ref(null)   // null = 新建；否则为被重命名的文件夹
+const folderNameInput = ref('')
+const showMoveFolder = ref(false)
+const movingChar = ref(null)
+
+function folderName(id) {
+  return folders.value.find(f => f.id === id)?.name || ''
+}
+
+// 角色增删后各文件夹的成员数会变，跟着刷新一次（首屏由 onMounted 负责）
+watch(() => chat.characters.length, () => folderStore.load())
+
+// ═══════════════════════════════════════
+// 批量归档（工具栏的「全部不参与活动」）
+// ═══════════════════════════════════════
+const archiveAllToggling = ref(false)
+
+/**
+ * ★ 2026-10-07 用户口径：批量归档的作用域是**当前分类下的角色**，不是全库。
+ *   理由：人类侧做批量调整是按文件夹分组的；若一次点下去把别的分组也带上，
+ *   这个开关就失去意义（要重新一个个改回来）。
+ *
+ *   作用域 = 当前视图（文件夹筛选）内、且**通过当前搜索词**的角色 ——
+ *   与用户"看到的这一批"完全一致（所见即所改）。
+ */
+const batchScopeCharacters = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  const base = folderScopedCharacters.value
+  if (!base.length) return []
+  return kw
+    ? base.filter(c => (c.display_name || '').toLowerCase().includes(kw))
+    : base
+})
+const scopeCount = computed(() => batchScopeCharacters.value.length)
+const scopeArchivedCount = computed(() => batchScopeCharacters.value.filter(c => c.archived).length)
+// 该作用域内全部归档才算「开」；部分归档时开关显示为关，点一下 = 把剩下的也归档
+const allArchived = computed(() =>
+  scopeCount.value > 0 && scopeArchivedCount.value === scopeCount.value
+)
+/** 当前作用域的人话描述（用于标题与提示，避免用户不知道会动到谁） */
+const scopeLabel = computed(() => {
+  if (folderFilter.value === 'archived') return '「归档管理」里的角色'
+  if (folderFilter.value === 'uncategorized') return '「未分类」里的角色'
+  if (folderFilter.value === 'all') return '全部角色'
+  const f = (folderStore.folders || []).find(x => String(x.id) === String(folderFilter.value))
+  return f ? `「${f.name}」里的角色` : '当前分类里的角色'
+})
+
+/** 把当前作用域转成后端认识的 scope */
+function currentScope() {
+  if (folderFilter.value === 'uncategorized') return { type: 'uncategorized' }
+  if (folderFilter.value === 'archived') return { type: 'ids', ids: batchScopeCharacters.value.map(c => c.id) }
+  if (folderFilter.value === 'all') {
+    // 带搜索词时也按 ids 精确限定，保证"所见即所改"
+    return charSearch.value.trim()
+      ? { type: 'ids', ids: batchScopeCharacters.value.map(c => c.id) }
+      : { type: 'all' }
+  }
+  return { type: 'folder', id: Number(folderFilter.value) }
+}
+
+async function toggleAllArchived(next) {
+  if (archiveAllToggling.value) return
+  const targets = batchScopeCharacters.value
+  if (!targets.length) {
+    showToast(`当前${scopeLabel.value}没有角色`, 'error')
+    return
+  }
+  archiveAllToggling.value = true
+  try {
+    const r = await api.setAllCharactersArchived(next, currentScope())
+    // 本地同步：只改本次作用域内的角色，作用域外的一律不动
+    const ids = new Set(targets.map(c => c.id))
+    chat.characters.forEach(c => { if (ids.has(c.id)) c.archived = next ? 1 : 0 })
+    showToast(
+      next
+        ? `已归档 ${r?.changed ?? 0} 个角色（${scopeLabel.value}），它们不再参与任何主动活动`
+        : `已恢复 ${r?.changed ?? 0} 个角色参与活动（${scopeLabel.value}）`,
+      'success'
+    )
+  } catch (err) {
+    showToast(err?.message || '操作失败', 'error')
+  } finally {
+    archiveAllToggling.value = false
+  }
+}
+
+/** 归档管理视图里单卡「取消归档」：只这一张卡在转，其余卡片保持可点 */
+const unarchiveBusyId = ref(null)
+async function onUnarchive(c) {
+  if (unarchiveBusyId.value !== null) return
+  unarchiveBusyId.value = c.id
+  try {
+    await api.setCharacterArchived(c.id, false)
+    // 本地同步：取消归档后该角色会离开「归档管理」进入活跃视图
+    c.archived = 0
+    const inList = chat.characters.find(x => x.id === c.id)
+    if (inList) inList.archived = 0
+    showToast(`「${c.display_name}」已恢复参与活动`, 'success')
+  } catch (err) {
+    showToast(err?.message || '取消归档失败', 'error')
+  } finally {
+    unarchiveBusyId.value = null
+  }
+}
+
+// 当前文件夹范围内的角色（未叠加搜索词）
+// 归档角色只在「归档管理」里出现，此处用 activeCharacters 排除掉（见其声明处的说明）
+const folderScopedCharacters = computed(() => {
+  if (folderFilter.value === 'archived') return archivedCharacters.value
+  const list = activeCharacters.value
+  if (folderFilter.value === 'uncategorized') return list.filter(c => !c.folder_id)
+  if (folderFilter.value === 'all') return list
+  return list.filter(c => c.folder_id === folderFilter.value)
+})
+
+// 实际渲染：文件夹筛选 + 名称搜索，置顶优先、组内按拼音排序
+const visibleCharacters = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  const list = kw
+    ? folderScopedCharacters.value.filter(c => (c.display_name || '').toLowerCase().includes(kw))
+    : folderScopedCharacters.value
+  return [...list].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1
+    if (!a.pinned && b.pinned) return 1
+    return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
+  })
+})
+
+// 标题计数：以**当前筛选范围**为分母（视图已排除归档，用总数当分母会一直显示「11 / 67」）
+const charCountLabel = computed(() => {
+  const scoped = folderScopedCharacters.value.length
+  const shown = visibleCharacters.value.length
+  return shown === scoped ? `${scoped}` : `${shown} / ${scoped}`
+})
+
+// 搜索词在全部角色里有命中，但当前文件夹内没有 —— 提示可以放宽到全部范围
+const canSearchEverywhere = computed(() => {
+  const kw = charSearch.value.trim().toLowerCase()
+  if (!kw || folderFilter.value === 'all') return false
+  return chat.characters.some(c => (c.display_name || '').toLowerCase().includes(kw))
+})
+
+/**
+ * 当前筛选范围里被归档的角色数。
+ *
+ * 用于空状态：某个文件夹的成员可能**全部**是归档的（本机「少女与战车」24 个、「武装JK世界」26 个
+ * 都是这种情况），此时视图是空的，但说「这个文件夹还是空的」并不准确 —— 得告诉用户去「归档管理」。
+ */
+const hiddenArchivedInScope = computed(() => {
+  if (folderFilter.value === 'archived') return 0
+  if (folderFilter.value === 'uncategorized') return archivedCharacters.value.filter(c => !c.folder_id).length
+  if (folderFilter.value === 'all') return archivedCharacters.value.length
+  return archivedCharacters.value.filter(c => c.folder_id === folderFilter.value).length
+})
+
+const emptyTitle = computed(() => {
+  if (charSearch.value.trim()) return `没有找到「${charSearch.value.trim()}」`
+  if (!chat.characters.length) return '还没有角色'
+  if (folderFilter.value === 'archived') return '没有归档角色'
+  if (hiddenArchivedInScope.value > 0) return `这里的角色都已归档（${hiddenArchivedInScope.value} 个）`
+  if (folderFilter.value === 'uncategorized') return '「未分类」里没有角色'
+  return '这个文件夹还是空的'
+})
+const emptyDesc = computed(() => {
+  if (charSearch.value.trim()) {
+    return folderFilter.value === 'all' ? '换个关键词试试。' : '换个关键词，或者切到「全部」看看。'
+  }
+  if (!chat.characters.length) return '点上面的「招募」认识第一位邻居。'
+  if (folderFilter.value === 'archived') return '归档过的角色会集中在这里，方便统一恢复或清理。'
+  // 成员全被归档时，指向「归档管理」而不是让人以为文件夹坏了
+  if (hiddenArchivedInScope.value > 0) return '去「归档管理」可以把它们恢复成参与活动。'
+  if (folderFilter.value === 'uncategorized') return '所有角色都已经归好类了。'
+  return '用角色卡上的文件夹按钮，把角色移进来。'
+})
+
+// ── 新建 / 重命名文件夹 ──
+function openNewFolder() {
+  editingFolder.value = null
+  folderNameInput.value = ''
+  showFolderEditor.value = true
+}
+
+function openRenameFolder(f) {
+  editingFolder.value = f
+  folderNameInput.value = f.name
+  showFolderEditor.value = true
+}
+
+async function submitFolderEditor() {
+  const name = folderNameInput.value.trim()
+  if (!name) return
+  try {
+    if (editingFolder.value) {
+      await folderStore.renameFolder(editingFolder.value.id, name)
+      showToast(`已重命名为「${name}」`, 'success')
+    } else {
+      const created = await folderStore.createFolder(name)
+      showToast(`已创建文件夹「${name}」`, 'success')
+      // 新建后直接切过去，省得再点一次
+      if (created?.id) folderFilter.value = created.id
+    }
+    showFolderEditor.value = false
+  } catch (err) {
+    showToast(err?.message || '操作失败', 'error')
+  }
+}
+
+// ── 删除文件夹（成员回到未分类，不删角色） ──
+async function askDeleteFolder(f) {
+  const ok = await confirmFn({
+    title: '删除文件夹',
+    message: `确定删除「${f.name}」吗？里面的 ${f.count} 个角色会回到「未分类」，角色本身不会被删除。`,
+    okText: '删除',
+    danger: true,
+  })
+  if (!ok) return
+  try {
+    await folderStore.removeFolder(f.id)
+    if (folderFilter.value === f.id) folderFilter.value = 'all'
+    showToast(`已删除文件夹「${f.name}」`, 'success')
+  } catch (err) {
+    showToast(err?.message || '删除失败', 'error')
+  }
+}
+
+// ── 把角色移入 / 移出文件夹 ──
+function openMoveFolder(c) {
+  movingChar.value = c
+  showMoveFolder.value = true
+}
+
+function openNewFolderFromMove() {
+  showMoveFolder.value = false
+  openNewFolder()
+}
+
+async function doMoveToFolder(folderId) {
+  const c = movingChar.value
+  if (!c) return
+  const target = folderId || null
+  if ((c.folder_id || null) === target) {
+    showMoveFolder.value = false
+    return
+  }
+  const prev = c.folder_id || null
+  c.folder_id = target           // 乐观更新：网格与同一引用，立即重排
+  showMoveFolder.value = false
+  try {
+    await folderStore.moveCharacter(c.id, target)
+    showToast(target ? `已移入「${folderName(target)}」` : '已移出到「未分类」', 'success')
+  } catch (err) {
+    c.folder_id = prev
+    showToast(err?.message || '移动失败', 'error')
+  }
+}
+
 const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const confirmFn = inject('confirm')
@@ -823,6 +1423,44 @@ async function savePersona() {
 function cancelEditPersona() {
   editingPersona.value = false
   userPersonaInput.value = userPersona.value
+}
+
+// ── 居住地（人类侧，2026-10-05）──
+//
+// 候选来自世界地图（子区 + 场景两级）。用户选了之后，日程生成会带上
+// 「<昵称> 的住处」，角色写"回家 / 去找你"时就有真实落点，不再含糊写"公寓"。
+// ⚠ 未指定时**不猜**（空串 = 未指定），提示词里那一段整段不出现。
+// ⚠ 本文件是 `<script setup>`（**不是 TS**）—— 不能写 `ref<T>()` / `: T` 这类类型注解。
+const editingHome = ref(false)
+const userHomeInput = ref('')
+const userHomeGroups = ref([])
+
+function startEditHome() {
+  userHomeInput.value = userHome.value || ''
+  editingHome.value = true
+  // 候选清单从日程选项接口取（那里已经按地图整理好了，不另抄地名表）
+  if (!userHomeGroups.value.length) loadHomeOptions()
+}
+
+async function loadHomeOptions() {
+  try {
+    const d = await api.getRegenerateOptions()
+    const groups = []
+    for (const a of d.areas || []) {
+      // 子区本身可住（"住在二维市"），其下场景也可住（"住在旧川里"）
+      const places = [{ name: a.name }, ...(a.places || []).map(p => ({ name: p.name }))]
+      groups.push({ area: a.name, places })
+    }
+    userHomeGroups.value = groups
+  } catch { /* 离线时静默：下拉里就只剩"（未指定）" */ }
+}
+
+async function saveHome() {
+  editingHome.value = false
+  const val = String(userHomeInput.value || '').trim()
+  if (val !== (userHome.value || '')) {
+    await saveUserConfig({ home: val })
+  }
 }
 
 // ═══════════════════════════════════════
@@ -1477,6 +2115,8 @@ onMounted(async () => {
   userAppearanceInput.value = userAppearance.value
   userPersonaInput.value = userPersona.value
   if (chat.characters.length === 0) await chat.loadCharacters()
+  // 文件夹列表（含各组成员数）与角色一起在首屏拉取
+  folderStore.load()
   // 拉一次宝箱状态，驱动入口卡上的「可开启」小圆点
   backpackStore.fetchItems()
   // 拉今天的《邻舍日报》，驱动报纸入口卡的未读红点
@@ -1548,7 +2188,7 @@ onMounted(async () => {
   min-width: 18px; height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -2144,6 +2784,206 @@ onMounted(async () => {
   font-family: inherit;
 }
 /* ── 角色网格 ── */
+/* 工具行：标题 + 批量归档 + 搜索框 */
+.char-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.char-toolbar .section-title { margin-bottom: 0; }
+
+.char-toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+/* 批量归档开关 */
+.char-archive-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.char-archive-all-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.char-archive-all-count {
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+
+.char-search {
+  position: relative;
+  width: 220px;
+  max-width: 46vw;
+  flex-shrink: 0;
+}
+.char-search-input { width: 100%; }
+.char-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--dur-fast) ease;
+}
+.char-search-clear:hover { background: var(--accent-solid); color: #fff; }
+
+/* ── 文件夹筛选栏 ── */
+.folder-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.folder-chip {
+  user-select: none;
+  max-width: 220px;
+  /* 提示可拖动；实际拖拽用 HTML5 draggable，不依赖光标样式 */
+  cursor: grab;
+}
+.folder-chip:active { cursor: grabbing; }
+/* 正在被拖走的那一枚：淡出让位 */
+.folder-chip.is-dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+/* 拖到谁头上，谁高亮成"将插到这里" */
+.folder-chip.is-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+}
+/* 「归档管理」入口：与文件夹 chip 同排，但用低调的虚线边提示它是另一种视图。
+   它不参与拖拽排序，所以要覆盖掉 .folder-chip 的 grab 光标。 */
+.folder-chip-archived {
+  border-style: dashed;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.folder-chip-archived:active { cursor: pointer; }
+.folder-chip-archived.active {
+  border-style: solid;
+  color: var(--on-accent, #fff);
+}
+.folder-chip-icon { flex-shrink: 0; opacity: 0.8; }
+.folder-chip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-chip-count {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-secondary);
+}
+.folder-chip.active .folder-chip-count {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent);
+}
+.folder-chip-op {
+  font-size: 11px;
+  line-height: 13px;
+}
+.folder-chip-new {
+  border-style: dashed;
+}
+.folder-chip-new:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 空状态（文件夹为空 / 搜索无结果），皮肤走全局 .empty */
+.char-empty {
+  margin-top: 8px;
+}
+
+/* ── 文件夹选择弹窗 / 编辑弹窗 ── */
+.folder-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.folder-editor-hint,
+.folder-pick-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.folder-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.folder-pick-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-bright);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--dur-fast) ease;
+}
+.folder-pick-item:hover {
+  border-color: var(--accent-light);
+  color: var(--accent);
+}
+.folder-pick-item.active {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.10);
+  color: var(--accent);
+  font-weight: 600;
+}
+.folder-pick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-pick-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.folder-pick-item.active .folder-pick-count { color: var(--accent); }
+
 .section-title {
   font-size: 15px; font-weight: 600; color: var(--text-secondary);
   margin-bottom: 14px;
@@ -2225,6 +3065,40 @@ onMounted(async () => {
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+/* ── 左上角文件夹入口（与置顶按钮同一列，常驻半透明） ── */
+.char-folder-btn {
+  position: absolute;
+  top: 36px;
+  left: 6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+  opacity: 0.4;
+}
+.char-folder-btn:hover {
+  opacity: 1;
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--accent);
+}
+.char-folder-btn.has-folder {
+  opacity: 0.8;
+  color: var(--accent);
+}
+/* 触屏没有 hover，常驻可见 */
+@media (hover: none) {
+  .char-folder-btn { opacity: 0.7; }
+}
+
 .char-card:hover {
   background: rgba(255, 255, 255, 0.45);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
@@ -2253,6 +3127,36 @@ onMounted(async () => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* ── 已归档：整卡压暗 + 角标，但仍可点开详情 ── */
+.char-card.archived { opacity: 0.55; }
+.char-card.archived:hover { opacity: 0.9; }
+.char-card-archived {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  user-select: none;
+}
+
+/* 「取消归档」：只在归档管理视图出现，替代/补位于「已归档」角标下方 */
+.char-unarchive-btn {
+  margin-top: 2px;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-bright);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.char-unarchive-btn:hover { border-color: var(--accent); color: var(--accent); }
+.char-unarchive-btn.is-busy { opacity: 0.6; pointer-events: none; }
 
 .char-card-foot {
   display: flex;

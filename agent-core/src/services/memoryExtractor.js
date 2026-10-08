@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { hybridSearch } from './memorySearch.js';
 import { applyMemoryActions, getCheckpoint, setCheckpoint } from './memory/memoryRepository.js';
+import { isMemoryEvidenceGateEnabled, isolateUnverifiedActions } from './memory/memoryEvidenceGate.js';
 import { isMemoryV3Enabled } from './memory/memoryConfig.js';
 import { buildAnalysisUserContent, buildChatLogLines, buildSharedAnalysisSystemPrompt, wrapChatLogBlock } from './chatLogPrompt.js';
 
@@ -98,7 +99,28 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
       });
       actions = parseMemoryActions(strict);
     }
-    const saved = applyMemoryActions({ conversationId, sourceRawStartId: startId, sourceRawEndId: endId, sourceMessageId, actions, eventTime });
+    // ★★ T1 记忆证据闸门（2026-10-07）：写入前逐字复算，拒收编造的条目。
+    //
+    // 为什么放在这里（而不是 applyMemoryActions 内部）：本函数手里正好有
+    // **本批次的消息窗口**（`messages`）—— 复算必须限定在这个范围内，
+    // 否则模型可以引用一条**很久以前**的消息来"证明"当下的判断，那不是我们想要的证据。
+    // ⚠ 默认关闭（FEATURE_MEMORY_EVIDENCE_GATE）：关闭时一行都不进，行为与上线前一致。
+    if (isMemoryEvidenceGateEnabled()) {
+      const window = messages.map(m => ({ id: m.id, content: m.content }));
+      const { accepted, isolated } = isolateUnverifiedActions(actions, window);
+      if (isolated.length) {
+        // ★ 不静默：被拒条数与原因都要留痕（项目红线 0/11 —— "看起来成功其实没写"是最大缺陷源）
+        const byReason = {};
+        for (const it of isolated) byReason[it.reason] = (byReason[it.reason] || 0) + 1;
+        console.warn(`[memoryEvidenceGate] 拒收 ${isolated.length}/${actions.length} 条记忆（证据不成立）：${JSON.stringify(byReason)}`);
+      }
+      actions = accepted;
+    }
+    const saved = applyMemoryActions({
+      conversationId, sourceRawStartId: startId, sourceRawEndId: endId, sourceMessageId, actions, eventTime,
+      // 证据随动作带下去由仓储写入（闸门关闭时恒为 undefined → 落 NULL）
+      evidenceOf: a => a?._evidence || null,
+    });
     setCheckpoint(conversationId, endId, 'idle', null);
     console.log(`[memoryExtractor] curated ${saved.length} memories for ${conversationId}, raw ${startId}-${endId}`);
     return saved;
@@ -118,6 +140,17 @@ export function buildMemoryCurationPrompt({ transcript, related = [], timeRange 
   const actionBudget = compact
     ? `- 上一次输出超出长度上限被截断：这次最多输出 ${CURATION_COMPACT_ACTIONS} 条，字段从简（reasoning 一句、episodicNote/semanticNote 各一句、entities 最多 2 个、triple 可省略）`
     : `- 最多输出 ${maxActions} 条：按重要性排序只留最重要的 ${maxActions} 条，同一件事不要拆成多条`;
+
+  // ★★ T1 记忆证据闸门（2026-10-07）：开启时**强制**每条附一段逐字引文。
+  //
+  // ⚠ 只在闸门开启时才加进 prompt —— 关闭时 prompt 与上线前**逐字节一致**，
+  //   从而保住既有的 LLM 前缀缓存（红线 4「默认不改行为」+ 缓存分层设计）。
+  // ⚠ 措辞必须强调「逐字照抄」，否则模型会缩写、改标点，导致复算必然失败。
+  //   同时明确"找不到原句就别写这条" —— 这是拒收的**前置防线**，比事后丢弃体验更好。
+  const evidenceRule = isMemoryEvidenceGateEnabled()
+    ? `\n\n【必须附证据】每条 memory 都要多给一个 evidenceText 字段：从 <chat_log> 里**逐字照抄**一句最能支撑这条判断的原话（连同原文标点，不要改写、不要省略、不要拼接）。若凑不出这样一句原话，说明这条判断缺乏依据 —— **宁可少写一条，也不要编造**。
+- 同一句话在记录里出现多次时，用 evidenceCount 注明你想引用的是第几次（从 1 起，默认 1）`
+    : '';
   const common = `你是聊天长期记忆整理器。只保存未来对话仍有价值、可独立理解的信息，不保存密码、密钥、一次性请求、泛化寒暄、角色固有设定或生图提示词。
 
 记忆类型：
@@ -157,7 +190,7 @@ ${actionBudget}`;
   // 顺序即缓存：<chat_log> 排在最前（与摘要共用同一段记录），指令随后，时间窗口/旧记忆这些变量后置
   const timeBlock = timeRange ? `\n<window_time>\n${timeRange}\n</window_time>\n` : '\n';
   const chatLogBlock = wrapChatLogBlock(transcript);
-  const taskText = `${common}\n\n${v3 ? v3Format : v2Format}\n\n只返回严格 JSON：{"memoryActions":[{"action":"create|update|merge","sourceMemoryIds":[],"memory":{...}}]}\n${timeBlock}<related_memories>\n${existing}\n</related_memories>`;
+  const taskText = `${common}\n\n${v3 ? v3Format : v2Format}\n\n只返回严格 JSON：{"memoryActions":[{"action":"create|update|merge","sourceMemoryIds":[],"memory":{...}}]}\n${timeBlock}<related_memories>\n${existing}\n</related_memories>${evidenceRule}`;
   return buildAnalysisUserContent(chatLogBlock, taskText);
 }
 

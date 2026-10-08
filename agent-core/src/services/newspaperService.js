@@ -17,7 +17,8 @@ import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/ind
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
-import { saveBase64Image } from './imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
+
 import { config } from '../config.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { getLightNoteWithWeather } from './timeLight.js';
@@ -104,6 +105,108 @@ export function getNewspaperByDate(dateKey) {
   return row ? mapPaperRowForFrontend(row) : null;
 }
 
+// ── 删除 / 清除往期 ───────────────────────────────────────────
+
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 收集某一期的全部配图 URL（世界异闻 / 人物特稿 / 各条新闻，共三处） */
+function collectEditionImageUrls(row) {
+  const urls = [];
+  const push = (u) => { if (typeof u === 'string' && u.startsWith('/images/')) urls.push(u); };
+  push(safeParseJson(row.character_event_json)?.image);
+  for (const item of (safeParseJson(row.items_json) || [])) push(item?.image);
+  push(safeParseJson(row.world_state_json)?.image);
+  return [...new Set(urls)];
+}
+
+/**
+ * 删除磁盘上属于这一期的配图。
+ *
+ * 保守起见先确认该图**没有被其他任何一期引用**再删 —— 正常情况每期的图都是独立生成的
+ * （文件名带时间戳），但万一有复用，删掉会让别期变成破图。
+ */
+function deleteEditionImages(db, urls, keepId) {
+  if (!urls.length) return 0;
+  const others = db.prepare('SELECT items_json, character_event_json, world_state_json FROM town_newspapers WHERE id != ?').all(keepId);
+  const inUse = new Set();
+  for (const r of others) {
+    pushInto(inUse, safeParseJson(r.character_event_json)?.image);
+    for (const item of (safeParseJson(r.items_json) || [])) pushInto(inUse, item?.image);
+    pushInto(inUse, safeParseJson(r.world_state_json)?.image);
+  }
+  let removed = 0;
+  for (const u of urls) {
+    if (inUse.has(u)) continue;
+    try { if (deleteImageFileByUrl(u)) removed++; } catch { /* 单张失败不阻断删期 */ }
+  }
+  return removed;
+
+  function pushInto(set, v) { if (typeof v === 'string' && v) set.add(v); }
+}
+
+/**
+ * 删除指定日期的那一期（连同它的配图）。
+ *
+ * 删掉今天的报纸不会自动重印 —— 想再要可在弹窗里点「催一下印刷机」走 POST /generate。
+ * 特稿主角当天的吐槽朋友圈排期（complaint_after）随行一起消失，这是删除的预期语义。
+ */
+export function deleteNewspaperEdition(dateKey) {
+  const key = String(dateKey || '');
+  if (!DATE_KEY_RE.test(key)) return { ok: false, error: '日期格式应为 YYYY-MM-DD' };
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM town_newspapers WHERE publish_date = ?').get(key);
+  if (!row) return { ok: false, error: '找不到这一期报纸' };
+
+  const urls = collectEditionImageUrls(row);
+  db.prepare('DELETE FROM town_newspapers WHERE id = ?').run(row.id);
+  const removedImages = deleteEditionImages(db, urls, row.id);
+  console.log(`[newspaper] 删除第 ${row.edition} 期（${key}），清理配图 ${removedImages}/${urls.length} 张`);
+  return { ok: true, date: key, edition: row.edition, removedImages, imageCount: urls.length };
+}
+
+/**
+ * 批量清除。
+ * @param {{ keepToday?: boolean, beforeDate?: string|null }} opts
+ *   - keepToday=true（默认）：只清往期，保留今天
+ *   - beforeDate='YYYY-MM-DD'：只清该日期之前（不含）的期
+ *   两者可叠加。想「清空全部」传 keepToday=false。
+ */
+export function deleteNewspaperEditions({ keepToday = true, beforeDate = null } = {}) {
+  const db = getDb();
+  const today = getLocalDateKey();
+  const where = [];
+  const params = [];
+  if (keepToday) { where.push('publish_date != ?'); params.push(today); }
+  if (beforeDate) {
+    if (!DATE_KEY_RE.test(String(beforeDate))) return { ok: false, error: 'beforeDate 格式应为 YYYY-MM-DD' };
+    where.push('publish_date < ?'); params.push(beforeDate);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const rows = db.prepare(`SELECT * FROM town_newspapers ${whereSql} ORDER BY publish_date DESC`).all(...params);
+  if (!rows.length) return { ok: true, deleted: 0, removedImages: 0, dates: [] };
+
+  // 先把所有要删的期从库里去掉，再统一清图 —— 这样共用的图不会被误判成「仍被引用」
+  const ids = rows.map(r => r.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const urls = [...new Set(rows.flatMap(collectEditionImageUrls))];
+  db.prepare(`DELETE FROM town_newspapers WHERE id IN (${placeholders})`).run(...ids);
+
+  const remaining = new Set();
+  for (const r of db.prepare('SELECT items_json, character_event_json, world_state_json FROM town_newspapers').all()) {
+    const add = (v) => { if (typeof v === 'string' && v) remaining.add(v); };
+    add(safeParseJson(r.character_event_json)?.image);
+    for (const item of (safeParseJson(r.items_json) || [])) add(item?.image);
+    add(safeParseJson(r.world_state_json)?.image);
+  }
+  let removedImages = 0;
+  for (const u of urls) {
+    if (remaining.has(u)) continue;
+    try { if (deleteImageFileByUrl(u)) removedImages++; } catch { /* 忽略单张失败 */ }
+  }
+  console.log(`[newspaper] 清除 ${rows.length} 期，清理配图 ${removedImages}/${urls.length} 张`);
+  return { ok: true, deleted: rows.length, removedImages, dates: rows.map(r => r.publish_date) };
+}
+
 /**
  * 读者手动消除今天的世界影响：置 world_dismissed=1，当天不再注入任何提示词。
  * 报纸版面保留异闻文本（已印出的历史），只是「影响」被驱散；可再次开启。
@@ -183,13 +286,15 @@ function maybeRefillTodayImages(row) {
 
 /** 抽当天特稿主角（同步查询；导出供回归测试——此函数曾被误写成 async 导致调用处拿到 Promise） */
 export function pickFeaturedCharacter(db) {
-  // 需要同时具备聊天（事件注入）与朋友圈（吐槽帖）两条链路，两边都禁用的角色不抽。
+  // 需要同时具备聊天（事件注入）与朋友圈（吐槽帖）两条链路，两边都禁用的角色不抽；
+  // 归档角色同样排除（不参与任何主动行为）。
   // 注意必须是同步函数：曾误写成 async 而调用处没 await，featured 变成 Promise，
   // id/display_name 全变 undefined，报纸主角链接与提示词一起失效。
   return db.prepare(`
     SELECT id, display_name, avatar_path, short_prompt, base_prompt, loras
     FROM characters
     WHERE events_disabled = 0 AND (moments_disabled IS NULL OR moments_disabled = 0)
+      AND COALESCE(archived, 0) = 0
     ORDER BY RANDOM() LIMIT 1
   `).get() || null;
 }

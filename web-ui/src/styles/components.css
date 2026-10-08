@@ -7,7 +7,7 @@
 /* ══ 按钮家族 ══ */
 /* 主按钮：游戏贴纸——饱和实底 + 底部厚度 + 顶部件高光，按下下沉 */
 .btn-primary {
-  background: var(--accent); color: #fff;
+  background: var(--accent-solid); color: #fff;
   box-shadow: 0 3px 0 var(--btn-lip);
   position: relative;
 }
@@ -47,7 +47,7 @@ button.btn-sm.btn-primary:active:not(:disabled) { transform: translateY(2px); bo
 .detail-rel-btn { display: flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
 .detail-rel-btn.subtle { background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.15); color: var(--accent); font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 10px; }
 .detail-rel-btn.subtle:hover { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.3); color: var(--accent-hover); }
-.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
+.detail-rel-btn.cta { padding: 10px 22px; font-size: 14px; background: var(--accent-solid); color: #fff; box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25); }
 .detail-rel-btn.cta:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35); transform: translateY(-1px); }
 @media (max-width: 767px) {
   .detail-rel-btn { padding: 5px 10px; font-size: 11px; }
@@ -156,7 +156,7 @@ button.btn-sm.btn-primary:active:not(:disabled) { transform: translateY(2px); bo
   background: rgba(var(--accent-rgb), 0.10); color: var(--accent);
   cursor: pointer;
 }
-.chip-x:hover { background: var(--accent); color: #fff; }
+.chip-x:hover { background: var(--accent-solid); color: #fff; }
 
 /* ══ 头像 ══ */
 .avatar {

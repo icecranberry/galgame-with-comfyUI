@@ -11,14 +11,17 @@ const messages = Array.from({ length: 80 }, (_, i) => ({
 function setup(t, lastSeenAt) {
   setActivePinia(createPinia())
   const group = { id: 1, last_seen_at: lastSeenAt, members: [], unread: 79 }
+  // ⚠ mock 必须同时给出 `text()`：request() 用 res.text() 读原始体后自行 JSON.parse。
+  //   旧 mock 只有 json() → `res.text is not a function`，store 拿不到数据。
+  const res = body => ({ ok: true, status: 200, text: async () => JSON.stringify(body), json: async () => body })
   t.mock.method(globalThis, 'fetch', async url => {
-    if (url === '/api/groups') return { ok: true, json: async () => ({ groups: [{ ...group }] }) }
+    if (url === '/api/groups') return res({ groups: [{ ...group }] })
     if (url === '/api/groups/1/messages') {
-      return { ok: true, json: async () => ({ group: { ...group }, messages }) }
+      return res({ group: { ...group }, messages })
     }
     assert.equal(url, '/api/groups/1/seen')
     group.last_seen_at = at(100)
-    return { ok: true, json: async () => ({ ok: true }) }
+    return res({ ok: true })
   })
   return useGroupsStore()
 }

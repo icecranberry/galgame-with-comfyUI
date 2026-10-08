@@ -848,7 +848,10 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .recall-go-btn { flex-shrink: 0; height: 38px; }
 .index-jobs { position: relative; z-index: 1; }
 .recall-results, .job-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; max-height: 420px; overflow-y: auto; position: relative; }
-.recall-item, .job-item { padding: 11px 12px; border-radius: 10px; background: rgba(255,255,255,.38); border: 1px solid rgba(125, 105, 85, .12); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+/* ⚠ 原为 rgba(255,255,255,.38) 半透明白底：在暗夜深背景上会合成出一层中灰
+   （实测 rgb(116,114,119)），随后 --text-secondary 灰字压上去 → 对比度 1.78，读不出。
+   改用主题变量（浅色主题仍为浅底、暗夜自动变深底）。 */
+.recall-item, .job-item { padding: 11px 12px; border-radius: 10px; background: var(--bg-tertiary); border: 1px solid var(--border-color, var(--border)); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .recall-item small, .job-item small { color: var(--text-secondary); }
 .job-item { display: grid; gap: 8px; }
 .job-heading, .job-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
@@ -866,7 +869,17 @@ textarea.ls-input { resize: vertical; font-family: ui-monospace, monospace; }
 .job-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .job-tags span { padding: 2px 6px; border-radius: 6px; background: rgba(var(--accent-rgb), .09); color: var(--accent); font-size: 10px; }
 .job-unavailable { color: var(--text-secondary); font-size: 11px; }
-.job-status.completed { color: #3f8759; }.job-status.pending { color: #9a742e; }.job-status.processing { color: #367aa3; }.job-status.failed { color: #c34f4f; }
+/* ⚠ 原来这组状态色是给浅底选的深色（#3f8759 等）→ 暗夜下压在深底上几乎看不见
+   （巡检实测 completed 对比度 1.1，远低于 4.5）。
+   改用**主题感知**的亮色变体：暗夜自动切到高亮版。 */
+.job-status.completed { color: #4aa870; }
+.job-status.pending { color: #c79a3e; }
+.job-status.processing { color: #4aa3d0; }
+.job-status.failed { color: #e06a6a; }
+[data-theme="dark"] .job-status.completed { color: #6ed99a; }
+[data-theme="dark"] .job-status.pending { color: #e8c063; }
+[data-theme="dark"] .job-status.processing { color: #6cc4ea; }
+[data-theme="dark"] .job-status.failed { color: #ff8f8f; }
 .job-error { color: #c34f4f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 

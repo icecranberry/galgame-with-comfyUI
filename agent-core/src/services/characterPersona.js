@@ -17,9 +17,11 @@
  */
 
 import { getActiveOutfits } from './outfitService.js';
+import { getSceneOutfitForNow, asPersonaOutfits } from './outfitScene.js';
+import { buildBodySizeLine } from './characterBuild.js';
 import { config } from '../config.js';
 
-const APPEARANCE_HEADING_RE = /##\s*你的外观/;
+export const APPEARANCE_HEADING_RE = /##\s*你的外观/;
 
 // 「你」→ 第三人称名时跳过非人称代词的复合词：
 //   迷｜你（迷你）、你｜们（你们）、你｜我（你我/你追我赶）、你｜好（你好）、你｜死（你死我活）。
@@ -212,7 +214,13 @@ function resolveOutfits(character, outfits) {
     if (Array.isArray(outfits)) return { limited: outfits, exclusive: null };
     return outfits;
   }
-  return getActiveOutfits(character?.id);
+  const active = getActiveOutfits(character?.id);
+  // 道具换装（变身卡/限时服饰）或当天报纸的世界观服饰生效中 → 直接用它。
+  // 「用户主动用了换装道具」不该被自动的场景服装盖掉。
+  if (active.limited.length > 0 || active.exclusive) return active;
+  // 否则按日程决定此刻穿哪套场景服装（工装/私服/居家/睡衣）
+  const sceneBlock = asPersonaOutfits(getSceneOutfitForNow(character?.id));
+  return sceneBlock || active;
 }
 
 /**
@@ -266,8 +274,11 @@ export function buildCharacterPersona(character, opts = {}) {
 }
 
 /**
- * 生图交叉参考信息（私聊 needImage / 画风测试共用）：身份行 + 外观段（含外观注入），
+ * 生图交叉参考信息（私聊 needImage / 画风测试共用）：身份行 + 体型行 + 外观段（含外观注入），
  * 「你」→角色名替换。
+ *
+ * 体型行的作用：多人同屏时，身高本来埋在中文外观段里、最容易被翻译丢掉，
+ * 单独抽一条结构化行（含英文 tag）显著提高它进入英文提示词的概率。卡里读不出体型时不加。
  * @param {object} char - characters 表行（至少含 base_prompt, display_name）
  * @param {object} [opts] - 同 buildCharacterPersona 的 opts.outfits / opts.variant 无关字段
  * @returns {string}
@@ -291,6 +302,9 @@ export function buildImageCrossRefInfo(char, opts = {}) {
     const identity = (cut >= 0 ? firstLine.slice(0, cut) : firstLine).replace(/^你是/, '').replace(/。$/, '').trim();
     if (identity) parts.push(identity);
   }
+
+  const bodyLine = buildBodySizeLine(char);
+  if (bodyLine) parts.push(bodyLine);
 
   const appearance = extractAppearanceSection(base);
   const injected = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(resolveOutfits(char, opts.outfits)));

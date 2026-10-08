@@ -4,36 +4,24 @@ import cors from 'cors';
 import path from 'path';
 import { readFileSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { config, autoDetectWorkflowMode } from './src/config.js';
+import net from 'node:net';
+import { config, autoDetectWorkflowMode, activateLlmProfile, getActiveProfileId } from './src/config.js';
 import { getDb, closeDb } from './src/db/index.js';
+import {
+  loadFeatureMigrations,
+} from './src/db/migrations/index.js';
+import {
+  runRegisteredMigrations,
+  listRegisteredMigrations,
+  isRegistryLoaded,
+} from './src/db/migrationRegistry.js';
 import { errorHandler } from './src/middleware/errorHandler.js';
 import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js';
 import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
-import chatRoutes from './src/routes/chat.js';
-import memoryRoutes from './src/routes/memory.js';
-import imagesRoutes from './src/routes/images.js';
-import charactersRoutes from './src/routes/characters.js';
-import emojiRoutes from './src/routes/emoji.js';
-import configRoutes from './src/routes/config.js';
-import momentsRoutes from './src/routes/moments.js';
-import relationshipsRoutes from './src/routes/relationships.js';
-import userRelationshipsRoutes from './src/routes/userRelationships.js';
-import portraitsRoutes from './src/routes/portraits.js';
-import notificationsRoutes from './src/routes/notifications.js';
-import eventsRoutes from './src/routes/events.js';
-import streamRoutes from './src/routes/stream.js';
-import expressionStandingRoutes from './src/routes/expressionStandings.js';
-import scheduleRoutes from './src/routes/schedule.js';
-import workflowsRoutes from './src/routes/workflows.js';
-import mailboxRoutes from './src/routes/mailbox.js';
-import groupsRoutes from './src/routes/groups.js';
-import libraryRoutes from './src/routes/library.js';
-import itemsRoutes from './src/routes/items.js';
-import newspaperRoutes from './src/routes/newspaper.js';
-import diaryRoutes from './src/routes/diary.js';
-import townRoutes from './src/routes/town.js';
-import characterReactionsRoutes from './src/routes/characterReactions.js';
+// API 路由统一由 src/routes/_autoMount.js 自动挂载（架构加固 P2）。
+// 存量挂载点迁移到 LEGACY_MOUNTS 表，新增路由走约定式 —— 都不需要在本文件出现。
+import { autoMountRoutes } from './src/routes/_autoMount.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
@@ -113,33 +101,15 @@ app.use('/avatars', express.static(path.join(DATA_DIR, 'avatars'), { maxAge: '30
 // 小镇像素素材（独立于 data/images，不进图库/压缩扫描；不带强缓存，素材重生成后刷新即生效）
 app.use('/town-assets', express.static('data/town/assets'));
 
-// API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
-app.use('/api', wrapRouterAsync(expressionStandingRoutes));
-app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
-app.use('/api/memory', wrapRouterAsync(memoryRoutes));
-app.use('/api/images', wrapRouterAsync(imagesRoutes));
-app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
-app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
-app.use('/api/config', wrapRouterAsync(configRoutes));
-app.use('/api/moments', wrapRouterAsync(momentsRoutes));
-app.use('/api/relationships', wrapRouterAsync(relationshipsRoutes));
-app.use('/api/user-relationships', wrapRouterAsync(userRelationshipsRoutes));
-app.use('/api/portraits', wrapRouterAsync(portraitsRoutes));
-app.use('/api/notifications', wrapRouterAsync(notificationsRoutes));
-app.use('/api/events', wrapRouterAsync(eventsRoutes));
-app.use('/api/stream', wrapRouterAsync(streamRoutes));
-app.use('/api/schedule', wrapRouterAsync(scheduleRoutes));
-app.use('/api/workflows', wrapRouterAsync(workflowsRoutes));
-app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
-app.use('/api/groups', wrapRouterAsync(groupsRoutes));
-app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
-app.use('/api/items', wrapRouterAsync(itemsRoutes));
-app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
-app.use('/api/diaries', wrapRouterAsync(diaryRoutes));         // /api/diaries/:id 角色日记（后台生成 + SSE）
-app.use('/api/town', wrapRouterAsync(townRoutes));
-// 角色操作反馈：/api/character-reactions/instant 低概率即时反应（额度 + 幂等在后端）
-app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));
-
+// ── API 路由：统一走自动挂载（架构加固 P2）──────────────────────
+//   · 存量挂载点逐字保留在 LEGACY_MOUNTS 里，行为与改造前完全一致；
+//   · 新路由按约定式自动登记：放 src/routes/<名字>.js，挂载点 = /api/<kebab 文件名>；
+//     要自定义挂载点就在该文件里 `export const mount = '/api/xxx'`；
+//   · 挂载后模块内部会复核"声明表 vs app 实际挂载面"，不一致直接抛，防静默漏挂。
+// 顺序敏感的挂载点（/api/characters/emoji 必须先于 /api/characters）由表内行序保证，勿重排。
+const routeMount = await autoMountRoutes(app, { wrapRouterAsync });
+console.log(`[routes] 已挂载 ${routeMount.legacy.length} 个存量路由`
+  + (routeMount.convention.length ? ` + ${routeMount.convention.length} 个约定式路由` : ''));
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 
 // 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
@@ -177,6 +147,38 @@ console.log('============================================');
 // 初始化数据库
 getDb();
 console.log('[db] SQLite initialized');
+
+// ── 可插拔迁移（架构加固 P1）──────────────────────────────
+// 新功能的建表/加列走 src/db/migrations/*.migration.js，不再改 db/index.js。
+// 三条不可回退的约定：
+//   · 单条迁移失败**不阻断启动**（留痕 + 下次重试），由 registry 内部隔离；
+//   · 迁移为空**不能当成"没迁移"**——若清单没加载成功要显式喊出来（红线 0）；
+//   · 必须在 getDb() 之后（台账表要建在真库上）。
+try {
+  await loadFeatureMigrations();
+  if (!isRegistryLoaded()) {
+    console.warn('[migration] ⚠ 迁移清单未加载（为什么没加载？别当成本轮没有迁移）');
+  }
+  const reg = runRegisteredMigrations(getDb());
+  if (reg.applied.length) console.log(`[migration] 本轮应用 ${reg.applied.length} 个新迁移`);
+  else if (listRegisteredMigrations().length === 0) console.log('[migration] 插件式迁移清单为空（正常：存量迁移仍在 db/index.js）');
+} catch (err) {
+  // 机制本身坏了也不许拖垮启动（迁移只是数据修补，不是服务可用性的前提）
+  console.error('[migration] 迁移机制异常（不阻断启动）:', err?.message || err);
+}
+
+// 恢复激活的 LLM profile 到内存 config。
+// 不做这一步的话，config.llm 会一直停在 .env 的值（LLM_API_KEY），而
+// syncActiveLlmProfile() 会在每次保存设置时把 config.llm.apiKey 写回 profile ——
+// 于是「用户为某个 profile 单独设的 key」会被 .env 里的旧值悄悄覆盖掉。
+{
+  const activeId = getActiveProfileId();
+  if (activeId) {
+    const r = activateLlmProfile(activeId);
+    if (r?.ok) console.log(`[config] restored active LLM profile: ${activeId}`);
+    else console.log(`[config] active LLM profile not found: ${activeId}`);
+  }
+}
 
 // 启动自动压缩：清理任务删除大量行后，SQLite 只把页还回内部空闲列表，文件对操作系统的
 // 占用不变。空闲页占比超阈值时在监听端口前做一次 VACUUM（阻塞启动数秒到数分钟，一次性
@@ -221,6 +223,47 @@ function compactDatabaseIfFragmented() {
     console.log(`[db] VACUUM 完成（${Math.round((Date.now() - t0) / 1000)}s）：${(sizeBefore / 1073741824).toFixed(2)} GB → ${(sizeAfter / 1073741824).toFixed(2)} GB`);
   } catch (err) {
     console.warn('[db] 自动压缩跳过（不影响启动）:', err?.message || err);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ★ 单实例守卫 —— 必须放在**任何调度器启动之前**
+//
+// 为什么需要：Node 在 Windows 上默认给监听套接字带 SO_REUSEADDR，**多个进程可以「同时绑定」
+// 同一个端口且不报 EADDRINUSE**（app.listen 因此不会进 error 分支，进程也不会退出）。
+// 后果是：启动器每次重启若没清干净上一个 node 子进程，旧进程就会变成一个
+// 「绑着端口却收不到请求」的哑进程 —— 但它启动时挂上的所有调度器（朋友圈发帖 / 日程特殊
+// 朋友圈 / 主动对话 / 奇遇 / 立绘…）照常在后台跑，反复写库并持续向 ComfyUI 派单。
+//
+// 实测（2026-10-04）：积压到 9 个 app.js 实例，其中 5 个同一时刻启动 → 每 5 分钟在同一秒
+// 插入 5 条朋友圈、每条 1~3 张配图，ComfyUI 被长期占满，用户手动生图（火花立绘）根本排不上队；
+// 而且用户把「朋友圈发帖频率」调成 0（关闭）也无效 —— 那些旧实例的 config 是启动时的内存快照，
+// 设置页改的是 DB + 当前进程内存，旧实例永远学不到新值。
+//
+// 守卫方式：listen 之前先探一次端口，有人应答就说明已有实例在服务，本进程直接退出。
+// 之所以要探两次间隔 1.5s：启动器「先杀旧进程再拉起」时旧进程可能还没释放端口，
+// 单次探测会误判、把新实例也挡掉，导致服务彻底起不来。
+// ═══════════════════════════════════════════════════════════
+async function portIsServing(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host: '127.0.0.1' });
+    const done = (v) => { try { sock.destroy(); } catch { /* 忽略 */ } resolve(v); };
+    sock.setTimeout(1200);
+    sock.once('connect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error', () => done(false));
+  });
+}
+
+if (await portIsServing(config.port)) {
+  await new Promise(r => setTimeout(r, 1500));
+  if (await portIsServing(config.port)) {
+    console.error('============================================');
+    console.error(`[agent-core] 端口 ${config.port} 已有实例在服务 —— 本进程退出。`);
+    console.error('  目的是避免重复实例各自跑调度器：会重复发朋友圈 / 跑日程 / 向 ComfyUI 重复派单。');
+    console.error('  若你确认想重启服务，请先在启动器里「停止」，等端口释放后再「启动」。');
+    console.error('============================================');
+    process.exit(0);
   }
 }
 

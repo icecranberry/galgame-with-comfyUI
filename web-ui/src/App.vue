@@ -5,7 +5,7 @@
     <span class="banner-text">尚未配置 API Key，请前往设置页面填写 DeepSeek（或其他兼容）API Key</span>
     <router-link to="/settings" class="banner-link">前往设置 →</router-link>
   </div>
-  <div class="app-layout" :class="{ 'is-mobile': isMobile }">
+  <div class="app-layout" :class="{ 'is-mobile': isMobile, 'sidebar-collapsed': !isMobile && sidebarCollapsed }">
     <!-- 移动端遮罩层：Sidebar 拉出时覆盖聊天区域 -->
     <Transition name="scrim-fade">
       <div v-if="isMobile && mobileSidebarOpen" class="mobile-scrim" @click="closeMobileSidebar"></div>
@@ -14,8 +14,26 @@
     <Sidebar
       :is-mobile="isMobile"
       :mobile-open="mobileSidebarOpen"
+      :collapsed="sidebarCollapsed"
       @char-selected="closeMobileSidebar"
     />
+    <!-- 桌面端：贴侧栏右缘的收纳手柄，点一下把侧栏向左收起（移动端用抽屉，不显示） -->
+    <div
+      v-if="!isMobile"
+      class="sidebar-handle"
+      role="button"
+      tabindex="0"
+      :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+      :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+      :aria-expanded="!sidebarCollapsed"
+      @click="toggleSidebar"
+      @keydown.enter.prevent="toggleSidebar"
+      @keydown.space.prevent="toggleSidebar"
+    >
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="15,6 9,12 15,18" />
+      </svg>
+    </div>
     <div class="page-host">
       <router-view v-slot="{ Component }">
         <Transition name="page">
@@ -180,6 +198,15 @@ provide('showChangelog', showChangelog)
 // ══════════════════════════════════════════════════
 const MOBILE_MAX = 767
 const isMobile = ref(false)
+// 桌面端侧边栏收纳（移动端走抽屉，这套不参与）
+const SIDEBAR_COLLAPSED_KEY = 'linshe.sidebar.collapsed'
+const sidebarCollapsed = ref((() => {
+  try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1' } catch { return false }
+})())
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch {}
+}
 const mobileSidebarOpen = ref(false)
 
 function checkMobile() {
@@ -304,7 +331,39 @@ onUnmounted(() => {
 </script>
 
 <style>
-.app-layout { display: flex; flex: 1; min-height: 0; position: relative; z-index: 1; }
+.app-layout {
+  display: flex; flex: 1; min-height: 0; position: relative; z-index: 1;
+  /* 侧栏宽度由这个变量驱动：折叠时置 0，侧栏与收纳手柄一起动。
+     --nav-width 是左侧图标栏（NavBar）宽度，手柄定位要把它算进去。 */
+  --sidebar-width: 300px;
+  --nav-width: 75px;
+}
+.app-layout.sidebar-collapsed { --sidebar-width: 0px; }
+
+/* ── 侧边栏收纳手柄（桌面端，贴在侧栏右缘） ── */
+.sidebar-handle {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--nav-width) + var(--sidebar-width));
+  transform: translateY(-50%);
+  width: 15px; height: 58px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 0 9px 9px 0;
+  border: 1px solid var(--glass-border);
+  border-left: none;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 30;
+  user-select: none;
+  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s ease, background 0.15s ease;
+}
+.sidebar-handle:hover { color: var(--accent); }
+.sidebar-handle svg { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+/* 折叠后箭头翻向另一边，提示可以再点开 */
+.app-layout.sidebar-collapsed .sidebar-handle svg { transform: rotate(180deg); }
 .page-host { position: relative; flex: 1; min-width: 0; }
 .page-modal-host { position: absolute; inset: 0; pointer-events: none; }
 .page-modal-host .modal-overlay { pointer-events: auto; }

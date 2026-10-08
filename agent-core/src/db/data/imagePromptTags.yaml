@@ -1008,7 +1008,7 @@
 
 - name: 人物
   groups:
-
+    # ★ 2026-10-07：身体设计组已并入「身体特征」段；本段在角色页只剩动作/表情类（整段属"绘图页"口径）。
     - name: 嘴巴（纯嘴巴补充）
       color: rgba(255, 123, 2, .4)
       tags:
@@ -1061,97 +1061,6 @@
         tongue out: 吐舌头
         uvula: 小舌头|口盖垂|悬雍垂
 
-    - name: 胸部
-      color: rgba(255, 123, 2, .4)
-      tags:
-        one breast out: 一胸向外
-        erect nipples: 乳头直立
-        nipple slip: 乳头滑出
-        areola slip: 乳晕微露
-        inverted nipples: 内陷乳头
-        huge nipples: 大乳头
-        chest: 胸部
-        flat chest: 贫乳(A )
-        small breasts: 小胸部(B)
-        medium breasts: 中等胸部(C)
-        big breasts: 大胸部(D)
-        large saggy breasts : 大而下垂的胸部
-        huge breasts: 巨乳(E)
-        gigantic breasts: 超巨乳(F)
-        between breasts: 两胸之间
-        breasts apart: 胸部分开
-        hanging breasts: 下垂
-        bouncing breasts: 晃动
-        cleavage: 乳沟
-        areola: 乳晕
-        nipples: 乳头
-        huge nipples,thick nipples: 大乳头
-        puffy nipples,erect nipples: 乳头勃起
-        pectorals: 胸肌
-        large pectorals: 大胸肌
-        unbuttoned clothes: 半露前胸
-        underboob: 下胸部
-        skindentation: 皮肤凹痕
-
-        # 之前追加的部分（保持不变）
-        large breasts: 大胸部（常用）
-        perky breasts: 挺翘胸部（上翘型）
-        pointy breasts: 尖尖胸部（火箭型）
-        sagging breasts: 下垂胸部（自然下垂）
-        asymmetrical breasts: 不对称胸部（大小不一）
-        veiny breasts: 胸部青筋可见
-        mole on breast: 胸部痣
-        dark nipples: 深色乳头
-        pink nipples: 粉色乳头
-        puffy areola: 肿胀乳晕
-        large areola: 大乳晕
-        small areola: 小乳晕
-        covered nipples: 乳头被遮盖（但隐约可见）
-        nipple piercing: 乳头穿孔
-        long nipples: 长乳头
-        gaping nipples: 张开乳头（罕见）
-        sideboob: 侧乳（侧面可见）
-        backboob: 后乳（背后可见）
-        breasts out: 双胸完全露出
-        bursting breasts: 胸部快要爆出来（衣服紧绷）
-        cleavage cutout: 乳沟镂空设计
-        framed breasts: 胸部被衣服框住（突出感）
-        sweat on breasts: 胸部出汗
-        cum on breasts: 胸部沾精液（痕迹）
-        breast focus: 胸部特写焦点
-        floating breasts: 胸部漂浮感（无重力/夸张）
-        unaligned breasts: 胸部不对齐（自然晃动感）
-
-        # 新追加：更多形状/质感/特殊细分
-        torpedo breasts: 鱼雷型胸部（向前突出）
-        bell shaped breasts: 钟形胸部（下圆上窄）
-        round breasts: 圆润胸部
-        teardrop breasts: 水滴型胸部
-        full breasts: 饱满胸部
-        firm breasts: 紧实胸部
-        soft breasts: 柔软胸部（视觉暗示）
-        breast tanlines: 胸部晒痕
-        freckles on breasts: 胸部雀斑
-        mole under breast: 胸下痣
-        visible ribs: 胸部可见肋骨（极瘦）
-        collarbone visible: 锁骨突出（与胸部搭配常见）
-        areolae visible through clothes: 乳晕透衣可见
-        see through cleavage: 透视乳沟
-        underboob cutout: 下胸镂空设计
-        nippleless clothes: 无乳头衣服设计（但胸部可见）
-        bare shoulders: 露肩
-      
-    - name: 对象
-      color: rgba(255, 123, 2, .4)
-      tags:
-        phimosis,foreskin: 包茎
-        penis: 鸡巴
-        pussy: 小穴
-        onee-shota: 小孩开大车
-        futanari,testicles:1.2,penis,pussy: 扶她
-        huge testicles,futanari,massive erect penis,veiny penis,thick shaft: 粗牛子
-        huge penis:1.2,huge testicles:1.2: 大牛子
-
     - name: 眼睛
       color: rgba(255, 123, 2, .4)
       tags:
@@ -1162,7 +1071,160 @@
       tags:
         big clitoris,clitoral foreskin,cute pussy,enlarged labia,developed inner labia,vagina: 夸张的小穴
 
+- name: 身体特征
+  groups:
+    # ★ 2026-10-07 用户要求：不再分「人物／身体特征」两段，已合并为单一「身体特征」段；
+    #   组序按"从上到下"的人体方位：体型 → 乳房 → 乳头/乳晕 → 阴毛 → 阴部 → 种族 → 机械/义体。
+    #   「对象」组已改名「阴部」；`小孩开大车`(onee-shota) 已移除（它是体位，不是身体特征）。
+    - name: 体型 / 身高
+      color: rgba(120, 190, 130, .45)
+      tags:
+        petite: 娇小
+        tall female: 高挑
+        slender: 纤细
+        slim: 苗条
+        curvy: 曲线丰满
+        muscular: 肌肉（女）
+        toned: 紧实
+        chubby: 微胖
+        thick thighs: 大腿丰满
+        wide hips: 宽胯
+        narrow waist: 细腰
+        long legs: 长腿
+        short stature: 个子矮
+        adult: 成年
+        mature female: 成熟女性
 
+    - name: 乳房形状
+      color: rgba(255, 123, 2, .4)
+      tags:
+        chest: 胸部
+        flat chest: 贫乳(A )
+        small breasts: 小胸部(B)
+        medium breasts: 中等胸部(C)
+        big breasts: 大胸部(D)
+        large saggy breasts: 大而下垂的胸部
+        huge breasts: 巨乳(E)
+        gigantic breasts: 超巨乳(F)
+        between breasts: 两胸之间
+        breasts apart: 胸部分开
+        hanging breasts: 下垂
+        pectorals: 胸肌
+        large pectorals: 大胸肌
+        skindentation: 皮肤凹痕
+        large breasts: 大胸部（常用）
+        perky breasts: 挺翘胸部（上翘型）
+        pointy breasts: 尖尖胸部（火箭型）
+        sagging breasts: 下垂胸部（自然下垂）
+        asymmetrical breasts: 不对称胸部（大小不一）
+        veiny breasts: 胸部青筋可见
+        mole on breast: 胸部痣
+        torpedo breasts: 鱼雷型胸部（向前突出）
+        bell shaped breasts: 钟形胸部（下圆上窄）
+        round breasts: 圆润胸部
+        teardrop breasts: 水滴型胸部
+        full breasts: 饱满胸部
+        firm breasts: 紧实胸部
+        soft breasts: 柔软胸部（视觉暗示）
+        freckles on breasts: 胸部雀斑
+        mole under breast: 胸下痣
+        visible ribs: 胸部可见肋骨（极瘦）
+        collarbone visible: 锁骨突出（与胸部搭配常见）
+
+    - name: 乳头 / 乳晕
+      color: rgba(255, 123, 2, .4)
+      tags:
+        erect nipples: 乳头直立
+        inverted nipples: 内陷乳头
+        huge nipples: 大乳头
+        areola: 乳晕
+        nipples: 乳头
+        huge nipples,thick nipples: 大乳头
+        puffy nipples,erect nipples: 乳头勃起
+        dark nipples: 深色乳头
+        pink nipples: 粉色乳头
+        puffy areola: 肿胀乳晕
+        large areola: 大乳晕
+        small areola: 小乳晕
+        nipple piercing: 乳头穿孔
+        long nipples: 长乳头
+        gaping nipples: 张开乳头（罕见）
+        areolae visible through clothes: 乳晕透衣可见
+
+    - name: 阴毛
+      color: rgba(146, 132, 216, .4)
+      tags:
+        pubic hair: 阴毛（有）
+        shaved pussy: 剃净（无毛）
+        trimmed pubic hair: 修剪过的阴毛
+        shaved pubes: 阴部剃净
+        pubic stubble: 阴部短茬
+        happy trail: 腹毛延伸线
+        landing strip: 一字型阴毛（修剪成条）
+        trimmed pussy hair: 修剪过的阴毛（同义）
+        hairless pussy: 无毛阴部
+        blonde pubic hair: 金色阴毛
+        pink pubic hair: 粉色阴毛
+
+    - name: 阴部
+      color: rgba(255, 123, 2, .4)
+      tags:
+        phimosis,foreskin: 包茎
+        penis: 鸡巴
+        pussy: 小穴
+        futanari,testicles,penis,pussy: 扶她
+        huge testicles,futanari,massive erect penis,veiny penis,thick shaft: 粗牛子
+        huge penis,huge testicles: 大牛子
+
+    - name: 种族特征
+      color: rgba(200, 150, 96, .45)
+      tags:
+        fox ears: 狐耳
+        fox tail: 狐尾
+        multiple tails: 多条尾巴（九尾等）
+        animal ears: 兽耳
+        animal tail: 兽尾
+        cat ears: 猫耳
+        cat tail: 猫尾
+        rabbit ears: 兔耳
+        wings: 翅膀
+        feathered wings: 羽翼
+        bat wings: 蝙蝠翼
+        dragon horns: 龙角
+        dragon tail: 龙尾
+        elf ears: 精灵耳
+        pointed ears: 尖耳
+        halo: 光环
+        horns: 角（普通）
+        floating: 悬浮
+        glowing markings: 发光纹路
+        gemstone: 宝石镶嵌（额头等）
+
+
+
+    - name: 机械 / 义体
+      color: rgba(96, 176, 200, .45)
+      tags:
+        android: 拟人机械（智械）
+        robot: 机器人
+        robot joints: 机械关节
+        mechanical joints: 可见机械关节结构
+        artificial limb: 义肢
+        prosthetic arm: 机械义肢臂
+        prosthetic leg: 机械义肢腿
+        mechanical legs: 机械腿
+        cyborg: 改造人（赛博格）
+        mechanical arms: 机械臂
+        rivets: 铆钉
+        metal skin: 金属皮肤
+        doll joints: 球形关节（人偶式）
+        seams: 缝合线（接缝）
+        panel lines: 装甲分缝线
+        wires: 外露导线
+        antenna: 天线
+        single mechanical eye: 单只机械眼
+        glowing eyes: 发光眼
+        datastream: 数据流光效
 
 - name: 表情动作
   groups:

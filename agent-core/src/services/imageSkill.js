@@ -23,7 +23,7 @@ import { acquireSlot, releaseSlot } from './llmConcurrency.js';
 import { prepareImagePrompt } from './imagePromptPreparer.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
-import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth } from './workflowTemplates.js';
+import { ACTIVE_WORKFLOW, PRO_WORKFLOW, checkWorkflowHealth, resolveCustomWorkflowPath } from './workflowTemplates.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
@@ -33,7 +33,11 @@ const PRO_WORKFLOW_PATH = path.join(WORKFLOW_DIR, PRO_WORKFLOW);
 let lastUsedWorkflowMode = (config.workflow?.mode === 'base') ? 'base' : 'turbo';
 
 function pathToMode(wfPath) {
-  return path.basename(wfPath) === PRO_WORKFLOW ? 'base' : 'turbo';
+  const name = path.basename(wfPath);
+  if (name === PRO_WORKFLOW) return 'base';
+  if (name === ACTIVE_WORKFLOW) return 'turbo';
+  // 自定义工作流：以文件名本身作为标识，供 image_tasks.workflow_template 记录、HiresFix 继承
+  return name;
 }
 
 export function getLastWorkflowMode() {
@@ -61,6 +65,14 @@ function resolveWorkflowPath(scene) {
   const mode = config.workflow?.mode || 'turbo';
   if (mode === 'turbo') return BASE_WORKFLOW_PATH;
   if (mode === 'base') return PRO_WORKFLOW_PATH;
+
+  // custom: 全局自定义工作流；文件缺失时回退 turbo，保证生图不中断
+  if (mode === 'custom') {
+    const custom = resolveCustomWorkflowPath(config.workflow?.customTemplate);
+    if (custom) return custom;
+    console.warn(`[imageSkill] Custom workflow "${config.workflow?.customTemplate || ''}" not found, falling back to turbo`);
+    return BASE_WORKFLOW_PATH;
+  }
 
   // hybrid: 根据场景选择
   if (mode === 'hybrid' && scene) {
@@ -606,6 +618,9 @@ async function _execute(rawPrompt, opts) {
       alreadyPrepared: opts.alreadyPrepared === true,
       skipOptimization: opts.skipOptimization === true,
       ragTimeoutMs: opts.ragTimeoutMs,
+      // ★ 时段锚点：调用方传入该画面发生的时刻（日程/朋友圈/聊天），
+      //   把光照钉在正确时段 —— 修「凌晨 2 点的活动生成出白天图」。
+      timeOfDay: opts.timeOfDay,
     });
     if (_limitEnabled()) {
       await acquireSlot();

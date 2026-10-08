@@ -137,3 +137,36 @@ test('超长（复读整段文本）的画面描述不会建成生图任务', ()
   const tooLong = 'a girl soaking in a pink bath, '.repeat(80);
   assert.equal(parseScriptLine(`宵宫: {${tooLong}}`, members), null);
 });
+
+// ══════════════════════════════════════════════════════════
+// 生图规范里的**人数规则**（2026-10-05 用户实报「单角色被画成两个人」）
+//
+// 规则原先**只教了多人怎么写**（Multiple Characters / Relative body size），
+// 从没教「单人怎么写」→ 模型会在背景里补人、或把同一角色画两份。
+// 现补了 Single subject 段。这几条是**防回退钉子**：删掉它等于缺陷复发。
+// ══════════════════════════════════════════════════════════
+
+test('★★ 生图规范必须包含「单人为主」的硬规则（删它＝同一角色被画两份）', () => {
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /Single subject/,
+    '缺 Single subject 段 → 模型不知道单人怎么处理，会凭空补第二个人');
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /exactly one person/i);
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /Never add anyone the conversation did not name/i);
+});
+
+test('★★ 生图规范必须显式说明「身体部位复数 ≠ 多人」', () => {
+  // 这正是 bug 的认知源头：two hands / both legs 曾被当成两个人
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /Body-part plurals do NOT mean multiple people/i);
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /two hands/i);
+});
+
+test('★ 多人规则必须保留（只加单人规则不得挤掉多人规则）', () => {
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /Multiple Characters/);
+  assert.match(IMAGE_PROMPT_RULE.rule_content, /Relative body size/);
+});
+
+test('★ 单人段必须排在多人段之前（默认情形先讲，符合"单人为主"的语义）', () => {
+  const soloAt = IMAGE_PROMPT_RULE.rule_content.indexOf('Single subject');
+  const multiAt = IMAGE_PROMPT_RULE.rule_content.indexOf('Multiple Characters');
+  assert.ok(soloAt > 0 && multiAt > 0, '两段都必须存在');
+  assert.ok(soloAt < multiAt, '单人段应在多人段之前');
+});

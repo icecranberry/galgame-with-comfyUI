@@ -133,9 +133,17 @@ const endJelly = (event) => {
 
 /* ── 主操作：珊瑚糖 ── */
 .ls-btn--primary {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: #fff;
   box-shadow: 0 var(--depth) 0 var(--accent-hover), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+/* ⚠ 暗夜下 --accent 是 #ff7a64（很亮），白字压上去只有 2.55（小字需 4.5，实测看不清）。
+   这里**只把按钮底色压深**（不动品牌色 token，避免波及其它装饰用途）：
+   同样的白字在深红底上可达 6+。 */
+[data-theme="dark"] .ls-btn--primary {
+  background: color-mix(in srgb, var(--accent) 62%, #451a12);
+  box-shadow: 0 var(--depth) 0 color-mix(in srgb, var(--accent-hover) 60%, #2a0f0a),
+              inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .ls-btn--primary:hover:not(:disabled) { filter: brightness(1.05) saturate(1.05); }
 

@@ -588,7 +588,7 @@ onMounted(loadAll)
 .admin-link-icon {
   width: 36px; height: 36px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 10px; background: var(--accent); color: #fff;
+  border-radius: 10px; background: var(--accent-solid); color: #fff;
   box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
 }
 .admin-link-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -611,7 +611,7 @@ onMounted(loadAll)
 .admin-link-open {
   margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
   padding: 6px 10px; border-radius: 999px;
-  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+  background: var(--accent-solid); color: #fff; font-size: 12px; font-weight: 700;
   box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.28);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }

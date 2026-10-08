@@ -2,7 +2,7 @@ import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 朋友圈定时发帖调度器
  *
- * - 每 10 分钟扫描一次
+ * - 每 5 分钟扫描一次
  * - 找出 next_moment_at <= now 或 NULL 的角色 / 镇民（双来源，谁先到期谁先发）
  * - 镇民每个自然滚动 24 小时最多发一条（调度查询里硬过滤，生成器排期兜底）
  * - 每次只处理一个（排队），避免并发生图撑爆 ComfyUI
@@ -25,7 +25,9 @@ export function setTownNpcPostGenerator(fn) {
   townNpcPostGenerator = fn;
 }
 
-const CHECK_INTERVAL = 10 * 60 * 1000; // 10 分钟
+// 5 分钟：必须 <= 最快发帖周期（momentFreq=24 时约 5~20 分钟），
+// 否则周期设得再快也会被扫描间隔卡成 10 分钟一条。
+const CHECK_INTERVAL = 5 * 60 * 1000;
 
 let timer = null;
 let processing = false;
@@ -58,6 +60,7 @@ async function maybePostNewspaperComplaint() {
     SELECT 1 AS blocked FROM characters
     WHERE id = ? AND (
       moments_disabled = 1
+      OR COALESCE(archived, 0) = 1
       OR (is_sleeping IS NOT NULL AND is_sleeping = 1)
       OR (temporary_wake_until IS NOT NULL AND temporary_wake_until > datetime('now'))
       OR id IN (SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged'))
@@ -100,6 +103,12 @@ async function tick() {
     return;
   }
 
+  // 频率闸门：momentFreq=0 表示关闭自动发帖（报纸吐槽帖也一并停，因为它同样是自动触发）
+  const momentFreq = config.features.momentFreq ?? 1;
+  if (momentFreq <= 0) {
+    return;
+  }
+
   const db = getDb();
   try {
     // 0. 报纸吐槽帖：《小镇早知道》当期主角的额外发圈（优先于常规发帖，处理过就结束本 tick）
@@ -110,6 +119,7 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.moments_disabled = 0
+        AND COALESCE(c.archived, 0) = 0
         AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND (c.temporary_wake_until IS NULL OR c.temporary_wake_until <= datetime('now'))
         AND (c.next_moment_at IS NULL OR c.next_moment_at <= datetime('now'))
@@ -171,10 +181,10 @@ async function tick() {
         console.log(`[momentScheduler] No pending posts. Next: ${nextUp.display_name} at ${nextUp.next_moment_at}`);
       } else {
         console.log('[momentScheduler] No active characters or all have NULL next_moment_at — initializing...');
-        // 首次启动：给所有角色设定首次发帖时间（1~4 小时内）
-        const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND next_moment_at IS NULL').all();
+        // 首次启动：给所有角色设定首次发帖时间（基准 1~4 小时，按 momentFreq 缩放）
+        const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND COALESCE(archived, 0) = 0 AND next_moment_at IS NULL').all();
         for (const c of chars) {
-          const delay = 1 * 3600_000 + Math.random() * 3 * 3600_000;
+          const delay = (1 * 3600_000 + Math.random() * 3 * 3600_000) / Math.max(0.01, momentFreq);
           const nextAt = new Date(Date.now() + delay).toISOString();
           db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')
             .run(toSQLiteDate(nextAt), c.id);

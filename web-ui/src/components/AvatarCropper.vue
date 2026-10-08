@@ -535,7 +535,7 @@ async function saveCrop() {
 .av-paste-icon {
   width:34px; height:34px; flex-shrink:0; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
-  background:var(--accent); color:var(--on-accent); font-size:18px;
+  background: var(--accent-solid); color:var(--on-accent); font-size:18px;
   box-shadow:0 2px 0 var(--btn-lip);
 }
 .av-paste-label { flex:1; min-width:0; }
@@ -544,7 +544,7 @@ async function saveCrop() {
 .av-paste-keys kbd {
   font-family:inherit; font-size:13px; font-weight:700;
   padding:3px 9px; border-radius:8px;
-  background:var(--accent); border:1px solid var(--accent-hover);
+  background: var(--accent-solid); border:1px solid var(--accent-hover);
   color:var(--on-accent); box-shadow:0 2px 0 var(--btn-lip);
 }
 

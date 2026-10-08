@@ -40,13 +40,35 @@ export const useChatStore = defineStore('chat', () => {
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
+  /** loadCharacters 的飞行中 Promise（并发合并用；见该函数的注释） */
+  let _loadCharactersInflight = null
+
   // 客户端渲染窗口：messages 已全量加载，窗口策略统一由 useMessageWindow 提供
   const { visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
     useMessageWindow(messages)
 
-  async function loadCharacters() {
-    try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
-    sortCharactersByPin()
+  /**
+   * 拉取角色列表。
+   *
+   * ★ **并发合并**：同一时刻的多次调用共用一个请求。
+   *
+   *   启动阶段有多个入口会碰角色列表（App.vue 的初始化、SSE 首帧、消息加载后的刷新、
+   *   视图进入时的补刷…），它们**几乎同时**发生 —— 实测首屏 `/api/characters` 被请求了 2 次，
+   *   内容完全一样。角色列表是启动路径上最重的一个接口（要带最后消息时间等），
+   *   重复请求既浪费又拖慢首屏。
+   *
+   *   写法与 `stores/characterFolders.js` 的 `load()` 一致：**只在请求飞行中复用**，
+   *   完成后立刻清空 —— 所以"改完角色要刷新"这类语义不受影响，不会拿到旧数据。
+   *
+   * @returns {Promise<void>}
+   */
+  function loadCharacters() {
+    if (_loadCharactersInflight) return _loadCharactersInflight
+    _loadCharactersInflight = (async () => {
+      try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch { /* 后端未就绪时保持上一次列表 */ }
+      sortCharactersByPin()
+    })().finally(() => { _loadCharactersInflight = null })
+    return _loadCharactersInflight
   }
 
   // 置顶优先 + 最近消息时间降序（置顶组内部仍按消息时间排）
@@ -312,8 +334,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content, imageMode = 'smart', deepThink = false, { townContext } = {}) {
-    if (streaming.value || !content.trim()) return
+  async function sendMessage(content, imageMode = 'smart', deepThink = false, { townContext, images = null } = {}) {
+    const attached = Array.isArray(images) ? images.filter(Boolean) : []
+    // 允许「只发图不写字」：有附件时不再要求文本非空
+    if (streaming.value || (!content.trim() && attached.length === 0)) return
     const charId = activeCharId.value
     if (!charId) return
 
@@ -325,7 +349,7 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
-    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
+    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId, ...(attached.length ? { images: [...attached] } : {}) })
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
 
@@ -478,7 +502,7 @@ export const useChatStore = defineStore('chat', () => {
         pendingTextTimers.clear()
       }
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink, townContext)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink, townContext, attached)
       abort = streamAbort
       const reader = stream.getReader()
 

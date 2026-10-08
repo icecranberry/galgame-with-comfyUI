@@ -20,6 +20,7 @@ import MomentsView from './views/MomentsView.vue'
 import EventsView from './views/EventsView.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import GalleryView from './views/GalleryView.vue'
+import MediaView from './views/MediaView.vue'
 import TavernView from './views/TavernView.vue'
 import MailboxView from './views/MailboxView.vue'
 import BackpackView from './views/BackpackView.vue'
@@ -28,6 +29,9 @@ import MemorySettingsView from './views/MemorySettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
+import WorldMapView from './views/WorldMapView.vue'
+import DrawView from './views/DrawView.vue'
+import StoryView from './views/StoryView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -38,8 +42,13 @@ const routes = [
   { path: '/moments', component: MomentsView },
   { path: '/events', component: EventsView },
   { path: '/town', component: TownView, props: route => ({ initialPanel: route.query.panel === 'life' ? 'life' : '' }) },
+  { path: '/worldmap', component: WorldMapView },
   { path: '/schedule', component: ScheduleView },
   { path: '/gallery', component: GalleryView },
+  { path: '/draw', component: DrawView },
+  // 「故事」（T2）：跨天演进的剧情线。⚠ 与 /events（奇遇，一次性事件）是两层东西。
+  { path: '/story', component: StoryView },
+  { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },
   { path: '/backpack', component: BackpackView },

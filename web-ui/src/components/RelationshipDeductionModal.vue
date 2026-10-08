@@ -270,9 +270,9 @@ async function confirmAll() {
         const existing = await api.getRelationships(item.from_id)
         const match = (existing.relationships || []).find(r => r.to_character_id === item.to_id)
         if (match) {
-          await api.updateRelationship(match.id, item.relationship_text)
+          await api.updateRelationship(match.id, item.relationship_text, item.intimacy)
         } else {
-          await api.createRelationship(item.from_id, item.to_id, item.relationship_text)
+          await api.createRelationship(item.from_id, item.to_id, item.relationship_text, item.intimacy)
         }
       }
     }
@@ -417,7 +417,7 @@ watch(() => props.visible, (val) => {
   user-select: none;
 }
 .ded-act.push { width: auto; background: rgba(var(--accent-rgb), 0.1); color: var(--accent, var(--accent)); font-size: 16px; }
-.ded-act.push:hover { background: var(--accent); color: var(--on-accent); }
+.ded-act.push:hover { background: var(--accent-solid); color: var(--on-accent); }
 .ded-act.remove { background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); }
 .ded-act.remove:hover { background: var(--danger); color: var(--on-accent); }
 .ded-act.edit { background: var(--bg-tertiary); color: var(--text-secondary); font-size: 13px; }
