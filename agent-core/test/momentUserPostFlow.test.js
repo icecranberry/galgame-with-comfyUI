@@ -8,6 +8,7 @@ const { config } = await import('../src/config.js');
 // 测试确定性：关闭日程/情绪子系统（睡眠检查与情绪注入不参与断言）
 config.features.schedule = false;
 config.features.emotion = false;
+config.features.memory = false;
 config.user.nickname = '测试员';
 // 路由层测试必须拦下真实 LLM 请求（OpenAI SDK 不走 globalThis.fetch）：
 // 指向本机必然拒绝连接的端口并重建客户端，chatSync 快速抛错 → 回复为空不阻塞
@@ -747,4 +748,53 @@ test('POST /api/moments/:id/comments 全链路：评论入库（LLM 不可用时
   // 空内容 400
   const bad = await request(app, 'POST', `/api/moments/${postId}/comments`, { content: '  ' });
   assert.equal(bad.status, 400);
+});
+
+
+test('朋友圈各评论入口使用说话者记忆，动态注入前三条且 user 始终最后', async t => {
+  const oldMemory = config.features.memory;
+  config.features.memory = true;
+  t.after(() => { config.features.memory = oldMemory; closeDb(); });
+  const db = getDb();
+  const posterId = seedCharacter(db, { name: 'rag_poster', display_name: '帖主' });
+  const friendId = seedCharacter(db, { name: 'rag_friend', display_name: '朋友' });
+  const poster = db.prepare('SELECT * FROM characters WHERE id = ?').get(posterId);
+  const friendChar = db.prepare('SELECT * FROM characters WHERE id = ?').get(friendId);
+  const friend = { other_id: friendId, other_name: '朋友', other_prompt: '朋友的人设', relationship_text: '好友' };
+  const post = { character_id: posterId, display_name: '帖主', content: '又来咖啡店', prompt: '拿铁和蛋糕' };
+  const thread = [{ id: 1, author_type: 'character', author_id: posterId, _posterId: posterId, content: '上次太甜', thread_root_id: 1 }];
+  const { generateCharacterCommentReply } = await import('../src/services/momentCommentService.js');
+  const { generateFriendInitialComment, generatePosterReplyToFriend, generateFriendContinuation } = await import('../src/services/momentInteractionService.js');
+  let scopes = [], queries = [], messages;
+  const deps = {
+    activeMemorySearch: async (query, options) => {
+      scopes.push(options.conversationIds); queries.push(query);
+      return { results: [1, 2, 3, 4].map(id => ({ memory_id: id, memory_type: '偏好', judgment: `往事${id}` })) };
+    },
+    rerankMemories: async (_query, hits) => hits.slice().reverse(),
+    chatSync: async msgs => { messages = msgs; return '记得少糖'; },
+  };
+  const cases = [
+    [friendId, () => generateUserPostComment(friendChar, { ...post, character_id: null }, thread, deps)],
+    [friendId, () => generateCharacterCommentReply(friendChar, post, thread, { userComment: { id: 2, content: '还记得吗', thread_root_id: 1 }, targetComment: thread[0], deps })],
+    [friendId, () => generateFriendInitialComment(friend, poster, post, '朋友是你的好友', deps)],
+    [posterId, () => generatePosterReplyToFriend(poster, friend, post, '上次太甜', thread, deps)],
+    [friendId, () => generateFriendContinuation(friend, poster, post, thread, deps)],
+  ];
+  for (const [speakerId, run] of cases) {
+    scopes = []; queries = [];
+    assert.equal(await run(), '记得少糖');
+    assert.ok(scopes.length >= 2);
+    assert.ok(scopes.every(scope => scope.length === 1 && scope[0] === `char-${speakerId}`));
+    assert.ok(queries.includes('又来咖啡店'));
+    assert.ok(queries.includes('拿铁和蛋糕'));
+    assert.ok(queries.every(query => !query.includes('请直接回应')));
+    const blocks = messages.filter(msg => msg.content.includes('<rag_memories>'));
+    assert.equal(blocks.length, 1);
+    assert.match(blocks[0].content, /往事4/);
+    assert.match(blocks[0].content, /往事2/);
+    assert.doesNotMatch(blocks[0].content, /往事1/);
+    assert.equal(messages.at(-1).role, 'user');
+    assert.equal(messages.at(-2), blocks[0]);
+  }
 });

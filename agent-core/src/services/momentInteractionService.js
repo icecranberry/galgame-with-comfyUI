@@ -11,12 +11,14 @@
  */
 
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
+import { recallMomentMemories, formatMomentMemories } from './momentMemoryRecall.js';
+import { stripMomentImageRequest } from './momentImageRequest.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { cropPersonalityForEmotion } from './emotionEngine.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote, firstMomentImagePrompt } from './momentForms.js';
 
 // Sigmoid 参数（与 moments.js 多人模式一致）
 const MULTI_P_MIN = 0.30;
@@ -85,7 +87,7 @@ function formatThreadContext(threadComments, friendName, posterName, userName) {
 /**
  * 朋友首轮评论（看到帖子后的第一反应）
  */
-async function generateFriendInitialComment(friend, posterChar, post, relDesc) {
+export async function generateFriendInitialComment(friend, posterChar, post, relDesc, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
     ? getSystemRulesWithWorld()
@@ -122,19 +124,24 @@ ${MOMENT_COMMENT_RULES}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
+  const memories = await recallMomentMemories([`char-${friend.other_id}`], {
+    postText: stripMomentImageRequest(post.content), imageText: firstMomentImagePrompt(post.prompt),
+  }, deps);
+  if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, friendName) });
+
   const worldRulePrefix = worldSetting
     ? '请遵循当前<world_setting>来评论朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '去评论区留个言吧：' });
 
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '朋友首评' });
+  const result = await (deps.chatSync || chatSync)(msgs, { temperature: 0.7, max_tokens: 128, label: '朋友首评' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 
 /**
  * 发帖人回复朋友的评论
  */
-async function generatePosterReplyToFriend(posterChar, friend, post, friendComment, threadContext) {
+export async function generatePosterReplyToFriend(posterChar, friend, post, friendComment, threadContext, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
     ? getSystemRulesWithWorld()
@@ -175,19 +182,26 @@ ${MOMENT_COMMENT_RULES}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
+  const memories = await recallMomentMemories([`char-${posterChar.id}`], {
+    postText: stripMomentImageRequest(post.content), commentText: friendComment,
+    threadText: (threadContext || []).slice(-6).map(c => c.content),
+    imageText: firstMomentImagePrompt(post.prompt),
+  }, deps);
+  if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, posterName) });
+
   const worldRulePrefix = worldSetting
     ? '请遵循当前<world_setting>来回复朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + `回复${friendName}的最后一条评论：` });
 
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '发帖人回朋友' });
+  const result = await (deps.chatSync || chatSync)(msgs, { temperature: 0.7, max_tokens: 128, label: '发帖人回朋友' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 
 /**
  * 朋友续评（30% 连锁触发后的再次回复）
  */
-async function generateFriendContinuation(friend, posterChar, post, threadContext) {
+export async function generateFriendContinuation(friend, posterChar, post, threadContext, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
     ? getSystemRulesWithWorld()
@@ -230,12 +244,19 @@ ${MOMENT_COMMENT_RULES}
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
 
+  const memories = await recallMomentMemories([`char-${friend.other_id}`], {
+    postText: stripMomentImageRequest(post.content), commentText: threadContext.at(-1)?.content,
+    threadText: threadContext.slice(-6, -1).map(c => c.content),
+    imageText: firstMomentImagePrompt(post.prompt),
+  }, deps);
+  if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, friendName) });
+
   const worldRulePrefix = worldSetting
     ? '请遵循当前<world_setting>来继续朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '继续聊天：' });
 
-  const result = await chatSync(msgs, { temperature: 0.7, max_tokens: 128, label: '朋友续评' });
+  const result = await (deps.chatSync || chatSync)(msgs, { temperature: 0.7, max_tokens: 128, label: '朋友续评' });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 

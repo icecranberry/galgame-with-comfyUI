@@ -101,8 +101,7 @@
 
       <section class="card" style="margin-top: 16px;">
         <div class="section-title">
-          <div><h3>未互动奇遇记忆</h3><p>关闭后，角色经历但用户未参与的奇遇在结束总结时不再写入聊天记忆（RAG），但仍会归档到往期奇遇。</p></div>
-          <linshe-switch v-model="form.recordUnengagedEvents" aria-label="RAG不记录未互动奇遇" />
+          <div><h3>奇遇记忆</h3><p>只有用户参与过的奇遇会整理进入聊天记忆（RAG）。未参与的奇遇仅归档到往期奇遇。</p></div>
         </div>
       </section>
 
@@ -469,7 +468,7 @@ const restoringMemoryId = ref(null)
 const consolidating = ref(false)
 
 const form = reactive({
-  enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24, recordUnengagedEvents: true,
+  enabled: true, topK: 7, textCandidates: 24, vectorCandidates: 24,
   activeSearch: { enabled: false, timeoutMs: 4000 },
   consolidation: { enabled: true, idleDelayMinutes: 30, minIntervalMinutes: 60, llmCallsPerRun: 3, dailyLlmCalls: 60 },
   contextBudget: { enabled: false, dynamicTokens: 8000 },
@@ -500,7 +499,7 @@ function providerPayload(provider, headersText) {
 }
 function payload() {
   return {
-    enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates, recordUnengagedEvents: form.recordUnengagedEvents,
+    enabled: form.enabled, topK: form.topK, textCandidates: form.textCandidates, vectorCandidates: form.vectorCandidates,
     activeSearch: { enabled: form.activeSearch.enabled, timeoutMs: form.activeSearch.timeoutMs },
     consolidation: {
       enabled: form.consolidation.enabled,

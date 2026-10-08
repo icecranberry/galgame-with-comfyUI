@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 生活片段生成器
  *
  * EVENT_TYPES 描述的是"角色今天的生活进入了哪一种状态"，不是"发生了什么剧情"。
@@ -24,8 +24,7 @@ import { config } from '../config.js';
 import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { broadcastNewEvent, broadcastEventUpdate, broadcastEventConclusion } from './eventNotificationBus.js';
-import { applyMemoryActions, softDeleteMemory } from './memory/memoryRepository.js';
-import { getMemorySettings } from './memory/memoryConfig.js';
+import { applyMemoryActions } from './memory/memoryRepository.js';
 import { getCurrentActivity, syncEventSchedule } from './scheduleManager.js';
 import { captureEventSchedule } from './eventSchedule.js';
 import { getTimeTag, getLightNoteWithWeather } from './timeLight.js';
@@ -1132,25 +1131,16 @@ ${taskPrompt}`
     };
   }
 
-  // 2. 存入记忆
+  // 2. 只有用户实际推进过分支的奇遇才进入 RAG；未参与的仍归档到往期奇遇。
   const conversationId = `char_${character.id}`;
 
-  try {
-    const parsedHistory = JSON.parse(event.choice_history || '[]');
-    const branchReasoning = parsedHistory
-      .filter(item => item.branch !== 0)
-      .map(item => `选择「${item.choice_label}」后：${item.summary}`)
-      .join('；');
-    if (!event.engaged) {
-      const oldRows = db.prepare(`
-        SELECT memory_id FROM memory_fragments
-        WHERE conversation_id = ? AND memory_type = 'event' AND subject = 'character'
-          AND status = 'active' AND judgment LIKE '未互动事件：%'
-      `).all(conversationId);
-      for (const row of oldRows) softDeleteMemory(row.memory_id);
-    }
-    const skipUnengaged = !event.engaged && !getMemorySettings().recordUnengagedEvents;
-    if (!skipUnengaged) {
+  if (event.engaged) {
+    try {
+      const parsedHistory = JSON.parse(event.choice_history || '[]');
+      const branchReasoning = parsedHistory
+        .filter(item => item.branch !== 0)
+        .map(item => `选择「${item.choice_label}」后：${item.summary}`)
+        .join('；');
       applyMemoryActions({
         conversationId,
         sourceRawStartId: null,
@@ -1161,15 +1151,15 @@ ${taskPrompt}`
           memory: {
             memoryType: 'event',
             subject: 'character',
-            judgment: `${event.engaged ? '已完成事件' : '未互动事件'}：${event.title}。${conclusionData.summary}`,
+            judgment: `已完成事件：${event.title}。${conclusionData.summary}`,
             reasoning: [event.description, branchReasoning].filter(Boolean).join('；'),
             tags: [character.display_name, event.title, '事件'],
           },
         }],
       });
+    } catch (memErr) {
+      console.error(`[eventGen] Memory save failed:`, memErr.message);
     }
-  } catch (memErr) {
-    console.error(`[eventGen] Memory save failed:`, memErr.message);
   }
 
   // 3. 移到 event_history（保留原始 ID，确保分享卡片等引用不失效）

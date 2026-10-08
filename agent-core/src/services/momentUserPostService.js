@@ -10,6 +10,7 @@
  */
 
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
+import { recallMomentMemories, formatMomentMemories } from './momentMemoryRecall.js';
 import { chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
@@ -219,6 +220,12 @@ export async function generateUserPostComment(character, post, historyComments, 
   if (imageContext) msgs.push({ role: 'system', content: imageContext });
   msgs.push({ role: 'system', content: character.base_prompt || '' });
   if (relationContext) msgs.push({ role: 'system', content: relationContext });
+  const memories = await recallMomentMemories([`char-${character.id}`], {
+    postText: visibleContent,
+    threadText: historyComments.slice(-6).map(c => c.content),
+    imageText: imageDescription,
+  }, deps);
+  if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, displayName) });
   msgs.push({ role: 'user', content: task });
 
   const chat = deps.chatSync || chatSync;
