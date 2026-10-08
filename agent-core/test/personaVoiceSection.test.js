@@ -106,3 +106,40 @@ test('★ 核心创作原则里必须点名"口癖是辨识度的命门"（保�
   const src = fs.readFileSync(CHARS, 'utf8');
   assert.match(src, /口癖/, '创作原则里应点名口癖');
 });
+
+/**
+ * ── 2026-10-08 用户口径（看实机产出后提的三条）────────────────
+ * ① 「说话方式」原来是 markdown 表格，与其他几节的条目式文段不一致 → 改成 `- 维度：内容`；
+ * ② 台词样本模型实际输出成 `- 情境·信念（v2.2）：「…」`（把资料里的版本号抄进来了）→ 定死格式并禁标注。
+ * 下面三条钉住，避免改模板时回退。
+ */
+test('★★ 「说话方式」必须是条目式文段（`- 维度：内容`），不许再画表格', () => {
+  const body = personaTemplateBody(fs.readFileSync(CHARS, 'utf8'));
+  const start = body.indexOf('## 你的说话方式');
+  const end = body.indexOf('## 你的好恶', start);
+  assert.ok(start >= 0 && end > start, '找不到「说话方式 → 好恶」这一段');
+  const block = body.slice(start, end);
+  assert.equal(/\|\s*维度\s*\|/.test(block), false, '说话方式段不得再用 markdown 表格');
+  assert.equal(/\|\s*:?-{2,}/.test(block), false, '说话方式段不得出现表格分隔行');
+  for (const dim of ['自称', '称呼他人', '语气基调', '标志口头禅', '标点与断句习惯', '开场模式', '风格切换', '绝不会说']) {
+    assert.ok(new RegExp(`^- ${dim}[：:]`, 'm').test(block), `说话方式缺少「- ${dim}：…」这一条目`);
+  }
+});
+
+test('★★ 台词样本必须给出固定格式 `- 情境·<场合>：「…」`，并明令不许带版本号', () => {
+  const src = fs.readFileSync(CHARS, 'utf8');
+  const idx = src.indexOf('### 台词样本');
+  const block = src.slice(idx, idx + 520);
+  assert.match(block, /情境·/, '应给出「情境·XX」的写法（用户口径 2026-10-08）');
+  assert.match(block, /版本号/, '必须点名"不许写版本号"（实测模型会输出 情境·信念（v2.2））');
+  assert.match(block, /不许附带|不要附带|必须去掉|应去掉/, '应明确要求去掉版本号/出处等标注');
+});
+
+test('★ 小镇 NPC 模板同步：说话方式同样不许画表格', () => {
+  const src = fs.readFileSync(NPC, 'utf8');
+  const start = src.indexOf('## 你的说话方式');
+  const end = src.indexOf('## 你的好恶', start);
+  assert.ok(start >= 0 && end > start, 'NPC 模板找不到「说话方式 → 好恶」段');
+  const block = src.slice(start, end);
+  assert.equal(/\|\s*维度\s*\|/.test(block), false, 'NPC 说话方式段不得再用 markdown 表格');
+});

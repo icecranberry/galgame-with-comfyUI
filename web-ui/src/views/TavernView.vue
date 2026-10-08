@@ -3433,17 +3433,24 @@ onMounted(async () => {
 .preview-name-row {
   display: flex; gap: 10px;
 }
+/* ⚠ 色板必须走 token：旧实现写死背景 `#f0ece8` + focus `rgba(255,255,255,.5)`，
+   暗夜主题下 `--text-bright`(#fbf8f5) 会压在浅底上 → 角色名/英文名几乎看不见。 */
 .preview-name-input {
   font-size: 20px; font-weight: 700; color: var(--text-bright);
-  background: #f0ece8;
-  border: 1px dashed rgba(var(--accent-rgb), 0.25);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-strong);
   border-radius: 8px; padding: 4px 10px;
   flex: 1; min-width: 0; outline: none; font-family: inherit;
-  transition: border-color 0.2s, background 0.2s;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   cursor: text;
 }
-.preview-name-input:hover  { border-color: rgba(var(--accent-rgb), 0.45); background: rgba(var(--accent-rgb), 0.07); }
-.preview-name-input:focus  { border-color: var(--accent); background: rgba(255,255,255,0.5); }
+.preview-name-input::placeholder { color: var(--text-secondary); opacity: 1; font-weight: 500; }
+.preview-name-input:hover:not(:focus) { border-color: rgba(var(--accent-rgb), 0.55); }
+.preview-name-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-secondary);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
+}
 
 /* ── 预览卡片 ── */
 .preview-card {
