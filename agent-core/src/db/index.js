@@ -998,6 +998,21 @@ function initSchema(db) {
   // 迁移: 角色立绘 — characters 表新增 standing_url 列
   migrateStandingSchema(db);
 
+  // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
+  migrateCharacterFolderSchema(db);
+
+  // 迁移: 角色归档 — characters 表新增 archived 列
+  migrateCharacterArchiveSchema(db);
+
+  // 迁移: 我的表情库 — user_emojis 表
+  migrateUserEmojiSchema(db);
+
+  // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+  migrateMomentTopicCheckedSchema(db);
+
+  // 迁移: 允许系统/自定义话题同名共存 — 唯一约束改为 (source, name)
+  migrateMomentTopicAllowDuplicateName(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1605,6 +1620,121 @@ function migrateDisturbSchema(db) {
 }
 
 /**
+ * 迁移: 允许「系统话题」与「自定义话题」同名共存
+ *
+ * 上游把 moment_topics.name 设成全局 UNIQUE，于是「自定义一条与系统同名的话题」根本插不进去。
+ * 但同名共存是合理需求：用户想用自己的文案，同时保留系统那份，靠 checked 决定抽谁。
+ * 所以把约束从 UNIQUE(name) 放宽成 UNIQUE(source, name)（同一来源内仍然不允许重名）。
+ *
+ * SQLite 不支持直接删除列约束，只能重建表；重建前后字段与数据原样保留。
+ */
+function migrateMomentTopicAllowDuplicateName(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='moment_topics'"
+    ).get();
+    if (!row?.sql) return;
+    if (!/name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) return;   // 已经是新结构，跳过
+
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE moment_topics__migrate (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        desc TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        checked INTEGER DEFAULT 1,
+        UNIQUE(source, name)
+      )
+    `);
+    db.exec(`
+      INSERT INTO moment_topics__migrate (id, name, desc, source, is_active, created_at, updated_at, checked)
+      SELECT id, name, desc, source, is_active, created_at, updated_at, checked FROM moment_topics
+    `);
+    db.exec('DROP TABLE moment_topics');
+    db.exec('ALTER TABLE moment_topics__migrate RENAME TO moment_topics');
+    db.exec('COMMIT');
+    console.log('[db] moment_topics: name 唯一约束放宽为 UNIQUE(source, name)，允许系统/自定义同名共存');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* 事务可能已提交 */ }
+    console.log('[db] migrateMomentTopicAllowDuplicateName error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+ *
+ * 不能复用 is_active：那张表里 is_active 是「软删除」标记（DELETE 接口把它置 0，
+ * 列表就不再返回），拿它当「临时停用」用的话，用户一取消勾选就再也找不回来了。
+ * 所以另起 checked：只有 is_active = 1 且 checked = 1 才参与抽题。
+ * 默认 1，保证老库升级后行为与现在完全一致。
+ */
+function migrateMomentTopicCheckedSchema(db) {
+  try {
+    const cols = db.prepare('PRAGMA table_info(moment_topics)').all();
+    if (!cols.find(c => c.name === 'checked')) {
+      db.exec('ALTER TABLE moment_topics ADD COLUMN checked INTEGER DEFAULT 1');
+      console.log('[db] Added moment_topics.checked column (default 1)');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentTopicCheckedSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 我的表情库 — user_emojis 表
+ *
+ * 用户自己的表情包，跨角色通用（与角色的 character_emojis 分开存）。
+ * 不复用 character_emojis 的原因：那张表的 character_id 是 NOT NULL 外键到 characters(id)，
+ * 借一个特殊 id 代表「用户」既违反外键约束，语义上也说不通；这里也不分 set（用户只有一套）。
+ */
+function migrateUserEmojiSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'done'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.log('[db] migrateUserEmojiSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色归档 — characters 表新增 archived 列
+ *
+ * 归档 = 该角色不再参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 日程刷新 / 拉群），
+ * 仅保留角色卡数据与「你主动找它时仍会回复」的能力。
+ *
+ * 刻意做成独立的拦截层，而不是去改动 moments_disabled / proactive_disabled /
+ * events_disabled / schedule_enabled 这四个开关 —— 否则归档再取消会把用户单独设过的
+ * 偏好一起抹掉。各调度器的选人查询统一叠加 `COALESCE(archived, 0) = 0`。
+ */
+function migrateCharacterArchiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'archived')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN archived INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.archived column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterArchiveSchema error:', err.message);
+  }
+}
+
+/**
  * 迁移: 日程系统 — characters 表新增 schedule 相关列
  */
 function migrateScheduleSchema(db) {
@@ -1786,6 +1916,31 @@ function migrateStandingSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色文件夹 — 新建 character_folders 表，characters 表新增 folder_id 列
+ * 单层分类：一个角色只属于一个文件夹，folder_id 为 NULL 表示「未分类」。
+ * 删除文件夹只把成员置回未分类（folder_id = NULL），不动角色本体。
+ */
+function migrateCharacterFolderSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS character_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'folder_id')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN folder_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added characters.folder_id column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterFolderSchema error:', err.message);
   }
 }
 

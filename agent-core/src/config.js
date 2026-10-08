@@ -109,6 +109,9 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
+    // 朋友圈发帖频率 0~24：1=默认（角色 2~8 小时一条），越大越快，24=最快（5~20 分钟），0=关闭
+    // （与 eventFreq 同口径：env 里写 0 会被兜成 1，运行时通过设置页设为 0 并存进 DB 才生效）
+    momentFreq: parseFloat(process.env.MOMENT_FREQ) || 1,
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
     scheduleRefreshDays: Math.max(1, Math.min(3, parseInt(process.env.SCHEDULE_REFRESH_DAYS, 10) || 1)), // 日程刷新周期（天），1~3
@@ -251,7 +254,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     type: 'oxipng',   // 'oxipng' | 'avif'
   },
   workflow: {
-    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid'
+    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid' | 'custom'
+    // mode === 'custom' 时使用的工作流文件名（位于 workflow/ 目录，如 制图工作流-pro-yinyue.json）
+    // 文件缺失时自动回退 turbo，不会导致生图失败
+    customTemplate: '',
     scene: {           // hybrid 模式下的场景→工作流映射
       chat: 'turbo',
       group: 'base',
@@ -568,6 +574,19 @@ export function updateEventFreq(value) {
 }
 
 /**
+ * 更新朋友圈发帖频率（0~24）
+ * 1 = 默认节奏（角色 2~8 小时一条），值越大越快，0 = 关闭自动发帖。
+ * 周期 = 基准 2~8 小时 / freq；上限 24 对应 5~20 分钟一条（再快没有意义，
+ * 而且发帖要调 LLM + 生图，实际也跑不过来）。
+ */
+export function updateMomentFreq(value) {
+  const f = Math.max(0, Math.min(24, parseFloat(value) || 0));
+  config.features.momentFreq = f;
+  persistSettingSync('feature_momentFreq', String(f));
+  console.log(`[config] momentFreq = ${f}`);
+}
+
+/**
  * 更新日程刷新周期（天，1~3），影响下次排期的 next_schedule_refresh_at
  */
 export function updateScheduleRefreshDays(value) {
@@ -774,12 +793,27 @@ export function updateCompressConfig({ enabled, type }) {
 }
 
 export function updateWorkflowMode(mode) {
-  if (!['base', 'turbo', 'hybrid'].includes(mode)) {
-    return { ok: false, error: 'mode must be base, turbo, or hybrid' };
+  if (!['base', 'turbo', 'hybrid', 'custom'].includes(mode)) {
+    return { ok: false, error: 'mode must be base, turbo, hybrid, or custom' };
   }
   config.workflow.mode = mode;
   persistSettingSync('workflow_mode', mode);
   console.log(`[config] workflowMode = ${mode}`);
+  return { ok: true };
+}
+
+/**
+ * 设置全局自定义工作流文件名（mode === 'custom' 时生效）
+ * 仅接受 workflow/ 目录下的 .json 文件名；传空字符串表示清除。
+ */
+export function updateWorkflowCustomTemplate(filename) {
+  if (filename !== undefined && filename !== null && typeof filename !== 'string') {
+    return { ok: false, error: 'customTemplate must be a string' };
+  }
+  const value = typeof filename === 'string' ? filename.trim() : '';
+  config.workflow.customTemplate = value;
+  persistSettingSync('workflow_custom_template', value);
+  console.log(`[config] workflowCustomTemplate = ${value || '(cleared)'}`);
   return { ok: true };
 }
 
@@ -974,6 +1008,11 @@ export function autoDetectWorkflowMode() {
   if (getSetting(MARKER_KEY) === 'true') {
     // 已检测过，不再自动干预
     return { skipped: true, reason: 'already_detected' };
+  }
+
+  // 用户显式选择自定义工作流时，自动检测不干预（也不标记，便于日后改回 turbo/base 时仍能自动检测）
+  if (config.workflow?.mode === 'custom') {
+    return { skipped: true, reason: 'explicit_custom_mode' };
   }
 
   try {

@@ -66,6 +66,55 @@ export async function togglePin(characterId, pinned) {
   return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
 }
 
+// 开关角色的日程生成：关闭后不再刷 LLM 生成日程（省 token），
+// 已生成的日程模板保留，角色仍按既有日程活动，只是内容不再变化
+export async function setCharacterScheduleEnabled(characterId, enabled) {
+  return request(`/characters/${characterId}/schedule-enabled`, { method: 'PUT', body: { enabled } })
+}
+
+// 批量开关全体角色的日程生成（「全量省 token」入口）
+export async function setAllCharactersScheduleEnabled(enabled) {
+  return request('/characters/schedule-enabled-all', { method: 'POST', body: { enabled } })
+}
+
+// 归档 / 取消归档：归档后该角色不再参与任何主动行为（主动聊天、朋友圈、奇遇、
+// 日程刷新、自己拉群、小镇奇遇），仅保留角色卡数据与「你主动找它时仍会回复」
+export async function setCharacterArchived(characterId, archived) {
+  return request(`/characters/${characterId}/archived`, { method: 'PUT', body: { archived } })
+}
+
+// 批量归档 / 取消归档全体角色
+export async function setAllCharactersArchived(archived) {
+  return request('/characters/archived-all', { method: 'POST', body: { archived } })
+}
+
+// ── 角色文件夹（单层分类）──
+export function listCharacterFolders() {
+  return request('/characters/folders')
+}
+
+export function createCharacterFolder(name) {
+  return request('/characters/folders', { method: 'POST', body: { name } })
+}
+
+export function renameCharacterFolder(id, name) {
+  return request(`/characters/folders/${id}`, { method: 'PUT', body: { name } })
+}
+
+export function deleteCharacterFolder(id) {
+  return request(`/characters/folders/${id}`, { method: 'DELETE' })
+}
+
+/** 重排文件夹顺序（拖拽排序），ids 为期望的先后顺序 */
+export function reorderCharacterFolders(ids) {
+  return request('/characters/folders/reorder', { method: 'PUT', body: { ids } })
+}
+
+// folderId 传 null 表示移回「未分类」
+export function moveCharacterToFolder(characterId, folderId) {
+  return request(`/characters/${characterId}/folder`, { method: 'PUT', body: { folder_id: folderId } })
+}
+
 // ── 角色专属外观/形态 ──
 export function listCharacterOutfits(characterId) {
   return request(`/characters/${characterId}/outfits`)
@@ -181,6 +230,23 @@ export function deleteEmoji(characterId, key, setId = null) {
   return request(`/characters/emoji/${characterId}/${key}${query}`, { method: 'DELETE' })
 }
 
+// ── 我的表情库（用户自己的表情包，跨角色通用）──
+
+export function listUserEmojis() {
+  return request(`/user-emoji`)
+}
+
+export function uploadUserEmoji(key, base64) {
+  return request(`/user-emoji/${encodeURIComponent(key)}/upload`, {
+    method: 'POST',
+    body: { base64 },
+  })
+}
+
+export function deleteUserEmoji(key) {
+  return request(`/user-emoji/${encodeURIComponent(key)}`, { method: 'DELETE' })
+}
+
 export async function deleteCharacter(id) {
   return request(`/characters/${id}`, { method: 'DELETE' })
 }
@@ -223,6 +289,14 @@ export function refineAppearanceDraft({ image, basePrompt, displayName }) {
   return request('/characters/refine-appearance-draft', {
     method: 'POST',
     body: { image, base_prompt: basePrompt, display_name: displayName },
+  })
+}
+
+/** 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存 */
+export function refinePersonaDraft({ basePrompt, displayName, mode }) {
+  return request('/characters/refine-persona-draft', {
+    method: 'POST',
+    body: { base_prompt: basePrompt, display_name: displayName, mode },
   })
 }
 
@@ -293,7 +367,12 @@ export async function deleteUserRelationship(id) {
   return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext) {
+// 上传一张聊天图片（base64 data URI → 返回 /images/chat/... 路径），发图前先调它
+export function uploadChatImage(base64) {
+  return request('/chat/upload-image', { method: 'POST', body: { base64 } })
+}
+
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext, images = null) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -314,7 +393,7 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(townContext === undefined ? {} : { townContext }) }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(Array.isArray(images) && images.length ? { images } : {}), ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
@@ -533,6 +612,11 @@ export function updateGroupSummaryInterval(value) {
 /** 更新奇遇触发频率 0~1 */
 export async function updateEventFreq(value) {
   await request(`/config/event-freq`, { method: 'PUT', body: { value } })
+}
+
+/** 更新朋友圈发帖频率（0~3，1=默认 2~8 小时一条，0=关闭自动发帖） */
+export async function updateMomentFreq(value) {
+  await request(`/config/moment-freq`, { method: 'PUT', body: { value } })
 }
 
 /** 更新日程刷新周期（天，1~3） */
@@ -1277,8 +1361,11 @@ export async function restoreWorkflow() {
   return request(`/workflows/restore`, { method: 'POST' })
 }
 
-export async function updateWorkflowMode(mode) {
-  return request(`/config/workflow-mode`, { method: 'PUT', body: { mode } })
+export async function updateWorkflowMode(mode, customTemplate) {
+  const body = { mode }
+  // mode === 'custom' 时一并提交全局自定义工作流文件名
+  if (customTemplate !== undefined) body.customTemplate = customTemplate
+  return request(`/config/workflow-mode`, { method: 'PUT', body })
 }
 
 export async function updateWorkflowScene(scene) {
@@ -1413,6 +1500,12 @@ export function deleteTopic(id) {
   return request(`/library/topics/${id}`, { method: 'DELETE' })
 }
 
+// 批量勾选 / 取消勾选话题（决定参不参与抽题，条目本身保留）
+// 传 { all: true } 表示全选/清空，或 { ids: [...] } 指定条目
+export function setTopicsChecked({ ids = null, all = false, checked }) {
+  return request(`/library/topics/set-checked`, { method: 'POST', body: { ids, all, checked } })
+}
+
 export function generateTopics(direction) {
   return request(`/library/topics/generate`, { method: 'POST', body: { direction } })
 }
@@ -1474,7 +1567,7 @@ export function listItems() {
   return request(`/items`)
 }
 
-// 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
+// 开启每日宝箱（冷却由后端 CHEST_COOLDOWN_SECONDS 决定，本地为 1 分钟；道具图片异步生成，完成后经 item_ready 事件刷新）
 export function openChest() {
   return request(`/items/chest/open`, { method: 'POST' })
 }

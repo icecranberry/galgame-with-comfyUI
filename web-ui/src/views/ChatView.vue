@@ -168,6 +168,25 @@
         </div>
       </Transition>
 
+      <!-- 待发送的图片：缩略图预览，可逐张移除 -->
+      <Transition name="chat-img-preview">
+        <div v-if="pendingChatImages.length || chatImageUploading" class="chat-img-strip">
+          <div v-for="(u, i) in pendingChatImages" :key="u" class="chat-img-thumb">
+            <img :src="u" alt="待发送的图片" />
+            <div
+              class="chat-img-del"
+              role="button"
+              tabindex="0"
+              title="移除这张图"
+              @click.stop="removeChatImage(i)"
+              @keydown.enter.prevent.stop="removeChatImage(i)"
+              @keydown.space.prevent.stop="removeChatImage(i)"
+            >✕</div>
+          </div>
+          <span v-if="chatImageUploading" class="chat-img-hint">上传中…</span>
+        </div>
+      </Transition>
+      <input ref="chatImageEl" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden @change="onChatImagePick" />
       <div class="input-area">
         <div class="force-img-wrap">
           <div
@@ -191,6 +210,42 @@
           @focus="inputFocused = true"
           @blur="inputFocused = false"
         ></textarea>
+        <!-- 发图：选中即上传，随消息一起交给后端（模型侧会转成图片输入） -->
+        <div
+          role="button"
+          tabindex="0"
+          class="gift-btn chat-img-btn"
+          :class="{ 'is-busy': chatImageUploading }"
+          title="发送图片"
+          aria-label="发送图片"
+          @keydown.enter.prevent="pickChatImage"
+          @keydown.space.prevent="pickChatImage"
+          @click="pickChatImage"
+        >
+          <svg class="gift-btn-icon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="3" />
+            <circle cx="8.5" cy="9.5" r="1.6" />
+            <path d="M4 17l4.6-4.6 3.4 3.4 3-3L20 16" />
+          </svg>
+        </div>
+        <!-- 我的表情库：选中的表情以 [名字] 标记插入输入框，后端会替换成图片 -->
+        <div
+          role="button"
+          tabindex="0"
+          class="gift-btn emoji-btn"
+          title="发表情"
+          aria-label="发表情"
+          @keydown.enter.prevent="showEmojiPicker = true"
+          @keydown.space.prevent="showEmojiPicker = true"
+          @click="showEmojiPicker = true"
+        >
+          <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8.5 14.4s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8" />
+            <line x1="9" y1="9.6" x2="9.01" y2="9.6" />
+            <line x1="15" y1="9.6" x2="15.01" y2="9.6" />
+          </svg>
+        </div>
         <div v-if="isCharSleeping" role="button" tabindex="0" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @keydown.enter.prevent="onWakeChar" @keydown.space.prevent="onWakeChar" @click="onWakeChar" title="叫醒角色">
           <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         </div>
@@ -231,6 +286,11 @@
         :affinity="chat.activeChar?.affinity ?? 50"
         @close="showGiftPanel = false"
         @sent="onGiftSent"
+      />
+      <UserEmojiPicker
+        v-if="showEmojiPicker"
+        @close="showEmojiPicker = false"
+        @pick="onPickEmoji"
       />
     </template>
 
@@ -603,6 +663,7 @@ import ChatBgPanel from '../components/ChatBgPanel.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
+import UserEmojiPicker from '../components/UserEmojiPicker.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
@@ -632,6 +693,74 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
+const showEmojiPicker = ref(false)
+
+// ── 随消息发送的图片 ──
+// 选中即上传，拿到 /images/chat/... 路径存这儿；发送时随消息一起交给后端，
+// 后端把它并进 messages.images，模型侧由 contextAssembler 转成图片输入。
+const pendingChatImages = ref([])
+const chatImageUploading = ref(false)
+const chatImageEl = ref(null)
+const MAX_CHAT_IMAGES = 4
+
+function pickChatImage() {
+  chatImageEl.value?.click()
+}
+
+async function onChatImagePick(ev) {
+  const files = Array.from(ev.target.files || [])
+  ev.target.value = ''   // 允许连续选同一个文件
+  if (!files.length) return
+
+  chatImageUploading.value = true
+  try {
+    for (const file of files) {
+      if (pendingChatImages.value.length >= MAX_CHAT_IMAGES) {
+        toastFn(`一次最多带 ${MAX_CHAT_IMAGES} 张图`, 'warning')
+        break
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        toastFn('图片不能超过 8MB', 'error')
+        continue
+      }
+      const dataUri = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(new Error('读取图片失败'))
+        reader.readAsDataURL(file)
+      })
+      const up = await api.uploadChatImage(dataUri)
+      if (up?.url) pendingChatImages.value.push(up.url)
+    }
+  } catch (err) {
+    toastFn(err?.message || '上传图片失败', 'error')
+  } finally {
+    chatImageUploading.value = false
+  }
+}
+
+function removeChatImage(idx) {
+  pendingChatImages.value.splice(idx, 1)
+}
+
+/** 表情面板选中：把 [名字] 标记插到光标处，用户可以继续补文字再发 */
+function onPickEmoji(key) {
+  showEmojiPicker.value = false
+  const marker = `[${key}]`
+  const el = inputEl.value
+  if (el && typeof el.selectionStart === 'number') {
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    inputText.value = inputText.value.slice(0, start) + marker + inputText.value.slice(end)
+    nextTick(() => {
+      el.focus()
+      const pos = start + marker.length
+      el.setSelectionRange(pos, pos)
+    })
+  } else {
+    inputText.value += marker
+  }
+}
 const inputFocused = ref(false)
 const wakeShaking = ref(false)
 
@@ -1661,7 +1790,7 @@ function pickGuess(text) {
 const showUndoBubble = ref(false)
 let pressTimer = null
 let longPressFired = false
-const sendDisabled = computed(() => !inputText.value.trim() || chat.streaming)
+const sendDisabled = computed(() => (!inputText.value.trim() && pendingChatImages.value.length === 0) || chat.streaming)
 
 function onSendPressStart() {
   // 流式中不允许长按（正在发送消息），仅输入为空时可以
@@ -1719,9 +1848,12 @@ async function undoLastRound() {
 async function send() {
   if (sendDisabled.value) return
   const text = inputText.value.trim()
+  const imgs = pendingChatImages.value.length ? [...pendingChatImages.value] : null
+  if (!text && !imgs) return
   inputText.value = ''
+  pendingChatImages.value = []
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text, imageGenMode.value, deepThinkMode.value)
+  await chat.sendMessage(text, imageGenMode.value, deepThinkMode.value, { images: imgs })
   await scrollToBottom(true)
 }
 
@@ -2058,6 +2190,52 @@ function renderContent(text) {
 .gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
 .gift-btn:hover .gift-btn-icon { transform: rotate(12deg) scale(1.1); }
 .gift-btn:active { transform: scale(0.94); }
+
+/* ── 表情按钮：复用礼物按钮的尺寸与交互，换一套青色以免两个圆钮混淆 ── */
+.emoji-btn {
+  background: linear-gradient(135deg, #9fd8d0 0%, #5fb8ab 100%);
+  box-shadow: 0 2px 8px rgba(95, 184, 171, 0.25);
+}
+.emoji-btn:hover { box-shadow: 0 4px 16px rgba(95, 184, 171, 0.35); }
+.emoji-btn:hover .gift-btn-icon { transform: scale(1.1); }
+
+/* ── 图片按钮：复用礼物按钮的尺寸与交互，换一套紫色以免三个圆钮混淆 ── */
+.chat-img-btn {
+  background: linear-gradient(135deg, #b8a9e8 0%, #8878d0 100%);
+  box-shadow: 0 2px 8px rgba(136, 120, 208, 0.25);
+}
+.chat-img-btn:hover { box-shadow: 0 4px 16px rgba(136, 120, 208, 0.35); }
+.chat-img-btn:hover .gift-btn-icon { transform: scale(1.1); }
+.chat-img-btn.is-busy { opacity: 0.6; pointer-events: none; }
+
+/* ── 待发送图片的预览条 ── */
+.chat-img-strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 14px 0;
+}
+.chat-img-thumb {
+  position: relative;
+  width: 58px; height: 58px;
+  border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+}
+.chat-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-img-del {
+  position: absolute; top: 2px; right: 2px;
+  width: 17px; height: 17px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1;
+  background: rgba(0, 0, 0, 0.45); color: #fff;
+  cursor: pointer;
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.chat-img-thumb:hover .chat-img-del { opacity: 1; }
+.chat-img-hint { font-size: 12px; color: var(--text-secondary); }
+.chat-img-preview-enter-active,
+.chat-img-preview-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
+.chat-img-preview-enter-from,
+.chat-img-preview-leave-to { opacity: 0; transform: translateY(6px); }
 
 /* ── 叫醒按钮（覆盖送礼按钮样式） ── */
 .wake-btn {

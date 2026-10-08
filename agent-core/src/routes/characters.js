@@ -23,7 +23,7 @@ import { invalidateCache as invalidateScheduleCache, syncSleepingState } from '.
 import { assignFontForNewCharacter } from '../services/handwritingFontService.js';
 import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
-import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
+import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { pickReactionMarker } from '../services/emojiService.js';
@@ -195,6 +195,120 @@ router.put('/standing-mode', (req, res) => {
   res.json({ ok: true, mode });
 });
 
+// ── 角色文件夹（单层分类）──
+// 一个角色只属于一个文件夹，folder_id 为 NULL = 未分类。删除文件夹只解绑成员，不删角色。
+
+// 文件夹名校验：非空、最长 20 字
+const FOLDER_NAME_MAX = 20;
+function normalizeFolderName(raw) {
+  const name = String(raw ?? '').trim();
+  if (!name) return { error: '文件夹名称不能为空' };
+  if (name.length > FOLDER_NAME_MAX) return { error: `文件夹名称最多 ${FOLDER_NAME_MAX} 个字` };
+  return { name };
+}
+
+// GET /api/characters/folders — 文件夹列表（含成员数量）＋未分类数量
+router.get('/folders', (req, res) => {
+  const db = getDb();
+  const folders = db.prepare(`
+    SELECT f.id, f.name, f.sort_order, COUNT(c.id) AS count
+    FROM character_folders f
+    LEFT JOIN characters c ON c.folder_id = f.id
+    GROUP BY f.id
+    ORDER BY f.sort_order ASC, f.id ASC
+  `).all();
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM characters WHERE folder_id IS NULL').get();
+  res.json({ folders, uncategorized: n || 0 });
+});
+
+// POST /api/characters/folders — 新建文件夹
+router.post('/folders', (req, res) => {
+  const db = getDb();
+  const { name, error } = normalizeFolderName(req.body?.name);
+  if (error) return res.status(400).json({ error });
+  if (db.prepare('SELECT id FROM character_folders WHERE name = ?').get(name)) {
+    return res.status(409).json({ error: '已存在同名文件夹' });
+  }
+  const { next } = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM character_folders').get();
+  const r = db.prepare('INSERT INTO character_folders (name, sort_order) VALUES (?, ?)').run(name, next);
+  res.status(201).json({ id: r.lastInsertRowid, name, sort_order: next, count: 0 });
+});
+
+// PUT /api/characters/folders/reorder — 重排文件夹顺序（拖拽排序）
+// 注意：必须注册在下面的 '/folders/:id' 之前，否则 'reorder' 会被当成 id 匹配掉。
+router.put('/folders/reorder', (req, res) => {
+  const db = getDb();
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(n => parseInt(n, 10)) : null;
+  if (!ids || !ids.length || ids.some(n => !Number.isInteger(n))) {
+    return res.status(400).json({ error: 'ids 必须是文件夹 id 数组' });
+  }
+  // 只接受真实存在的文件夹，且以库里的现状为准做交集，防止前端传了脏数据把 sort_order 写乱
+  const existing = db.prepare('SELECT id FROM character_folders').all().map(r => r.id);
+  const existingSet = new Set(existing);
+  const ordered = ids.filter(id => existingSet.has(id));
+  if (!ordered.length) return res.status(400).json({ error: '没有有效的文件夹 id' });
+  // 没被前端列到的文件夹保留在末尾，保持相对顺序（避免漏传导致它们乱序）
+  for (const id of existing) if (!ordered.includes(id)) ordered.push(id);
+
+  const stmt = db.prepare('UPDATE character_folders SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction(() => {
+    ordered.forEach((id, i) => stmt.run(i + 1, id));
+  });
+  tx();
+  res.json({ ok: true, order: ordered });
+});
+
+// PUT /api/characters/folders/:id — 重命名文件夹
+router.put('/folders/:id', (req, res) => {
+  const db = getDb();
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid folder id' });
+  if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: '文件夹不存在' });
+  }
+  const { name, error } = normalizeFolderName(req.body?.name);
+  if (error) return res.status(400).json({ error });
+  if (db.prepare('SELECT id FROM character_folders WHERE name = ? AND id != ?').get(name, id)) {
+    return res.status(409).json({ error: '已存在同名文件夹' });
+  }
+  db.prepare('UPDATE character_folders SET name = ? WHERE id = ?').run(name, id);
+  res.json({ ok: true, id, name });
+});
+
+// DELETE /api/characters/folders/:id — 删除文件夹（成员回到未分类）
+router.delete('/folders/:id', (req, res) => {
+  const db = getDb();
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'invalid folder id' });
+  if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(id)) {
+    return res.status(404).json({ error: '文件夹不存在' });
+  }
+  const tx = db.transaction((fid) => {
+    db.prepare('UPDATE characters SET folder_id = NULL WHERE folder_id = ?').run(fid);
+    db.prepare('DELETE FROM character_folders WHERE id = ?').run(fid);
+  });
+  tx(id);
+  res.json({ ok: true });
+});
+
+// PUT /api/characters/:id/folder — 把角色移入文件夹（folder_id 传 null 表示移回未分类）
+router.put('/:id/folder', (req, res) => {
+  const db = getDb();
+  const char = db.prepare('SELECT id FROM characters WHERE id = ?').get(req.params.id);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+  const raw = req.body?.folder_id;
+  let folderId = null;
+  if (raw !== null && raw !== undefined && raw !== '') {
+    folderId = parseInt(raw, 10);
+    if (!Number.isSafeInteger(folderId) || folderId <= 0) return res.status(400).json({ error: 'invalid folder id' });
+    if (!db.prepare('SELECT id FROM character_folders WHERE id = ?').get(folderId)) {
+      return res.status(404).json({ error: '文件夹不存在' });
+    }
+  }
+  db.prepare('UPDATE characters SET folder_id = ? WHERE id = ?').run(folderId, req.params.id);
+  res.json({ ok: true, folder_id: folderId });
+});
+
 // ── 角色置顶 ──
 // 必须注册在 put('/:id') 之前，避免被参数路由吞掉
 
@@ -209,6 +323,88 @@ router.put('/:id/pin', (req, res) => {
   const val = pinned ? 1 : 0;
   db.prepare('UPDATE characters SET pinned = ? WHERE id = ?').run(val, req.params.id);
   res.json({ ok: true, pinned: val });
+});
+
+// PUT /api/characters/:id/schedule-enabled — 开关该角色的日程生成
+//
+// 关闭后，replyQueueScheduler 的日程刷新不再挑中它（那条查询本就按 schedule_enabled 过滤），
+// 于是省下每次刷新的 LLM 调用。已生成的 schedule_templates 会被保留，
+// snapshotTodaySchedule 仍能把模板铺成每天的 daily_schedules ——
+// 角色照旧按既有日程活动，只是内容不再变化（省 token 又不丢体验）。
+// 睡眠同步已与这个开关解耦（见 scheduleManager），所以不用手动改 is_sleeping。
+router.put('/:id/schedule-enabled', (req, res) => {
+  const db = getDb();
+  const characterId = parseInt(req.params.id, 10);
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const enabled = req.body?.enabled ? 1 : 0;
+  if (enabled) {
+    // 重新开启：刷新时间置空，后台会优先挑中它，尽快生成一次
+    db.prepare('UPDATE characters SET schedule_enabled = 1, next_schedule_refresh_at = NULL WHERE id = ?')
+      .run(characterId);
+  } else {
+    db.prepare('UPDATE characters SET schedule_enabled = 0, next_schedule_refresh_at = NULL WHERE id = ?')
+      .run(characterId);
+    // 顺手对齐一次睡眠状态（此刻可能刚好处在入睡/起床边界）
+    syncSleepingState(characterId);
+  }
+  invalidateScheduleCache(characterId);
+  console.log(`[char] Schedule generation ${enabled ? 'enabled' : 'disabled'} for ${char.display_name}`);
+  res.json({ ok: true, schedule_enabled: enabled });
+});
+
+// POST /api/characters/schedule-enabled-all — 批量开关全体角色的日程生成
+// 「全量省 token」入口：一次把所有角色排期清空／恢复，不必逐个点。
+// 恢复时只重排那些被关掉的（schedule_enabled = 0），已经开着的角色不受打扰。
+router.post('/schedule-enabled-all', (req, res) => {
+  const db = getDb();
+  const enabled = req.body?.enabled ? 1 : 0;
+  const r = enabled
+    ? db.prepare(`UPDATE characters SET schedule_enabled = 1, next_schedule_refresh_at = NULL
+                  WHERE schedule_enabled = 0`).run()
+    : db.prepare(`UPDATE characters SET schedule_enabled = 0, next_schedule_refresh_at = NULL
+                  WHERE schedule_enabled = 1 OR schedule_enabled IS NULL`).run();
+  console.log(`[char] Schedule generation ${enabled ? 'enabled' : 'disabled'} for ${r.changes} character(s)`);
+  res.json({ ok: true, schedule_enabled: enabled, changed: r.changes });
+});
+
+// POST /api/characters/archived-all — 批量归档 / 取消归档全体角色
+// 与单个归档同一语义（独立拦截层，不改写四个细分开关）；取消归档时把刷新排期置空，
+// 后台会重新把角色排进日程队列。
+router.post('/archived-all', (req, res) => {
+  const db = getDb();
+  const archived = req.body?.archived ? 1 : 0;
+  const r = archived
+    ? db.prepare(`UPDATE characters SET archived = 1, next_schedule_refresh_at = NULL
+                  WHERE COALESCE(archived, 0) = 0`).run()
+    : db.prepare(`UPDATE characters SET archived = 0, next_schedule_refresh_at = NULL
+                  WHERE COALESCE(archived, 0) = 1`).run();
+  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${r.changes} character(s) in bulk`);
+  res.json({ ok: true, archived, changed: r.changes });
+});
+
+// PUT /api/characters/:id/archived — 归档 / 取消归档
+//
+// 归档 = 该角色不再参与任何主动行为：主动聊天、发朋友圈、触发奇遇、刷新日程、
+// 自己拉群、参与小镇奇遇；但角色卡数据完整保留，你主动找它聊天它照常回复。
+//
+// 刻意做成独立的拦截层（各调度器的选人查询叠加 COALESCE(archived,0)=0），
+// 不修改四个细分开关 —— 否则归档再取消，会把用户单独设过的「不主动聊天」之类偏好一起抹掉。
+router.put('/:id/archived', (req, res) => {
+  const db = getDb();
+  const characterId = parseInt(req.params.id, 10);
+  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
+  if (!char) return res.status(404).json({ error: 'Character not found' });
+
+  const archived = req.body?.archived ? 1 : 0;
+  // 两种方向都把刷新排期清空：归档时避免「刚好被排到」，取消归档时让它重新进队列尽快生成一次
+  db.prepare('UPDATE characters SET archived = ?, next_schedule_refresh_at = NULL WHERE id = ?')
+    .run(archived, characterId);
+  if (archived) syncSleepingState(characterId);
+  invalidateScheduleCache(characterId);
+  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${char.display_name}`);
+  res.json({ ok: true, archived });
 });
 
 // PUT /api/characters/:id — 更新角色
@@ -1532,6 +1728,100 @@ router.post('/refine-appearance-draft', async (req, res) => {
       });
     }
     res.status(500).json({ error: '修正外观失败: ' + rawMsg });
+  }
+});
+
+// ── 人设润色（纯文本 LLM 改写人设；「## 你的外观」段原样保留）──
+// 与「修正外观」同构：只产出草稿并回传整卡，落库由前端走既有保存链路。
+// 外观段单独剥离、润色完再拼回 —— 不依赖模型自觉，从结构上保证生图描述不被改动。
+
+const REFINE_PERSONA_SYSTEM_PROMPT = `你是角色卡人设润色助手。用户会给你一段角色卡的人设正文（Markdown，可能带「## 」小标题），请按要求改写它。
+
+【铁律】
+1. 不得新增、删除或改动任何设定事实。身份、年龄、经历、组织、人际、能力、好恶、口头禅、对特定对象的称呼方式等一律照旧 —— 只改「怎么表达」，不改「表达了什么」。
+2. 绝对不要输出「## 你的外观」段。外观由另一个工具负责，出现即属越界。
+3. 原有的「## 」小标题必须原样保留（标题文字、顺序、数量都不变）；原文没有小标题时也不要自行添加。
+4. 保持原文的人称与视角（原文用第二人称「你」就继续用「你」）。
+5. 直接输出改写后的正文，不要任何前言、后记、解释，也不要用 markdown 代码块包裹。
+
+【文字要求】
+凝练、有画面感、有张力；去掉同义反复、口水话与空泛形容。保留原文中具体的专有名词与数字。`;
+
+const PERSONA_REFINE_MODES = {
+  polish: '润色表达：信息量与篇幅与原文基本持平，只提升文字质量。',
+  enrich: '丰富细节：在原有设定骨架上补充感官细节、具体情境与内在矛盾，让形象更立体。可以增加氛围和心理描写，但不得新增原文未提及的硬设定（亲属、组织、事件、能力等）。篇幅可比原文长约五成。',
+  concise: '精简凝练：删去冗余与重复表达，保留全部设定要点，目标篇幅约为原文的七成。',
+};
+
+/**
+ * 为人设润色做「三段切分」：外观标题之前（要润色的）/ 外观段（原样保留）/ 外观之后（原样保留）。
+ *
+ * 刻意不用 splitAppearanceSection —— 它返回的 `after` 是**外观段之后**的内容、并不含外观段本身，
+ * 拿 before+after 直接拼回会把整个外观段丢掉（已用单测确认过这个坑）。
+ */
+function splitPersonaAroundAppearance(basePrompt) {
+  const base = String(basePrompt || '');
+  const m = base.match(APPEARANCE_HEADING_RE);
+  if (!m) return { target: base.trim(), appearance: '', tail: '' };
+  const next = base.indexOf('\n## ', m.index + 1);
+  return {
+    target: base.slice(0, m.index).trim(),
+    appearance: base.slice(m.index, next >= 0 ? next : base.length).trim(),
+    tail: next >= 0 ? base.slice(next).trim() : '',
+  };
+}
+
+// POST /api/characters/refine-persona-draft — 润色人设（外观段原样保留）
+// Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise' }
+// → { ok, base_prompt（润色后整卡）, original_prompt, mode }
+router.post('/refine-persona-draft', async (req, res) => {
+  const basePrompt = typeof req.body?.base_prompt === 'string' ? req.body.base_prompt : '';
+  if (!basePrompt.trim()) {
+    return res.status(400).json({ error: '人格提示词为空，没有可润色的内容' });
+  }
+  const displayName = String(req.body?.display_name || '').trim() || '角色';
+  const mode = PERSONA_REFINE_MODES[req.body?.mode] ? req.body.mode : 'polish';
+
+  // 只把「外观段之前」的部分交给模型；外观段与它之后的内容原样拼回
+  const { target, appearance, tail } = splitPersonaAroundAppearance(basePrompt);
+  if (target.length < 10) {
+    return res.status(400).json({ error: '外观段之前没有可润色的人设内容' });
+  }
+
+  try {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[refine-persona] polishing "${displayName}" (mode: ${mode}, ${target.length} chars)`);
+
+    const llmResult = await chatSync([
+      // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
+      { role: 'system', content: getSystemRules({ roleplay: false }) },
+      { role: 'system', content: REFINE_PERSONA_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: `角色名：${displayName}\n润色方式：${PERSONA_REFINE_MODES[mode]}\n\n以下是该角色的人设正文（已排除外观段），请输出润色结果：\n\n${target}`,
+      },
+    ], { model, temperature: 0.7, max_tokens: 4096, label: '人设润色' });
+
+    let polished = String(llmResult || '').trim()
+      .replace(/^```(?:markdown|md)?\s*/i, '')   // 去掉可能的代码围栏
+      .replace(/```\s*$/, '')
+      .trim();
+    // 防御：模型若擅自带上外观段，就地截断（外观一律以拼回的原段为准）
+    const intrudedAt = polished.search(/##\s*你的外观/);
+    if (intrudedAt >= 0) polished = polished.slice(0, intrudedAt).trim();
+
+    // 合理性校验：太短多半是被截断或跑偏，宁可报错也不写坏用户的卡
+    if (polished.length < Math.max(20, target.length * 0.3)) {
+      return res.status(502).json({ error: '润色结果过短，可能被模型截断，请重试或换个力度' });
+    }
+
+    // 原顺序拼回：润色后的前段 + 原外观段 + 原外观之后的段落
+    const newBasePrompt = [polished, appearance, tail].filter(Boolean).join('\n\n');
+    console.log(`[refine-persona] done (${target.length} → ${polished.length} chars)`);
+    res.json({ ok: true, base_prompt: newBasePrompt, original_prompt: basePrompt, mode });
+  } catch (err) {
+    console.error('[refine-persona] error:', err.message);
+    res.status(500).json({ error: '人设润色失败: ' + String(err?.message || err) });
   }
 });
 

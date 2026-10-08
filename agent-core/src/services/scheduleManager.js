@@ -76,10 +76,12 @@ export function initialize() {
   // 全量清理超过 2 天的旧日程快照
   db.prepare(`DELETE FROM daily_schedules WHERE schedule_date < DATE('now', 'localtime', '-2 days')`).run();
 
-  // 检查所有启用日程的角色
+  // 检查所有角色：日程数据的存废由 daily_schedules 自身决定，不看 schedule_enabled。
+  // 后者只用来控制「要不要花 token 重新生成日程」（见 replyQueueScheduler），
+  // 关掉它的角色仍应继续按已生成的日程作息，否则日程页显示在梦乡、实际却能回消息。
+  // 没有日程的角色会在下面的 getTodayScheduleRaw 处直接跳过。
   const chars = db.prepare(`
     SELECT id, display_name FROM characters
-    WHERE schedule_enabled = 1 OR schedule_enabled IS NULL
   `).all();
 
   let sleepers = 0;
@@ -123,9 +125,8 @@ function startSleepingStateCron() {
 
   async function tick() {
     const db = getDb();
-    const chars = db.prepare(
-      'SELECT id FROM characters WHERE schedule_enabled = 1 OR schedule_enabled IS NULL'
-    ).all();
+    // 同 initialize：睡眠同步只看角色有没有日程数据，与「是否重新生成」的开关无关
+    const chars = db.prepare('SELECT id FROM characters').all();
 
     for (const char of chars) {
       syncSleepingState(char.id);
@@ -637,7 +638,7 @@ export function getAllOverview() {
   const now = new Date();
 
   const chars = db.prepare(`
-    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode, pinned
+    SELECT id, display_name, avatar_path, is_sleeping, sleep_until, wake_attempts, was_door_woken, temporary_wake_until, wake_mode, pinned, archived
     FROM characters
     ORDER BY display_name ASC
   `).all();
@@ -664,6 +665,7 @@ export function getAllOverview() {
       wake_mode: char.wake_mode,
       is_temp_woken: tempWoken,
       pinned: char.pinned ? 1 : 0,
+      archived: char.archived ? 1 : 0,
     };
   });
 }

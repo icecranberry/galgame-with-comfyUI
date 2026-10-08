@@ -1,7 +1,7 @@
 /**
  * 背包/道具系统服务层
  *
- * 获取渠道：每日宝箱（16 小时冷却，开箱记录并入 gift_history（gift_type='chest'），
+ * 获取渠道：每日宝箱（冷却见下方 CHEST_COOLDOWN_SECONDS，本地为 1 分钟，开箱记录并入 gift_history（gift_type='chest'），
  * 按最近一次道具图片生成完成时间惰性计算；生成期间由 generating 道具占用冷却。
  * 冷却记录在图片生成完成（成功或兜底标记 ready）后才写入；进程中断未完成的 generating
  * 宝箱道具会在下次启动时清理，不计入冷却；商城/服务道具由各自流程恢复。
@@ -40,7 +40,9 @@ import {
 
 // ── 常量 ──
 
-export const CHEST_COOLDOWN_SECONDS = 16 * 3600;
+// 宝箱冷却时长：上游默认 16 小时（16 * 3600），本地改成 1 分钟。
+// 这是本地补丁的一部分（见 E:\邻舍-local），更新版本时会随 local 分支一起重放，不会再被覆盖。
+export const CHEST_COOLDOWN_SECONDS = 60;
 const OUTFIT_DURATION_HOURS = 24;
 const BUFF_DURATION_HOURS = 6;
 const FAVOR_DELTA = 8;
@@ -175,6 +177,9 @@ export function getChestState() {
   return {
     canOpen: remainingSeconds <= 0 && !generating,
     remainingSeconds,
+    // cooldownSeconds 是权威值，前端按它挑合适单位显示（冷却可能只有 1 分钟，
+    // 换算成小时会是 0.0167 这种没法看的数字）；cooldownHours 保留兼容旧调用方。
+    cooldownSeconds: CHEST_COOLDOWN_SECONDS,
     cooldownHours: CHEST_COOLDOWN_SECONDS / 3600,
     generating,
   };

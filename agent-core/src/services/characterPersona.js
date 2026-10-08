@@ -19,7 +19,7 @@
 import { getActiveOutfits } from './outfitService.js';
 import { config } from '../config.js';
 
-const APPEARANCE_HEADING_RE = /##\s*你的外观/;
+export const APPEARANCE_HEADING_RE = /##\s*你的外观/;
 
 // 「你」→ 第三人称名时跳过非人称代词的复合词：
 //   迷｜你（迷你）、你｜们（你们）、你｜我（你我/你追我赶）、你｜好（你好）、你｜死（你死我活）。
