@@ -58,8 +58,14 @@
               <LootWindow v-if="view === 'loot'" @taken="onLootTaken" @use="onLootUse" />
 
               <template v-else>
+              <!-- ⚠ 2026-10-08 修复：`<Transition>` 的子节点必须带 `v-if`/`v-show`，
+                   否则过渡**永远不会触发**（Vue 只在子节点进出时执行过渡钩子）。
+                   此前这里的 `<section>` 是无条件渲染的，配合下方 `.effects-panel-*`
+                   那组 0.3s 过渡样式（已定义但从未生效）—— 属"意图未实现"的死代码。
+                   条件与外层 `<template v-else>` 一致（view !== 'loot'），因此**行为零变化**：
+                   仅在从「橱窗」切回「道具」时让该面板按设计意图淡入。 -->
               <Transition name="effects-panel">
-                <section class="active-effects" aria-labelledby="active-effects-title">
+                <section v-if="view !== 'loot'" class="active-effects" aria-labelledby="active-effects-title">
                   <div class="effects-heading">
                     <div class="effects-heading-main">
                       <span class="effects-heading-icon" aria-hidden="true">

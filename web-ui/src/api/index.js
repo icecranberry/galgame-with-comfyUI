@@ -1485,11 +1485,23 @@ export function generateStoryLine(data) {
 export function getStoryOutline() {
   return request(`/story/outline`)
 }
-/** AI 生成大纲草稿（**只出草稿不落库**） */
+/** 读「字段化编辑器」载荷（含各节点原文块，未改动节点要原样保留） */
+export function getStoryOutlineEditor() {
+  return request(`/story/outline/editor`)
+}
+/** AI 生成大纲草稿（**只出草稿不落库**）；可带 participantIds / places 作为上下文 */
 export function generateStoryOutline(data = {}) {
   return request(`/story/outline/generate`, { method: 'POST', body: data })
 }
-/** 保存大纲（首次生成或整体替换） */
+/** 细化某一个节点（只出草稿，不动其他节点与游标） */
+export function refineStoryOutlineBeat(data) {
+  return request(`/story/outline/beat/refine`, { method: 'POST', body: data })
+}
+/** 从字段化编辑器保存（服务端统一序列化，未改动节点逐字节保留） */
+export function saveStoryOutlineEditor(data) {
+  return request(`/story/outline/editor`, { method: 'PUT', body: data })
+}
+/** 保存大纲（首次生成或整体替换，收完整 raw） */
 export function saveStoryOutline(data) {
   return request(`/story/outline`, { method: 'PUT', body: data })
 }

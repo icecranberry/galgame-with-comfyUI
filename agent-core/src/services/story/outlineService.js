@@ -26,6 +26,8 @@ import { getDb } from '../../db/index.js';
 import { getWorldSetting } from '../../db/worldRepository.js';
 import { chatSync } from '../../llm/llm-client.js';
 import { extractFirstJson, repairJson } from '../eventGenerator.js';
+// 角色/地点候选的**唯一真源**（与「新建事件线」同一个来源，避免两处口径不一 —— 红线 8）
+import { listParticipantOptions, listPlaceOptions } from './eventLineService.js';
 
 // ═══════════════════════════════════════════════════════════
 // 一、解析（移植构画 schema.js 的纯函数）
@@ -114,6 +116,101 @@ export function normalizeOutlineResponse(raw) {
 /** 简易可编辑文本规范化（构画 `normalizeEditableText` 的等价最小实现） */
 function normalizeEditableText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * 把大纲原文切成「前缀 + 各 Beat 原始块 + 后缀」。
+ *
+ * ── 为什么要这个（2026-10-07，用户要求生成模块改成「字段化表单」）──
+ * 用户口径：生成大纲的形态要**照着「新建事件线」来做** —— 结果不能只是只读预览，
+ * 而要像编辑表单那样逐字段可改。字段化编辑之后必须能拼回 `raw` 落库，
+ * 而 `saveOutline` 收的就是 `raw`。
+ *
+ * ★★ 拼回时**必须保留原始块文本**：用户没动过的节点应当**逐字节不变** ——
+ *   模型将来多给的字段、行内包装都不会被吃掉。这与 `editOutlineScene`
+ *   「不重新序列化」是同一条红线（见本文件头部说明）。
+ *   所以这里把每个 Beat 的原文块一并交出去，前端只对**被改过的**节点重新序列化。
+ *
+ * ★ `separator` = 块之间的原始分隔文本，一并交出去由调用方原样回传 ——
+ *   不带这个，拼回时只能用固定空行，整串就不再逐字节一致了。
+ *
+ * @returns {{prefix:string, suffix:string, blocks:string[], separator:string}}
+ *   blocks = 各 Beat 的原文块（已去尾部空白）；separator = 块间原始分隔符
+ */
+export function splitOutlineRaw(raw) {
+  const source = String(raw || '');
+  const widget = /<outline_widget\b[^>]*>([\s\S]*?)<\/outline_widget\s*>/i.exec(source);
+  const inner = widget ? widget[1] : source;
+  const innerStart = widget ? widget.index + widget[0].indexOf(widget[1]) : 0;
+  const prefix = source.slice(0, innerStart);
+  const suffix = source.slice(innerStart + inner.length);
+
+  // ★ 用**原文偏移**定位每个 Beat 块的起止（不能靠"按行重拼再取尾空白"——
+  //   那样会漏掉块尾与下一块之间的换行，拼回时少一个 `\n`，逐字节一致直接失败）。
+  const starts = [];
+  for (const m of inner.matchAll(/^[ \t]*(?:[>#*\-]\s*)*Beat\s*[:：]/gim)) starts.push(m.index);
+  const blocks = starts.map((start, k) => {
+    const next = k + 1 < starts.length ? starts[k + 1] : inner.length;
+    // 块内容 = 到下一起点前的文本，去掉尾部空白（尾部空白属于分隔符）
+    return inner.slice(start, next).replace(/\s+$/, '');
+  });
+
+  // 分隔符 = 第一块内容结束到第二块起点之间的**原始文本**（原样回传才能逐字节还原）
+  let separator = '\n\n';
+  if (starts.length >= 2) separator = inner.slice(starts[0] + blocks[0].length, starts[1]);
+  return { prefix, suffix, blocks, separator };
+}
+
+/**
+ * 把 Beat 字段序列化成原文格式（`parseOutline` 的逆运算）。
+ *
+ * ⚠ 字段里若含竖线，会破坏 `time|title|type|line|outcome` 的分段，
+ *   所以统一替换成全角斜杠 `／`（可读，且不会被 `parseOutline` 的 `[|｜]` 切开）。
+ * ⚠ 多行内容里的换行也必须压成空格 —— 每个字段**只能占一行**，
+ *   否则下一行会被当成新的段落行而解析失败。
+ */
+export function serializeOutlineBeat(beat) {
+  const one = v => String(v ?? '').replace(/[|｜]/g, '／').replace(/\s*\n\s*/g, ' ').trim();
+  return [
+    `Beat: ${one(beat?.time)}|${one(beat?.title)}|${one(beat?.type)}|${one(beat?.line)}|${one(beat?.outcome)}`,
+    `Scene: ${one(beat?.scene)}`,
+    `Subtext: ${one(beat?.subtext)}`,
+    `Think: ${one(beat?.think)}`,
+  ].join('\n');
+}
+
+/**
+ * 用各 Beat 块文本拼回完整 `raw`（与 `splitOutlineRaw` 互为逆运算）。
+ *
+ * ★ 包装处理的两条口径：
+ *   · 原本有 `<outline_widget>` —— **只补标签内侧的换行**，标签外的装饰文字原样保留；
+ *   · 原本没有（全新生成）—— 补一套标准包装，与 `normalizeOutlineResponse` 同格式。
+ *     补包装**不影响**块内容，所以"未改动节点逐字节一致"依然成立。
+ *
+ * @param {string} prefix 包装前缀（原样拼回，可能为空）
+ * @param {string} suffix 包装后缀（原样拼回，可能为空）
+ * @param {string[]} blockTexts 每个 Beat 的块文本 —— 未改动的直接给原文块，
+ *        改动过的用 `serializeOutlineBeat` 重新生成。空项被丢弃（= 删除该节点）。
+ * @param {string} separator 块间分隔符（由 `splitOutlineRaw` 给出，原样回传才能逐字节一致）
+ */
+export function composeOutlineRaw(prefix, suffix, blockTexts, separator = '\n\n') {
+  const sep = String(separator || '');
+  const body = (Array.isArray(blockTexts) ? blockTexts : [])
+    .map(s => String(s || '').replace(/\s+$/, ''))
+    .filter(Boolean)
+    .join(sep);
+
+  let pre = String(prefix || '');
+  let suf = String(suffix || '');
+  const hasOpen = /<outline_widget\b/i.test(pre);
+  const hasClose = /<\/outline_widget\s*>/i.test(suf);
+
+  if (!hasOpen && !hasClose) {
+    return `<outline_widget>\n${body}\n</outline_widget>`;
+  }
+  if (hasOpen) pre = `${pre.replace(/\s+$/, '')}\n`;
+  if (hasClose) suf = `\n${suf.replace(/^\s+/, '')}`;
+  return `${pre}${body}${suf}`;
 }
 
 /**
@@ -223,6 +320,36 @@ export function getOutline() {
   return rowToOutline(row);
 }
 
+/**
+ * 取「字段化编辑器」需要的完整载荷（2026-10-07 用户口径：生成模块照「新建事件线」做）。
+ *
+ * ── 与 `getOutline()` 的差别 ────────────────────────────────
+ * 除了可直接渲染的解析字段，还给出：
+ *   · `blocks` —— 每个 Beat 的**原文块**。编辑器只对**被用户改动过**的节点
+ *     用 `serializeOutlineBeat` 重新生成，其余原样回填 —— 这样"没动过的节点"
+ *     落库后与改动前**逐字节一致**（守住"不重新序列化"这条红线）。
+ *   · `prefix` / `suffix` —— `<outline_widget>` 包装，原样拼回。
+ *   · `basisNote` / `pin` / `cursor` —— 编辑态要显示的既有状态。
+ *
+ * ⚠ 前端**不要自己解析 raw**（会把"保留未知字段"的活儿做丢）—— 一律用本函数的输出。
+ */
+export function getOutlineForEditor() {
+  const cur = getOutline();
+  if (!cur || !cur.beats.length) return null;
+  const { prefix, suffix, blocks, separator } = splitOutlineRaw(cur.raw);
+  return {
+    prefix,
+    suffix,
+    blocks,
+    separator,
+    beats: cur.beats,
+    cursor: cur.cursor,
+    pin: cur.pin,
+    basisNote: cur.basisNote,
+    beatCount: cur.beatCount,
+  };
+}
+
 /** 落库：`raw_text` + 解析结果 + 游标（首次生成/整体替换用） */
 export function saveOutline({ raw, basisNote = '', cursor = 1 } = {}) {
   const text = String(raw || '');
@@ -244,6 +371,40 @@ export function saveOutline({ raw, basisNote = '', cursor = 1 } = {}) {
     'INSERT INTO story_outlines (beat_json, raw_text, cursor, pin, basis_note) VALUES (?, ?, ?, 0, ?)'
   ).run(JSON.stringify(beats), text, cur, String(basisNote || '').slice(0, 500));
   return getOutline();
+}
+
+/**
+ * 从**字段化编辑器**回写大纲（2026-10-07，配合 `getOutlineForEditor`）。
+ *
+ * ── 为什么不让前端直接给 `raw` ───────────────────────────────
+ * 编辑器里每个节点既可手改字段、也可能整块没动。若前端自己拼 `raw`：
+ *   ① 会把未改动节点的格式也一起"归一化"，吃掉模型原本的字段包装；
+ *   ② 序列化规则要在前后端各写一份，两处口径迟早分叉（红线 8）。
+ * 所以序列化统一留在服务端：前端只报「哪些节点改成了什么」。
+ *
+ * @param {{prefix?:string, suffix?:string, items:Array<{value?:object, raw?:string}>}} input
+ *   items 按顺序对应节点；给了 `value`（字段对象）= 该节点已被改动/新增，由服务端序列化；
+ *   给了 `raw` = 原样沿用的原文块（**逐字节保留**）。两者都空 = 删除该节点。
+ * @returns 同 `saveOutline` 的返回（最新大纲）
+ */
+export function saveOutlineFromEditor({ prefix = '', suffix = '', items = [], separator = '\n\n', basisNote, cursor } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const blockTexts = list.map(item => {
+    if (!item) return '';
+    // ★ 优先用**原文块**：只要前端没标"已改动"，就一个字节都不碰它
+    if (item.value && typeof item.value === 'object') return serializeOutlineBeat(item.value);
+    return String(item.raw || '').trim();
+  }).filter(Boolean);
+
+  if (!blockTexts.length) {
+    // ★ 一个节点都不剩 = 不是"清空"，是模型/用户没给出可用内容 → 抛错保留原状（红线 0）
+    throw Object.assign(new Error('至少要保留一个节点（若要清空请用「清空」）'), { statusCode: 400 });
+  }
+  const raw = composeOutlineRaw(prefix, suffix, blockTexts, separator);
+  const payload = { raw };
+  if (basisNote !== undefined) payload.basisNote = basisNote;
+  if (cursor !== undefined) payload.cursor = cursor;
+  return saveOutline(payload);
 }
 
 /** 改游标（人工重定位 / 自动推进共用） */
@@ -422,20 +583,44 @@ function worldContextText() {
 }
 
 /**
- * 生成剧情大纲（**只出草稿，由调用方决定是否保存** —— 与「修正地点」「AI 生成事件线」同一范式）。
+ * 收拢「生成参考材料」—— **生成与细化共用这一份实现**。
  *
- * @param {{direction?:string}} input direction = 用户给的走向提示（可空）
- * @returns {Promise<{raw:string, beats:Array, basisNote:string}>}
+ * ★★ 只此一处拼装（红线 8 同源）：两条链路若要的材料不同步，同一次生成里
+ *    「换个说法重写」会得到与初次生成不一致的世界观，用户无法解释为什么。
+ *
+ * @param {{direction?:string, participantIds?:Array, places?:Array}} input
+ *   participantIds/places = 用户在弹窗里已选的上下文（与「新建事件线」同一入口，
+ *   走 `eventLineService.listParticipantOptions/listPlaceOptions` 取的候选，口径一致）。
+ *   ⚠ 这里**只取名字喂给模型**，不做任何"相关性推断"—— 用户点了谁就带谁。
+ * @returns {{blocks:string[], hasMaterial:boolean}}
  */
-export async function generateOutlineDraft(input = {}) {
-  const direction = String(input.direction || '').trim();
+function buildOutlineContext({ direction = '', participantIds = [], places = [] } = {}) {
   const material = recentStoryMaterial();
   const lines = existingLineNames();
   const world = worldContextText();
 
-  // ★ 什么都没得参考时**抛错**，不产出凭空大纲（红线 0：宁可说清"没素材"）
-  if (!material.length && !lines.length && !direction) {
-    throw Object.assign(new Error('没有可参考的剧情材料：先积累一些对话，或填写一个走向提示'), { statusCode: 400 });
+  // 用户已选角色 → 取名字（给模型看名字比看 id 有用得多）
+  const pids = (Array.isArray(participantIds) ? participantIds : [])
+    .map(Number).filter(Number.isFinite);
+  let people = [];
+  if (pids.length) {
+    try {
+      const ph = pids.map(() => '?').join(',');
+      people = getDb().prepare(`SELECT id, display_name FROM characters WHERE id IN (${ph})`).all(...pids)
+        .map(r => `${r.display_name}（id ${r.id}）`);
+    } catch { people = []; }
+  }
+  const placeList = (Array.isArray(places) ? places : [])
+    .map(p => String(p || '').trim()).filter(Boolean);
+
+  // 用户没指定地点时给一份可用地名清单（避免模型自造地名）——
+  // ⚠ 用户指定了就不给，免得候选清单干扰他明确的意图。
+  let placeHint = '';
+  if (!placeList.length) {
+    try {
+      const opts = listPlaceOptions().slice(0, 120).map(p => p.name);
+      if (opts.length) placeHint = `【可用的地点名（若涉及地点，用这些标准名，不要自造）】${[...new Set(opts)].join('、')}`;
+    } catch { /* 地点库读不到就不给提示，不影响生成 */ }
   }
 
   const blocks = [];
@@ -446,7 +631,36 @@ export async function generateOutlineDraft(input = {}) {
   if (lines.length) {
     blocks.push(`【已铺开的故事线（大纲应与它们呼应，不要另起炉灶）】\n${lines.join('、')}`);
   }
+  if (people.length) blocks.push(`【本次涉及角色（大纲要围绕他们展开）】${people.join('、')}`);
+  if (placeList.length) blocks.push(`【本次涉及地点（剧情尽量发生在这些地方）】${placeList.join('、')}`);
+  if (placeHint) blocks.push(placeHint);
   if (direction) blocks.push(`【本次走向提示（用户给的，必须体现）】\n${direction}`);
+
+  return { blocks, hasMaterial: material.length > 0 || lines.length > 0 };
+}
+
+/**
+ * 生成剧情大纲（**只出草稿，由调用方决定是否保存** —— 与「修正地点」「AI 生成事件线」同一范式）。
+ *
+ * @param {{direction?:string, participantIds?:Array, places?:Array}} input
+ *   direction = 用户给的走向提示（可空）
+ * @returns {Promise<{raw:string, beats:Array, basisNote:string}>}
+ */
+export async function generateOutlineDraft(input = {}) {
+  const direction = String(input.direction || '').trim();
+  const { blocks, hasMaterial } = buildOutlineContext({
+    direction,
+    participantIds: input.participantIds,
+    places: input.places,
+  });
+
+  // ★ 什么都没得参考时**抛错**，不产出凭空大纲（红线 0：宁可说清"没素材"）。
+  //   判据是「材料 / 走向提示 / 角色 / 地点」**全空** —— 用户只要给了任何一样，
+  //   就说明他有明确意图，不该被拦住。
+  const hasContext = blocks.some(b => !/^【世界观基调/.test(b));
+  if (!hasMaterial && !direction && !hasContext) {
+    throw Object.assign(new Error('没有可参考的剧情材料：先积累一些对话，或填写一个走向提示，也可以先选好角色'), { statusCode: 400 });
+  }
 
   const raw = await chatSync([
     { role: 'system', content: OUTLINE_CREATION_CONTRACT },
@@ -455,6 +669,10 @@ export async function generateOutlineDraft(input = {}) {
       content: `${blocks.join('\n\n')}\n\n`
         + '请以编剧顾问的第三人称视角，为这个故事生成大纲。'
         + '直呼角色名字，不要扮演角色，严禁使用"我""我们"。'
+        // ⚠ 「所属故事线」字段：忠实于已有线名，匹配不上就写"无" ——
+        //   前端会把对不上的线名标成「未匹配」，乱造名字会让用户看到一片红。
+        + 'Beat 的「所属故事线」只使用上面【已铺开的故事线】里出现过的名字；'
+        + '若这一节点不属于任何已有线，就写"无"，不要自造线名。'
         + '严格按上面的机器结构输出。',
     },
   ], { temperature: 0.8, max_tokens: 2400, label: 'story:outline-gen' });
@@ -470,6 +688,66 @@ export async function generateOutlineDraft(input = {}) {
     beats,
     basisNote: direction ? `按走向提示生成：${direction}` : '按近期剧情生成',
   };
+}
+
+/**
+ * 细化某个节点（2026-10-07 用户口径：字段化表单里每个节点可**单独重写**）。
+ *
+ * ★ 与 `generateOutlineDraft` 的关键差别：**不重置游标、不动其他节点** ——
+ *   用户可能已经写了 5 个节点，只想把第 3 个改顺，不能让他前面白干。
+ * ★ 仍然**只出草稿不落库**：结果回给前端填进该节点的字段，
+ *   用户确认后由「保存」整体走 `saveOutline`（与生成链路同一落库口）。
+ *
+ * @param {{ index:number, brief?:string, participantIds?:Array, places?:Array }} input
+ *   index = 要重写的节点下标（0 基）；brief = 用户对这一节点的具体要求（可空）
+ * @returns {Promise<{beat:object}>} 单个 Beat 字段（time/title/type/line/outcome/scene/subtext/think）
+ */
+export async function refineOutlineBeat(input = {}) {
+  const cur = getOutline();
+  if (!cur || !cur.beats.length) {
+    throw Object.assign(new Error('还没有大纲，先生成一份再来细化'), { statusCode: 400 });
+  }
+  const index = Number(input.index);
+  if (!Number.isInteger(index) || index < 0 || index >= cur.beats.length) {
+    throw Object.assign(new Error('要细化的节点不存在'), { statusCode: 400 });
+  }
+
+  const beat = cur.beats[index];
+  const brief = String(input.brief || '').trim();
+  const { blocks } = buildOutlineContext({
+    participantIds: input.participantIds,
+    places: input.places,
+  });
+
+  // 把「当前节点」「前后节点」交给模型 —— 孤立地重写一个节点会与上下文脱节。
+  const neighbor = (i, label) => (cur.beats[i]
+    ? `${label}：${serializeOutlineBeat(cur.beats[i])}`
+    : `${label}：无`);
+  const focus = [
+    `【要重写的节点（第 ${index + 1} 个）】\n${serializeOutlineBeat(beat)}`,
+    neighbor(index - 1, '【上一个节点】'),
+    neighbor(index + 1, '【下一个节点】'),
+  ].join('\n\n');
+
+  const raw = await chatSync([
+    { role: 'system', content: OUTLINE_CREATION_CONTRACT },
+    {
+      role: 'user',
+      content: `${blocks.join('\n\n')}\n\n${focus}\n\n`
+        + `请**只重写第 ${index + 1} 个节点**，保持它在整条序列里的位置与叙事作用衔接自然`
+        + '（与上一个节点的结果承接、给下一个节点留下可推进的余地），不要改动别的节点。'
+        + '直呼角色名字，不要扮演角色，严禁使用"我""我们"。'
+        + 'Beat 的「所属故事线」沿用原节点的取值（除非它与剧情明显冲突，此时用已有线名或写"无"）。'
+        + '只输出**一个**节点的机器结构（一对 <outline_widget> 里只放一组 Beat/Scene/Subtext/Think）。',
+    },
+  ], { temperature: 0.8, max_tokens: 900, label: 'story:outline-refine' });
+
+  const beats = parseCompleteOutline(normalizeOutlineResponse(raw));
+  // ⚠ 没有可用结果就抛错，**不要拿空值覆盖**用户已经写好的节点（红线 0 / 与 saveOutline 同口径）
+  if (!beats.length) {
+    throw Object.assign(new Error('模型没能重写这个节点，请补一句要求或直接手改'), { statusCode: 502 });
+  }
+  return { beat: beats[0] };
 }
 
 // ═══════════════════════════════════════════════════════════

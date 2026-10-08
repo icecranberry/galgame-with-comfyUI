@@ -20,7 +20,9 @@
         <button type="button" class="sv-tab" :class="{ active: tab === 'graph' }" @click="tab = 'graph'">节点图</button>
       </div>
       <linshe-button v-if="tab === 'lines'" variant="primary" size="sm" @click="openCreate">+ 新建线</linshe-button>
-      <linshe-button v-else-if="tab === 'outline'" variant="primary" size="sm" :loading="outlineBusy" @click="openOutlineGenerate">✨ 生成大纲</linshe-button>
+      <linshe-button v-else-if="tab === 'outline'" variant="primary" size="sm" :loading="outlineBusy" @click="openOutlineGenerate">
+        {{ outline && outline.beatCount ? '✨ 编辑/重新生成' : '✨ 生成大纲' }}
+      </linshe-button>
     </div>
 
     <div v-if="loading" class="sv-empty">加载中…</div>
@@ -36,7 +38,7 @@
           <span class="sv-flex"></span>
           <linshe-button variant="secondary" size="sm" :disabled="outlineBusy" @click="advanceOutline">判定是否推进</linshe-button>
           <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="toggleOutlinePin">{{ outline.pin ? '解锁' : '锁定' }}</linshe-button>
-          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="openOutlineGenerate">重新生成</linshe-button>
+          <linshe-button variant="ghost" size="sm" :disabled="outlineBusy" @click="openOutlineGenerate">编辑</linshe-button>
           <linshe-button variant="ghost" size="sm" tone="danger" :disabled="outlineBusy" @click="removeOutline">清空</linshe-button>
         </div>
         <p v-if="outline.basisNote" class="sv-ol-note">依据：{{ outline.basisNote }}</p>
@@ -234,46 +236,19 @@
       @applied="onDraftApplied"
     />
 
-    <!-- AI 生成剧情大纲（只出草稿；确认后点「保存」才落库） -->
-    <linshe-modal v-model="outlineGenOpen" title="生成剧情大纲" wide>
-      <div class="sv-form">
-        <p class="sv-ol-hint">
-          邻舍会参考<strong>近期剧情</strong>与<strong>已铺开的故事线</strong>，铺一条可推进的节点序列。
-          节点代表<strong>阶段跨度</strong>（不是单镜头），宁可少而完整。
-        </p>
-        <div class="sv-field">
-          <label>走向提示<span class="sv-opt">（可选；留空则完全按已有剧情材料推演）</span></label>
-          <linshe-input v-model="outlineDirection" placeholder="如：让这条线在两周内收束，中间加一次意外" />
-        </div>
-        <div v-if="outlineDraft" class="sv-ol-draft">
-          <p class="sv-ol-draft-head">生成结果（{{ outlineDraft.beats.length }} 个节点，可直接保存）</p>
-          <ol class="sv-beats">
-            <li v-for="(b, i) in outlineDraft.beats" :key="i" class="sv-beat">
-              <div class="sv-beat-head">
-                <span class="sv-beat-idx">{{ i + 1 }}</span>
-                <span class="sv-beat-time">{{ b.time || '未定' }}</span>
-                <h3 class="sv-beat-title">{{ b.title }}</h3>
-                <span v-if="b.type" class="sv-beat-type">{{ b.type }}</span>
-                <span v-if="b.line" class="sv-beat-line">{{ b.line }}</span>
-              </div>
-              <div class="sv-beat-body">
-                <div v-if="b.scene" class="sv-beat-field"><span class="sv-beat-k">Scene</span><span class="sv-beat-v">{{ b.scene }}</span></div>
-                <p v-if="b.subtext" class="sv-beat-sub">「{{ b.subtext }}」</p>
-                <p v-if="b.think" class="sv-beat-think"><b>Think</b>：{{ b.think }}</p>
-              </div>
-            </li>
-          </ol>
-        </div>
-      </div>
-      <template #footer>
-        <span class="sv-gen-hint">生成后点「保存」才会落库</span>
-        <div style="flex:1"></div>
-        <linshe-button variant="secondary" :loading="outlineBusy" @click="runOutlineGenerate">
-          {{ outlineDraft ? '重新生成' : '生成' }}
-        </linshe-button>
-        <linshe-button variant="primary" :disabled="!outlineDraft || outlineBusy" @click="saveOutlineDraft">保存</linshe-button>
-      </template>
-    </linshe-modal>
+    <!-- ── 剧情大纲：字段化编辑器（2026-10-07 用户口径）────────────
+         用户原话：「生成功能模块应该类似于线列表的新建事件线」——
+         改为**字段化表单 + ✨ 按要点生成 + 节点可增删/重写**，
+         不再是只读草稿预览。
+         ⚠ 弹窗只收集与编辑，**写库仍归 StoryView**（submitOutlineEditor → /outline/editor，
+           服务端统一序列化，未改动节点逐字节保留）。状态单一来源，弹窗不碰 API 写库。 -->
+    <StoryOutlineEditorModal
+      v-model="outlineEditorOpen"
+      :participant-options="participantOptions"
+      :place-options="placeOptions"
+      :line-names="lines.map(l => l.name).filter(Boolean)"
+      @saved="submitOutlineEditor"
+    />
 
     <!-- 编辑某个节点的 Scene（2026-10-07 用户口径：替代原生 window.prompt）
          ⚠ 弹窗只收集文本，写库仍由 submitSceneEdit 走 /outline/beats/:index（状态归 StoryView） -->
@@ -297,6 +272,7 @@ import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import MultiPickSelect from '../components/ui/MultiPickSelect.vue'
 import StoryGraphCanvas from '../components/story/StoryGraphCanvas.vue'
 import StoryLineGenerateModal from '../components/story/StoryLineGenerateModal.vue'
+import StoryOutlineEditorModal from '../components/story/StoryOutlineEditorModal.vue'
 import StoryOutlineSceneModal from '../components/story/StoryOutlineSceneModal.vue'
 
 const toastFn = inject('toast', null)
@@ -313,9 +289,8 @@ const generateOpen = ref(false)
 /** 「面」= 剧情大纲 */
 const outline = ref(null)
 const outlineBusy = ref(false)
-const outlineGenOpen = ref(false)
-const outlineDirection = ref('')
-const outlineDraft = ref(null)
+/** 字段化大纲编辑器（2026-10-07 用户口径：照「新建事件线」做，不再是只读草稿预览） */
+const outlineEditorOpen = ref(false)
 /** 编辑节点 Scene 的弹窗（2026-10-07 用户口径：替代原生 window.prompt） */
 const sceneEditOpen = ref(false)
 const sceneEdit = ref(null)
@@ -436,34 +411,26 @@ function jumpToLine(index, name) {
   if (target) openEdit(target)
 }
 
+/** 打开字段化编辑器 —— 载荷与保存都由组件内部走 /outline/editor，这里只负责显隐 */
 function openOutlineGenerate() {
-  outlineDirection.value = ''
-  outlineDraft.value = null
-  outlineGenOpen.value = true
+  outlineEditorOpen.value = true
 }
 
-/** 生成**草稿**（不落库）—— 与「修正地点」「AI 生成事件线」同一范式 */
-async function runOutlineGenerate() {
+/**
+ * 编辑器点「保存」—— **由本视图独占写库**（组件只收集，不碰 API 写库）。
+ *
+ * ★★ 载荷是「哪些节点改成了什么」（`items`），序列化与"未改动节点逐字节保留"
+ *   都在服务端 `saveOutlineFromEditor` 里做 —— 前端不自己拼 `raw`，
+ *   否则序列化规则要在两处各写一份，迟早分叉（红线 8）。
+ */
+async function submitOutlineEditor(payload) {
   if (outlineBusy.value) return
   outlineBusy.value = true
   try {
-    const r = await api.generateStoryOutline({ direction: outlineDirection.value.trim() })
-    outlineDraft.value = r?.draft || null
-    if (!outlineDraft.value?.beats?.length) toastFn?.('没生成出可用节点', 'warning')
-  } catch (err) {
-    toastFn?.('生成失败：' + (err?.message || ''), 'error')
-  } finally { outlineBusy.value = false }
-}
-
-/** 保存草稿（用户确认后才落库） */
-async function saveOutlineDraft() {
-  if (!outlineDraft.value || outlineBusy.value) return
-  outlineBusy.value = true
-  try {
-    await api.saveStoryOutline({ raw: outlineDraft.value.raw, basisNote: outlineDraft.value.basisNote })
-    outlineGenOpen.value = false
-    outlineDraft.value = null
-    await loadOutline()
+    const r = await api.saveStoryOutlineEditor(payload)
+    outline.value = r?.outline || outline.value
+    outlineEditorOpen.value = false
+    await loadLineRefs()
     toastFn?.('大纲已保存', 'success')
   } catch (err) {
     toastFn?.('保存失败：' + (err?.message || ''), 'error')
@@ -650,7 +617,9 @@ async function save() {
  *   有引用才弹确认，并把数量说清楚。用户拒绝也完全合理 —— 那名字可能是他有意写的旧称。
  */
 async function offerRenameSync(oldName, newName) {
-  let changed = 0
+  // ⚠ 2026-10-08：不写 `let changed = 0` —— catch 分支直接 return，
+  //   初始化值永远不会被读到（lint 报 no-useless-assignment），去掉后行为完全一致。
+  let changed
   try {
     const r = await api.renameStoryOutlineLineRef(oldName, newName, true)
     changed = Number(r?.changed) || 0

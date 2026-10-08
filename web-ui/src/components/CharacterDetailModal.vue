@@ -1673,7 +1673,16 @@ async function onAppearanceRefined({ basePrompt }) {
     if (target.scene === 'nude') {
       // 全身那套没有"衣服" —— 整段就是身体（这正是修全身时最有价值的信息）
       const { body } = splitBodyGarment(appearance)
-      if (body) detail.body = body
+      /**
+       * ★★ 2026-10-08 修复（用户实报「应用到身体并保存」没覆盖）：
+       * 这里原先只在 `body` 非空时才写。可"全身"这套**整段就是身体**，
+       * 模型产出必然是身体内容 —— 一旦拆分判据把它误判成"衣服"（body 为空），
+       * 就会**静默跳过**，用户点了「应用」却什么都没发生。
+       * 兜底：拆不出 body 时，**把整段原样作为身体**（这比丢失好，且与本套语义一致）。
+       */
+      const nextBody = body || appearance
+      if (nextBody) detail.body = nextBody
+      refinedGotBody = Boolean(nextBody)
       // description 保持「全身声明」不动，画面主体由身体决定
     } else {
       const { body, garment } = splitBodyGarment(appearance)

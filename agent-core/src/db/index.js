@@ -3451,7 +3451,18 @@ function migrateMediaSchema(db) {
           if (db.prepare(`SELECT id FROM media_outlets WHERE name = ?`).get(name)) continue;
           // ★ 用户主动删过的，不再复活
           if (deletedByUser.includes(name)) {
-            console.log(`[db] media seed: 跳过「${name}」（用户已主动删除）`);
+            // ⚠ 这行**只在第一次上报**（2026-10-07 用户实报：每次启动都刷
+            //   「跳过「狸狸八卦」（用户已主动删除）」,而状态其实没有任何变化）。
+            //   墓碑是持久状态，每次都念一遍等于对着"没变化"报警，属噪音。
+            //   记一个一次性标记，之后静默；**不是**删除这条日志本身。
+            const flagged = db.prepare(
+              `SELECT setting_value FROM system_settings WHERE setting_key = ?`
+            ).get(`media_late_seed_skip_reported_${name}`);
+            if (!flagged) {
+              console.log(`[db] media seed: 跳过「${name}」（用户已主动删除，之后不再重复提示）`);
+              db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+                VALUES (?, '1')`).run(`media_late_seed_skip_reported_${name}`);
+            }
             continue;
           }
           const ghost = DEFAULT_MEDIA_OUTLETS.find(o => o.name === name);

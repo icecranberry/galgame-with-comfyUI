@@ -295,3 +295,131 @@ test('★ 生成与判定都**只出草稿/只动游标**，不越权写库', ()
   assert.ok(!/saveOutline\s*\(/.test(code), '生成函数不得自己落库（由调用方决定）');
   assert.ok(!/INSERT\s+INTO/i.test(code), '生成函数不得直接 INSERT');
 });
+
+// ─────────────────────────────────────────────────────────
+// ⑦ 字段化编辑器（2026-10-07 用户口径：生成模块照「新建事件线」做）
+//
+//    用户实报「大纲生成我不是很满意」，要求改成**字段化表单**——
+//    节点逐字段可改、可增删、可单独重写，确认后才保存。
+//    随之而来的核心风险是：字段化编辑会**丢掉模型原本的字段包装**。
+//    下面这几条专钉"未改动节点必须逐字节保留"。
+// ─────────────────────────────────────────────────────────
+
+test('★★★ splitOutlineRaw：切开包装与各节点原文块，且能原样拼回（逐字节一致）', () => {
+  const raw = sampleRaw();
+  const { prefix, suffix, blocks, separator } = svc.splitOutlineRaw(raw);
+  assert.equal(blocks.length, 3, '应切出 3 个节点块');
+  assert.ok(/<outline_widget/.test(prefix), '前缀应含开标签');
+  assert.ok(/<\/outline_widget>/.test(suffix), '后缀应含闭标签');
+  assert.ok(separator.length > 0, '必须给出块间原始分隔符（否则拼回整串不可能逐字节一致）');
+  // ★ 未改动的节点原样回传 → 拼回结果必须与原文**逐字节一致**
+  assert.equal(svc.composeOutlineRaw(prefix, suffix, blocks, separator), raw,
+    '未改动任何节点时，拼回结果必须与原文逐字节一致（否则会吃掉模型给的未知字段）');
+});
+
+test('★★★ 只改一个节点：其余节点必须**逐字节保留**，不得被重新序列化', () => {
+  const raw = sampleRaw();
+  const { prefix, suffix, blocks } = svc.splitOutlineRaw(raw);
+  // 第二个节点补一个"模型将来可能多给的未知字段"，看它能不能活下来
+  const withExtra = blocks[1] + '\nMood: 这是模型多给的一个字段';
+  const texts = [blocks[0], withExtra, blocks[2]];
+  const out = svc.composeOutlineRaw(prefix, suffix, texts);
+  assert.ok(out.includes('Mood: 这是模型多给的一个字段'),
+    '未改动节点的未知字段必须保留 —— 这是"不重新序列化"的落点');
+  // 解析层只看已知字段，未知行被宽容忽略（不该炸）
+  const beats = svc.parseCompleteOutline(out);
+  assert.equal(beats.length, 3, '多一个未知字段不应破坏解析');
+});
+
+test('★★ 改动过的节点按字段重新序列化：竖线与换行必须被处理（否则解析错位）', () => {
+  const beat = {
+    time: '第1天', title: '含|竖线', type: '冲突', line: 'A线',
+    outcome: '结果', scene: '第一行\n第二行', subtext: '题记', think: '理由',
+  };
+  const text = svc.serializeOutlineBeat(beat);
+  // 竖线会破坏 `time|title|type|line|outcome` 分段 → 必须替换成全角
+  assert.ok(!/含\|竖线/.test(text), '字段内的半角竖线必须被替换（否则 Beat 分段错位）');
+  const parsed = svc.parseOutline(`<outline_widget>\n${text}\n</outline_widget>`)[0];
+  assert.equal(parsed.title, '含／竖线', '竖线应被替换成全角斜杠');
+  assert.equal(parsed.scene, '第一行 第二行', 'Scene 内的换行必须压成空格（否则下一行会被当成新段落行）');
+  assert.ok(svc.isCompleteOutlineBeat(parsed), '八项齐全的节点应被识别为有效节点');
+});
+
+test('★★★ saveOutlineFromEditor：未改动给 raw / 改动给 value / 空项 = 删除节点', () => {
+  const raw = sampleRaw();
+  const { prefix, suffix, blocks } = svc.splitOutlineRaw(raw);
+  // 第 2 个节点被改过（只改了标题），第 3 个被删（空项）
+  const items = [
+    { raw: blocks[0] },
+    { value: { ...svc.parseOutline(blocks[1])[0], title: '改过的标题' } },
+    { raw: '' },
+  ];
+  const out = svc.saveOutlineFromEditor({ prefix, suffix, items });
+  assert.equal(out.beatCount, 2, '空项应被视为删除该节点');
+  assert.equal(out.beats[0].title, svc.parseOutline(blocks[0])[0].title, '未改动节点内容不得变化');
+  assert.equal(out.beats[1].title, '改过的标题', '改动过的节点应取新值');
+});
+
+test('★★★ 字段化编辑器里一个节点都不剩 → **必须抛错**，不得把旧大纲清成空（红线 0）', () => {
+  assert.throws(() => svc.saveOutlineFromEditor({ prefix: '', suffix: '', items: [] }),
+    /至少要保留一个节点/, '空 items 不是"清空"，应抛错保留原状');
+  assert.throws(() => svc.saveOutlineFromEditor({ items: [{ raw: '' }, { raw: '   ' }] }),
+    /至少要保留一个节点/, '全是空块同样应抛错');
+});
+
+test('★★ 用来路不明的碎片拼不出有效节点时，saveOutline 兜底抛错（双层保险）', () => {
+  // 只有一个 Beat 行、没有 Scene/Subtext/Think → 不完整 → 有效节点数为 0
+  const out = (() => {
+    try { return svc.saveOutlineFromEditor({ items: [{ raw: 'Beat: 第一天|标题|类型|线|结果' }] }); }
+    catch (err) { return err; }
+  })();
+  assert.ok(out instanceof Error, '不完整节点拼出来也保存不了 → 必须抛错');
+  assert.match(out.message, /没给出可用的大纲节点/, '错误信息要说清是"没有可用节点"');
+});
+
+test('★★★ 细化节点：只动一个节点、不动其他节点、游标不变、且**不落库**', () => {
+  const refineBody = svcSrc.slice(
+    svcSrc.indexOf('export async function refineOutlineBeat'),
+    svcSrc.indexOf('// ═══════════════════════════════════════════════════════════\n// 五、推进判定'),
+  );
+  const code = refineBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/saveOutline\s*\(/.test(code), '细化不得自己落库（只回草稿，由前端确认后保存）');
+  assert.ok(!/setOutlineCursor/.test(code), '细化不得改游标（用户可能已经手定位了）');
+  assert.match(refineBody, /serializeOutlineBeat/, '应把原节点与相邻节点一起交给模型（否则与上下文脱节）');
+  assert.match(refineBody, /beats\[0\]/, '只取模型返回的第一个节点');
+});
+
+test('★★ 细化必须校验下标（越界 / 没有大纲都要明确报错，不静默返回空）', () => {
+  assert.match(svcSrc, /要细化的节点不存在/, '越界下标要有明确错误');
+  assert.match(svcSrc, /还没有大纲，先生成一份再来细化/, '没有大纲时要有明确错误');
+});
+
+test('★★★ 字段化编辑器的取数必须给出原文块（否则"逐字节保留"无从谈起）', () => {
+  assert.match(svcSrc, /export function getOutlineForEditor/, '应导出编辑器取数函数');
+  assert.match(svcSrc, /splitOutlineRaw\(cur\.raw\)/, '编辑器载荷必须来自原文切块');
+  for (const k of ['prefix', 'suffix', 'blocks']) {
+    assert.ok(new RegExp(`${k}\\s*[,:]`).test(svcSrc.slice(svcSrc.indexOf('getOutlineForEditor'))),
+      `编辑器载荷必须包含 ${k}`);
+  }
+});
+
+test('★★ 新增的字段化路由已注册（editor 取数 / 保存 / 单节点细化）', () => {
+  for (const p of [
+    "router.get('/outline/editor'", "router.put('/outline/editor'",
+    "router.post('/outline/beat/refine'",
+  ]) {
+    assert.ok(routeSrc.includes(p), `缺少路由 ${p}`);
+  }
+  // ⚠ `/outline/editor` 必须声明在 `/outline` 之前吗？路径不同其实不冲突，
+  //   但生成路由要能带上上下文（participantIds/places）—— 用源码钉住这点。
+  assert.match(routeSrc, /generateOutlineDraft\(req\.body \|\| \{\}\)/, '生成路由应透传整个 body（含角色/地点上下文）');
+});
+
+test('★★ 生成与细化都要把「用户选的角色/地点」带给模型（与「新建事件线」同构）', () => {
+  assert.match(svcSrc, /listParticipantOptions|listPlaceOptions/,
+    '角色/地点候选必须取事件线那边的唯一真源（红线 8：同一口径只留一份定义）');
+  assert.match(svcSrc, /【本次涉及角色/, '应把已选角色作为上下文块喂给模型');
+  assert.match(svcSrc, /【本次涉及地点/, '应把已选地点作为上下文块喂给模型');
+  // 用户没给地点时才补"可用地名清单"，给了就不干扰
+  assert.match(svcSrc, /if \(!placeList\.length\)/, '仅在用户未指定地点时才给候选地名');
+});

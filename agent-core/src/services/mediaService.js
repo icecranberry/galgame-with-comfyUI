@@ -452,6 +452,9 @@ export function rememberDeletedOutlet(name) {
     const list = readDeletedOutlets();
     if (!list.includes(n)) list.push(n);
     setSetting(DELETED_OUTLETS_KEY, JSON.stringify(list));
+    // 墓碑重新登记 → 之前那条"已跳过"的一次性提示也要重来一次
+    // （否则用户删 A、建回 A、再删 A，第二次启动就静默了，他会以为没生效）
+    clearSkipReportedFlag(n);
   } catch { /* 记不上也不该阻断删除本身 */ }
 }
 
@@ -466,6 +469,26 @@ export function forgetDeletedOutlet(name) {
     const list = readDeletedOutlets();
     if (!list.includes(n)) return;
     setSetting(DELETED_OUTLETS_KEY, JSON.stringify(list.filter(x => x !== n)));
+  } catch { /* ignore */ }
+}
+
+/**
+ * 一次性「已提示跳过补种」标记的 key。
+ * ⚠ 与墓碑（`media_outlets_deleted`）配对使用：墓碑是**持久状态**，
+ *   而"跳过"是**每次启动都会算出的同一结果** —— 每次都念一遍等于对着没变化报警。
+ *   所以只上报第一次，之后静默（2026-10-07 用户实报的启动日志噪音）。
+ */
+export function skipReportedKey(name) {
+  return `media_late_seed_skip_reported_${String(name || '').trim()}`;
+}
+
+/** 清除"已提示"标记（墓碑被重新登记时调用，让提示能再来一次） */
+export function clearSkipReportedFlag(name) {
+  try {
+    const n = String(name || '').trim();
+    if (!n) return;
+    const db = getDb();
+    db.prepare('DELETE FROM system_settings WHERE setting_key = ?').run(skipReportedKey(n));
   } catch { /* ignore */ }
 }
 

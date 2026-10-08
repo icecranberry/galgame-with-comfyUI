@@ -31,7 +31,8 @@ import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
 import WorldMapView from './views/WorldMapView.vue'
 import DrawView from './views/DrawView.vue'
-import StoryView from './views/StoryView.vue'
+// ⚠ StoryView 不在此静态导入 —— 它是 `/story` 的**懒加载**路由（见下方 routes），
+//    多写一行静态 import 会同时造成"未使用变量"告警与 chunk 无法拆分。
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -47,7 +48,11 @@ const routes = [
   { path: '/gallery', component: GalleryView },
   { path: '/draw', component: DrawView },
   // 「故事」（T2）：跨天演进的剧情线。⚠ 与 /events（奇遇，一次性事件）是两层东西。
-  { path: '/story', component: StoryView },
+  // ★ 2026-10-08：改为路由级懒加载。该页的「节点图」标签页依赖 @vue-flow/core，
+  //   它又是低频页面（需进「故事」页再切到「节点图」）→ 拆成独立异步 chunk，仅在访问时下载。
+  //   ⚠ 注意：@vue-flow 同时被关系图组件（关系图/用户关系图）引用，那些是常驻页面，
+  //     因此 vue-flow 本体仍会留在主 chunk；本改动拆出的是 StoryView 自身与其样式。
+  { path: '/story', component: () => import('./views/StoryView.vue') },
   { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
   { path: '/mailbox', component: MailboxView },

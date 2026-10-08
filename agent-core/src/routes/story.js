@@ -24,6 +24,8 @@ import {
   getOutline, saveOutline, setOutlineCursor, setOutlinePin,
   updateBeatScene, deleteBeat, clearOutline,
   generateOutlineDraft, judgeOutlineAdvance,
+  // 字段化编辑器（2026-10-07 用户口径：生成模块照「新建事件线」做）
+  getOutlineForEditor, saveOutlineFromEditor, refineOutlineBeat,
 } from '../services/story/outlineService.js';
 
 const router = Router();
@@ -144,6 +146,19 @@ router.post('/generate', async (req, res) => {
 //   面的 Beat 里有「所属故事线」一栏可指向线名 —— **用名字不用外键**（线可删，大纲是历史产物）。
 // ══════════════════════════════════════════════════════════
 
+/**
+ * 读「字段化编辑器」载荷（含各节点原文块，供"未改动即原样保留"）。
+ * ⚠ 必须声明在 `/outline/line-refs` 之类的**具体路径**之外无所谓（路径不冲突），
+ *   但保持"具体在前"的书写习惯。
+ */
+router.get('/outline/editor', (req, res) => {
+  try {
+    res.json({ editor: getOutlineForEditor() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /** 读当前大纲（含 Beat 序列与游标） */
 router.get('/outline', (req, res) => {
   try {
@@ -156,13 +171,39 @@ router.get('/outline', (req, res) => {
 /**
  * AI 生成大纲草稿（**只出草稿不落库** —— 与「修正地点」「AI 生成事件线」同一范式）。
  * 响应里同时给 `raw` 与解析后的 `beats`，前端可先展示再由用户决定保存。
+ * ★ 2026-10-07：可带 `participantIds` / `places`（与「新建事件线」同构的上下文）。
  */
 router.post('/outline/generate', async (req, res) => {
   try {
     const draft = await generateOutlineDraft(req.body || {});
     res.json({ ok: true, draft });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/**
+ * 细化**某一个**节点（只出草稿，不落库、不动其他节点、不动游标）。
+ * 字段化编辑器的「✨ 重写这个节点」入口用。
+ */
+router.post('/outline/beat/refine', async (req, res) => {
+  try {
+    res.json({ ok: true, draft: await refineOutlineBeat(req.body || {}) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
+  }
+});
+
+/**
+ * 从**字段化编辑器**保存（服务端统一序列化，未改动节点逐字节保留）。
+ * ⚠ 与 `PUT /outline` 的区别：那个收完整 `raw`（历史入口，保留兼容），
+ *   这个收「哪些节点改成了什么」。
+ */
+router.put('/outline/editor', (req, res) => {
+  try {
+    res.json({ ok: true, outline: saveOutlineFromEditor(req.body || {}) });
+  } catch (err) {
+    res.status(err.statusCode || 400).json({ error: err.message });
   }
 });
 
