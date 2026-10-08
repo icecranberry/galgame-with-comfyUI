@@ -40,6 +40,10 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_proactiveChatFreq: '1',
   feature_events: 'true',
   feature_eventFreq: '1',
+  // 朋友圈发帖频率：0 = 关闭自动发帖（默认）。用户想自动补内容时在设置页手动开启。
+  feature_momentFreq: '0',
+  // 传媒自动抓帖：0 = 关闭（默认）。>0 = 每晚几批，在夜间窗口内错峰随机（见 config.features.mediaAutoPerNight）。
+  feature_mediaAutoPerNight: '0',
   feature_disturbMode: 'false',
   feature_serializeBackgroundLLM: 'false',
   feature_backgroundLLMMaxConcurrency: '3',
@@ -61,6 +65,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   user_gender: '',
   user_appearance: '',
   user_persona: '',
+  // 人类（用户）的居住地点：地图里的地点名。**默认空 = 未指定**（不猜、不编）。
+  user_home: '',
 };
 
 // ── 全局规则 ──

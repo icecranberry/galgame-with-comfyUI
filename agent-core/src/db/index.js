@@ -8,6 +8,7 @@ import { initWorldRepository } from './worldRepository.js';
 import { seedAll } from './seedData.js';
 import { DEFAULT_EVENT_TYPES } from './seedEventTypes.js';
 import { DEFAULT_MOMENT_TOPICS } from './seedTopics.js';
+import { DEFAULT_MEDIA_OUTLETS } from './seedMedia.js';
 import { IMAGE_PROMPT_KNOWLEDGE, IMAGE_PROMPT_KNOWLEDGE_VERSION } from './imagePromptKnowledgeData.js';
 import { migrateTownSchema } from './townSchema.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
@@ -26,7 +27,9 @@ import { migrateTownItemSchema } from './townItemSchema.js';
 import { migrateTownItemTemplateSchema } from './townItemTemplateSchema.js';
 import { cleanupInterruptedChestItems } from '../services/itemLifecycle.js';
 import { migrateWeatherHourlySchema } from './weatherHourlySchema.js';
+// ⚠ 2026-10-08 合并 v3.7.0：上游新增 townBuildingFeatureSchema 迁移、本地新增 characterNameGuard —— 都保留。
 import { migrateTownBuildingFeatureSchema } from './townBuildingFeatureSchema.js';
+import { stripCharacterNames } from '../utils/characterNameGuard.js';
 
 import { migrateExpressionStandings, recoverExpressionStandingJobs } from './expressionStandingSchema.js';
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
@@ -364,6 +367,82 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_character_outfits_char ON character_outfits(character_id);
+
+    -- 场景立绘（工装/私服/居家/睡衣四套形象，供角色详情页左右切换查看）。
+    -- 与 character_outfits 的「场景服装」是两回事：服装是**文字描述**（驱动生图），立绘是**已画好的图**。
+    -- 刻意分表 —— 角色可以还没配服装就先有立绘，也可以配了服装但某套还没出图，两者解耦。
+    -- scene 取值同 services/outfitScene.js 的 OUTFIT_SCENES。
+    -- 注意：characters.standing_url 仍是「角色默认形象」，被聊天/朋友圈/群聊等各处引用，本表不动它；
+    -- work 槽在读取时以 standing_url 兜底（见 services/characterStanding.js），
+    -- 这样「已有的那张立绘」天然就是工装形象，用户不会觉得立绘凭空消失。
+    CREATE TABLE IF NOT EXISTS character_standings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+      scene TEXT NOT NULL,
+      image_url TEXT,
+      prompt_text TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(character_id, scene)
+    );
+    CREATE INDEX IF NOT EXISTS idx_character_standings_char ON character_standings(character_id);
+
+    -- ── 传媒 / 数字媒体（媒体内容页）──────────────────────────────
+    -- 一个「媒体」= 一个内容源（论坛 / 报纸 / 匿名职场社区 / 暗网 …），自带一份生成提示词。
+    -- 用户可自行增删改；默认种入二相乐园的 5 个媒体。
+    -- prompt 存的是该媒体的「角色设定 + 规则 + 写作要求」，生成帖子时原样作为 system 注入。
+    CREATE TABLE IF NOT EXISTS media_outlets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      tagline TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      icon TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      -- 形态：feed=帖子流 / weekly=周刊版式 / poster=海报版式（决定前端用哪套渲染）
+      layout TEXT NOT NULL DEFAULT 'feed',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- 板块（媒体下的分区，如「攻略 / 八卦 / 招募」）。每个媒体可自定义自己的板块。
+    CREATE TABLE IF NOT EXISTS media_boards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      outlet_id INTEGER NOT NULL REFERENCES media_outlets(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      desc TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(outlet_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_boards_outlet ON media_boards(outlet_id);
+
+    -- 帖子。作者可能是**活跃角色**（author_type='character'，带角色 id 与头像）或匿名 NPC。
+    -- 配图沿用《邻舍日报》的做法：文字先落库，image_status='pending' 由后台逐张补。
+    CREATE TABLE IF NOT EXISTS media_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      outlet_id INTEGER NOT NULL REFERENCES media_outlets(id) ON DELETE CASCADE,
+      board_id INTEGER REFERENCES media_boards(id) ON DELETE SET NULL,
+      batch_id TEXT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tags_json TEXT,
+      author_type TEXT NOT NULL DEFAULT 'anonymous',
+      character_id INTEGER,
+      author_name TEXT NOT NULL DEFAULT '',
+      author_avatar TEXT,
+      likes INTEGER NOT NULL DEFAULT 0,
+      views INTEGER NOT NULL DEFAULT 0,
+      comments_json TEXT,
+      image_prompt TEXT,
+      image TEXT,
+      image_status TEXT NOT NULL DEFAULT 'pending',
+      image_error TEXT,
+      -- 周刊/海报的结构化正文（feed 形态不用，正文仍在 content）
+      payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_media_posts_outlet ON media_posts(outlet_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_media_posts_board ON media_posts(board_id);
+    CREATE INDEX IF NOT EXISTS idx_media_posts_img ON media_posts(image_status);
 
     -- 通用限时服饰（如一套女仆装的 tag 组合）。character_id 为空 = 全员可见的全局服饰；
     -- 指定角色 = 道具系统写入的该角色专属限时服饰。expires_at 为过期时间（空 = 永久生效），
@@ -998,6 +1077,27 @@ function initSchema(db) {
   // 迁移: 角色立绘 — characters 表新增 standing_url 列
   migrateStandingSchema(db);
 
+  // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
+  migrateCharacterFolderSchema(db);
+
+  // 迁移: 角色归档 — characters 表新增 archived 列
+  migrateCharacterArchiveSchema(db);
+
+  // 迁移: 角色论坛马甲 — characters 表新增 forum_alias / forum_persona 列
+  migrateCharacterForumAlias(db);
+
+  // 迁移（一次性）: 场景套「裸体」改名「全身」（套名 + 两张日程表的 outfit 标注）
+  migrateOutfitNudeRename(db);
+
+  // 迁移: 我的表情库 — user_emojis 表
+  migrateUserEmojiSchema(db);
+
+  // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+  migrateMomentTopicCheckedSchema(db);
+
+  // 迁移: 允许系统/自定义话题同名共存 — 唯一约束改为 (source, name)
+  migrateMomentTopicAllowDuplicateName(db);
+
   // 迁移: AI 小镇 v2 — town_maps/locations/players 加列（新表由上方 CREATE IF NOT EXISTS 覆盖）
   migrateTownV2Schema(db);
   migrateTownSchema(db);
@@ -1064,6 +1164,26 @@ function initSchema(db) {
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
 
+  // 迁移: 宝箱橱窗（loot_catalog 商品清单 + loot_offers 当前橱窗）
+  migrateLootCatalogSchema(db);
+
+  // 迁移: 角色间关系的亲密度分级（决定朋友圈多人场景的概率与画面尺度）
+  migrateRelationshipIntimacy(db);
+
+  // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
+  migrateCharacterOutfitScene(db);
+
+  // 迁移 + 种子: 媒体内容页（传媒 / 板块 / 帖子）
+  migrateMediaSchema(db);
+  // 媒体迁移之后再跑：论坛去图要用到 media_outlets 的 layout 列
+  migrateForumPostsPlainText(db);
+
+  // 迁移: 世界地图骨架（独立于游戏小镇的 town_maps —— 那是可行走的网格图，本表是叙事地理）
+  migrateWorldMapSchema(db);
+
+  // 迁移: 归档角色禁止日程（一次性清理存量）
+  migrateArchivedScheduleCleanup(db);
+
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
 
@@ -1078,13 +1198,20 @@ function initSchema(db) {
   // 重建 FTS5 索引
   rebuildFtsIndex(db);
 
-  // 启动时 FTS 写入测试：部分损坏场景下 SELECT 能过但 INSERT 会炸，提前修复
+  // 启动时 FTS 写入测试：部分损坏场景下 SELECT 能过但 INSERT/DELETE 会炸，提前修复
+  //
+  // ⚠ 判据必须宽松（2026-10-06 用户报"未能正常删除聊天记录"踩到）：
+  //   原来只认 `SQLITE_CORRUPT_VTAB`，但实测损坏时抛的是
+  //   **`SQLITE_CORRUPT` / "database disk image is malformed"**（错误码不匹配 doc 里的假设）——
+  //   于是自愈被跳过，坏掉的 FTS 一直留着，最终表现为：
+  //   **删 messages 时报 malformed 被上层吞掉 → 界面显示"清理完成"但一行没删**。
+  //   改为：**任何** FTS 写入失败都触发重建（重建本身幂等，多跑无害）。
   try {
     db.prepare(`INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', -1, 'fts_write_test')`).run();
   } catch (writeErr) {
-    if (writeErr.code === 'SQLITE_CORRUPT_VTAB') {
-      console.log('[db] FTS5 write-test failed at startup, force rebuilding...');
-      // 用导出的 repairFtsIndex 不行（circular），直接内联重建
+    console.log('[db] FTS5 write-test failed at startup (' + writeErr.code + ': ' + writeErr.message + '), force rebuilding...');
+    // 用导出的 repairFtsIndex 不行（circular），直接内联重建
+    try {
       db.exec(`DROP TRIGGER IF EXISTS messages_ai`);
       db.exec(`DROP TRIGGER IF EXISTS messages_ad`);
       db.exec(`DROP TRIGGER IF EXISTS messages_au`);
@@ -1098,8 +1225,9 @@ function initSchema(db) {
       const insert = db.prepare(`INSERT INTO messages_fts(rowid, content) VALUES (?, ?)`);
       for (const m of msgs) insert.run(m.id, m.content);
       console.log(`[db] FTS5 startup force-rebuild: ${msgs.length} messages indexed`);
-    } else {
-      throw writeErr;
+    } catch (rebuildErr) {
+      // 重建也失败：**不能静默** —— 记下来，但别阻断启动（其余功能仍可用）
+      console.error('[db] FTS5 重建失败（全文检索将不可用）:', rebuildErr.message);
     }
   }
 }
@@ -1605,6 +1733,213 @@ function migrateDisturbSchema(db) {
 }
 
 /**
+ * 迁移: 允许「系统话题」与「自定义话题」同名共存
+ *
+ * 上游把 moment_topics.name 设成全局 UNIQUE，于是「自定义一条与系统同名的话题」根本插不进去。
+ * 但同名共存是合理需求：用户想用自己的文案，同时保留系统那份，靠 checked 决定抽谁。
+ * 所以把约束从 UNIQUE(name) 放宽成 UNIQUE(source, name)（同一来源内仍然不允许重名）。
+ *
+ * SQLite 不支持直接删除列约束，只能重建表；重建前后字段与数据原样保留。
+ */
+function migrateMomentTopicAllowDuplicateName(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='moment_topics'"
+    ).get();
+    if (!row?.sql) return;
+    if (!/name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(row.sql)) return;   // 已经是新结构，跳过
+
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE moment_topics__migrate (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        desc TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'default' CHECK(source IN ('default','custom')),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        checked INTEGER DEFAULT 1,
+        UNIQUE(source, name)
+      )
+    `);
+    db.exec(`
+      INSERT INTO moment_topics__migrate (id, name, desc, source, is_active, created_at, updated_at, checked)
+      SELECT id, name, desc, source, is_active, created_at, updated_at, checked FROM moment_topics
+    `);
+    db.exec('DROP TABLE moment_topics');
+    db.exec('ALTER TABLE moment_topics__migrate RENAME TO moment_topics');
+    db.exec('COMMIT');
+    console.log('[db] moment_topics: name 唯一约束放宽为 UNIQUE(source, name)，允许系统/自定义同名共存');
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch { /* 事务可能已提交 */ }
+    console.log('[db] migrateMomentTopicAllowDuplicateName error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
+ *
+ * 不能复用 is_active：那张表里 is_active 是「软删除」标记（DELETE 接口把它置 0，
+ * 列表就不再返回），拿它当「临时停用」用的话，用户一取消勾选就再也找不回来了。
+ * 所以另起 checked：只有 is_active = 1 且 checked = 1 才参与抽题。
+ * 默认 1，保证老库升级后行为与现在完全一致。
+ */
+function migrateMomentTopicCheckedSchema(db) {
+  try {
+    const cols = db.prepare('PRAGMA table_info(moment_topics)').all();
+    if (!cols.find(c => c.name === 'checked')) {
+      db.exec('ALTER TABLE moment_topics ADD COLUMN checked INTEGER DEFAULT 1');
+      console.log('[db] Added moment_topics.checked column (default 1)');
+    }
+  } catch (err) {
+    console.log('[db] migrateMomentTopicCheckedSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 我的表情库 — user_emojis 表
+ *
+ * 用户自己的表情包，跨角色通用（与角色的 character_emojis 分开存）。
+ * 不复用 character_emojis 的原因：那张表的 character_id 是 NOT NULL 外键到 characters(id)，
+ * 借一个特殊 id 代表「用户」既违反外键约束，语义上也说不通；这里也不分 set（用户只有一套）。
+ */
+function migrateUserEmojiSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_emojis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        emoji_key TEXT NOT NULL UNIQUE,
+        prompt TEXT NOT NULL DEFAULT '',
+        image_path TEXT,
+        style TEXT,
+        status TEXT NOT NULL DEFAULT 'done'
+          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err) {
+    console.log('[db] migrateUserEmojiSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色归档 — characters 表新增 archived 列
+ *
+ * 归档 = 该角色不再参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 日程刷新 / 拉群），
+ * 仅保留角色卡数据与「你主动找它时仍会回复」的能力。
+ *
+ * 刻意做成独立的拦截层，而不是去改动 moments_disabled / proactive_disabled /
+ * events_disabled / schedule_enabled 这四个开关 —— 否则归档再取消会把用户单独设过的
+ * 偏好一起抹掉。各调度器的选人查询统一叠加 `COALESCE(archived, 0) = 0`。
+ */
+function migrateCharacterArchiveSchema(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'archived')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN archived INTEGER DEFAULT 0`);
+      console.log('[db] Added characters.archived column (default 0)');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterArchiveSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移（一次性）: 场景套「裸体」改名「全身」—— 三处数据必须一起改。
+ *
+ * ── 为什么不能只改常量 ──────────────────────────────
+ * 套的 `name` 是**日程标注的匹配键**：日程 JSON 里存着 `"outfit":"裸体"`，
+ * `getSceneOutfitForNow` 按名称回查 `character_outfits.name`。
+ * 只改常量（`NUDE_NAME`）会让老数据与新常量并存：
+ *   · 老角色的行仍叫「裸体」（`upsertSceneOutfits` 会保留已有名字）；
+ *   · 新生成的日程按新常量标「全身」→ **匹配不上** →
+ *     角色静默回退成默认服装（洗浴时穿上街装）。
+ * 这正是「改套名 ⇒ 旧日程必须一起迁」那条硬约束的实例，所以三处同步：
+ *   ① `character_outfits.name`（12 行量级）
+ *   ② `daily_schedules.schedule_json` 的 outfit 标注
+ *   ③ `schedule_templates.schedule_json` 的 outfit 标注
+ *
+ * ── 为什么是一次性的（once 标记）────────────────────
+ * 匹配的是旧值「裸体」，跑过一次后就没有可匹配的行（天然幂等）；
+ * 但每次都全表扫描两个大 JSON 列是纯浪费，故按项目惯例打一次性标记。
+ * ⚠ 若日后又要改套名，请新开一个迁移键，不要复用这个。
+ */
+function migrateOutfitNudeRename(db) {
+  try {
+    const marker = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'outfit_nude_renamed_fullbody'`
+    ).get();
+    if (marker) return;
+
+    // 表还没建就先不迁，且**不写标记**，留给下次启动（否则会永久跳过）
+    const hasOutfits = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='character_outfits'`
+    ).get();
+    if (!hasOutfits) return;
+
+    const OLD = '裸体';
+    const NEW = '全身';
+
+    // ① 套名（只动 scene='nude' 的行，别误伤用户给其它套起的别名）
+    const renamed = db.prepare(
+      `UPDATE character_outfits SET name = ? WHERE scene = 'nude' AND name = ?`
+    ).run(NEW, OLD).changes;
+
+    // ②③ 日程标注：JSON 是紧凑存储（`"outfit":"裸体"`），但也防一手带空格的写法
+    const PATTERNS = [
+      [`"outfit":"${OLD}"`, `"outfit":"${NEW}"`],
+      [`"outfit": "${OLD}"`, `"outfit": "${NEW}"`],
+    ];
+    let scheduleChanges = 0;
+    for (const table of ['daily_schedules', 'schedule_templates']) {
+      const exists = db.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name=?`
+      ).get(table);
+      if (!exists) continue;
+      for (const [from, to] of PATTERNS) {
+        scheduleChanges += db.prepare(
+          `UPDATE ${table} SET schedule_json = REPLACE(schedule_json, ?, ?) WHERE schedule_json LIKE ?`
+        ).run(from, to, `%${from}%`).changes;
+      }
+    }
+
+    db.prepare(
+      `INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES ('outfit_nude_renamed_fullbody', '1')`
+    ).run();
+    console.log(`[db] 场景套改名 裸体→全身：套名 ${renamed} 行、日程标注 ${scheduleChanges} 行（一次性）`);
+  } catch (err) {
+    console.log('[db] migrateOutfitNudeRename error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色「论坛马甲」—— characters 表新增 forum_alias / forum_persona。
+ *
+ * 为什么马甲要存成角色属性、而不是生成时现编：
+ *   网名必须**稳定**。同一个角色每次发帖都换个名字，读者就认不出是谁，
+ *   "马甲"也就没意义了。要稳定就只能落在档案里（与「外观」同理）。
+ *   两者都可空 —— 没填的角色在论坛里退回用真名，不影响既有数据。
+ */
+function migrateCharacterForumAlias(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'forum_alias')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN forum_alias TEXT`);
+      console.log('[db] Added characters.forum_alias column');
+    }
+    if (!cols.find(c => c.name === 'forum_persona')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN forum_persona TEXT`);
+      console.log('[db] Added characters.forum_persona column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterForumAlias error:', err.message);
+  }
+}
+
+/**
  * 迁移: 日程系统 — characters 表新增 schedule 相关列
  */
 function migrateScheduleSchema(db) {
@@ -1786,6 +2121,31 @@ function migrateStandingSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateStandingSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色文件夹 — 新建 character_folders 表，characters 表新增 folder_id 列
+ * 单层分类：一个角色只属于一个文件夹，folder_id 为 NULL 表示「未分类」。
+ * 删除文件夹只把成员置回未分类（folder_id = NULL），不动角色本体。
+ */
+function migrateCharacterFolderSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS character_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
+    if (!cols.find(c => c.name === 'folder_id')) {
+      db.exec(`ALTER TABLE characters ADD COLUMN folder_id INTEGER DEFAULT NULL`);
+      console.log('[db] Added characters.folder_id column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterFolderSchema error:', err.message);
   }
 }
 
@@ -2315,6 +2675,7 @@ export {
   getSystemRulesWithWorld,
   getGlobalRule,
   getSystemRules,
+  adaptWorldText,
   listWorldSettings,
   getActiveWorldSetting,
   getWorldSettingById,
@@ -2517,6 +2878,662 @@ function migrateChatBgSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateChatBgSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 宝箱橱窗 —— 商品清单与当前橱窗
+ *
+ * loot_catalog：由外部清单（E:\邻舍-local\loot-catalog\catalog.json）导入的商品池。
+ *   图片按「单件」缓存（image_url），因为候选组合随机、几乎不重复，按整套生图等于每次刷新都烧算力。
+ * loot_offers：当前橱窗里每页的 8 个格子。放库里而不是内存 —— 刷新页面不该把橱窗清空。
+ */
+function migrateLootCatalogSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_catalog (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tag TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        meaning TEXT NOT NULL DEFAULT '',
+        cat TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        page TEXT NOT NULL,
+        image_url TEXT,
+        image_status TEXT NOT NULL DEFAULT '',
+        image_error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_loot_catalog_page ON loot_catalog(page)`);
+    // 生图用英文 Danbooru tag 组合。
+    // 原先生图 prompt 只用 tag 字段，但词典里大量 tag 是生僻写法（如 sheer_babydoll），
+    // 模型不认识就自由发挥 —— A/B 实测「纯 tag」会画出一个玻璃罐子；
+    // 「中文描述」同样无效（Danbooru 系模型不吃中文）；「英文 tag 组合」才准确。
+    {
+      const cols = db.prepare(`PRAGMA table_info(loot_catalog)`).all();
+      if (!cols.find(c => c.name === 'image_tags')) {
+        db.exec(`ALTER TABLE loot_catalog ADD COLUMN image_tags TEXT`);
+        console.log('[db] Added loot_catalog.image_tags column');
+      }
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS loot_offers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        page TEXT NOT NULL,
+        slot_index INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(page, slot_index)
+      )
+    `);
+    console.log('[db] loot catalog schema ready');
+  } catch (err) {
+    console.log('[db] migrateLootCatalogSchema error:', err.message);
+  }
+}
+
+/**
+ * 世界地图骨架（叙事地理）。
+ *
+ * ⚠ 与游戏小镇的 `town_maps` 是**两回事**，别混：
+ *   · `town_maps`  —— 可行走的**网格图**（tile 图层 + 寻路 + 资产），供「世界(内测)」用；
+ *   · `world_maps` —— 叙事**地理骨架**（大地区 → 子地区 → 场景 → POI），供「地图」页规划用。
+ * 两者将来可通过「导入小镇」打通，但数据模型刻意分开：
+ * 骨架是纯文本、秒级生成、不烧生图额度；网格图要资产生成与布局，重得多。
+ */
+function migrateWorldMapSchema(db) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS world_maps (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        name             TEXT NOT NULL,
+        world_setting_id INTEGER,
+        note             TEXT NOT NULL DEFAULT '',
+        created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS world_map_places (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        map_id     INTEGER NOT NULL REFERENCES world_maps(id) ON DELETE CASCADE,
+        parent_id  INTEGER REFERENCES world_map_places(id) ON DELETE CASCADE,
+        level      INTEGER NOT NULL,
+        key        TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        name_en    TEXT,
+        kind       TEXT NOT NULL DEFAULT '',
+        summary    TEXT NOT NULL DEFAULT '',
+        pois_json  TEXT NOT NULL DEFAULT '[]',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_wmp_map    ON world_map_places(map_id, level, sort_order);
+      CREATE INDEX IF NOT EXISTS idx_wmp_parent ON world_map_places(parent_id, sort_order);
+      -- 区域间通勤边（2026-10-05）。日程生成时由**后端算好注入**，不让 LLM 猜距离。
+      -- ⚠ 两翼（喜笑区/悲泣区）在图上不共享坐标系 → 跨翼只能查这张表，不能从坐标推。
+      CREATE TABLE IF NOT EXISTS world_map_transit (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        map_id     INTEGER NOT NULL REFERENCES world_maps(id) ON DELETE CASCADE,
+        line_id    TEXT NOT NULL,              -- A / B / W
+        line_name  TEXT NOT NULL DEFAULT '',
+        from_stop  TEXT NOT NULL,
+        to_stop    TEXT NOT NULL,
+        mode       TEXT NOT NULL,              -- rail | water
+        km         REAL,                       -- 可为 NULL：跨翼段无法从图上算
+        minutes    INTEGER NOT NULL,
+        seq        INTEGER NOT NULL DEFAULT 0, -- 在线路里的段序号
+        note       TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_wmt_map  ON world_map_transit(map_id, line_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_wmt_from ON world_map_transit(from_stop);
+    `);
+  } catch (err) {
+    console.error('[db] migrateWorldMapSchema 失败:', err.message);
+  }
+  migrateWorldMapPlaceAttrs(db);
+  migrateWorldMapTransit(db);
+}
+
+/**
+ * 迁移: 地图地点的**结构化属性**（准入 / 分区 / 场景提示词 / 功能分类）。
+ *
+ * ── 为什么需要（2026-10-05）──────────────────────────────
+ * 日程生成的两个老问题都出在「地点只有名字，没有属性」：
+ *  ① 「谢绝外人」这类准入信息**只写在提示词的散文常量里**（scheduleGenerator 的
+ *     「不写进去的地方：珠星总部、海原电视塔…」），在地图数据之外 —— 于是改地图
+ *     不会改它，模型照样 ROLL 到不合适的地方；
+ *  ② 角色「在不在自己家」靠 LLM 自己推断，导致该穿居家服时穿外出服。
+ * 解法就是把这两件事变成**可查询的数据**，注入时由后端过滤/标注，不让模型猜。
+ *
+ * 加列一律 `ALTER TABLE ADD COLUMN` + PRAGMA 存在性检测（本表是 CREATE IF NOT EXISTS
+ * 建的，老库没有这几列）。**不给默认值以外的回填** —— 老数据 access 留空串表示
+ * 「未标注」，注入侧按「未标注 = 允许」处理（否则一次迁移会把所有地点关掉）。
+ */
+function migrateWorldMapPlaceAttrs(db) {
+  try {
+    const cols = new Set(db.prepare('PRAGMA table_info(world_map_places)').all().map(c => c.name));
+    const add = (name, ddl) => { if (!cols.has(name)) db.exec(`ALTER TABLE world_map_places ADD COLUMN ${ddl}`); };
+    // access: public | restricted | private | time_window（空串 = 未标注，按 public 处理）
+    add('access', `access TEXT NOT NULL DEFAULT ''`);
+    // zone: residence | activity | private_transit（空串 = 未标注）
+    add('zone', `zone TEXT NOT NULL DEFAULT ''`);
+    // category: 功能分类（商店街/商业设施/公园/文化/餐饮/居住/地标…），用于分组呈现
+    add('category', `category TEXT NOT NULL DEFAULT ''`);
+    // scene_prompt: 生图场景提示词（英文）—— 与 imagePromptTags 的检索面打通
+    add('scene_prompt', `scene_prompt TEXT NOT NULL DEFAULT ''`);
+    // open/close: 仅 access=time_window 有意义（'18:00' / '02:00'）
+    add('open_at', `open_at TEXT NOT NULL DEFAULT ''`);
+    add('close_at', `close_at TEXT NOT NULL DEFAULT ''`);
+    /**
+     * ★ pos_x / pos_y：**用户在点位图上手动摆过的坐标**（归一化 0~1，-1 = 未摆过）。
+     *
+     * ── 为什么要落库（2026-10-06 用户反馈）────────────────────────
+     * 原先手动拖拽只写 localStorage['linshe.worldmap.pointLayout'] ——
+     * **浏览器本地**，后端与 LLM 完全读不到 → 用户抱怨"被拖动过的点位不能保存，
+     * 对 LLM 计算距离造成阻碍"。
+     * 现在改成落库：前端拖完写回后端，后端算通勤/距离时就能读到真实摆放。
+     *
+     * ⚠ 用 `-1` 表示"没摆过"（而不是 NULL 或 0）：0 是合法的左上角坐标，
+     *   用 0 当哨兵会让"摆在最左"和"没摆"混为一谈。
+     */
+    add('pos_x', `pos_x REAL NOT NULL DEFAULT -1`);
+    add('pos_y', `pos_y REAL NOT NULL DEFAULT -1`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_wmp_access ON world_map_places(map_id, access)`);
+  } catch (err) {
+    console.error('[db] migrateWorldMapPlaceAttrs 失败:', err.message);
+  }
+}
+
+/**
+ * 迁移: 区域间通勤边种子（`world_map_transit`）。
+ *
+ * ── 口径（2026-10-06 用户最终裁定）──────────────────────
+ *  · ★ **A 线取折线口径**（用户 2026-10-06 明确选择「折线（66 分）」）：
+ *    珠星站 →防御部站→ 泊地站沿折线合计 **66 分**（34+32）。
+ *    ⚠ 与之并存的「直线反解 60 分」只作图上参考，**通勤注入用折线值**。
+ *    D6 落地：车站节点为 lv3「防御部站」（id=637，挂 lv2「异常防御部」下）。
+ *  · **B 环线按已算结果**（95.64km / 209 分，首段 30 / 末段 61 不对称，几何必然）。
+ *    ★ 用户 2026-10-06 确认**接受该不对称**（D4）。
+ *  · **W 水路改用「游戏内实际时长」定线**：全程 330 分 = **5.5 小时**（用户给定，D5）。
+ *    ★ 这是比图上比例尺**更权威**的口径 —— 那个比例尺（66.8 m/锚点单位）本是按
+ *    **轨道**约束反解的，套到水路上本就不该。所以 W 线各段用时按实际分配，里程只作参考。
+ *
+ * ⚠ **只在该图还没通勤数据时种入**（一次性）。用户手改过就不覆盖 —— 与本项目
+ *   「迁移不覆盖用户显式选择」的红线一致。
+ */
+function migrateWorldMapTransit(db) {
+  try {
+    const map = db.prepare('SELECT id FROM world_maps ORDER BY id LIMIT 1').get();
+    if (!map) return;
+    const existing = db.prepare('SELECT COUNT(*) AS n FROM world_map_transit WHERE map_id = ?').get(map.id).n;
+    if (existing > 0) return;
+
+    // A 线（城际）—— ★ 折线口径（用户 2026-10-06 选定）：珠星站→防御部站→泊地站 合计 66 分
+    const A = [
+      ['珠星站', '防御部站', 'rail', 16.25, 34, 'A线折线口径第1段'],
+      ['防御部站', '泊地站', 'rail', 15.74, 32, 'A线折线口径第2段；沿折线合计 66 分'],
+      ['泊地站', '海原站', 'rail', 29.87, 60, 'A线折线口径第3段（用户给定 60 分）'],
+    ];
+    // B 线（环线）
+    const B = [
+      ['观览云岛站', '泊地站', 'rail', 13.89, 30, ''],
+      ['泊地站', '鸽川站', 'rail', 15.00, 32, ''],
+      ['鸽川站', '绘世学院', 'rail', 21.22, 44, ''],
+      ['绘世学院', '珠星站', 'rail', 15.12, 32, ''],
+      ['珠星站', '观览云岛站', 'rail', 30.41, 61, '环线闭合段；与首段 30 分不对称，属几何必然'],
+    ];
+    // W 线（水路）——按用户给的**游戏内实际 5~6 小时**定线，里程为反推参考值
+    const W = [
+      ['海原站', '鸽川港', 'water', 25.2, 92, ''],
+      ['鸽川港', '喜悲街', 'water', 29.4, 106, '跨翼段：两翼在图上不共享坐标系，里程为按实际时长反推'],
+      ['喜悲街', '渡画泉隐', 'water', 37.2, 132, ''],
+    ];
+
+    const ins = db.prepare(`INSERT INTO world_map_transit
+      (map_id, line_id, line_name, from_stop, to_stop, mode, km, minutes, seq, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const tx = db.transaction(() => {
+      const put = (lineId, lineName, segs) => segs.forEach((s, i) =>
+        ins.run(map.id, lineId, lineName, s[0], s[1], s[2], s[3], s[4], i, s[5] || ''));
+      put('A', '城际线', A);
+      put('B', '环线', B);
+      put('W', '水路线', W);
+    });
+    tx();
+    const n = db.prepare('SELECT COUNT(*) AS n FROM world_map_transit WHERE map_id = ?').get(map.id).n;
+    console.log(`[db] world_map_transit 种子：${n} 条通勤边（A/B/W 三线）`);
+  } catch (err) {
+    console.error('[db] migrateWorldMapTransit 失败:', err.message);
+  }
+}
+
+/**
+ * 迁移: 论坛帖子去图 —— **一次性**清掉论坛帖的 image_prompt / image。
+ *
+ * ── 背景（2026-10-05，用户口径）──────────────────────────
+ * 论坛是**纯文字版面**，不该配图。但此前提示词写的是「约四分之一的帖子可以有图」，
+ * 存量里已经生成了几条带图帖（实测 12 条里 5 条有图），版面变成图文混排。
+ *
+ * 新生成已在出口层强制清空 `image_prompt`；本迁移负责**回填存量**。
+ * ⚠ 只清论坛（`media_outlets.layout='forum'`）—— 社交平台与规则34**该配图**，别误伤。
+ * 图片文件本身**不动**（可能被别处引用；保留磁盘占用换安全）。
+ */
+function migrateForumPostsPlainText(db) {
+  try {
+    const done = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'forum_posts_plain_text_v1'`
+    ).get();
+    if (done) return;
+    const r = db.prepare(`
+      UPDATE media_posts
+         SET image_prompt = NULL, image = NULL, image_status = 'none', image_error = NULL
+       WHERE outlet_id IN (SELECT id FROM media_outlets WHERE layout = 'forum')
+         AND (image_prompt IS NOT NULL AND image_prompt != '')
+    `).run();
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+      VALUES ('forum_posts_plain_text_v1', '1')`).run();
+    if (r.changes > 0) console.log(`[db] 论坛去图：清掉 ${r.changes} 条论坛帖的配图`);
+  } catch (err) {
+    console.log('[db] forum posts plain-text migration skipped:', err.message);
+  }
+}
+
+/**
+ * 读该图全部通勤边（供日程注入；地图改了这里自动跟上）。
+ * 按 line_id, seq 排序；两翼之间只能靠这张表，不能从坐标推。
+ */
+export function listTransitEdges(mapId = null) {
+  try {
+    const db = getDb();
+    let id = Number(mapId) || null;
+    if (!id) id = db.prepare('SELECT id FROM world_maps ORDER BY id LIMIT 1').get()?.id ?? null;
+    if (!id) return [];
+    return db.prepare(
+      'SELECT line_id, line_name, from_stop, to_stop, mode, km, minutes, seq, note FROM world_map_transit WHERE map_id = ? ORDER BY line_id, seq'
+    ).all(id);
+  } catch { return []; }
+}
+
+/** 站间用时（同线相邻段）；查不到返回 null —— 调用方据此决定是否标注 */
+export function transitMinutesBetween(fromStop, toStop, mapId = null) {
+  const edges = listTransitEdges(mapId);
+  const f = String(fromStop || '').trim(), t = String(toStop || '').trim();
+  const hit = edges.find(e => e.from_stop === f && e.to_stop === t);
+  return hit ? hit.minutes : null;
+}
+
+/**
+ * 迁移: 归档角色禁止日程 —— **一次性**清掉归档角色遗留的日程数据。
+ *
+ * ── 背景（为什么要清）────────────────────────────────────
+ * 「归档 = 不参与任何主动行为」这条口径很早就定了，各调度器的选人查询也陆续叠了
+ * `COALESCE(archived, 0) = 0`。但日程这条链路上漏了两处**写入**：
+ *   · `snapshotTodaySchedule()` —— 无条件重建今日快照；
+ *   · `getTodayScheduleRaw()` 的 fallback —— 查不到就顺手插一条。
+ * 结果是归档角色**每天仍被重建 51 条今日快照**（实测：模板早在 10-03 就停更，
+ * 但 10-05 的 daily_schedules 仍有 51 条），日程页/概览里也一直列着它们。
+ * 两处入口已在代码层封住（`isScheduleForbidden` + 启动初始化过滤），
+ * 这里补的是**存量数据**。
+ *
+ * ── 清什么、不清什么 ─────────────────────────────────────
+ * 清：`daily_schedules` 里归档角色的当天及以后快照。
+ *   —— 这些是"每天都重建"的临时派生数据，删了不影响模板。
+ * **不**清：`schedule_templates`。
+ *   —— 取消归档时能立刻恢复作息，不用重新烧 token 生成；
+ *     且用户手动改过的模板（scheduleEditor）不该因为归档而丢。
+ *
+ * ⚠ 一次性标记：不做标记的话，用户**取消归档后又归档**时数据会被再清一次 ——
+ *   那次是合理的（本来就该清）；但每次启动都扫全表没必要。
+ *   用标记保证只跑一次，之后的清理交给上面那两处代码拦截。
+ */
+function migrateArchivedScheduleCleanup(db) {
+  try {
+    const done = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'archived_schedule_cleanup_v1'`
+    ).get();
+    if (done) return;
+
+    const r = db.prepare(`
+      DELETE FROM daily_schedules
+      WHERE character_id IN (SELECT id FROM characters WHERE COALESCE(archived, 0) = 1)
+    `).run();
+
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+      VALUES ('archived_schedule_cleanup_v1', '1')`).run();
+
+    if (r.changes > 0) {
+      console.log(`[db] archived schedule cleanup: 清掉 ${r.changes} 条归档角色的日程快照`);
+    }
+  } catch (err) {
+    console.log('[db] archived schedule cleanup skipped:', err.message);
+  }
+}
+
+/**
+ * 迁移: 媒体内容页 —— media_outlets / media_boards / media_posts 建表 + 默认媒体种子
+ *
+ * 表本身在启动建表块里 CREATE IF NOT EXISTS；这里只负责**种入默认媒体与板块**。
+ * 用 INSERT OR IGNORE：用户改过的媒体/板块不会被后续启动覆盖；
+ * 用户删掉的默认媒体也不会被"复活"（因为按 name 判重，用户删了就再插一次？——
+ * 会复活。所以额外记一个 system_settings 标记，播过一次就不再播）。
+ */
+function migrateMediaSchema(db) {
+  try {
+    // ── 结构升级（独立于种子开关，老库也要加上）──
+    // layout：媒体形态，决定前端用哪套版式渲染
+    //   'feed'   = 帖子瀑布流（网络热门 / 公司脉脉 / 幻月暗所…）
+    //   'portal' = 门户（数字报刊·两层生成）：横版卡片网格 + 点开板块才生成正文。
+    //              出刊只跑一次短 LLM（立刻可读），配图与正文都按需补。
+    //   'weekly' = 周刊版式（**旧形态**：狸狸通讯社原样，已被 portal 取代，保留以渲染老帖）
+    //   'poster' = 海报版式（**旧形态**：狸狸八卦原样，同上）
+    const oCols = db.prepare(`PRAGMA table_info(media_outlets)`).all();
+    if (!oCols.find(c => c.name === 'layout')) {
+      db.exec(`ALTER TABLE media_outlets ADD COLUMN layout TEXT NOT NULL DEFAULT 'feed'`);
+      console.log('[db] Added media_outlets.layout column');
+    }
+    // payload_json：周刊/海报的结构化正文（feed 形态不用，内容仍在 content）
+    const pCols = db.prepare(`PRAGMA table_info(media_posts)`).all();
+    if (!pCols.find(c => c.name === 'payload_json')) {
+      db.exec(`ALTER TABLE media_posts ADD COLUMN payload_json TEXT`);
+      console.log('[db] Added media_posts.payload_json column');
+    }
+
+    // ── 形态校正（幂等，每次启动都跑）──
+    try {
+      // 两个本地刊各有**固定形态**，由这两条校正保证它们稳定停在自己的档位，
+      // 不会因为用户在媒体设置里误改、或历史实验残留而漂移：
+      //
+      //   《狸狸通讯社》→ portal（数字报刊）
+      //     它的提示词是长长的「多栏目文稿」（问答栏目 / 榜单 / 跟帖区 / 落款），
+      //     正对门户的两层生成（出刊只出骨架 → 立即可读；图后台串行补；正文点开才生成），
+      //     老帖仍按 payload 形态渲染，不会白丢内容。
+      //
+      //   《狸狸八卦》→ poster（海报）★ 2026-10-05 定稿
+      //     它的提示词本就是**海报口吻**（「每期出**一张海报**（不是文章）」+ 版式部件清单），
+      //     按 portal 出刊要靠 buildPortalFormatPrompt 把海报口吻硬塞进「标题 + 引言 + 板块」
+      //     的骨架里，两头都别扭。定稿为 poster 后：出刊走 generatePosterIssue()，
+      //     产出 bigTitle 结构的 payload，由 MediaPoster.vue 渲染成**横版头版**。
+      //     （曾一度把本刊拉回 portal 迁就形态名；那条路已弃，别再改回来。
+      //      启动时若发现它不在 poster，本条会把它拨回。）
+      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout != 'portal'`).run();
+      db.prepare(`UPDATE media_outlets SET layout = 'poster' WHERE name = '狸狸八卦' AND layout != 'poster'`).run();
+
+      // 清理历史实验打的一次性标记（已不再使用）
+      db.prepare(`DELETE FROM system_settings WHERE setting_key = 'media_bagua_layout_fixed'`).run();
+    } catch { /* ignore */ }
+
+    const seeded = db.prepare(
+      `SELECT setting_value FROM system_settings WHERE setting_key = 'media_outlets_seeded'`
+    ).get();
+    if (seeded?.setting_value === '1') {
+      // 种子已播过，但后续版本新增的媒体要单独补种。
+      // ⚠ 必须是**显式白名单**，不能改成"凡 DEFAULT 里没有的就补" ——
+      //   用户会主动删掉不想要的媒体，全量补种会把它们复活（踩过同类坑）。
+      //
+      // ★★ 但**光有白名单还不够**：白名单里的名字一旦被用户主动删掉，
+      //   每次启动仍会把它建回来（`node --watch` 下改个文件就重启 → 删了又回来）。
+      //   实测踩过：《狸狸八卦》被用户删掉后，一次重启就以新 id 复活了。
+      //   所以要再叠一层「删除墓碑」：`deleteOutlet()` 会把名字记进
+      //   `system_settings.media_outlets_deleted`，这里跳过那些名字。
+      const LATE_SEEDED = ['狸狸八卦', '二相论坛', '规则34', '哈托比亚'];
+      try {
+        const deletedRaw = db.prepare(
+          `SELECT setting_value FROM system_settings WHERE setting_key = 'media_outlets_deleted'`
+        ).pluck().get();
+        let deletedByUser = [];
+        try {
+          const parsed = deletedRaw ? JSON.parse(deletedRaw) : [];
+          if (Array.isArray(parsed)) deletedByUser = parsed.filter(x => typeof x === 'string');
+        } catch { /* 墓碑坏了就当作没有，不影响补种 */ }
+
+        const insLate = db.prepare(`INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+          VALUES (?, ?, ?, ?, ?, 1, ?)`);
+        const insLateBoard = db.prepare(`
+          INSERT OR IGNORE INTO media_boards (outlet_id, name, desc, sort_order) VALUES (?, ?, '', ?)
+        `);
+
+        /*
+         * 一次性：补登《狸狸八卦》的删除墓碑。
+         *
+         * 用户在删除墓碑机制上线**之前**就把它删了，所以墓碑里没有记录 ——
+         * 若不补这一条，下次启动（`node --watch` 下改个文件就重启）它会照旧复活。
+         * 用户删除的理由是「过于样板戏」，属明确的主动删除，据此登记。
+         *
+         * 只在「墓碑记录尚未建立」时执行一次，之后不再干预（用户若重新建回来，
+         * `createOutlet()` 会撤掉墓碑）。
+         */
+        const tombstoneInited = db.prepare(
+          `SELECT setting_value FROM system_settings WHERE setting_key = 'media_deleted_seeded_v1'`
+        ).get();
+        if (!tombstoneInited) {
+          const names = new Set(deletedByUser);
+          names.add('狸狸八卦');
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at)
+            VALUES ('media_outlets_deleted', ?, CURRENT_TIMESTAMP)`).run(JSON.stringify([...names]));
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+            VALUES ('media_deleted_seeded_v1', '1')`).run();
+          deletedByUser = [...names];
+        }
+
+        for (const name of LATE_SEEDED) {
+          if (db.prepare(`SELECT id FROM media_outlets WHERE name = ?`).get(name)) continue;
+          // ★ 用户主动删过的，不再复活
+          if (deletedByUser.includes(name)) {
+            console.log(`[db] media seed: 跳过「${name}」（用户已主动删除）`);
+            continue;
+          }
+          const ghost = DEFAULT_MEDIA_OUTLETS.find(o => o.name === name);
+          if (!ghost) continue;
+          const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM media_outlets').get().m;
+          const r = insLate.run(ghost.name, ghost.tagline || '', ghost.prompt || '', ghost.icon || '', maxOrder + 1, ghost.layout || 'feed');
+          const row = db.prepare('SELECT id FROM media_outlets WHERE name = ?').get(name);
+          if (row) (ghost.boards || []).forEach((b, bi) => insLateBoard.run(row.id, b, bi));
+          console.log(`[db] media seed: 补种「${name}」（${r.changes > 0 ? '已插入' : '已存在'}）`);
+        }
+      } catch (err) {
+        console.log('[db] media late-seed skipped:', err.message);
+      }
+      // ── 一次性：规则34 的提示词升级到「体位驱动」版 ──
+      // 旧提示词是 v1（让模型自己写 image_prompt），新方案把画面交给服务端随机分配，
+      // 旧提示词会让模型做重复劳动并与新格式打架。
+      // ⚠ 只在**用户没改过**时才替换：判据是旧提示词里的特征句还在。
+      //   用户改过就保留他的版本（媒体设置里本来就能编辑 prompt）。
+      try {
+        const done = db.prepare(
+          `SELECT setting_value FROM system_settings WHERE setting_key = 'media_gallery_prompt_v2'`
+        ).get();
+        if (!done) {
+          const row = db.prepare(`SELECT id, prompt FROM media_outlets WHERE name = '规则34'`).get();
+          const ghost = DEFAULT_MEDIA_OUTLETS.find(o => o.name === '规则34');
+          if (row && ghost && String(row.prompt || '').includes('你只负责**画什么**')) {
+            db.prepare(`UPDATE media_outlets SET prompt = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+              .run(ghost.prompt || '', row.id);
+            console.log('[db] media prompt: 「规则34」提示词已升级到体位驱动版');
+          }
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+            VALUES ('media_gallery_prompt_v2', '1')`).run();
+        }
+      } catch (err) {
+        console.log('[db] media gallery prompt migration skipped:', err.message);
+      }
+
+      // ── 一次性：「狸狸通讯社」提示词去模板化 ──
+      // 老提示词是**成套配方**：固定版式（刊头→开场白→访谈栏目→尾部板块→落款）+
+      // 写死的栏目名示例（「震撼首发：一手信息直播间」等）+ 固定开场与收尾口号 +
+      // 榜单示例。结果是**每期长得一模一样**（用户口径：过于样板戏 / 模板化）。
+      // 新提示词只保留刊社人格，把"板块名自己现想、不许沿用往期"作为铁律。
+      // ⚠ 同样只在**用户没改过**时替换：判据是旧提示词里的特征句还在。
+      try {
+        const done = db.prepare(
+          `SELECT setting_value FROM system_settings WHERE setting_key = 'media_lili_prompt_v2'`
+        ).get();
+        if (!done) {
+          const row = db.prepare(`SELECT id, prompt FROM media_outlets WHERE name = '狸狸通讯社'`).get();
+          const ghost = DEFAULT_MEDIA_OUTLETS.find(o => o.name === '狸狸通讯社');
+          const old = String(row?.prompt || '');
+          // 特征句：老版本独有、且一定会出现在未改动的原文里
+          if (row && ghost?.prompt && old.includes('快问快答Time') && old.includes('一手信息直播间')) {
+            db.prepare(`UPDATE media_outlets SET prompt = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+              .run(ghost.prompt, row.id);
+            console.log('[db] media prompt: 「狸狸通讯社」提示词已去模板化');
+          }
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+            VALUES ('media_lili_prompt_v2', '1')`).run();
+        }
+      } catch (err) {
+        console.log('[db] media lili prompt migration skipped:', err.message);
+      }
+
+      // ── 一次性：洗掉「规则34」既存图库帖里的角色名 ──
+      // 背景：`buildGalleryFormatPrompt` 曾把角色名（出镜名单）交给模型，模型便照抄进作品名，
+      // 产出「爻光·毒龙 01」「姬子 压墙式」「姬子×朽叶 双重骑乘」。用户口径：
+      // **规则34 不许出现人物/角色的名字**。提示词层已改（不再给名字）+ 出口层已加清洗
+      // （`stripCharacterNames`），但**历史数据**需要这一遍回填。
+      //
+      // ⚠ 一次性标记：不清洗就每次启动都跑一遍（虽然幂等，但没有意义且会一直写库）。
+      try {
+        const done = db.prepare(
+          `SELECT setting_value FROM system_settings WHERE setting_key = 'media_gallery_dename_v1'`
+        ).get();
+        if (!done) {
+          const names = db.prepare(`SELECT display_name FROM characters`).all()
+            .map(r => String(r.display_name || '').trim())
+            .filter(Boolean);
+          const rows = db.prepare(`
+            SELECT id, title, content, author_name FROM media_posts
+            WHERE payload_json LIKE '%"gallery"%'
+          `).all();
+          const upd = db.prepare(`UPDATE media_posts SET title = ?, content = ?, author_name = ? WHERE id = ?`);
+          let cleaned = 0;
+          for (const r of rows) {
+            const title = stripCharacterNames(r.title, names) || r.title;
+            const content = stripCharacterNames(r.content, names);
+            const author = stripCharacterNames(r.author_name, names) || r.author_name;
+            if (title !== r.title || content !== r.content || author !== r.author_name) {
+              upd.run(title, content, author, r.id);
+              cleaned++;
+            }
+          }
+          if (cleaned) console.log(`[db] media gallery: 已洗掉 ${cleaned} 条图库帖里的角色名`);
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+            VALUES ('media_gallery_dename_v1', '1')`).run();
+        }
+      } catch (err) {
+        console.log('[db] media gallery dename migration skipped:', err.message);
+      }
+      return;
+    }
+
+    const insOutlet = db.prepare(`
+      INSERT OR IGNORE INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+      VALUES (?, ?, ?, ?, ?, 1, ?)
+    `);
+    const insBoard = db.prepare(`
+      INSERT OR IGNORE INTO media_boards (outlet_id, name, desc, sort_order) VALUES (?, ?, '', ?)
+    `);
+    /*
+     * ★ 首次播种也要跳过「用户删过的」媒体。
+     *
+     * 这条路径只在 `media_outlets_seeded !== '1'` 时跑（全新安装 / 种子标记丢失）。
+     * 全新安装时墓碑本来是空的，看似不需要 —— 但**种子标记有可能丢**：
+     * 用工具箱重置、从旧备份恢复数据、手动清 system_settings 都可能发生。
+     * 那时若不多看一眼墓碑，用户删掉的媒体会**连同整个默认清单一起**回来，
+     * 而且这次是"全量复活"，比补种更难察觉。
+     *
+     * 与下面 `LATE_SEEDED` 分支读的是同一个键（`media_outlets_deleted`），口径统一。
+     */
+    let seedDeleted = [];
+    try {
+      const raw = db.prepare(
+        `SELECT setting_value FROM system_settings WHERE setting_key = 'media_outlets_deleted'`
+      ).pluck().get();
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) seedDeleted = parsed.filter(x => typeof x === 'string');
+    } catch { /* 墓碑坏了就当作没有，不影响首次播种 */ }
+
+    let outlets = 0, boards = 0;
+    const tx = db.transaction(() => {
+      DEFAULT_MEDIA_OUTLETS.forEach((o, i) => {
+        if (seedDeleted.includes(o.name)) {
+          console.log(`[db] media seed: 跳过「${o.name}」（用户已主动删除）`);
+          return;
+        }
+        const r = insOutlet.run(o.name, o.tagline || '', o.prompt || '', o.icon || '', i, o.layout || 'feed');
+        if (r.changes > 0) outlets++;
+        const row = db.prepare('SELECT id FROM media_outlets WHERE name = ?').get(o.name);
+        if (!row) return;
+        (o.boards || []).forEach((b, bi) => {
+          if (insBoard.run(row.id, b, bi).changes > 0) boards++;
+        });
+      });
+    });
+    tx();
+
+    db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value)
+      VALUES ('media_outlets_seeded', '1')`).run();
+    if (outlets || boards) console.log(`[db] media seed: ${outlets} outlets / ${boards} boards`);
+  } catch (err) {
+    console.log('[db] migrateMediaSchema error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色服装的场景标记 — character_outfits 加 scene 列
+ *
+ * 用途：角色可同时拥有多套「场景服装」（工装 work / 外出 casual / 居家 home / 睡眠 sleep），
+ * 由日程决定当前穿哪套。取值见 services/outfitScene.js 的 OUTFIT_SCENES。
+ *
+ * **刻意不复用 `enabled`**：现有的 `enabled` 承载「同时只启用一套」的互斥语义
+ * （道具变身/临时形态靠它，见 getActiveOutfits 的 LIMIT 1）。场景服装改用
+ * `scene IS NOT NULL` 标记，两条通道互不干扰。
+ */
+function migrateCharacterOutfitScene(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_outfits)`).all();
+    if (!cols.find(c => c.name === 'scene')) {
+      db.exec(`ALTER TABLE character_outfits ADD COLUMN scene TEXT`);
+      console.log('[db] Added character_outfits.scene column');
+    }
+    /**
+     * body：这个角色的**身体描述**（英文生图 tag 风格：发色/发型/瞳色/肤色/体型/显著特征）。
+     *
+     * ★ 为什么单独立一列（2026-10-04）：服装描述原先把身体和衣服混在一起写，导致
+     *   · 同一部位在「外观段 / work / casual」三处互相矛盾（银狼的发型有三个版本）；
+     *   · 裸体场景没有可用的身体真源（外观段里也只有头发和瞳色）。
+     *   现在 body 是**该角色 5 套共用的一份身体描述**，description 只写**衣服**
+     *   （`nude` 那套的 description 为空），注入时由 composeOutfitText() 拼成自包含文本。
+     *   这样身体只存一份、不会在各套之间漂移。
+     */
+    if (!cols.find(c => c.name === 'body')) {
+      db.exec(`ALTER TABLE character_outfits ADD COLUMN body TEXT`);
+      console.log('[db] Added character_outfits.body column');
+    }
+  } catch (err) {
+    console.log('[db] migrateCharacterOutfitScene error:', err.message);
+  }
+}
+
+/**
+ * 迁移: 角色间关系的亲密度 — character_relationships 加 intimacy 列
+ *
+ * 0=泛泛 1=熟悉 2=亲近 3=亲密。分级用于决定朋友圈多人场景的概率与画面尺度。
+ *
+ * **列默认为 NULL，并且刻意不做全量回填**：NULL 表示「未设定」，读取时按关系文本
+ * 关键词实时推断（见 services/relationshipIntimacy.js 的 resolveIntimacy）。
+ * 这样关系文本一改，判定就跟着变；而一旦回填成显式值，PUT 会保留该值，
+ * 改文本就不会再重推断了。用户在图里手动选定后才落为显式值。
+ */
+function migrateRelationshipIntimacy(db) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(character_relationships)`).all();
+    if (!cols.find(c => c.name === 'intimacy')) {
+      db.exec(`ALTER TABLE character_relationships ADD COLUMN intimacy INTEGER`);
+      console.log('[db] Added character_relationships.intimacy column');
+    }
+  } catch (err) {
+    console.log('[db] migrateRelationshipIntimacy error:', err.message);
   }
 }
 

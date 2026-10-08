@@ -419,16 +419,24 @@ const footnote = computed(() => {
   font-weight: 600; white-space: nowrap; flex-shrink: 0;
 }
 
-.badge-busy   { background: rgba(var(--accent-rgb),0.1);  color: #c06858; }
-.badge-sleep  { background: rgba(149,128,204,0.1);  color: #7c6db8; }
-.badge-drowsy { background: rgba(140,160,190,0.1);  color: #6d84a8; }
+/* ⚠ 原为「10% 透明底 + 深色字」：浅色主题没问题，但暗夜下 10% 底在深背景上≈看不见，
+   深字直接糊掉（巡检实测 badge-sleep 对比度 1.32）。
+   改为「更实的底 + 亮色字」，并在暗夜下进一步提亮文字。 */
+.badge-busy   { background: rgba(var(--accent-rgb),0.18);  color: #a8483a; }
+.badge-sleep  { background: rgba(149,128,204,0.18);  color: #5f4f9e; }
+.badge-drowsy { background: rgba(140,160,190,0.18);  color: #4f6a92; }
+[data-theme="dark"] .badge-busy   { background: rgba(var(--accent-rgb),0.26); color: #ffb3a4; }
+[data-theme="dark"] .badge-sleep  { background: rgba(149,128,204,0.30); color: #c4b4f5; }
+[data-theme="dark"] .badge-drowsy { background: rgba(140,160,190,0.30); color: #b3c9e8; }
 
 .tag-badge {
   font-size: 0.65rem; padding: 2px 8px; border-radius: 999px;
   font-weight: 600; white-space: nowrap; flex-shrink: 0;
 }
-.tag-green  { background: rgba(82,196,26,0.1);  color: #389e0d; }
-.tag-orange { background: rgba(250,173,20,0.1); color: #d48806; }
+.tag-green  { background: rgba(82,196,26,0.18);  color: #2f7d0a; }
+.tag-orange { background: rgba(250,173,20,0.20); color: #a86b00; }
+[data-theme="dark"] .tag-green  { background: rgba(82,196,26,0.26);  color: #9ee57a; }
+[data-theme="dark"] .tag-orange { background: rgba(250,173,20,0.28); color: #ffcf70; }
 .tag-overflow { background: rgba(0,0,0,0.04); color: var(--text-secondary); }
 
 /* ── Mid ── */

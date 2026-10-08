@@ -472,7 +472,7 @@ function onScroll() {
   color: var(--on-accent);
   transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
   user-select: none;
-  background: var(--accent);
+  background: var(--accent-solid);
 }
 .filter-avatar-img {
   width: 100%;
@@ -500,7 +500,7 @@ function onScroll() {
   opacity: 0.7;
 }
 .filter-all.active {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--on-accent);
   border-color: var(--accent);
   opacity: 1;

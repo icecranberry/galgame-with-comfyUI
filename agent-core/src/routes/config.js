@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
+import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
@@ -269,6 +269,16 @@ router.put('/event-freq', (req, res) => {
   res.json({ ok: true, eventFreq: config.features.eventFreq });
 });
 
+// PUT /api/config/moment-freq — 更新朋友圈发帖频率 0~24（1=默认 2~8 小时，24=最快 5~20 分钟，0=关闭）
+router.put('/moment-freq', (req, res) => {
+  const { value } = req.body;
+  if (value == null || typeof value !== 'number' || value < 0 || value > 24) {
+    return res.status(400).json({ error: 'value must be 0~24' });
+  }
+  updateMomentFreq(value);
+  res.json({ ok: true, momentFreq: config.features.momentFreq });
+});
+
 // PUT /api/config/schedule-refresh-days — 更新日程刷新周期（天，1~3）
 router.put('/schedule-refresh-days', (req, res) => {
   const { value } = req.body;
@@ -507,10 +517,10 @@ router.get('/user', (req, res) => {
   res.json(getUserConfig());
 });
 
-// PUT /api/config/user — 更新用户昵称 + 性别 + 外观 + 其他说明
+// PUT /api/config/user — 更新用户昵称 + 性别 + 外观 + 其他说明 + 居住地点
 router.put('/user', (req, res) => {
-  const { nickname, gender, appearance, persona } = req.body;
-  updateUserConfig({ nickname, gender, appearance, persona });
+  const { nickname, gender, appearance, persona, home } = req.body;
+  updateUserConfig({ nickname, gender, appearance, persona, home });
   res.json({ ok: true, ...getUserConfig() });
 });
 
@@ -758,11 +768,16 @@ router.put('/disturb-mode', (req, res) => {
   res.json({ ok: true, disturbMode: config.features.disturbMode });
 });
 
-// PUT /api/config/workflow-mode — 更新工作流模式 (base|turbo|hybrid)
+// PUT /api/config/workflow-mode — 更新工作流模式 (base|turbo|hybrid|custom)
+// mode === 'custom' 时可同时传 customTemplate（workflow/ 目录下的文件名）
 router.put('/workflow-mode', (req, res) => {
-  const { mode } = req.body;
-  if (!mode || !['base', 'turbo', 'hybrid'].includes(mode)) {
-    return res.status(400).json({ error: 'mode must be base, turbo, or hybrid' });
+  const { mode, customTemplate } = req.body;
+  if (!mode || !['base', 'turbo', 'hybrid', 'custom'].includes(mode)) {
+    return res.status(400).json({ error: 'mode must be base, turbo, hybrid, or custom' });
+  }
+  if (customTemplate !== undefined) {
+    const customResult = updateWorkflowCustomTemplate(customTemplate);
+    if (!customResult.ok) return res.status(400).json(customResult);
   }
   const result = updateWorkflowMode(mode);
   if (!result.ok) return res.status(400).json(result);

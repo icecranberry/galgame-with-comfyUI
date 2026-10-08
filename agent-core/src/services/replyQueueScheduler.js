@@ -27,6 +27,8 @@ import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { maybeGenerateDailyNewspaper } from './newspaperService.js';
+import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, cleanupOrphanMediaImages, maybeGenerateDailyIssues } from './mediaService.js';
+import { resetStaleGenerating } from './lootService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
@@ -39,11 +41,21 @@ export function startReplyQueueScheduler() {
   if (timer) return;
   console.log('[replyQueue] Scheduler started (interval: 1min)');
 
+  // 启动自愈：把上次进程中断时遗留的「正在生成」放回可重试。
+  // 生图队列在内存里，重启即丢，DB 状态却会停在 generating —— 不重置的话那几条
+  // 既不会被重新排队，也会被 repairMissingImages 跳过，等于永久坏掉。
+  try { resetStaleGenerating(); } catch (e) { console.error('[replyQueue] loot 状态自愈失败:', e.message); }
+  try { resetStaleMediaGenerating(); } catch (e) { console.error('[replyQueue] media 状态自愈失败:', e.message); }
+
   // 首次延迟 10 秒启动（等待 DB 就绪）
   timer = setTimeout(() => {
     tick();
     timer = setInterval(tick, CHECK_INTERVAL);
     timer.unref?.();
+    // 启动 3 分钟后清一次传媒孤儿配图（历史重复生图留下的；用延时避开启动高峰）
+    setTimeout(() => {
+      try { cleanupOrphanMediaImages(); } catch (e) { console.error('[replyQueue] media 孤儿清理失败:', e.message); }
+    }, 3 * 60 * 1000).unref?.();
   }, 10_000);
 }
 
@@ -67,6 +79,15 @@ async function tick() {
     //    fire-and-forget——生成含 LLM 与逐张配图，不能阻塞下面的调度）
     maybeGenerateDailyNewspaper();
 
+    // 0.2 数字报刊〔每日一刊〕：每个启用的刊物每天补出一期。
+    //     与《邻舍日报》同一套机制（调度 tick 触发 + 内部去重）。刻意**每个 tick 最多出一个刊**
+    //     —— 有多个刊物时不会在同一分钟并发几次 LLM，下一个 tick 自然轮到下一个。
+    maybeGenerateDailyIssues().catch(err => console.error('[media] 每日出刊异常:', err.message));
+
+    // 0.5 媒体内容页：到点补一批新帖；每轮顺带补几张缺封面（同为 fire-and-forget，
+    //     内部自带节流与并发守卫，不阻塞下面的调度）
+    maybeAutoGenerateMedia();
+
     // 1. 日程分散刷新（每次 tick 最多 1 个角色）
     await maybeRefreshOneSchedule();
 
@@ -87,6 +108,7 @@ async function maybeRefreshOneSchedule() {
   const candidate = db.prepare(`
     SELECT id, display_name, base_prompt FROM characters
     WHERE schedule_enabled = 1
+      AND COALESCE(archived, 0) = 0
       AND (
         next_schedule_refresh_at IS NULL
         OR next_schedule_refresh_at <= datetime('now')

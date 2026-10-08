@@ -34,6 +34,14 @@
   --accent: #e07b6c;
   --accent-hover: #cc6a5c;
   --accent-light: #f0a89a;
+  /* ★ 实心强调底（配白字用）：与 --accent 同色 —— 暖色主题下白字对比度已达标。
+     暗夜主题会把它压深（见 [data-theme="dark"]），因为那里 --accent 是亮橙，
+     白字压上去只有 2.55，远低于小字所需的 4.5。 */
+  --accent-solid: var(--accent);
+  /* ★ 软底强调文字色：用于「accent 系浅底 + 强调色文字」的场景（选中项、软标签）。
+     ⚠ 绝不能用 --accent 直接当这种文字色 —— 浅色主题下 --accent 与 --accent-light 都是暖橙，
+     叠在一起对比度极低（暗夜下更糟：实测 1.0~1.2，等同看不见）。这里给一个明显更深的红棕。 */
+  --accent-on-soft: #a8442f;
   --slider-track-start: #f0d5cd;
   --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
   --accent-rgb: 224, 123, 108;
@@ -216,6 +224,12 @@
   --accent: #ff7a64;
   --accent-hover: #f0644e;
   --accent-light: #ffa58f;
+  /* ★ 实心强调底：暗夜下把 --accent 压深，让**白字可达标**（原色只有 2.55）。
+     只影响"当底色用"的场景，不改变 --accent 本身的装饰用途。 */
+  --accent-solid: color-mix(in srgb, var(--accent) 58%, #3d1710);
+  /* 软底强调文字：暗夜下 --accent/--accent-light 都是亮橙，互为底/字必然撞色（实测 1.0~1.2）。
+     这里给一个仍属暖色系、但在软底上够清晰的**更深红**（配合 .is-on-soft 类使用）。 */
+  --accent-on-soft: #7a2b1c;
   --slider-track-start: var(--bg-sunken);
   --slider-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
   --accent-rgb: 255, 122, 100;

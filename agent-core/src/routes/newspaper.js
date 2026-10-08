@@ -5,8 +5,11 @@ import {
   setWorldStateDismissed,
   listNewspaperEditions,
   getNewspaperByDate,
+  // ⚠ 2026-10-08 合并 v3.7.0：上游新增两个删除函数、本地新增两个重新生成函数 —— 都保留。
   regenerateNewspaperImage,
   regenerateTodayNewspaper,
+  deleteNewspaperEdition,
+  deleteNewspaperEditions,
 } from '../services/newspaperService.js';
 
 const router = Router();
@@ -81,6 +84,30 @@ router.post('/dismiss-world', (req, res) => {
     : !paper.world_dismissed;
   setWorldStateDismissed(target);
   res.json({ ok: true, dismissed: target, newspaper: getTodayNewspaperForFrontend() });
+});
+
+// ── 删除 / 清除往期 ──
+// ⚠ 顺序要紧：具体路径 `/editions/:date` 必须放在 `/editions` 之前，
+//   否则 Express 会把 :date 当成下一次匹配的路径段（这里两者方法不同，但仍按此约定排列）。
+
+// DELETE /api/newspaper/editions/:date — 删除某一期（连同它的配图文件）
+router.delete('/editions/:date', (req, res) => {
+  const r = deleteNewspaperEdition(req.params.date);
+  if (!r.ok) return res.status(404).json({ error: r.error });
+  res.json({ ...r, editions: listNewspaperEditions() });
+});
+
+// DELETE /api/newspaper/editions — 批量清除往期
+//   ?keep=today（默认）只清往期、保留今天；?keep=none 连今天一起清空
+//   ?before=YYYY-MM-DD 只清该日期之前（不含）的期
+router.delete('/editions', (req, res) => {
+  const keep = String(req.query.keep || 'today').toLowerCase();
+  const r = deleteNewspaperEditions({
+    keepToday: keep !== 'none',
+    beforeDate: req.query.before ? String(req.query.before) : null,
+  });
+  if (!r.ok) return res.status(400).json({ error: r.error });
+  res.json({ ...r, editions: listNewspaperEditions() });
 });
 
 export default router;

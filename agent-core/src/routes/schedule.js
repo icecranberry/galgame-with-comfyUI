@@ -14,7 +14,7 @@
  */
 
 import { Router } from 'express';
-import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
+import { getDb, getSystemRules, getWorldSetting, getGlobalRule, listTransitEdges } from '../db/index.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
@@ -25,7 +25,9 @@ import {
   syncSleepingState, isTempWoken, isSleeping,
   scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
-import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
+import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule, SLEEP_TYPES, NSFW_BANDS } from '../services/scheduleGenerator.js';
+import { ledgerOverview, auditCharacter } from '../services/scheduleLedger.js';
+import { listMaps, getMap, listAreasForSchedule, pickSchedulePlaces, normalizeAccess, accessReason, ACCESS_LABEL, ZONE_LABEL } from '../services/worldMapService.js';
 import { updateScheduleActivity } from '../services/scheduleEditor.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
@@ -67,7 +69,8 @@ router.post('/regenerate-all', async (req, res) => {
     }
 
     const db = getDb();
-    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' ORDER BY id").all();
+    // 归档角色不参与：重置世界线是批量重刷，没理由给「不参与活动」的角色白烧一遍 token
+    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' AND COALESCE(archived, 0) = 0 ORDER BY id").all();
 
     if (!characters.length) {
       return res.status(404).json({ error: '没有角色' });
@@ -186,6 +189,307 @@ router.post('/regenerate-all/cancel', (req, res) => {
   resetTask.cancelled = true;
   console.log('[schedule] Reset worldline cancellation requested');
   res.json({ cancelled: true, message: '已请求取消' });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 日程弹窗 · 地图联动
+//
+// 粒度 = 世界地图的「子区」（level 2）。地块名与场景名直接取自 worldMapService，
+// **不在这里另抄一份地名表** —— 地图改了这里自动跟上。
+// ⚠ 本路由必须注册在 `/:characterId` 之前，否则会被参数路由吃掉。
+// ═══════════════════════════════════════════════════════════
+
+/** 读出可作为「日常活动区域」的子区清单（含其下场景名）
+ *  ⚠ 真源在 `worldMapService.listAreasForSchedule` —— 这里只做薄的取数，
+ *    不要再本地拼地点清单，否则准入过滤会两处漂移。 */
+function loadScheduleAreas(mapId) {
+  const { mapId: mid, mapName, areas } = listAreasForSchedule(mapId);
+  if (!mid) return { mapId: null, mapName: '', areas: [] };
+  // 兼容旧调用方：补一个纯名字数组 `scenes`（前端 tooltip 与旧断言用）
+  return {
+    mapId: mid, mapName,
+    areas: areas.map(a => ({ ...a, scenes: (a.places || []).map(p => p.name) })),
+  };
+}
+
+/**
+ * 地名 → 本次**可进提示词**的场景清单（含准入过滤与用户排除）。
+ *
+ * ★ 这里是「问题 2：谢绝外人会被 ROLL 到」的落点：过去只取全部场景名，
+ *   地图里的准入属性完全没参与；现在按 `access` 过滤，并把「被显式放行但需标注」
+ *   的例外单独带出来（`notes`），注入时写明原因，模型就不会乱去。
+ *
+ * ⚠ 返回值保持 `Record<string, string[]>` **不变**（约束块与既有测试都按这个契约），
+ *   附带信息走**并列的独立字段**（notesByArea / promptsByArea / zonesByArea），
+ *   不要把它们塞进 names 里。
+ */
+function scenesByAreaFor(names, mapId, excludedByArea = {}) {
+  const { areas } = loadScheduleAreas(mapId);
+  const out = {}, notes = {}, prompts = {}, zones = {}, placeZones = {}, summaries = {};
+  for (const n of names) {
+    const area = areas.find(a => a.name === n);
+    if (!area) { out[n] = []; continue; }
+    const excluded = new Set(Array.isArray(excludedByArea[n]) ? excludedByArea[n] : []);
+    // ⚠ 把**子区自身的 access** 传下去：`幻月秘庭` 是 lv2 子区且 restricted，
+    //   只管子项的话整区会被放行（实测踩过）。
+    const { included } = pickSchedulePlaces(area.places || [], excluded, area.access || '');
+    out[n] = included.map(p => p.name);
+    const ns = included.filter(p => p.note).map(p => ({ name: p.name, note: p.note }));
+    if (ns.length) notes[n] = ns;
+    const ps = included.filter(p => p.scene_prompt).map(p => ({ name: p.name, prompt: p.scene_prompt }));
+    if (ps.length) prompts[n] = ps;
+    const zs = [...new Set(included.map(p => p.zone).filter(Boolean))];
+    if (zs.length) zones[n] = zs;
+    // ★ 逐点 zone（区域里既可能有住宅也可能有商店，不能整区一刀切）
+    const pz = included.filter(p => p.zone).map(p => ({ name: p.name, zone: p.zone }));
+    if (pz.length) placeZones[n] = pz;
+    // ★★ 地点简介 —— 这是「八股现象」的直接解药（2026-10-05）。
+    //   地图里本来就有这些简介（实测 lv3 78 个里 65 个有），但过去**只注入了裸地名**：
+    //   模型拿到「鸽川大道、鸽川埠、鸽川河与滨河道…」这样一串名字，不知道它们长什么样，
+    //   只好反复用世界观里唯一具体描述过的那几个画面（于是"世界尽头酒馆总是黄金马桶"）。
+    //   把简介一并给它，模型才有"可写的东西"，才不必复读。
+    const sm = included.filter(p => p.summary).map(p => ({ name: p.name, summary: p.summary }));
+    if (sm.length) summaries[n] = sm;
+  }
+  return {
+    scenesByArea: out, notesByArea: notes, promptsByArea: prompts,
+    zonesByArea: zones, placeZonesByArea: placeZones, summariesByArea: summaries,
+  };
+}
+
+/**
+ * 从请求体读出本次编排约束。**未传任何一项时返回 {}** → 不产生约束层（行为不变）。
+ * 导出供测试钉住「非法输入不得变成 500、也不得误当成有效选项」。
+ */
+export function readScheduleOptions(body = {}) {
+  const out = {};
+  const areas = Array.isArray(body.areas)
+    ? body.areas.map(a => String(a ?? '').trim()).filter(Boolean)
+    : [];   // 非数组一律忽略（不抛错）
+  // ── ★ 准入禁令：**无条件**收集（不依赖用户勾了哪些区域）──
+  //   见 collectAccessNotes 的说明：这是「改地图即生效」的落点。
+  try {
+    const notes = collectAccessNotes(body.mapId);
+    if (notes.length) out.accessNotes = notes;
+  } catch { /* 忽略：取不到就不加这一段 */ }
+  // ── ★ 人类侧居住地：日程里"回家/去找你"要用真实落点 ──
+  //   从 config.user.home 读（设置页写入）。未设则整段不出现。
+  try {
+    const home = String(config.user?.home || '').trim();
+    if (home) {
+      out.userHome = home;
+      out.userName = String(config.user?.nickname || '').trim();
+    }
+  } catch { /* 忽略 */ }
+  // ── ★ 区域通勤基线（问题 6）：后端从 `world_map_transit` 读表注入，**不让 LLM 猜距离**。──
+  //   没落库的图返回空数组 → 整段不出现（行为与上线前一致）。
+  try {
+    const edges = listTransitEdges(body.mapId);
+    if (edges.length) out.transitEdges = edges;
+  } catch { /* 忽略 */ }
+  // ── 用户取消勾选的地点（= 排除）。**排除优先于一切**，先收集再算场景清单。 ──
+  const excludedByArea = {};
+  if (body.excludedByArea && typeof body.excludedByArea === 'object' && !Array.isArray(body.excludedByArea)) {
+    for (const [k, v] of Object.entries(body.excludedByArea)) {
+      const name = String(k ?? '').trim();
+      if (!name) continue;
+      const list = Array.isArray(v) ? v.map(x => String(x ?? '').trim()).filter(Boolean) : [];
+      if (list.length) excludedByArea[name] = list;
+    }
+  }
+  // ── 用户显式点选的 restricted/private 地点（显式指令优先于自动过滤）──
+  const pickedPlaces = Array.isArray(body.pickedPlaces)
+    ? body.pickedPlaces.map(p => String(p ?? '').trim()).filter(Boolean)
+    : [];
+
+  if (areas.length) {
+    out.areas = areas;
+    out.areaStrict = !!body.areaStrict;
+    try {
+      const r = scenesByAreaFor(areas, body.mapId, excludedByArea);
+      out.scenesByArea = r.scenesByArea;
+      if (Object.keys(r.notesByArea).length) out.notesByArea = r.notesByArea;
+      if (Object.keys(r.promptsByArea).length) out.promptsByArea = r.promptsByArea;
+      if (Object.keys(r.zonesByArea).length) out.zonesByArea = r.zonesByArea;
+      if (Object.keys(r.placeZonesByArea).length) out.placeZonesByArea = r.placeZonesByArea;
+      if (Object.keys(r.summariesByArea).length) out.summariesByArea = r.summariesByArea;
+    } catch { out.scenesByArea = {}; }
+    // 显式点选的受限地点：补回候选清单（并在注入时标注原因）
+    if (pickedPlaces.length) {
+      try {
+        const { areas: allAreas } = loadScheduleAreas(body.mapId);
+        const want = new Set(pickedPlaces);
+        const forced = [];
+        for (const a of allAreas) {
+          if (!areas.includes(a.name)) continue;
+          for (const p of a.places || []) {
+            if (want.has(p.name) && !normalizeAccess(p.access).match(/^$|^public$|^time_window$/)) {
+              forced.push({ name: p.name, area: a.name, note: accessReason(p) || '仅限特定对象' });
+            }
+          }
+        }
+        if (forced.length) out.forcedPlaces = forced;
+      } catch { /* 忽略 */ }
+    }
+    if (Object.keys(excludedByArea).length) out.excludedByArea = excludedByArea;
+  }
+  if (body.nsfwRatio !== undefined && body.nsfwRatio !== null && body.nsfwRatio !== '') {
+    const n = Number(body.nsfwRatio);
+    if (Number.isFinite(n)) out.nsfwRatio = n;   // 越界交给 nsfwBandOf 钳制
+  }
+  if (body.sleepType && Object.prototype.hasOwnProperty.call(SLEEP_TYPES, body.sleepType)) {
+    out.sleepType = body.sleepType;              // 非法键忽略
+  }
+  return out;
+}
+
+/**
+ * 全图**受限地点清单** —— 补上「改地图即生效」这条链路。
+ *
+ * 过去「谢绝外人」只写在 `scheduleInst` 的散文常量里（贺星总部/海原电视塔/幻月秘庭），
+ * 在地图数据之外；用户在地图里给某个地点标了 access=restricted 也不会影响日程。
+ * 这里把标注过的全列出来，**无论用户勾没勾区域**都注入 → 地图即真源。
+ */
+function collectAccessNotes(mapId) {
+  try {
+    const { areas } = loadScheduleAreas(mapId);
+    const out = [];
+    for (const a of areas) {
+      // ⚠ 子区自身受限时，整区都要报（`幻月秘庭` 是 lv2 且 restricted，
+      //   只看子项会漏掉"整个区域谢绝外人"这件事）
+      const aa = normalizeAccess(a.access);
+      if (aa === 'restricted' || aa === 'private') {
+        out.push({ name: a.name, area: a.region, note: (accessReason({ access: aa }) || '仅限特定对象') + '（整个区域）' });
+      }
+      for (const p of a.places || []) {
+        const acc = normalizeAccess(p.access);
+        if (acc === 'restricted' || acc === 'private') {
+          out.push({ name: p.name, area: a.name, note: accessReason(p) || '仅限特定对象' });
+        }
+      }
+    }
+    return out;
+  } catch { return []; }
+}
+
+// ── GET /api/schedule/regenerate-options — 日程弹窗的全部选项（单一真源）──
+//
+// 档位/睡眠类型**只在后端定义一份**（scheduleGenerator 的 NSFW_BANDS / SLEEP_TYPES），
+// 前端只负责渲染，不另抄一份 —— 否则前后端档位迟早漂移（项目红线 8）。
+router.get('/regenerate-options', (req, res) => {
+  try {
+    const { mapId, mapName, areas } = loadScheduleAreas(req.query.mapId);
+    // 人类侧居住地的候选：**所有可去的地点**（含子区与场景两级）。
+    // 用户可能住在某个子区（"二维市"）也可能住在具体某处（"旧川里"），两种都给。
+    const allPlaces = [];
+    for (const a of areas) {
+      allPlaces.push({ name: a.name, region: a.region, area: a.name, kind: a.kind || '' });
+      for (const p of (a.places || [])) {
+        // 受限地点也能住（"谢绝外人"说的是别人进不去，住户自己当然能回）
+        allPlaces.push({ name: p.name, region: a.region, area: a.name, kind: p.category || '' });
+      }
+    }
+    // 每个地点的**准入结果**也在服务端算好给前端（前端只负责渲染灰显与理由，
+    // 不自己判断 access 语义 —— 否则前后端会漂移，项目红线 8）
+    const decorated = areas.map(a => {
+      // ★ 子区自身的 access：`幻月秘庭` 整个区就是 restricted，不能只标子项
+      const areaAccess = normalizeAccess(a.access);
+      const areaBlocked = areaAccess === 'restricted' || areaAccess === 'private';
+      return {
+        ...a,
+        areaAccess,
+        areaReason: areaBlocked ? (accessReason({ access: areaAccess }) || '仅限特定对象') : '',
+        places: (a.places || []).map(p => {
+          const own = normalizeAccess(p.access);
+          const eff = own === 'public' ? own : (areaBlocked && own === '' ? areaAccess : own);
+          const accessible = eff === '' || eff === 'public' || eff === 'time_window';
+          return {
+            name: p.name, category: p.category || p.kind || '', access: eff || '',
+            zone: p.zone || '',
+            // 继承来的受限：**只写「所在区域受限」**（用户口径，2026-10-05）——
+            // 原来会拼成「所在区域受限（谢绝外人／需身份）」，把父级的原因塞进子项的标签里，
+            // 又长又容易让人以为是这个地点自己的问题。父级原因在区域那一行已经有地方显示了。
+            reason: p.reason || (areaBlocked && own === '' ? '所在区域受限' : ''),
+            // 默认是否勾选：不可达的默认不勾（用户可手动勾回来 = 显式放行）
+            defaultChecked: accessible,
+          };
+        }),
+      };
+    });
+    res.json({
+      mapId,
+      mapName,
+      areas: decorated,
+      accessLabel: ACCESS_LABEL,
+      zoneLabel: ZONE_LABEL,
+      // ★ 人类侧居住地：当前值 + 可选地点（供设置页选择；空 = 未指定）
+      userHome: String(config.user?.home || ''),
+      homeOptions: allPlaces.map(p => ({ name: p.name, region: p.region, area: p.area, kind: p.kind || '' })),
+      nsfwBands: NSFW_BANDS,
+      sleepTypes: Object.entries(SLEEP_TYPES).map(([value, v]) => ({ value, label: v.label, text: v.text })),
+      defaults: { nsfwRatio: 50, sleepType: 'auto' },
+    });
+  } catch (err) {
+    console.error('[schedule] GET /regenerate-options error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// 角色日程台账（长期观测）
+//
+// 用途：持续观察 LLM 生成的日程在**长期表现**上的合理性/稳定性/八股度。
+// 全部**只读**（现算，不落库），所以不会成为新的"必须维护的真源"。
+// ⚠ 必须注册在 `/:characterId` **之前**，否则会被参数路由吃掉（本项目已有约定）。
+// ═══════════════════════════════════════════════════════════
+
+/** 台账的观测上下文：受限地点、不可直接抵达、跨区通勤分钟 */
+function buildLedgerCtx() {
+  const forbiddenPlaces = new Set();
+  const noTransferPlaces = new Set();
+  const transferMinutes = new Map();
+  try {
+    const { areas } = loadScheduleAreas();
+    for (const a of areas) {
+      for (const p of a.places || []) {
+        if (p.access === 'restricted' || p.access === 'private') forbiddenPlaces.add(p.name);
+      }
+    }
+  } catch { /* 地图取不到就不做这两项检查 */ }
+  try {
+    // 不可直接抵达：不在任何线路上的孤立地点（幻月秘庭、世界尽头酒馆）
+    const edges = listTransitEdges();
+    const onNet = new Set();
+    for (const e of edges) { onNet.add(e.from_stop); onNet.add(e.to_stop); }
+    for (const n of ['幻月秘庭', '世界尽头酒馆']) if (!onNet.has(n)) noTransferPlaces.add(n);
+    for (const e of edges) transferMinutes.set(`${e.from_stop}→${e.to_stop}`, e.minutes);
+  } catch { /* ignore */ }
+  return { forbiddenPlaces, noTransferPlaces, transferMinutes };
+}
+
+// GET /api/schedule/ledger — 全角色台账总览
+router.get('/ledger', (req, res) => {
+  try {
+    const r = ledgerOverview(buildLedgerCtx());
+    res.json(r);
+  } catch (err) {
+    console.error('[schedule] GET /ledger error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/schedule/ledger/:characterId — 单角色详账
+router.get('/ledger/:characterId', (req, res) => {
+  try {
+    const id = parseInt(req.params.characterId, 10);
+    if (isNaN(id)) return res.status(400).json({ error: 'invalid characterId' });
+    const r = auditCharacter(id, buildLedgerCtx());
+    if (!r) return res.status(404).json({ error: '角色不存在' });
+    res.json(r);
+  } catch (err) {
+    console.error('[schedule] GET /ledger/:characterId error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── GET /api/schedule/:characterId — 完整今日日程 ──
@@ -664,11 +968,12 @@ router.post('/:characterId/regenerate', async (req, res) => {
     }
 
     const direction = (req.body && req.body.direction) ? String(req.body.direction).trim() : null;
+    const options = readScheduleOptions(req.body || {});
 
-    console.log(`[schedule] Regenerating schedule for ${character.display_name}${direction ? ` (direction: ${direction.slice(0, 50)}...)` : ''}...`);
+    console.log(`[schedule] Regenerating schedule for ${character.display_name}${direction ? ` (direction: ${direction.slice(0, 50)}...)` : ''}${Object.keys(options).length ? ` (options: ${Object.keys(options).join(',')})` : ''}...`);
 
     // 生成新模板
-    const result = await generateSchedule(character, direction);
+    const result = await generateSchedule(character, direction, options);
 
     // 分配下次刷新时间
     assignNextRefreshTime(characterId);
