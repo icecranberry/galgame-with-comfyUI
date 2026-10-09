@@ -118,6 +118,8 @@
               </div>
               <div v-else-if="item.msg.content" class="msg-bubble">
                 <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
+                <SpeechButton v-if="item.msg.role === 'assistant' && item.msg.speech_message_id"
+                  :key="`${chat.activeCharId}-${item.msg.speech_message_id}`" :character-id="chat.activeCharId" :message-id="item.msg.speech_message_id" />
               </div>
             </div>
 
@@ -590,6 +592,8 @@
 </template>
 
 <script setup>
+import SpeechButton from '../components/SpeechButton.vue'
+import { loadSpeech, stopSpeech } from '../stores/speech.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
@@ -1565,6 +1569,7 @@ function teardownResizeObserver() {
 
 onMounted(async () => {
   await Promise.all([chat.loadCharacters(), loadUserAvatar(), settings.loadComfyConfig()])
+  if (chat.activeCharId) loadSpeech(chat.activeCharId).catch(() => {})
   scheduleStore.fetchOverview(true) // silent: 获取日程概览用于 header 显示
   const targetId = route.params.id ? parseInt(route.params.id) : (chat.characters.length > 0 ? chat.characters[0].id : null)
   if (targetId && targetId !== chat.activeCharId) {
@@ -1583,6 +1588,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopSpeech()
   teardownMobileKeyboard()
   teardownResizeObserver()
   window.removeEventListener('click', dismissUndoBubble)
@@ -1601,6 +1607,8 @@ let pendingCharSwitch = false
 
 // 切角色：停 Observer + 隐藏容器，等消息加载完成后滚底
 watch(() => chat.activeCharId, (id, oldId) => {
+  stopSpeech()
+  if (id) loadSpeech(id).catch(() => {})
   if (id && id !== oldId) {
     const routeId = parseInt(route.params.id)
     if (id !== routeId) router.replace('/chat/' + id)

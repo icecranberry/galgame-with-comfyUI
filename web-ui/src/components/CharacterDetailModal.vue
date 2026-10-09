@@ -2,7 +2,7 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal && !showVoiceModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <h3>{{ character?.display_name }}</h3>
@@ -18,6 +18,7 @@
               </div>
               <div>
                 <linshe-button size="sm" class="sp-btn-small" @click="$emit('open-avatar-editor', character)">更换头像</linshe-button>
+                <linshe-button size="sm" class="sp-btn-small" @click="showVoiceModal = true">声音 · {{ voiceLabel }}</linshe-button>
                 <linshe-button v-if="character?.avatar_path" variant="ghost" size="sm" class="sp-btn-small" @click="$emit('remove-avatar', character)">移除</linshe-button>
               </div>
               <div v-if="character?.is_oath" class="detail-avatar-oath">
@@ -423,10 +424,13 @@
       :base-prompt="detail.editPrompt"
       @applied="onAppearanceRefined"
     />
+    <VoiceManagerModal v-model="showVoiceModal" :character="character" @saved="refreshVoiceLabel" />
   </Teleport>
 </template>
 
 <script setup>
+import VoiceManagerModal from './VoiceManagerModal.vue'
+import { ttsApi } from '../api/tts.js'
 import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
@@ -446,6 +450,20 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   character: { type: Object, default: null },
 })
+const showVoiceModal = ref(false)
+const voiceLabel = ref('未设置')
+async function refreshVoiceLabel() {
+  const id = props.character?.id
+  if (!id) return
+  try {
+    const binding = await ttsApi(`/characters/${id}`)
+    if (props.character?.id === id) voiceLabel.value = binding?.name || '未设置'
+  } catch { if (props.character?.id === id) voiceLabel.value = '待检查' }
+}
+watch([() => props.visible, () => props.character?.id], ([visible]) => {
+  if (visible) { voiceLabel.value = '读取中'; refreshVoiceLabel() }
+}, { immediate: true })
+watch(() => props.visible, visible => { if (!visible) showVoiceModal.value = false })
 
 const emit = defineEmits([
   'close',

@@ -188,6 +188,13 @@
         <span>立绘管理</span>
       </div>
 
+      <div key="voice-manage" class="char-card emoji-manage-card" role="button" tabindex="0" @click="showVoiceLibrary = true" @keydown.enter.prevent="showVoiceLibrary = true" @keydown.space.prevent="showVoiceLibrary = true">
+        <div class="emoji-manage-icon">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="12" y="3" width="8" height="16" rx="4"/><path d="M7 14v2a9 9 0 0 0 18 0v-2M16 25v4M11 29h10"/></svg>
+        </div>
+        <span>音色管理</span>
+      </div>
+
       <!-- 招募卡片：管理入口之后 -->
       <div key="recruit" class="char-card recruit-card" @click="openRecruit">
         <div class="recruit-plus">+</div>
@@ -638,6 +645,7 @@
 
       <EmojiManagerModal v-if="showEmojiManager" :characters="sortedCharacters" @close="showEmojiManager = false" />
       <StandingManagerModal :open="showStandingManager" :characters="sortedCharacters" @close="showStandingManager = false" />
+      <VoiceLibraryModal v-model="showVoiceLibrary" :characters="sortedCharacters" />
   </div>
 </template>
 
@@ -657,6 +665,7 @@ import BackpackModal from '../components/BackpackModal.vue'
 import NewspaperModal from '../components/NewspaperModal.vue'
 import EmojiManagerModal from '../components/EmojiManagerModal.vue'
 import StandingManagerModal from '../components/StandingManagerModal.vue'
+import VoiceLibraryModal from '../components/VoiceLibraryModal.vue'
 import AppearanceRefineModal from '../components/AppearanceRefineModal.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import { emitCharacterAvatarChanged, emitCharacterPinEnabled } from '../utils/characterReactionProducers.js'
@@ -676,6 +685,7 @@ const showMailbox = ref(false)
 const showBackpack = ref(false)
 const showEmojiManager = ref(false)
 const showStandingManager = ref(false)
+const showVoiceLibrary = ref(false)
 const mailboxUnread = computed(() => mailboxStore.unreadCount)
 const backpackChestReady = computed(() => backpackStore.chestReady)
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
+import { withImageGpu } from './speechGpu.js';
 
 const getBase = () => config.comfyui.url.replace(/\/+$/, '');
 const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
@@ -453,6 +454,10 @@ function formatComfyUIError(errText, status) {
 }
 
 export async function submitWorkflow(guiWorkflow, onProgress) {
+  return withImageGpu(() => submitWorkflowWithGpu(guiWorkflow, onProgress));
+}
+
+async function submitWorkflowWithGpu(guiWorkflow, onProgress) {
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const apiPrompt = guiToApi(guiWorkflow);
 

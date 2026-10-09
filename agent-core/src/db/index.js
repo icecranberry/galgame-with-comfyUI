@@ -32,6 +32,7 @@ import { migrateExpressionStandings, recoverExpressionStandingJobs } from './exp
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
 import { migrateCharacterReactionPacksSchema } from './characterReactionPackSchema.js';
 import { migrateCharacterDiarySchema } from './diarySchema.js';
+import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -61,6 +62,7 @@ export function getDb() {
 // ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
 // moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
 function cleanupOrphanedInFlight(database) {
+  recoverSpeechJobs(database);
   recoverExpressionStandingJobs(database);
   cleanupTownDialogueRequests(database);
   const tasks = [
@@ -1063,6 +1065,7 @@ function initSchema(db) {
   migrateCharacterReactionPacksSchema(db);
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
+  migrateTtsSchema(db);
 
   // 种子: 奇遇事件类型库 + 朋友圈话题库（INSERT OR IGNORE，仅插入缺失的系统条目，不覆盖用户编辑）
   seedEventLibraries(db);
