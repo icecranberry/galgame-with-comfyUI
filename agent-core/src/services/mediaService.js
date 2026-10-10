@@ -21,12 +21,10 @@
  * 为避免靠名字匹配出错，发帖人**按下标指派**：提示词里明确「第 N 条由『某某』本人发布」。
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatSync } from '../llm/llm-client.js';
 import { generateImageRaw } from './imageSkill.js';
-import { saveBase64Image, deleteImageFileByUrl, getImageDir } from './imagePaths.js';
+import { saveBase64Image, deleteImageFileByUrl } from './imagePaths.js';
 import { invalidateGalleryCache } from './galleryCache.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { broadcast } from './unifiedStreamBus.js';
@@ -1409,7 +1407,7 @@ export function canRegenerateImage(post) {
  *   weekly → 清空头图
  *
  * 旧图文件**不在这里删** —— 等新图写入成功后再处理，避免「图清了、新图又失败」
- * 导致这条内容永久没图。孤儿文件由 cleanupOrphanMediaImages 兜底清理。
+ * 导致这条内容永久没图。
  * @returns {{ok:boolean, error?:string, cleared?:number, post?:object}}
  */
 export function regeneratePostImage(postId) {
@@ -1624,43 +1622,6 @@ export function resetStaleMediaGenerating() {
   } catch (err) {
     console.error('[media] resetStaleMediaGenerating 失败:', err.message);
     return 0;
-  }
-}
-
-/**
- * 清理未被任何帖子引用的孤儿配图文件。
- *
- * 重复生图的历史遗留：目录里的文件数远多于 DB 引用数（实测 81 vs 37）。
- * 现在虽然加了 CAS 防护不会再产生新的，但存量孤儿会白占磁盘，需要清一次。
- * @param {number} [maxAgeMs] 只清理「这么久以前」的文件，避免误删正在写入的
- * @returns {{scanned:number, removed:number}}
- */
-export function cleanupOrphanMediaImages(maxAgeMs = 60 * 60 * 1000) {
-  try {
-    const dir = getImageDir('media');
-    if (!fs.existsSync(dir)) return { scanned: 0, removed: 0 };
-    const referenced = new Set(
-      getDb().prepare(`SELECT image FROM media_posts WHERE image IS NOT NULL AND image <> ''`).all()
-        .map(r => String(r.image).split('/').pop())
-    );
-    let scanned = 0, removed = 0;
-    const now = Date.now();
-    for (const f of fs.readdirSync(dir)) {
-      if (!f.startsWith('media_')) continue;      // 只看本模块产生的文件
-      scanned++;
-      if (referenced.has(f)) continue;
-      const full = path.join(dir, f);
-      try {
-        if (now - fs.statSync(full).mtimeMs < maxAgeMs) continue;  // 太新，可能在写
-        fs.unlinkSync(full);
-        removed++;
-      } catch { /* 单个失败不影响其余 */ }
-    }
-    if (removed > 0) console.log(`[media] 清理孤儿配图 ${removed} 个（扫描 ${scanned}）`);
-    return { scanned, removed };
-  } catch (err) {
-    console.error('[media] cleanupOrphanMediaImages 失败:', err.message);
-    return { scanned: 0, removed: 0 };
   }
 }
 

@@ -176,9 +176,9 @@ async function loadSection(s) {
   transition: box-shadow 0.18s, border-color 0.18s;
 }
 .po-card:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); }
-/* 配图保持卡片比例，正文在独立窗口中阅读。 */
-.po-thumb { position: relative; aspect-ratio: 16 / 9; background: var(--bg-sunken); overflow: hidden; }
-.po-thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; }
+/* 图框匹配默认朋友圈配图 1600×1200，完整显示且不留边；其他比例仍等比适配。 */
+.po-thumb { position: relative; aspect-ratio: 4 / 3; background: var(--bg-sunken); overflow: hidden; }
+.po-thumb-img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; }
 .po-thumb-ph {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;

@@ -153,7 +153,7 @@ function changeClass(change) {
   font-size: 12.5px; line-height: 1.75; color: #6b6255;
   font-style: italic;
 }
-.wk-hero { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; border: 1px solid #d8d0bd; }
+.wk-hero { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--bg-sunken); border-radius: 8px; border: 1px solid #d8d0bd; }
 .wk-zoomable { cursor: zoom-in; }
 .wk-hero--ph {
   display: flex; align-items: center; justify-content: center; gap: 8px;

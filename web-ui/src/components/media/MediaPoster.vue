@@ -187,7 +187,7 @@ const issueNo = computed(() => String(data.value?.issueNo || 1).padStart(2, '0')
 /* ── 主图舞台 ── */
 .po-stage { position: relative; background: #fff; }
 .po-main-wrap { position: relative; }
-.po-main { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.po-main { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: var(--bg-sunken); }
 /* 可放大的图：给个手型光标提示可点 */
 .po-zoomable { cursor: zoom-in; }
 .po-main--ph {
@@ -253,7 +253,7 @@ const issueNo = computed(() => String(data.value?.issueNo || 1).padStart(2, '0')
   transform: rotate(-1deg);
 }
 .po-panel:nth-child(even) .po-panel-img { transform: rotate(1deg); }
-.po-panel-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.po-panel-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .po-panel-label {
   font-size: 10.5px; font-weight: 700;
   padding: 3px 8px; border-radius: 999px;

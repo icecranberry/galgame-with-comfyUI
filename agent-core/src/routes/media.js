@@ -12,7 +12,6 @@ import {
   listOutlets, getOutlet, createOutlet, updateOutlet, deleteOutlet,
   listBoards, createBoard, updateBoard, deleteBoard,
   listPosts, generateMediaBatch, fillPendingImages, fillPortalImages, getAutoState,
-  cleanupOrphanMediaImages, resetStaleMediaGenerating,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
   generatePortalSection,
@@ -206,17 +205,6 @@ router.put('/auto', (req, res) => {
   try {
     const minutes = updateMediaAutoMinutes(req.body?.minutes);
     res.json({ ok: true, auto: getAutoState(), minutes });
-  } catch (err) { fail(res, err); }
-});
-
-// POST /api/media/cleanup-images — 清理未被引用的孤儿配图 + 重置卡住的生成状态
-// （重复生图的历史遗留；平时启动后也会自动清一次）
-router.post('/cleanup-images', (req, res) => {
-  try {
-    const stale = resetStaleMediaGenerating();
-    // maxAge 0 = 立刻清（用户显式点的，说明就是要清干净）
-    const r = cleanupOrphanMediaImages(0);
-    res.json({ ok: true, ...r, staleReset: stale });
   } catch (err) { fail(res, err); }
 });
 

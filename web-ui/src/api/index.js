@@ -2091,10 +2091,6 @@ export function setMediaAuto(minutes) {
   return request('/media/auto', { method: 'PUT', body: { minutes } })
 }
 
-/** 清理未被引用的孤儿配图（重复生图的历史遗留）+ 重置卡住的生成状态 */
-export function cleanupMediaImages() {
-  return request('/media/cleanup-images', { method: 'POST' })
-}
 
 /** 为某条媒体内容重新生成配图（周刊/海报会连同小图一起重出） */
 export function regenerateMediaPostImage(postId) {

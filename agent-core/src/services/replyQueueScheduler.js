@@ -27,7 +27,7 @@ import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { maybeGenerateDailyNewspaper } from './newspaperService.js';
-import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, cleanupOrphanMediaImages } from './mediaService.js';
+import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating } from './mediaService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
@@ -50,10 +50,6 @@ export function startReplyQueueScheduler() {
     tick();
     timer = setInterval(tick, CHECK_INTERVAL);
     timer.unref?.();
-    // 启动 3 分钟后清一次传媒孤儿配图（历史重复生图留下的；用延时避开启动高峰）
-    setTimeout(() => {
-      try { cleanupOrphanMediaImages(); } catch (e) { console.error('[replyQueue] media 孤儿清理失败:', e.message); }
-    }, 3 * 60 * 1000).unref?.();
   }, 10_000);
 }
 

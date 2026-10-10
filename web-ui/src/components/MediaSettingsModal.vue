@@ -193,14 +193,6 @@
           >
             删除媒体
           </linshe-button>
-          <linshe-button
-            variant="ghost"
-            size="sm"
-            :loading="cleaning"
-            @click="doCleanup"
-          >
-            清理配图
-          </linshe-button>
         </div>
         <div class="ms-footer-save">
           <linshe-button size="sm" :disabled="saving" @click="close">
@@ -284,28 +276,6 @@ watch(
 
 function close() {
   emit('update:modelValue', false)
-}
-
-/**
- * 清理未被引用的孤儿配图。
- * 来源是早期「同一帖子被重复生图」留下的存量；现已加 CAS 防护不会再产生新的，
- * 这个入口用于把历史遗留清干净（服务启动后也会自动清一次）。
- */
-const cleaning = ref(false)
-async function doCleanup() {
-  if (cleaning.value) return
-  cleaning.value = true
-  try {
-    const r = await api.cleanupMediaImages()
-    toastFn?.(
-      `已清理 ${r.removed} 个孤儿配图${r.staleReset ? `，重置 ${r.staleReset} 条卡住的生成` : ''}`,
-      'success'
-    )
-  } catch (err) {
-    toastFn?.('清理失败' + '：' + (err?.message || ''), 'error')
-  } finally {
-    cleaning.value = false
-  }
 }
 
 async function selectOutlet(o) {
