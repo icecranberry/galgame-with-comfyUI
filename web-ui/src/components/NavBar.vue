@@ -34,13 +34,13 @@
         <span class="nav-label">奇遇</span>
       </div>
       
-      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="媒体">
+      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="媒体" @click="handleMediaClick">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 10v4a1 1 0 0 0 1 1h4l10 4V5L8 9H4a1 1 0 0 0-1 1Z" />
             <path d="M8 9v6M5 15l1 5h3l-1-5M21 9a5 5 0 0 1 0 6" />
           </svg>
-          <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读" aria-label="日报有更新"></span>
+          <span v-if="mediaUnreadCount > 0" class="nav-dot" :title="`媒体有 ${mediaUnreadCount} 条未读更新`" :aria-label="`媒体有 ${mediaUnreadCount} 条未读更新`">{{ mediaUnreadCount > 99 ? '99+' : mediaUnreadCount }}</span>
         </div>
         <span class="nav-label">媒体</span>
       </router-link>
@@ -113,6 +113,7 @@ import { useProactiveStore } from '../stores/notifications.js'
 import { useScheduleStore } from '../stores/schedule.js'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { useNewspaperStore } from '../stores/newspaper.js'
+import { useMediaStore } from '../stores/media.js'
 import { useUpdateStore } from '../stores/updateInfo.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 import GearIcon from './GearIcon.vue'
@@ -125,6 +126,8 @@ const proactive = useProactiveStore()
 const scheduleStore = useScheduleStore()
 const mailbox = useMailboxStore()
 const newspaper = useNewspaperStore()
+const media = useMediaStore()
+const mediaUnreadCount = computed(() => media.newPostCount + Number(newspaper.unread))
 const updateInfo = useUpdateStore()
 
 function handleMomentsClick() {
@@ -143,6 +146,10 @@ function handleEventsClick() {
   } else {
     router.push('/events')
   }
+}
+
+function handleMediaClick() {
+  if (route.path === '/media') media.requestRefresh()
 }
 
 function handleScheduleClick() {
@@ -193,6 +200,7 @@ onMounted(() => {
   setTimeout(updateIndicator, 400)
   window.addEventListener('resize', updateIndicator)
   window.addEventListener('linshe:route-reselected', handleRouteReselected)
+  media.connectSSE()
   startUnifiedStream()
   moments.connectSSE()
   events.connectSSE()
@@ -202,6 +210,7 @@ onMounted(() => {
 
 function handleRouteReselected(event) {
   if (event.detail?.route === '/moments') handleMomentsClick()
+  if (event.detail?.route === '/media') handleMediaClick()
 }
 
 onUnmounted(() => {
@@ -209,6 +218,7 @@ onUnmounted(() => {
   window.removeEventListener('linshe:route-reselected', handleRouteReselected)
   stopUnifiedStream()
   moments.disconnectSSE()
+  media.disconnectSSE()
   events.disconnectSSE()
   mailbox.stopPolling()
   newspaper.stopPolling()
@@ -324,17 +334,6 @@ onUnmounted(() => {
   animation: cel-jelly 0.45s var(--ease-spring) both;
 }
 
-/* 《邻舍日报》未读点：与信箱数字徽标同皮肤同动效，收成小圆点，显示在媒体入口 */
-.nav-dot-daily {
-  top: -5px;
-  right: -6px;
-  left: auto;
-  width: 12px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0;
-  border-radius: 50%;
-}
 
 
 /* 日程重置后台指示器 */

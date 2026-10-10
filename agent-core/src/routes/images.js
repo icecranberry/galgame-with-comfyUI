@@ -291,7 +291,8 @@ router.post('/test-style', async (req, res) => {
       artist: finalArtist,
       width: finalWidth,
       height: finalHeight,
-      scene: mode,
+      // 实验室沿用 event 模式名；LoRA 过滤与工作流配置使用 events 场景。
+      scene: isEvent ? 'events' : mode,
       persistPreparation: false,
       ...(sceneLoras.length > 0 ? { loras: sceneLoras } : {}),
       onProgress: (p) => {
@@ -432,7 +433,7 @@ router.post('/test-hires', async (req, res) => {
       refineOpts.artist = source.artist;
       refineOpts.loras = [];
       refineOpts.sourceMode = source.wfMode;
-      refineOpts.scene = source.mode;
+      refineOpts.scene = source.mode === 'event' ? 'events' : source.mode;
       refineOpts.ext = path.extname(img.filename || '') || '.png';
     } else {
       const cleanUrl = source.url.replace(/\?.*$/, '');

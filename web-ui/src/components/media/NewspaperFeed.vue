@@ -16,10 +16,7 @@
         <span>{{ error }}</span>
         <media-game-button size="sm" @click="loadMore">重新加载</media-game-button>
       </template>
-      <media-game-button v-else-if="hasMore" size="sm" @click="loadMore">
-        继续翻阅更早的报纸 ↓
-      </media-game-button>
-      <span v-else-if="!empty">已翻到最早一期 · 故事仍在继续</span>
+      <span v-else-if="!hasMore && !empty">已翻到最早一期 · 故事仍在继续</span>
     </div>
   </div>
 </template>

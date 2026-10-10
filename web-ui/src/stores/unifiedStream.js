@@ -78,6 +78,7 @@ function _connect() {
     event_urgency:     d => _dispatch('event_urgency', d),
     new_post:          d => _dispatch('new_post', d),
     media_new_posts:   d => _dispatch('media_new_posts', d),
+    media_post_deleted: d => _dispatch('media_post_deleted', d),
     media_image_ready: d => _dispatch('media_image_ready', d),
     media_portal_ready: d => _dispatch('media_portal_ready', d),
     new_comment:       d => _dispatch('new_comment', d),

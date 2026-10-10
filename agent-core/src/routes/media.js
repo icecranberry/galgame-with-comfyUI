@@ -11,7 +11,7 @@ import { Router } from 'express';
 import {
   listOutlets, getOutlet, createOutlet, updateOutlet, deleteOutlet,
   listBoards, createBoard, updateBoard, deleteBoard,
-  listPosts, generateMediaBatch, fillPendingImages, fillPortalImages, getAutoState,
+  listPosts, getMediaUnread, generateMediaBatch, fillPendingImages, fillPortalImages, getAutoState,
   regeneratePostImage, deletePost,
   deletePosts, regeneratePostImages, MAX_BATCH_POSTS,
   generatePortalSection,
@@ -105,6 +105,12 @@ router.delete('/boards/:boardId', (req, res) => {
 });
 
 // ── 帖子 ──
+
+router.get('/unread-count', (req, res) => {
+  try {
+    res.json(getMediaUnread({ digital: req.query.digital, social: req.query.social }));
+  } catch (err) { fail(res, err); }
+});
 
 // GET /api/media/posts?outlet=&board=&limit=&offset=
 router.get('/posts', (req, res) => {

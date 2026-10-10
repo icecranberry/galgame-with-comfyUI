@@ -9,7 +9,7 @@
 小镇世界内的玩法界面全面向游戏舞台靠拢，以 `TownDialogueStage.vue` 的 SVG 暖纸不规则对话框为锚点，不再使用 SaaS 后台卡片堆叠。
 
 * 游戏浮层使用可见纸张/木板质感、暖纸底色、墨色文字和硬描边；允许不规则 SVG 外框、厚底按钮、立绘舞台、任务回合条、工作牌和结算收据。
-* 保留 `LinsheButton / LinsheInput / LinsheSelect / LinsheSwitch` 的统一组件与软糖立体/凹陷语言；游戏化只改变容器、信息层级和视觉氛围，不绕过组件规则。
+* 保留 `LinsheButton / LinsheInput / LinsheSelect / LinsheSwitch` 的统一组件：按钮使用软糖立体，输入类使用平面轮廓；游戏化只改变容器、信息层级和视觉氛围，不绕过组件规则。
 * 禁止玻璃拟态、渐变光斑、装饰性 Orb、卡片套卡片；弹窗遮罩仍用 `rgba(0,0,0,0.45)`，浮层内不用 backdrop-filter。
 * 普通应用页面（聊天、设置、背包、信箱等）继续沿用 Soft Warm UI；镇内舞台、生活、工坊、咖啡馆等玩法界面优先迁移到游戏化视觉。
 * 新玩法界面应能看出“玩家在世界里做事”：立绘在场、对话在暖纸框里、操作以回合/班次/收据呈现，而不是表单化管理。
@@ -49,7 +49,7 @@
 
 ## 动效规范
 
-1. 只动 `transform` / `opacity`；时长用 `--dur-*`，缓动用 `--ease-*`（弹性一律 `--ease-spring`）
+1. 默认只动 `transform` / `opacity`；平面输入控件的悬停、聚焦与失焦允许仅对 `border-color` 做 `--dur-interaction`（0.3 秒）/ `--ease-standard` 过渡，底色与尺寸不变。时长用 `--dur-*`，缓动用 `--ease-*`（弹性一律 `--ease-spring`）
 2. 入场：列表容器加 `.stagger`；弹窗用 `modal-fade`；页面切换走全局 `.page`
 3. 反馈：按钮全局按压下沉；点赞用 `.like-burst`（heart-pop + ring-out）；徽标出现用 `.cel-jelly`
 4. 氛围：光斑缓慢漂移（index.html，52-64s）、`.sparkle` 微闪——密度克制，不叠加多层环境动画
@@ -65,7 +65,7 @@
 表单与操作控件统一使用上游 3.2 引入的 7 个 Linshe 组件（`web-ui/src/components/ui/`）。它们是 Cel Glow 体系的**结构层**：交互与布局归组件，皮肤色值必须引用 Cel Glow token、随暖色 / 暗夜两套主题联动，**禁止保留上游的珊瑚色硬编码**（上游文档中的「珊瑚糖」在本体系下即 `var(--accent)` 主题糖）：
 
 - **`LinsheButton`**：表单与弹窗按钮不留裸 `<button>`。变体 `primary`（主操作实心，每屏至多一个）/ `secondary`（次要，默认）/ `danger` / `ghost`（描边幽灵）/ `icon`（圆形小图标钮，中性糖面 + 悬停转主题色，尺寸档位为正方形）/ `chip`（胶囊选择、页签）/ `link`（文字链接）。「软糖立体」＝亮面填充 + 深色厚底硬投影 + 按下下沉压扁，与 `.btn-primary` 贴纸按钮语言同源；实底色走 `--accent` / `--fun-*`，底厚与投影走 `--btn-lip` / `--shadow-hard` 系 token。
-- **`LinsheInput`**：文本输入框 / 文本域统一使用。「软糖凹陷」皮肤与按钮互补（按钮是凸起的糖，输入框是按进糖纸的凹痕），caret 与聚焦描边/光环用 `--accent`。聊天输入框、信纸、透明嵌入输入等特殊输入界面保留独立设计，但皮肤色值应对齐 token。
+- **`LinsheInput`**：文本输入框 / 文本域统一使用平面轮廓：保留原有 `--bg-secondary` 主题底色（悬停、聚焦均不变色），1.5px `--border` 细描边、`--radius-md` 圆角（sm 用 `--radius-sm`），不使用凹陷阴影、高光或发光光晕。悬停描边加深至 `--border-strong`；聚焦只将同一圈边框变为 `--accent`，不叠加外圈，尺寸不变；错误态边框始终使用 `--danger`，禁用底色保持 `--bg-tertiary`。聊天输入框、信纸、透明嵌入输入等特殊输入界面保留独立设计，但皮肤色值应对齐 token。
 - **`LinsheAutoTextarea`**：需要自动增高、或收起时单行省略的长文本域使用（`collapsible` / `min-height`），皮肤与 `LinsheInput` 同源，不要自己写 auto-resize。
 - **`LinsheSelect`**：下拉选择统一使用。触发器与 LinsheInput 同皮肤；选项面板 Teleport 到 body 的轻量浮层，选中态用 `--accent`，空间不足自动向上翻转。
 - **`LinsheSwitch`**：拨动开关统一使用，不写裸 checkbox 开关样式。关/开两态等高不跳变（关＝中性糖、开＝主题糖）；`aria-label`、`title` 等透传到内部 input。

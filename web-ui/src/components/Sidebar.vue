@@ -141,13 +141,13 @@
         </div>
         <span>朋友圈</span>
       </div>
-      <router-link to="/media" class="footer-nav-btn" :aria-current="$route.path.startsWith('/media') ? 'page' : undefined" @click="onMenuItemClick">
+      <router-link to="/media" class="footer-nav-btn" :aria-current="$route.path.startsWith('/media') ? 'page' : undefined" @click="onMediaClick">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 10v4a1 1 0 0 0 1 1h4l10 4V5L8 9H4a1 1 0 0 0-1 1Z" />
             <path d="M8 9v6M5 15l1 5h3l-1-5M21 9a5 5 0 0 1 0 6" />
           </svg>
-          <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读" aria-label="日报有更新"></span>
+          <span v-if="mediaUnreadCount > 0" class="nav-dot" :title="`媒体有 ${mediaUnreadCount} 条未读更新`" :aria-label="`媒体有 ${mediaUnreadCount} 条未读更新`">{{ mediaUnreadCount > 99 ? '99+' : mediaUnreadCount }}</span>
         </div>
         <span>媒体</span>
       </router-link>
@@ -341,6 +341,7 @@ import { useMailboxStore } from '../stores/mailbox.js'
 import { useGroupsStore } from '../stores/groups.js'
 import { useBackpackStore } from '../stores/backpack.js'
 import { useNewspaperStore } from '../stores/newspaper.js'
+import { useMediaStore } from '../stores/media.js'
 import { useCharacterFoldersStore, groupCharactersByFolder } from '../stores/characterFolders.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
@@ -367,6 +368,8 @@ const mailbox = useMailboxStore()
 const groups = useGroupsStore()
 const backpack = useBackpackStore()
 const newspaper = useNewspaperStore()
+const media = useMediaStore()
+const mediaUnreadCount = computed(() => media.newPostCount + Number(newspaper.unread))
 const folderStore = useCharacterFoldersStore()
 const toast = inject('toast', null)
 const showMoreMenu = ref(false)
@@ -522,6 +525,11 @@ function onEventsClick() {
 function onMenuItemClick() {
   showMoreMenu.value = false
   if (props.isMobile) emit('charSelected')
+}
+
+function onMediaClick() {
+  if (route.path === '/media') media.requestRefresh()
+  onMenuItemClick()
 }
 
 function formatTime(iso) {
@@ -1007,15 +1015,6 @@ function formatTime(iso) {
   text-align: center;
   white-space: nowrap;
   animation: jelly-pop 0.45s cubic-bezier(0.17, 0.89, 0.32, 1.35);
-}
-
-/* 《邻舍日报》未读点：与信箱数字徽标同皮肤，收成小圆点 */
-.nav-dot-daily {
-  width: 12px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0;
-  border-radius: 50%;
 }
 
 @keyframes jelly-pop {

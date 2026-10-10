@@ -293,8 +293,8 @@ defineExpose({ open: openPanel })
 </script>
 
 <style scoped>
-/* ── 软糖凹陷选择框 ──
-   触发器与 LinsheInput 同一皮肤（糖纸凹痕，聚焦时被珊瑚色照亮），
+/* ── 平面选择框 ──
+   触发器与 LinsheInput 同一皮肤（主题底色、圆角细边与单圈聚焦态），
    选项面板是轻量浮层：白底暖描边 + 珊瑚色选中态 */
 .ls-select-wrapper { position: relative; width: 100%; }
 
@@ -310,22 +310,19 @@ defineExpose({ open: openPanel })
   color: var(--text-bright);
   background: var(--bg-secondary);
   border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: pointer; user-select: none;
   outline: none;
   text-align: left;
   position: relative;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+  box-shadow: none;
+  transition: border-color var(--dur-interaction) var(--ease-standard);
 }
 .ls-select--md .ls-select-trigger { min-height: 36px; padding: 6px 30px 6px 12px; font-size: 13px; }
 
 /* ── 尺寸（与 LinsheButton / LinsheInput 对齐） ── */
-.ls-select--sm .ls-select-trigger { min-height: 26px; padding: 3px 26px 3px 9px; font-size: 12px; border-radius: 8px; }
-.ls-select--lg .ls-select-trigger { min-height: 42px; padding: 10px 32px 10px 14px; font-size: 14px; border-radius: 12px; }
+.ls-select--sm .ls-select-trigger { min-height: 26px; padding: 3px 26px 3px 9px; font-size: 12px; border-radius: var(--radius-sm); }
+.ls-select--lg .ls-select-trigger { min-height: 42px; padding: 10px 32px 10px 14px; font-size: 14px; }
 
 .ls-select-label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ls-select-label.placeholder { color: var(--text-secondary); }
@@ -333,14 +330,13 @@ defineExpose({ open: openPanel })
 /* ── 悬停：边框加深一点（同 LinsheInput） ── */
 .ls-select-trigger:hover { border-color: var(--border-strong); }
 
-/* ── 展开 / 聚焦：凹痕被主题色照亮 ── */
-.ls-select-trigger:focus-visible,
+/* ── 展开 / 聚焦：单圈主题色边框，无外圈与光晕 ── */
+.ls-select-wrapper:not(.is-disabled) .ls-select-trigger:focus-visible,
 .ls-select-wrapper.is-open:not(.is-disabled) .ls-select-trigger {
   background: var(--bg-secondary);
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 3px rgba(var(--accent-rgb), 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  outline: none;
+  box-shadow: none;
 }
 
 .ls-select-chevron {

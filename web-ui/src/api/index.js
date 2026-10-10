@@ -2065,6 +2065,12 @@ export function deleteMediaBoard(boardId) {
   return request(`/media/boards/${boardId}`, { method: 'DELETE' })
 }
 
+/** 轻量未读计数，沿用媒体页的设备级已读游标。 */
+export function getMediaUnread(seen = {}) {
+  const query = new URLSearchParams({ digital: seen.digital || 0, social: seen.social || 0 })
+  return request(`/media/unread-count?${query}`)
+}
+
 /** 帖子分页（不传 outlet 则跨媒体） */
 export function listMediaPosts({ outlet = null, board = null, category = null, limit = 40, offset = 0 } = {}) {
   let path = `/media/posts?limit=${limit}&offset=${offset}`

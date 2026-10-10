@@ -111,7 +111,7 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 独立自动增高文本域：保留 LinsheInput 的“软糖凹陷”皮肤，但支持折叠与精确光标控制 */
+/* 独立自动增高文本域：与 LinsheInput 共用平面轮廓，支持折叠与精确光标控制 */
 .ls-auto-textarea { position: relative; width: 100%; }
 
 .ls-auto-textarea__field {
@@ -127,12 +127,13 @@ defineExpose({
   color: var(--text-bright);
   background: var(--bg-secondary);
   border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   caret-color: var(--accent);
   outline: none;
   resize: none;
   overflow: hidden;
-  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+  box-shadow: none;
+  transition: border-color var(--dur-interaction) var(--ease-standard);
 }
 
 .ls-auto-textarea__field::placeholder { color: var(--text-secondary); opacity: 1; }
@@ -140,12 +141,15 @@ defineExpose({
 .ls-auto-textarea__field:hover:not(:disabled):not(:focus) { border-color: var(--border-strong); }
 
 .ls-auto-textarea__field:focus {
+  background: var(--bg-secondary);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+  outline: none;
+  box-shadow: none;
 }
 
 .ls-auto-textarea__field:disabled {
   background: var(--bg-tertiary);
+  border-color: var(--border);
   color: var(--text-secondary);
   cursor: not-allowed;
   box-shadow: none;
@@ -163,13 +167,19 @@ defineExpose({
   color: var(--text-bright);
   background: var(--bg-secondary);
   border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: text;
-  transition: border-color var(--dur-fast) ease;
+  transition: border-color var(--dur-interaction) var(--ease-standard);
 }
 
-.ls-auto-textarea__ellipsis:hover { border-color: var(--accent); }
+.ls-auto-textarea__field:not(:disabled) + .ls-auto-textarea__ellipsis:hover { border-color: var(--border-strong); }
+.ls-auto-textarea__field:disabled + .ls-auto-textarea__ellipsis {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+}
 </style>

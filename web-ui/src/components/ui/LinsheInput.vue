@@ -96,9 +96,7 @@ defineExpose({
 </script>
 
 <style scoped>
-/* ── 软糖凹陷输入框 ──
-   与 LinsheButton 的「软糖立体」互补：按钮是凸起的糖，
-   输入框是糖被按进糖纸后留下的凹痕（微下陷 + 聚焦时被主题色照亮） */
+/* ── 平面输入框：保留主题底色，圆角细边，聚焦只强调同一圈轮廓 ── */
 .ls-input {
   box-sizing: border-box;
   display: block;
@@ -110,22 +108,19 @@ defineExpose({
   color: var(--text-bright);
   background: var(--bg-secondary);
   border: 1.5px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   caret-color: var(--accent);
   outline: none;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background-color 0.15s ease;
+  box-shadow: none;
+  transition: border-color var(--dur-interaction) var(--ease-standard);
   -webkit-tap-highlight-color: transparent;
 }
 .ls-input::placeholder { color: var(--text-secondary); opacity: 1; }
 
 /* ── 尺寸（与 LinsheButton 对齐） ── */
-.ls-input--sm { min-height: 26px; padding: 3px 9px; font-size: 12px; border-radius: 8px; }
+.ls-input--sm { min-height: 26px; padding: 3px 9px; font-size: 12px; border-radius: var(--radius-sm); }
 .ls-input--md { min-height: 36px; padding: 6px 12px; }
-.ls-input--lg { min-height: 42px; padding: 10px 14px; font-size: 14px; border-radius: 12px; }
+.ls-input--lg { min-height: 42px; padding: 10px 14px; font-size: 14px; }
 
 /* ── 文本域 ── */
 .ls-input--textarea {
@@ -136,20 +131,21 @@ defineExpose({
 }
 
 /* ── 悬停：边框加深一点 ── */
-.ls-input:hover:not(:disabled):not(:focus) { border-color: var(--border-strong); }
+.ls-input:hover:not(:disabled):not(:focus):not(.ls-input--invalid) { border-color: var(--border-strong); }
 
-/* ── 聚焦：凹痕被主题色照亮 ── */
+/* ── 聚焦：单圈主题色边框，无外圈与光晕 ── */
 .ls-input:focus {
   background: var(--bg-secondary);
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 3px rgba(var(--accent-rgb), 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  border-color: var(--ls-input-focus-color, var(--accent));
+  outline: none;
+  box-shadow: none;
 }
 
 /* ── 校验错误 ── */
-.ls-input--invalid { border-color: var(--danger, #d9534f); }
-.ls-input--invalid:focus { box-shadow: 0 0 0 3px rgba(217, 83, 79, 0.15); }
+.ls-input--invalid {
+  --ls-input-focus-color: var(--danger);
+  border-color: var(--danger);
+}
 
 /* ── 禁用 ── */
 .ls-input:disabled {
@@ -165,7 +161,7 @@ defineExpose({
 .ls-input:-webkit-autofill {
   -webkit-box-shadow: 0 0 0 40px var(--bg-secondary) inset;
   -webkit-text-fill-color: var(--text-bright);
-  transition: background-color 9999s ease-out;
+  transition: background-color 9999s ease-out, border-color var(--dur-interaction) var(--ease-standard);
 }
 
 /* ── 减弱动效 ── */

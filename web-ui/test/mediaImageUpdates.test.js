@@ -39,7 +39,7 @@ test('poster panel event updates only its panel, never the cover', () => {
 })
 
 test('unified SSE forwards every media event to subscribers', async () => {
-  const events = ['media_new_posts', 'media_image_ready', 'media_portal_ready']
+  const events = ['media_new_posts', 'media_image_ready', 'media_portal_ready', 'media_post_deleted']
   const received = []
   const originalFetch = globalThis.fetch
   const unsubscribers = events.map(name => onEvent(name, data => received.push([name, data])))

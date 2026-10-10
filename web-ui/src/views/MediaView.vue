@@ -1,5 +1,5 @@
 <template>
-  <div class="media-view">
+  <div ref="scrollContainer" class="media-view">
     <div class="media-shell">
       <section class="media-deck" aria-label="传媒导航">
         <header class="media-deck-header">
@@ -567,15 +567,13 @@
                 </media-game-button>
               </div>
             </div>
-            <div v-if="posts.length" class="list-end">
-              <media-game-button
-                v-if="hasMore"
-                :loading="loadingMore"
-                @click="loadMore"
-              >
-                加载更多
-              </media-game-button>
-              <span v-else>已经读到这里的最后一篇了</span>
+            <div v-if="posts.length" ref="loadMoreSentinel" class="list-end" role="status" aria-live="polite" :aria-busy="loadingMore">
+              <span v-if="loadingMore">正在加载下一页…</span>
+              <template v-else-if="loadError">
+                <span>加载失败：{{ loadError }}</span>
+                <media-game-button size="sm" @click="loadMore">重试</media-game-button>
+              </template>
+              <span v-else-if="!hasMore">已经读到这里的最后一篇了</span>
             </div>
           </template>
         </section>
@@ -629,7 +627,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
+import { ref, computed, inject, watch, onMounted, onUnmounted } from 'vue'
 import * as api from '../api/index.js'
 import MediaGameButton from '../components/media/MediaGameButton.vue'
 import LinsheTabs from '../components/ui/LinsheTabs.vue'
@@ -644,7 +642,8 @@ import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import { applyMediaImageUpdate, applyMediaPortalReady } from '../utils/mediaImageUpdates.js'
 import { scrollHorizontalOnWheel as scrollChannelTabs } from '../utils/horizontalScroll.js'
-import { readMediaSeen, markMediaSeen, mediaCategoryUnread, chooseMediaCategory } from '../utils/mediaCategoryEntry.js'
+import { chooseMediaCategory } from '../utils/mediaCategoryEntry.js'
+import { useMediaStore } from '../stores/media.js'
 import NewspaperFeed from '../components/media/NewspaperFeed.vue'
 import { useNewspaperStore } from '../stores/newspaper.js'
 
@@ -723,18 +722,15 @@ const CATEGORIES = [
 ]
 // 等待更新状态后只选择一次入口，避免先闪到随机分类；用户手动选择优先。
 const activeCategory = ref('')
-const seenMedia = ref(readMediaSeen())
-const latestMedia = ref({ digital: 0, social: 0 })
-const categoryUnread = computed(() => mediaCategoryUnread(latestMedia.value, seenMedia.value, newspaperUnread.value))
-
-async function refreshMediaUnread() {
-  await Promise.all(['digital', 'social'].map(async category => {
-    try {
-      const data = await api.listMediaPosts({ category, limit: 1 })
-      latestMedia.value[category] = data.posts?.[0]?.id || 0
-    } catch { /* 查询失败不覆盖已有更新状态，也不阻塞其他分类 */ }
-  }))
-}
+const mediaStore = useMediaStore()
+const scrollContainer = ref(null)
+const loadMoreSentinel = ref(null)
+const categoryUnread = computed(() => ({
+  traditional: newspaperUnread.value,
+  digital: mediaStore.categories.digital.count > 0,
+  social: mediaStore.categories.social.count > 0,
+}))
+const refreshMediaUnread = mediaStore.refreshUnreadCount
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -1241,11 +1237,12 @@ async function loadPage(offset = 0) {
     if (offset === 0) posts.value = d.posts || []
     else posts.value.push(...(d.posts || []))
     total.value = d.total || 0
+    // 列表在翻页期间发生删除时，空页即停止，避免在底部重复请求同一页。
+    if (offset > 0 && !d.posts?.length) total.value = posts.value.length
     // 浏览「全部」的首页才消费该分类的更新；筛选单个媒体/板块不误清其他内容。
     if (offset === 0 && !activeOutlet.value && !activeBoard.value) {
-      const latestId = Math.max(0, ...posts.value.map(post => post.id))
-      latestMedia.value[activeCategory.value] = latestId
-      seenMedia.value = markMediaSeen(seenMedia.value, activeCategory.value, latestId)
+      const latestId = Math.max(0, ...posts.value.map(post => post.published_seq ?? post.id))
+      mediaStore.markSeen(activeCategory.value, latestId)
     }
   } catch (err) {
     console.error('[media] 读取帖子失败:', err)
@@ -1263,11 +1260,24 @@ async function loadPage(offset = 0) {
 }
 
 async function loadMore() {
-  if (loadingMore.value || !hasMore.value) return
+  if (disposed || loading.value || loadingMore.value || !hasMore.value || activeCategory.value === 'traditional') return
   loadingMore.value = true
-  await loadPage(posts.value.length)
-  loadingMore.value = false
+  try {
+    await loadPage(posts.value.length)
+  } finally {
+    loadingMore.value = false
+  }
 }
+
+// 页尾进入滚动容器时续页；每次布局更新后重新观察，短列表会自动补足视口。
+let feedObserver = null
+function observeFeedEnd() {
+  feedObserver?.disconnect()
+  if (loadMoreSentinel.value && !loading.value && !loadingMore.value && hasMore.value && !loadError.value) {
+    feedObserver?.observe(loadMoreSentinel.value)
+  }
+}
+watch([loadMoreSentinel, loading, loadingMore, hasMore], observeFeedEnd, { flush: 'post' })
 
 async function onOutletChange(id) {
   if (activeOutlet.value === id) return
@@ -1313,6 +1323,22 @@ async function reloadAll() {
   await loadPage(0)
 }
 
+// 同路由再次点击导航：保留当前分类/筛选，重载已发布内容并回到顶部。
+let navRefreshing = false
+watch(() => mediaStore.refreshSignal, async () => {
+  if (navRefreshing || disposed) return
+  navRefreshing = true
+  try {
+    if (batchMode.value) exitBatchMode()
+    await Promise.all([reloadAll(), refreshMediaUnread(), loadAuto(), newspaperStore.fetchToday()])
+    if (disposed) return
+    newspaperRefreshKey.value++
+    scrollContainer.value?.scrollTo({ top: 0, behavior: 'smooth' })
+  } finally {
+    navRefreshing = false
+  }
+})
+
 // ── SSE ──
 let unsubNew = null
 let unsubImg = null
@@ -1320,6 +1346,10 @@ let unsubPortal = null
 let disposed = false
 
 onMounted(async () => {
+  feedObserver = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting) && !loadError.value) loadMore()
+  }, { root: scrollContainer.value, rootMargin: '0px 0px 200px 0px' })
+  observeFeedEnd()
   // Subscribe before loading data or starting image generation.
   unsubImg = onEvent('media_image_ready', (event) => {
     for (const post of new Set([...posts.value, detailPost.value])) {
@@ -1364,6 +1394,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disposed = true
+  feedObserver?.disconnect()
   ++loadSeq
   clearTimeout(refreshTimer)
   if (tickTimer) clearInterval(tickTimer)
