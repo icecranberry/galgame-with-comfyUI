@@ -476,12 +476,12 @@
             <div v-if="recruit.step === 'preview'" class="modal-body" style="position:relative">
               <div class="preview-card">
                 <div class="preview-name-row">
-                  <input
+                  <linshe-input
                     v-model="recruit.result.display_name"
                     class="preview-name-input"
                     placeholder="角色名"
                   />
-                  <input
+                  <linshe-input
                     v-model="recruit.result.name"
                     class="preview-name-input"
                     placeholder="英文名（英文/拼音，唯一）"
@@ -2321,7 +2321,7 @@ onMounted(async () => {
   width: 90px;
   padding: 3px 6px;
   font-size: 13px;
-  color: var(--text-bright);
+  color: var(--town-paper-ink);
   background: #fffdf8;
   border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 6px;
@@ -2669,7 +2669,7 @@ onMounted(async () => {
 }
 
 .inline-input {
-  background: rgba(255,255,255,0.9);
+  background: var(--bg-secondary);
   border: 1px solid var(--accent);
   border-radius: 8px;
   padding: 4px 10px;
@@ -3280,16 +3280,9 @@ onMounted(async () => {
   display: flex; gap: 10px;
 }
 .preview-name-input {
-  font-size: 20px; font-weight: 700; color: var(--text-bright);
-  background: #f0ece8;
-  border: 1px dashed rgba(var(--accent-rgb), 0.25);
-  border-radius: 8px; padding: 4px 10px;
-  flex: 1; min-width: 0; outline: none; font-family: inherit;
-  transition: border-color 0.2s, background 0.2s;
-  cursor: text;
+  font-size: 20px; font-weight: 700;
+  flex: 1; min-width: 0;
 }
-.preview-name-input:hover  { border-color: rgba(var(--accent-rgb), 0.45); background: rgba(var(--accent-rgb), 0.07); }
-.preview-name-input:focus  { border-color: var(--accent); background: rgba(255,255,255,0.5); }
 
 /* ── 预览卡片 ── */
 .preview-card {

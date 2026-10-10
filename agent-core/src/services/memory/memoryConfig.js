@@ -20,7 +20,7 @@ export const DEFAULT_MEMORY_SETTINGS = Object.freeze({
   topK: 7,
   textCandidates: 24,
   vectorCandidates: 24,
-  recordUnengagedEvents: true,
+  recordUnengagedEvents: false,
   // v3：记忆多重表示 + 实体检索通道 + 语义注入（docs/memory-upgrade-plan.md 阶段一开关）
   v3: { enabled: true },
   // 阶段二：@memory 主动回想（默认关，灰度放量；docs/memory-upgrade-plan.md §5）
@@ -82,7 +82,8 @@ export function normalizeMemorySettings(input = {}, previous = null) {
     topK: clampInt(input.topK, base.topK, 1, 20),
     textCandidates: clampInt(input.textCandidates, base.textCandidates, 5, 100),
     vectorCandidates: clampInt(input.vectorCandidates, base.vectorCandidates, 5, 100),
-    recordUnengagedEvents: input.recordUnengagedEvents === undefined ? base.recordUnengagedEvents : Boolean(input.recordUnengagedEvents),
+    // 兼容旧客户端字段；未参与奇遇不再允许写入 RAG，旧配置的 true 也不生效。
+    recordUnengagedEvents: false,
     v3: {
       enabled: v3.enabled === undefined ? (base.v3?.enabled ?? true) : Boolean(v3.enabled),
     },
