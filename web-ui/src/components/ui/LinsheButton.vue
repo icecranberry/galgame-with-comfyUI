@@ -139,17 +139,18 @@ const endJelly = (event) => {
 }
 .ls-btn--primary:hover:not(:disabled) { filter: brightness(1.05) saturate(1.05); }
 
-/* ── 次要操作：白糖糖（主题色描边 + 浅主题色厚底） ── */
+/* ── 次要操作：白面珊瑚糖（深珊瑚文字 + 清晰描边与厚底） ── */
 .ls-btn--secondary {
   background: var(--bg-secondary);
-  color: var(--accent);
-  border: 1.5px solid rgba(var(--accent-rgb), 0.4);
-  box-shadow: 0 var(--depth) 0 rgba(var(--accent-rgb), 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: color-mix(in srgb, var(--accent-hover) 70%, var(--text-primary));
+  border: 1.5px solid color-mix(in srgb, var(--accent-hover) 70%, var(--border));
+  box-shadow:
+    0 var(--depth) 0 color-mix(in srgb, var(--accent-hover) 70%, var(--border-strong)),
+    inset 0 1px 0 var(--glass-border);
 }
 .ls-btn--secondary:hover:not(:disabled) {
-  background: var(--accent-light);
-  border-color: rgba(var(--accent-rgb), 0.7);
-  color: var(--accent-hover);
+  background: color-mix(in srgb, var(--bg-secondary) 95%, var(--accent));
+  border-color: var(--accent-hover);
 }
 
 /* ── 危险操作：红辣椒糖 ── */

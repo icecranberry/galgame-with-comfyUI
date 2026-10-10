@@ -131,20 +131,28 @@ function validateOutletLayout(layout) {
   return layout;
 }
 
-export function createOutlet({ name, tagline = '', prompt = '', icon = '', layout = 'feed' }) {
+export function createOutlet({ name, tagline = '', prompt = '', icon = '', layout = 'feed', enabled = true, boards = [] }) {
   validateOutletLayout(layout);
   const nm = clampText(name, 24);
   if (!nm) throw Object.assign(new Error('媒体名称不能为空'), { statusCode: 400 });
   if (!clampText(prompt, 8000)) throw Object.assign(new Error('媒体提示词不能为空'), { statusCode: 400 });
+  if (!Array.isArray(boards) || boards.length > 12 || boards.some(b => !b || typeof b.name !== 'string' || !b.name.trim() || b.name.trim().length > 16 || (b.desc != null && (typeof b.desc !== 'string' || b.desc.length > 60)))) {
+    throw Object.assign(new Error('板块最多12个，名称需为1至16字，定位不超过60字'), { statusCode: 400 });
+  }
+  if (new Set(boards.map(b => b.name.trim())).size !== boards.length) throw Object.assign(new Error('板块名称不能重复'), { statusCode: 400 });
   const db = getDb();
   const dup = db.prepare('SELECT id FROM media_outlets WHERE name = ?').get(nm);
   if (dup) throw Object.assign(new Error('同名媒体已存在'), { statusCode: 400 });
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM media_outlets').get().m;
-  const r = db.prepare(`
-    INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
-    VALUES (?, ?, ?, ?, ?, 1, ?)
-  `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, layout);
-  return getOutlet(Number(r.lastInsertRowid));
+  return db.transaction(() => {
+    const r = db.prepare(`
+      INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, enabled ? 1 : 0, layout);
+    const id = Number(r.lastInsertRowid);
+    for (const board of boards) createBoard(id, board);
+    return getOutlet(id);
+  })();
 }
 
 export function updateOutlet(id, patch = {}) {

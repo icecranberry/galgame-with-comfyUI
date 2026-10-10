@@ -2036,6 +2036,10 @@ export function createMediaOutlet(body) {
   return request('/media/outlets', { method: 'POST', body })
 }
 
+export function generateMediaOutletDraft(body, signal) {
+  return request('/media/outlets/draft', { method: 'POST', body, signal })
+}
+
 export function updateMediaOutlet(id, body) {
   return request(`/media/outlets/${id}`, { method: 'PUT', body })
 }

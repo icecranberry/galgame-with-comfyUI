@@ -18,6 +18,7 @@ import {
   DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE, MEDIA_AUTO_STEPS,
 } from '../services/mediaService.js';
 import { config, updateMediaAutoMinutes } from '../config.js';
+import { generateMediaOutletDraft } from '../services/mediaOutletDesigner.js';
 
 const router = Router();
 
@@ -29,6 +30,13 @@ function fail(res, err) {
 }
 
 // ── 媒体 ──
+
+// 仅生成表单草稿，不创建媒体、不触发出刊或生图。
+router.post('/outlets/draft', async (req, res) => {
+  try {
+    res.json({ draft: await generateMediaOutletDraft(req.body || {}) });
+  } catch (err) { fail(res, err); }
+});
 
 // GET /api/media/outlets — 全部媒体（含板块数/帖子数）
 router.get('/outlets', (req, res) => {
