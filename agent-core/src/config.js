@@ -140,7 +140,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     townAutoLLM: process.env.FEATURE_TOWN_AUTO_LLM !== 'false', // 默认开：小镇「自动/定时」LLM 事件（tick 驱动的相遇对话+摘要、批量状态气泡）；关闭只影响后台自动生成，玩家主动发起的 NPC/工坊对话仍走模型
     townBuildingFeatures: process.env.FEATURE_TOWN_BUILDING_FEATURES !== 'false', // 默认开：小镇特殊建筑「描述驱动的可执行玩法」（关闭后隐藏新入口、拒绝新生成/新操作）
     bgmMuted: false, // 默认关：小镇 BGM 静音（世界页顶栏音符钮切换）
-    soul: process.env.FEATURE_SOUL === 'true', // 默认关：灵魂系统（角色自我认知状态层，见 services/soulEngine.js）
+    soul: true, // 默认开启：灵魂系统（不再提供设置页开关，见 services/soulEngine.js）
   },
   // 灵魂系统（角色自我认知状态层）。开关是 features.soul；此处只放可配的回归中心 mid。
   // min/max 硬编码在 soulEngine，刻意不暴露（源插件那四个属性无消费方，是死配置）。

@@ -93,6 +93,7 @@ test('共鸣码：快照平均与当前值比较的方向正确，空快照返�
 
 test('落库往返：无行写中庸态，写盘后读回一致，两个角色互不影响', () => {
   const db = getDb();
+  assert.equal(config.features.soul, true, '新安装装载默认设置后应启用灵魂系统');
   config.features.soul = true;
   clearSoulCache();
 
@@ -137,10 +138,11 @@ test('开关关闭：不注入、不落快照、不改行为参数、不写库',
 
 // ── 开关打开：四维驱动行为参数 + 提示词块 ──
 
-test('开关打开：ExpressionDesire 决定长度档位，RecallDepth/ImpressionDepth 驱动行为，提示词块含四行倾向', () => {
+test('开关打开：前三维控制行为参数，提示词只随发散度换档', () => {
   config.features.soul = true;
   clearSoulCache();
   const soul = getSoulState('9200');
+  const initialBlock = renderSoulStateBlock('9200');
 
   soul.energy.ExpressionDesire = -20; // 极端简洁
   assert.equal(soulReplyLengthHint('9200'), '10~25个汉字');
@@ -154,17 +156,22 @@ test('开关打开：ExpressionDesire 决定长度档位，RecallDepth/Impressio
   assert.ok(soulCurationLimit('9200') > DEFAULT_MIDS.ImpressionDepth);
 
   const block = renderSoulStateBlock('9200');
-  for (const label of ['社交倾向', '认知倾向', '表达倾向', '情绪倾向']) {
-    assert.ok(block.includes(label), `提示词块缺少 ${label}`);
-  }
+  assert.equal(block, initialBlock, '前三维已有各自控制入口，不应重复改写灵魂提示词');
   assert.ok(block.startsWith('<soul_state>') && block.trimEnd().endsWith('</soul_state>'));
+  soul.energy.Creativity = 0.1;
+  assert.equal(renderSoulStateBlock('9200'), block, '同档位的小幅波动不改写提示词');
+  soul.energy.Creativity = -20;
+  const focusedBlock = renderSoulStateBlock('9200');
+  soul.energy.Creativity = 20;
+  const creativeBlock = renderSoulStateBlock('9200');
+  assert.equal(new Set([block, focusedBlock, creativeBlock]).size, 3, '低、中、高发散度应给出不同的行为提示');
 
   config.features.soul = false;
 });
 
 // ── 迁移：soul_states 表 + memory_fragments.soul_snapshot 列，幂等 ──
 
-test('迁移：建 soul_states 表与 soul_snapshot 列，重复执行幂等', async () => {
+test('迁移：建表、补快照列并将旧关闭设置一次性迁移为开启', async () => {
   const db = getDb();
   const columns = new Set(db.prepare('PRAGMA table_info(memory_fragments)').all().map(c => c.name));
   assert.ok(columns.has('soul_snapshot'), 'memory_fragments 应新增 soul_snapshot 列');
@@ -172,6 +179,13 @@ test('迁移：建 soul_states 表与 soul_snapshot 列，重复执行幂等', a
   assert.ok(table, 'soul_states 表应存在');
 
   const { migrateSoulSchema } = await import('../src/db/index.js');
+  db.prepare("DELETE FROM system_settings WHERE setting_key = 'soul_default_enabled_migrated'").run();
+  db.prepare("UPDATE system_settings SET setting_value = 'false' WHERE setting_key = 'feature_soul'").run();
+  migrateSoulSchema(db);
+  const { loadSystemSettings } = await import('../src/db/settings.js');
+  loadSystemSettings(db);
+  assert.equal(config.features.soul, true, '旧安装关闭值迁移后装载为开启');
   migrateSoulSchema(db); // 幂等：重复执行不报错
+  assert.equal(db.prepare("SELECT COUNT(*) AS c FROM system_settings WHERE setting_key = 'soul_default_enabled_migrated'").get().c, 1);
   assert.equal(db.prepare('PRAGMA table_info(memory_fragments)').all().filter(c => c.name === 'soul_snapshot').length, 1);
 });

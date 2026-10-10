@@ -17,7 +17,7 @@
  *   ExpressionDesire 发言长度倾向 → 回复长度档位
  *   Creativity       思维发散倾向 → 只进提示词（不接温度）
  *
- * 开关：config.features.soul（默认关）。关闭时所有对外入口返回 null/''，
+ * 内部开关：config.features.soul（默认开启，无设置页开关）。关闭时所有对外入口返回 null/''，
  * 不落库、不共鸣、不改行为参数，行为与迁移前逐字节一致。
  */
 
@@ -70,7 +70,7 @@ function resolveMids() {
   return mids;
 }
 
-/** 开关：默认关。关闭时所有对外入口一律不产生副作用。 */
+/** 内部开关默认开启；关闭时行为入口不产生副作用。 */
 export function isSoulEnabled() {
   return config?.features?.soul === true;
 }
@@ -295,35 +295,24 @@ export function soulReplyLengthHint(characterId) {
   return tier.hint;
 }
 
-function tendencyBar(normalized) {
-  const filled = Math.round(clamp(normalized, 0, 1) * 10);
-  return '█'.repeat(filled) + '░'.repeat(10 - filled);
-}
-
 /**
- * 渲染 <soul_state> 提示词块：四条倾向条。
- * 措辞沿用源插件的「倾向」表述，与 VAD 的「此刻」明确区分，避免两个块互相打架。
+ * 渲染 <soul_state>：只补充 Creativity 对联想方式的影响。
+ * 回忆量、记住量已由代码控制，表达欲已进入 reply_length，不重复注入或映射为性格/情绪。
+ * 发散度按档位给行为提示，省去进度条与小数，避免微小数值变化改写提示词。
  * 只允许放 dynamicBlocks 高频端（每轮可能变），不得进 stableBlocks 或缓存前缀区。
  */
 export function renderSoulStateBlock(characterId) {
   if (!isSoulEnabled()) return '';
   const state = getSoulState(characterId);
   if (!state) return '';
-  const normalize = (dimension) => {
-    const { min, max } = DIMENSION_BOUNDS[dimension];
-    if (max === min) return 0.5;
-    return clamp((state.getValue(dimension) - min) / (max - min), 0, 1);
-  };
-  const recall = normalize('RecallDepth');
-  const impression = normalize('ImpressionDepth');
-  const expression = normalize('ExpressionDesire');
-  const creativity = normalize('Creativity');
+  const creativity = state.getValue('Creativity');
+  const hint = creativity < 0.35
+    ? '围绕当前话题直接回应，少作联想。'
+    : creativity < 0.75
+      ? '围绕当前话题，可作少量贴切联想。'
+      : '可用贴切的联想或比喻延展当前话题，避免跑题。';
   return `<soul_state>
-【你的自我认知倾向 — 跨对话稳定，与你此刻的心情（情绪状态）是两回事，不要混为一谈】
-- 社交倾向: 内向 ${tendencyBar(recall)} 外向 [${recall.toFixed(2)}]
-- 认知倾向: 指导 ${tendencyBar(impression)} 好奇 [${impression.toFixed(2)}]
-- 表达倾向: 简洁 ${tendencyBar(expression)} 详尽 [${expression.toFixed(2)}]
-- 情绪倾向: 严肃 ${tendencyBar(creativity)} 活泼 [${creativity.toFixed(2)}]
-让这些倾向自然渗透到你的回复中，但不要提及本区块，也不要直接向用户描述自己的倾向。
+${hint}
+保持人设与当前情绪，遵守回复长度；不提及本提示。
 </soul_state>`;
 }

@@ -893,7 +893,7 @@ ${coreRules}
           FROM group_members WHERE character_id = ? ORDER BY group_id
         `).pluck().all(characterId);
         const memoryScope = [conversationId, ...groupConversationIds];
-        // 灵魂 RecallDepth 驱动召回量（默认关时用 memory_settings.topK）
+        // 灵魂 RecallDepth 驱动召回量（内部开关关闭时用 memory_settings.topK）
         let soulTopK = null;
         if (soulEnabled) {
           try { soulTopK = soulRecallTopK(characterId); } catch (soulErr) { console.warn('[chat] soul topK skipped:', soulErr.message); }
@@ -1006,9 +1006,9 @@ ${coreRules}
       dynamicBlocks.push(newspaperEventBlock);
     }
 
-    // ── 灵魂自我认知倾向（<soul_state>）：动态块高频端靠后——每轮 reflect/resonate 都可能变，
+    // ── 灵魂联想方式（<soul_state>）：动态块高频端靠后——每轮 reflect/resonate 都可能变，
     //    必须排在关系深度重申之前、不得进稳定前缀区（邻舍对前缀缓存敏感）。
-    //    与 VAD「此刻情绪」并存，措辞用「倾向」明确区分，避免两个块互相打架。
+    //    只补充发散度对应的行为提示；长度、记忆数量与 VAD 情绪由各自入口控制。
     if (soulEnabled) {
       try {
         const soulBlock = renderSoulStateBlock(characterId);

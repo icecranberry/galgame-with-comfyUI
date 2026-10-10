@@ -3268,10 +3268,17 @@ export function migrateChatMemoryV3Schema(db) {
 // 迁移: 灵魂系统（角色的自我认知状态层，见 services/soulEngine.js）。
 //   - soul_states：四维能量槽按 character_id 键控落库，跨会话/跨重启延续
 //   - memory_fragments.soul_snapshot：记忆落库那一刻的四维 energy 快照，供召回时反向共鸣
-// 默认关（config.features.soul），关闭时不写任何数据，但建表本身幂等无副作用。
+// 默认开启（config.features.soul）；移除设置页开关后，一次性将旧安装的关闭值迁移为开启。
 // 设计依据 .pai/plan/memory/20261010_灵魂系统最小迁移到邻舍.md。
 export function migrateSoulSchema(db) {
   try {
+    db.transaction(() => {
+      const migrated = db.prepare("SELECT 1 FROM system_settings WHERE setting_key = 'soul_default_enabled_migrated'").get();
+      if (migrated) return;
+      db.prepare("INSERT OR REPLACE INTO system_settings (setting_key, setting_value, updated_at) VALUES ('feature_soul', 'true', CURRENT_TIMESTAMP)").run();
+      db.prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES ('soul_default_enabled_migrated', '1')").run();
+    })();
+
     db.prepare(`
       CREATE TABLE IF NOT EXISTS soul_states (
         character_id TEXT PRIMARY KEY,
