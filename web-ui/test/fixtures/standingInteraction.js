@@ -25,6 +25,7 @@ document.addEventListener('pointerup',()=>{if(downAt){metrics.gesture=`${Math.ro
 document.addEventListener('pointercancel',()=>downAt=0,true)
 const encode=new TextEncoder()
 let stream,selection=1,revision=1,reply=0,version=1
+let configFailures=0
 let motionStyle
 function reducedMotion(){
  metrics.reduced=!metrics.reduced
@@ -80,6 +81,7 @@ window.fetch=async(url,options={})=>{
  if(path==='/api/stream')return new Response(new ReadableStream({start(c){stream=c;send('connected',{});options.signal?.addEventListener('abort',()=>{try{c.close()}catch{};if(stream===c)stream=null},{once:true})},cancel(){stream=null}}),{headers:{'Content-Type':'text/event-stream'}})
  if(path==='/api/standing-display/state')return Response.json(snapshot())
  const match=path.match(/^\/api\/characters\/(\d+)\/standing-interaction$/)
+ if(match&&configFailures>0){configFailures--;return Response.json({error:'Injected configuration failure'},{status:503})}
  if(match){const id=Number(match[1]);const data=config(id);data.isSleeping=metrics.sleep;if(options.method==='PUT'){metrics.writes++;data.config=JSON.parse(options.body).config;data.version++}const copy=structuredClone(data);if(metrics.delayed)await new Promise(r=>setTimeout(r,700));return Response.json(copy)}
  const region=path.match(/^\/api\/characters\/(\d+)\/expression-standings\/([^/]+)\/interaction-regions$/)
  if(region&&options.method==='PUT'){metrics.writes++;const data=config(Number(region[1]));const slot=data.slots.find(s=>s.slotId===decodeURIComponent(region[2]));slot.regions=JSON.parse(options.body).regions;slot.regionVersion++;return Response.json(data)}
@@ -93,6 +95,7 @@ createApp({render(){return [h(StandingDisplayView),h('aside',{style:'position:fi
  action('睡眠切换',()=>{metrics.sleep=!metrics.sleep;send('schedule_state_change',{character_id:metrics.character,is_sleeping:metrics.sleep})}),
  action('更新图片版本',()=>{version++;const data=config(metrics.character);const slot=data.slots[0];slot.imageVersion=version;slot.regionsStale=true;slot.regionDraft=slot.regions;slot.regions=null;update();send('expression_standings_updated',{characterId:metrics.character})}),
  action('延迟配置',()=>metrics.delayed=!metrics.delayed),
+ action('模拟配置失败',()=>{configFailures=2;send('expression_standings_updated',{characterId:metrics.character})}),
  action('切换构图',composition),
  action('断线/重连',()=>{metrics.offline=!metrics.offline;if(metrics.offline){stream?.close();stream=null}}),
  action('减少动效预览',reducedMotion),

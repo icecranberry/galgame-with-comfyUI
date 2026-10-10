@@ -2013,7 +2013,7 @@ export const updateExpressionStandingPrompt = (id, slot, prompt, generation) => 
 export const editExpressionStanding = (id, slot, action, body = {}) => request(expressionStandingPath(id, slot) + '/' + action, { method: 'POST', body })
 export const deleteExpressionStanding = (id, slot) => request(expressionStandingPath(id, slot), { method: 'DELETE' })
 export const getStandingDisplayState = () => request('/standing-display/state')
-export const getStandingInteraction = id => request(`/characters/${id}/standing-interaction`)
+export const getStandingInteraction = (id, { signal } = {}) => request(`/characters/${id}/standing-interaction`, { signal })
 export const getStandingTouchLines = id => request(`/characters/${id}/expression-standings/touch-lines`)
 export const saveStandingTouchLines = (id, body) => request(`/characters/${id}/expression-standings/touch-lines`, {method:'PUT',body})
 export const generateStandingTouchLines = (id, expectedVersion) => request(`/characters/${id}/expression-standings/touch-lines/generate`, {method:'POST',body:{expectedVersion}})
