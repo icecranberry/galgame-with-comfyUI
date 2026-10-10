@@ -109,6 +109,23 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
     eventFreq: parseFloat(process.env.EVENT_FREQ) || 1, // 奇遇触发频率 0~1，0=关闭自动触发
+    // 朋友圈发帖频率 0~24：1=基准（角色 2~8 小时一条），越大越快，24=最快（5~20 分钟）。
+    // **默认 0 = 关闭**：自动发帖要调 LLM + 生图，属于「用户想看时才看」的内容，
+    // 默认开启会在后台持续消耗额度与显卡。想自动补内容可在设置页「朋友圈发帖频率」里开启。
+    // 用 IIFE 而不是 `|| 1`：`parseFloat('0') || 1` 会把显式的 0 兜成 1，
+    // env 里写 MOMENT_FREQ=0 就永远关不掉（这个坑 mediaAutoMinutes 已经踩过一次）。
+    momentFreq: (() => {
+      const v = parseFloat(process.env.MOMENT_FREQ);
+      return Number.isFinite(v) ? Math.max(0, Math.min(24, v)) : 0;
+    })(),
+    // 传媒内容页自动抓帖间隔（分钟）。
+    // **默认 0 = 关闭**：传媒属于「用户想看时才看」的内容，
+    // 默认自动抓帖会在后台持续调 LLM，与"按需生成"的取向不符。
+    // 想要自动补内容可在传媒页的「自动」档位里开启。
+    mediaAutoMinutes: (() => {
+      const v = parseInt(process.env.MEDIA_AUTO_MINUTES, 10);
+      return Number.isFinite(v) ? v : 0;
+    })(),
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
     scheduleRefreshDays: Math.max(1, Math.min(3, parseInt(process.env.SCHEDULE_REFRESH_DAYS, 10) || 1)), // 日程刷新周期（天），1~3
@@ -251,7 +268,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     type: 'oxipng',   // 'oxipng' | 'avif'
   },
   workflow: {
-    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid'
+    mode: 'turbo',     // 'base' | 'turbo' | 'hybrid' | 'custom'
+    // mode === 'custom' 时使用的工作流文件名（位于 workflow/ 目录，如 制图工作流-pro-yinyue.json）
+    // 文件缺失时自动回退 turbo，不会导致生图失败
+    customTemplate: '',
     scene: {           // hybrid 模式下的场景→工作流映射
       chat: 'turbo',
       group: 'base',
@@ -568,6 +588,37 @@ export function updateEventFreq(value) {
 }
 
 /**
+ * 更新朋友圈发帖频率（0~24）
+ * 1 = 默认节奏（角色 2~8 小时一条），值越大越快，0 = 关闭自动发帖。
+ * 周期 = 基准 2~8 小时 / freq；上限 24 对应 5~20 分钟一条（再快没有意义，
+ * 而且发帖要调 LLM + 生图，实际也跑不过来）。
+ */
+export function updateMomentFreq(value) {
+  const f = Math.max(0, Math.min(24, parseFloat(value) || 0));
+  config.features.momentFreq = f;
+  persistSettingSync('feature_momentFreq', String(f));
+  console.log(`[config] momentFreq = ${f}`);
+}
+
+/**
+ * 更新传媒内容页的自动抓帖间隔（分钟）。
+ * 0 = 关闭自动（只手动刷新）；非 0 时夹在 5 分钟 ~ 12 小时之间
+ * —— 比 5 分钟更快没有意义（一次生成要调 LLM，实际也跑不过来），
+ * 超过 12 小时则近乎等于关闭。
+ * @param {number|string} value
+ * @returns {number} 实际生效的分钟数
+ */
+export function updateMediaAutoMinutes(value) {
+  const raw = parseInt(value, 10);
+  let n = Number.isFinite(raw) ? raw : 20;
+  if (n !== 0) n = Math.max(5, Math.min(720, n));
+  config.features.mediaAutoMinutes = n;
+  persistSettingSync('feature_mediaAutoMinutes', String(n));
+  console.log(`[config] mediaAutoMinutes = ${n}${n === 0 ? '（已关闭自动）' : ''}`);
+  return n;
+}
+
+/**
  * 更新日程刷新周期（天，1~3），影响下次排期的 next_schedule_refresh_at
  */
 export function updateScheduleRefreshDays(value) {
@@ -774,12 +825,27 @@ export function updateCompressConfig({ enabled, type }) {
 }
 
 export function updateWorkflowMode(mode) {
-  if (!['base', 'turbo', 'hybrid'].includes(mode)) {
-    return { ok: false, error: 'mode must be base, turbo, or hybrid' };
+  if (!['base', 'turbo', 'hybrid', 'custom'].includes(mode)) {
+    return { ok: false, error: 'mode must be base, turbo, hybrid, or custom' };
   }
   config.workflow.mode = mode;
   persistSettingSync('workflow_mode', mode);
   console.log(`[config] workflowMode = ${mode}`);
+  return { ok: true };
+}
+
+/**
+ * 设置全局自定义工作流文件名（mode === 'custom' 时生效）
+ * 仅接受 workflow/ 目录下的 .json 文件名；传空字符串表示清除。
+ */
+export function updateWorkflowCustomTemplate(filename) {
+  if (filename !== undefined && filename !== null && typeof filename !== 'string') {
+    return { ok: false, error: 'customTemplate must be a string' };
+  }
+  const value = typeof filename === 'string' ? filename.trim() : '';
+  config.workflow.customTemplate = value;
+  persistSettingSync('workflow_custom_template', value);
+  console.log(`[config] workflowCustomTemplate = ${value || '(cleared)'}`);
   return { ok: true };
 }
 
@@ -974,6 +1040,11 @@ export function autoDetectWorkflowMode() {
   if (getSetting(MARKER_KEY) === 'true') {
     // 已检测过，不再自动干预
     return { skipped: true, reason: 'already_detected' };
+  }
+
+  // 用户显式选择自定义工作流时，自动检测不干预（也不标记，便于日后改回 turbo/base 时仍能自动检测）
+  if (config.workflow?.mode === 'custom') {
+    return { skipped: true, reason: 'explicit_custom_mode' };
   }
 
   try {

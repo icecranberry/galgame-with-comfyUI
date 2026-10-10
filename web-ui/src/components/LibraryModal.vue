@@ -6,7 +6,7 @@
       @update:model-value="$emit('update:modelValue', $event)"
     >
       <template #header-extra>
-        <span class="lib-count">{{ items.length }} 条</span>
+        <span class="lib-count">{{ items.length }} 条<span v-if="!isEvents"> · 已勾选 {{ checkedCount }}</span></span>
       </template>
       <div class="lib-body">
           <!-- 生成器 -->
@@ -109,6 +109,10 @@
                 <polyline points="9,6 15,12 9,18" />
               </svg>
               <span class="group-title">系统（{{ systemItems.length }}）</span>
+              <span v-if="!isEvents" class="group-actions" @click.stop>
+                <linshe-button variant="link" size="sm" @click="setAllChecked(true)">全选</linshe-button>
+                <linshe-button variant="link" size="sm" @click="setAllChecked(false)">清空</linshe-button>
+              </span>
               <span class="group-hint">{{ systemOpen ? '收起' : '展开' }}</span>
             </div>
             <CollapseTransition :show="systemOpen">
@@ -118,10 +122,12 @@
                   :key="item.id"
                   :item="item"
                   :is-events="isEvents"
+                  :selectable="!isEvents"
                   @edit="startEdit"
                   @cancel="cancelEdit"
                   @save="saveItem"
                   @remove="removeItem"
+                  @toggle-check="toggleTopicCheck"
                 />
                 <div v-if="systemItems.length === 0" class="empty-hint">暂无系统条目</div>
               </div>
@@ -145,10 +151,12 @@
                   :key="item.id || item._tempKey"
                   :item="item"
                   :is-events="isEvents"
+                  :selectable="!isEvents"
                   @edit="startEdit"
                   @cancel="cancelEdit"
                   @save="saveItem"
                   @remove="removeItem"
+                  @toggle-check="toggleTopicCheck"
                 />
                 <div v-if="customItems.length === 0" key="custom-empty" class="empty-hint">还没有自定义条目，用上方生成器或点「＋新增」添加</div>
               </TransitionGroup>
@@ -258,6 +266,31 @@ const previewLeavingCount = ref(0)
 
 const systemItems = computed(() => items.value.filter(i => i.source === 'default'))
 const customItems = computed(() => items.value.filter(i => i.source === 'custom'))
+
+// ── 话题勾选（仅朋友圈话题库；奇遇事件库不启用）──
+// 勾选决定这条话题参不参与抽取，条目本身保留，随时能再勾回来。
+const checkedCount = computed(() => items.value.filter(i => i.checked !== 0).length)
+
+async function toggleTopicCheck(item) {
+  const next = item.checked === 0 ? 1 : 0
+  const prev = item.checked
+  item.checked = next
+  try {
+    await api.setTopicsChecked({ ids: [item.id], checked: next === 1 })
+  } catch (err) {
+    item.checked = prev
+    console.warn('[library] toggle topic check failed:', err?.message)
+  }
+}
+
+async function setAllChecked(checked) {
+  try {
+    await api.setTopicsChecked({ all: true, checked })
+    for (const it of items.value) it.checked = checked ? 1 : 0
+  } catch (err) {
+    console.warn('[library] set all checked failed:', err?.message)
+  }
+}
 
 // ── 加载 ──
 
@@ -573,6 +606,8 @@ function addItem() {
 .group-header svg.rotated { transform: rotate(90deg); }
 .group-title { font-size: 14px; font-weight: 700; color: var(--text-primary, #333); }
 .group-hint { font-size: 11px; color: var(--text-secondary, #888); }
+/* 全选 / 清空：靠右，且不要冒泡到分组头的展开收起 */
+.group-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .add-card {
   min-height: 130px;
   border: 1.5px dashed var(--accent, var(--accent));

@@ -28,7 +28,7 @@ import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, ge
 import { SentenceSplitter } from '../utils/sentenceSplitter.js';
 import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
-import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
+import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap, getUserEmojiMap } from '../services/emojiService.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
 import { detectAndApplyAppointment } from '../services/appointmentDetector.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
@@ -114,6 +114,29 @@ function toISODate(sqliteDT) {
 }
 
 // DELETE /api/characters/:id/messages — 清空角色对话记录
+// POST /api/chat/upload-image — 用户发图前的上传（base64 data URI → /images/chat/...）
+// 注意：本 router 挂在 '/api'（见 app.js），所以这里要写完整的 '/chat/upload-image'，
+// 不能只写 '/upload-image'（那会变成 /api/upload-image，前端调 /api/chat/upload-image 就 404）。
+router.post('/chat/upload-image', (req, res) => {
+  try {
+    const base64 = req.body?.base64;
+    if (typeof base64 !== 'string' || !base64) return res.status(400).json({ error: '缺少图片数据' });
+    const mimeMatch = base64.match(/^data:(image\/(?:png|jpeg|webp|gif|bmp));base64,/);
+    if (!mimeMatch) return res.status(400).json({ error: '仅支持 PNG / JPG / WEBP / GIF / BMP 图片' });
+    const buf = Buffer.from(base64.slice(mimeMatch[0].length), 'base64');
+    if (buf.length === 0) return res.status(400).json({ error: '图片为空' });
+    if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: '图片不能超过 8MB' });
+
+    const extMap = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp' };
+    const filename = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${extMap[mimeMatch[1]]}`;
+    const url = saveBase64Image('chat', filename, base64);
+    res.json({ ok: true, url });
+  } catch (err) {
+    console.error('[chat] upload-image error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.delete('/characters/:id/messages', (req, res, next) => {
   const db = getDb();
   // 入口即校验：id 必须是正整数，conversationId 由校验后的数字构造（不直接拼接原始输入）
@@ -306,12 +329,19 @@ router.get('/messages/:id', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTownState }), async (req, res) => {
-  const { message, client_msg_id, force_image_gen, image_mode, deep_think } = req.body;
+  const { message, client_msg_id, force_image_gen, image_mode, deep_think, images: rawImages } = req.body;
   const deepThink = deep_think === true || deep_think === 'true';
   const imageMode = ['off', 'smart', 'force'].includes(image_mode) ? image_mode : (force_image_gen ? 'force' : 'smart');
   // 深度思考下的生图策略：off = planner 看不到图片工具；must = 强制生图（本轮必配图，形式由 planner 定）；auto = planner 按需决策
   const imagePolicy = imageMode === 'off' ? 'off' : (deepThink && imageMode === 'force' ? 'must' : 'auto');
-  if (!message || typeof message !== 'string') {
+
+  // 用户随消息带的图片（/images/... 路径数组）。只收本项目的图片路径，其余忽略。
+  const attachedImages = (Array.isArray(rawImages) ? rawImages : [])
+    .filter(u => typeof u === 'string' && u.startsWith('/images/'))
+    .slice(0, 4);
+  const hasAttached = attachedImages.length > 0;
+
+  if ((!message || typeof message !== 'string') && !hasAttached) {
     return res.status(400).json({ error: 'message is required' });
   }
 
@@ -328,7 +358,12 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
   const conversationId = convId(characterId);
   const emojiMap = getCharacterEmojiMap(characterId, db);
   const emojiNote = buildEmojiNote([...emojiMap.keys()]);
-  const parsedUserMessage = parseEmojiText(message, emojiMap);
+  const parsedUserMessage = parseEmojiText(message, new Map([...emojiMap, ...getUserEmojiMap(db)]));
+  // 用户附带的图片并进 images —— 这样存库、回显、以及 contextAssembler 把它转成模型输入
+  // 全都走同一条既有链路，不必另开分支
+  if (hasAttached) {
+    parsedUserMessage.images = [...new Set([...parsedUserMessage.images, ...attachedImages])];
+  }
 
   // ── 日程系统：回复队列拦截 ──
   if (config.features.schedule !== false) {

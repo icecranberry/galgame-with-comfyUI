@@ -1,6 +1,14 @@
 const BASE = '/api'
 
-// 统一请求基元：非 2xx 自动抛出服务端 error 信息，成功返回解析后的 JSON
+/**
+ * 统一请求基元：非 2xx 自动抛出服务端 error 信息，成功返回解析后的 JSON。
+ *
+ * ★ 关于「新功能报 404」：本机后端没有热重载，改了 agent-core 的代码后必须重启服务，
+ *   否则新路由根本不存在 —— Express 会直接吐一段 HTML（`Cannot POST /api/xxx`），
+ *   而不是我们约定的 JSON `{ error }`。这类 404 极容易被误当成功能 bug。
+ *   这里统一识别并补一句人话提示，省得每个调用点各写一遍
+ *   （已踩三次：日报删除 / 传媒批量操作 / 外观扩写）。
+ */
 async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -8,8 +16,17 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal,
   })
-  const result = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+  const raw = await res.text()
+  let result = {}
+  try { result = raw ? JSON.parse(raw) : {} } catch { /* 非 JSON（多半是 Express 默认 HTML 错误页） */ }
+  if (!res.ok) {
+    // 404 + 拿不到结构化 error ⇒ 路由没注册（后端是旧代码），而不是"功能坏了"
+    const isMissingRoute = res.status === 404 && !result.error && !result.message
+    if (isMissingRoute) {
+      throw new Error('接口不存在：后端服务还是旧代码，请先在启动器里重启服务再试')
+    }
+    throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+  }
   return result
 }
 
@@ -66,6 +83,55 @@ export async function togglePin(characterId, pinned) {
   return request(`/characters/${characterId}/pin`, { method: 'PUT', body: { pinned } })
 }
 
+// 开关角色的日程生成：关闭后不再刷 LLM 生成日程（省 token），
+// 已生成的日程模板保留，角色仍按既有日程活动，只是内容不再变化
+export async function setCharacterScheduleEnabled(characterId, enabled) {
+  return request(`/characters/${characterId}/schedule-enabled`, { method: 'PUT', body: { enabled } })
+}
+
+// 批量开关全体角色的日程生成（「全量省 token」入口）
+export async function setAllCharactersScheduleEnabled(enabled) {
+  return request('/characters/schedule-enabled-all', { method: 'POST', body: { enabled } })
+}
+
+// 归档 / 取消归档：归档后该角色不再参与任何主动行为（主动聊天、朋友圈、奇遇、
+// 日程刷新、自己拉群、小镇奇遇），仅保留角色卡数据与「你主动找它时仍会回复」
+export async function setCharacterArchived(characterId, archived) {
+  return request(`/characters/${characterId}/archived`, { method: 'PUT', body: { archived } })
+}
+
+// 批量归档 / 取消归档全体角色
+export async function setAllCharactersArchived(archived) {
+  return request('/characters/archived-all', { method: 'POST', body: { archived } })
+}
+
+// ── 角色文件夹（单层分类）──
+export function listCharacterFolders() {
+  return request('/characters/folders')
+}
+
+export function createCharacterFolder(name) {
+  return request('/characters/folders', { method: 'POST', body: { name } })
+}
+
+export function renameCharacterFolder(id, name) {
+  return request(`/characters/folders/${id}`, { method: 'PUT', body: { name } })
+}
+
+export function deleteCharacterFolder(id) {
+  return request(`/characters/folders/${id}`, { method: 'DELETE' })
+}
+
+/** 重排文件夹顺序（拖拽排序），ids 为期望的先后顺序 */
+export function reorderCharacterFolders(ids) {
+  return request('/characters/folders/reorder', { method: 'PUT', body: { ids } })
+}
+
+// folderId 传 null 表示移回「未分类」
+export function moveCharacterToFolder(characterId, folderId) {
+  return request(`/characters/${characterId}/folder`, { method: 'PUT', body: { folder_id: folderId } })
+}
+
 // ── 角色专属外观/形态 ──
 export function listCharacterOutfits(characterId) {
   return request(`/characters/${characterId}/outfits`)
@@ -81,6 +147,55 @@ export function updateCharacterOutfit(characterId, outfitId, data) {
 
 export function deleteCharacterOutfit(characterId, outfitId) {
   return request(`/characters/${characterId}/outfits/${outfitId}`, { method: 'DELETE' })
+}
+
+// ── 场景服装（工装/外出/居家/睡眠，由日程决定穿哪套）──
+
+/** 该角色的场景服装 + 场景定义 */
+export function listSceneOutfits(characterId) {
+  return request(`/characters/${characterId}/outfits/scene`)
+}
+
+/** 此刻按日程该穿哪套（用于界面展示/调试） */
+export function getCurrentSceneOutfit(characterId) {
+  return request(`/characters/${characterId}/outfit-now`)
+}
+
+/**
+ * 用 LLM 生成场景服装；save=true 时直接落库。
+ * @param {object} [extra]
+ * @param {string} [extra.baseAppearance] 常态外观（工装描述）：传了就**以它为基准**只换衣服，身体特征不变
+ * @param {string[]} [extra.scenes] 只生成这几套（如 ['casual','home','sleep']）；不传则四套都出
+ */
+export function generateSceneOutfits(characterId, save = false, extra = {}) {
+  return request(`/characters/${characterId}/outfits/generate`, { method: 'POST', body: { save, ...extra } })
+}
+
+/** 批量保存四套场景服装（同场景已存在则更新描述） */
+export function saveSceneOutfits(characterId, outfits) {
+  return request(`/characters/${characterId}/outfits/scene`, { method: 'PUT', body: { outfits } })
+}
+
+// ── 场景立绘（工装/私服/居家/睡衣四套形象，详情页左右切换）──
+
+/** 四套场景立绘（未生成的场景返回空图；工装槽以默认立绘兜底） */
+export function listSceneStandings(characterId) {
+  return request(`/characters/${characterId}/standings`)
+}
+
+/** 生成某场景的立绘（LLM 出提示词 → 出图 → 落库；传 prompt 则直接复用，不再请求 LLM） */
+export function generateSceneStanding(characterId, scene, requirement = '', prompt = '') {
+  return request(`/characters/${characterId}/standings/generate`, { method: 'POST', body: { scene, requirement, prompt } })
+}
+
+/** 上传本地图片作为某场景立绘（base64 data URL） */
+export function uploadSceneStanding(characterId, scene, base64) {
+  return request(`/characters/${characterId}/standings/upload`, { method: 'POST', body: { scene, base64 } })
+}
+
+/** 清掉某场景的显式立绘（工装槽会回落到默认立绘） */
+export function deleteSceneStanding(characterId, scene) {
+  return request(`/characters/${characterId}/standings/${encodeURIComponent(scene)}`, { method: 'DELETE' })
 }
 
 export async function clearMessages(characterId) {
@@ -181,6 +296,23 @@ export function deleteEmoji(characterId, key, setId = null) {
   return request(`/characters/emoji/${characterId}/${key}${query}`, { method: 'DELETE' })
 }
 
+// ── 我的表情库（用户自己的表情包，跨角色通用）──
+
+export function listUserEmojis() {
+  return request(`/user-emoji`)
+}
+
+export function uploadUserEmoji(key, base64) {
+  return request(`/user-emoji/${encodeURIComponent(key)}/upload`, {
+    method: 'POST',
+    body: { base64 },
+  })
+}
+
+export function deleteUserEmoji(key) {
+  return request(`/user-emoji/${encodeURIComponent(key)}`, { method: 'DELETE' })
+}
+
 export async function deleteCharacter(id) {
   return request(`/characters/${id}`, { method: 'DELETE' })
 }
@@ -218,11 +350,28 @@ export function uploadStanding(characterId, base64) {
   return request(`/characters/${characterId}/standing-upload`, { method: 'POST', body: { base64 } })
 }
 
-/** 修正外观：上传参考图（base64 data URL）+ 当前整卡文本（可为待确认的草稿卡），邻舍分析后重写「## 你的外观」（不入库，由前端回填） */
-export function refineAppearanceDraft({ image, basePrompt, displayName }) {
+/** 修正外观：上传参考图（base64 data URL）+ 当前整卡文本（可为待确认的草稿卡），邻舍分析后重写「## 你的外观」（不入库，由前端回填）
+ *  sceneLabel 用于按场景追加硬性约束（如睡衣必须赤脚）——原先没传，导致修睡衣与修工装走同一条提示词。 */
+export function refineAppearanceDraft({ image, basePrompt, displayName, sceneLabel }) {
   return request('/characters/refine-appearance-draft', {
     method: 'POST',
-    body: { image, base_prompt: basePrompt, display_name: displayName },
+    body: { image, base_prompt: basePrompt, display_name: displayName, scene_label: sceneLabel },
+  })
+}
+
+/** 修正外观·文字模式：按纯文字要点扩写外观描述（不出图，只走文本 LLM；不入库，由前端回填） */
+export function expandAppearanceDraft({ brief, basePrompt, displayName, sceneLabel }) {
+  return request('/characters/expand-appearance-draft', {
+    method: 'POST',
+    body: { brief, base_prompt: basePrompt, display_name: displayName, scene_label: sceneLabel },
+  })
+}
+
+/** 人设润色：让邻舍改写人格提示词（外观段原样保留），只出草稿不落库，由父级决定是否保存 */
+export function refinePersonaDraft({ basePrompt, displayName, mode }) {
+  return request('/characters/refine-persona-draft', {
+    method: 'POST',
+    body: { base_prompt: basePrompt, display_name: displayName, mode },
   })
 }
 
@@ -256,12 +405,20 @@ export async function getRelationships(characterId) {
   return request(`/relationships?character_id=${characterId}`)
 }
 
-export async function createRelationship(from_character_id, to_character_id, relationship_text) {
-  return request(`/relationships`, { method: 'POST', body: { from_character_id, to_character_id, relationship_text } })
+// intimacy 可选（0 泛泛 / 1 熟悉 / 2 亲近 / 3 亲密）；省略时后端按关系文本推断
+export async function createRelationship(from_character_id, to_character_id, relationship_text, intimacy) {
+  return request(`/relationships`, {
+    method: 'POST',
+    body: { from_character_id, to_character_id, relationship_text, ...(intimacy === undefined ? {} : { intimacy }) },
+  })
 }
 
-export async function updateRelationship(id, relationship_text) {
-  return request(`/relationships/${id}`, { method: 'PUT', body: { relationship_text } })
+// 省略 intimacy 时后端保留已显式设定的值（不会因改错字而丢失手工调整）
+export async function updateRelationship(id, relationship_text, intimacy) {
+  return request(`/relationships/${id}`, {
+    method: 'PUT',
+    body: { relationship_text, ...(intimacy === undefined ? {} : { intimacy }) },
+  })
 }
 
 export async function deleteRelationship(id) {
@@ -293,7 +450,12 @@ export async function deleteUserRelationship(id) {
   return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext) {
+// 上传一张聊天图片（base64 data URI → 返回 /images/chat/... 路径），发图前先调它
+export function uploadChatImage(base64) {
+  return request('/chat/upload-image', { method: 'POST', body: { base64 } })
+}
+
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext, images = null) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -314,7 +476,7 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(townContext === undefined ? {} : { townContext }) }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(Array.isArray(images) && images.length ? { images } : {}), ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功
@@ -533,6 +695,11 @@ export function updateGroupSummaryInterval(value) {
 /** 更新奇遇触发频率 0~1 */
 export async function updateEventFreq(value) {
   await request(`/config/event-freq`, { method: 'PUT', body: { value } })
+}
+
+/** 更新朋友圈发帖频率（0~3，1=默认 2~8 小时一条，0=关闭自动发帖） */
+export async function updateMomentFreq(value) {
+  await request(`/config/moment-freq`, { method: 'PUT', body: { value } })
 }
 
 /** 更新日程刷新周期（天，1~3） */
@@ -984,6 +1151,14 @@ export function listGalleryImages(limit = 100, offset = 0, folder = '', characte
   return request(path)
 }
 
+/**
+ * 批量删除图片（相册多选用）。后端逐张删除、只失效一次相册缓存。
+ * @returns {Promise<{success:boolean, deleted:number, failed:number, failedItems:Array}>}
+ */
+export function deleteImagesBatch(urls) {
+  return request(`/images/delete-batch`, { method: 'POST', body: { urls } })
+}
+
 /** 提交后台重新生成任务（完成后需确认才覆盖原图） */
 export function regenerateImage(imageUrl) {
   return request(`/images/regenerate`, { method: 'POST', body: { url: imageUrl } })
@@ -1277,8 +1452,11 @@ export async function restoreWorkflow() {
   return request(`/workflows/restore`, { method: 'POST' })
 }
 
-export async function updateWorkflowMode(mode) {
-  return request(`/config/workflow-mode`, { method: 'PUT', body: { mode } })
+export async function updateWorkflowMode(mode, customTemplate) {
+  const body = { mode }
+  // mode === 'custom' 时一并提交全局自定义工作流文件名
+  if (customTemplate !== undefined) body.customTemplate = customTemplate
+  return request(`/config/workflow-mode`, { method: 'PUT', body })
 }
 
 export async function updateWorkflowScene(scene) {
@@ -1366,6 +1544,23 @@ export async function dismissNewspaperWorldState(dismissed) {
   return request(`/newspaper/dismiss-world`, { method: 'POST', body: { dismissed } })
 }
 
+// 删除某一期（连同它的配图文件）
+export async function deleteNewspaperEdition(date) {
+  return request(`/newspaper/editions/${date}`, { method: 'DELETE' })
+}
+
+/**
+ * 批量清除往期。
+ * @param {{ keep?: 'today'|'none', before?: string|null }} opts
+ *   keep='today'（默认）只清往期、保留今天；'none' 连今天一起清空
+ *   before='YYYY-MM-DD' 只清该日期之前（不含）的期
+ */
+export async function clearNewspaperEditions({ keep = 'today', before = null } = {}) {
+  let path = `/newspaper/editions?keep=${encodeURIComponent(keep)}`
+  if (before) path += `&before=${encodeURIComponent(before)}`
+  return request(path, { method: 'DELETE' })
+}
+
 
 // ── 事件库管理（奇遇事件类型 / 朋友圈话题）──
 
@@ -1411,6 +1606,12 @@ export function updateTopic(id, data) {
 
 export function deleteTopic(id) {
   return request(`/library/topics/${id}`, { method: 'DELETE' })
+}
+
+// 批量勾选 / 取消勾选话题（决定参不参与抽题，条目本身保留）
+// 传 { all: true } 表示全选/清空，或 { ids: [...] } 指定条目
+export function setTopicsChecked({ ids = null, all = false, checked }) {
+  return request(`/library/topics/set-checked`, { method: 'POST', body: { ids, all, checked } })
 }
 
 export function generateTopics(direction) {
@@ -1474,7 +1675,7 @@ export function listItems() {
   return request(`/items`)
 }
 
-// 开启每日宝箱（16 小时冷却；道具图片异步生成，完成后经 item_ready 事件刷新）
+// 开启每日宝箱（冷却由后端 CHEST_COOLDOWN_SECONDS 决定，本地为 1 分钟；道具图片异步生成，完成后经 item_ready 事件刷新）
 export function openChest() {
   return request(`/items/chest/open`, { method: 'POST' })
 }
@@ -1497,6 +1698,42 @@ export function discardItem(itemId) {
 // 提前移除已生效的效果（服饰/变身会同步撤销临时外观）
 export function removeActiveEffect(effectId) {
   return request(`/items/effects/${effectId}`, { method: 'DELETE' })
+}
+
+// ── 宝箱橱窗（分页浏览商品 → 挑选 → 带走）──
+
+/** 分页配置 + 各页可选商品数 */
+export function getLootPages() {
+  return request('/loot/pages')
+}
+
+/**
+ * 某页当前橱窗（4 个格子，未刷新过时全为空位）。
+ * @param {boolean} [ensure] true 时把缺图的格子补进生图队列 —— 打开橱窗时用，
+ *   这样卡上的「生成中」是真的在生成、且一定会完成（轮询兜底不要传，避免反复塞队列）
+ */
+export function getLootWindow(page, ensure = false) {
+  return request(`/loot/window?page=${encodeURIComponent(page)}${ensure ? '&ensure=1' : ''}`)
+}
+
+/** 给缺图的商品排队补图（管理用）；传 tags 只补指定几件 */
+export function repairLootImages({ limit = 50, tags = null } = {}) {
+  return request('/loot/repair-images', { method: 'POST', body: { limit, tags } })
+}
+
+/** 刷新某页（重抽 8 个；缺图的会异步排队生成，完成后经 loot_image_ready 事件推送） */
+export function rollLootWindow(page) {
+  return request('/loot/window/roll', { method: 'POST', body: { page } })
+}
+
+/** 带走选中的格子（写进背包），slots 为格子下标数组 */
+export function takeLootItems(page, slots) {
+  return request('/loot/window/take', { method: 'POST', body: { page, slots } })
+}
+
+/** 丢弃橱窗里的一格（不带走、不进背包，只把候选项划掉） */
+export function discardLootSlot(page, slot) {
+  return request('/loot/window/discard', { method: 'POST', body: { page, slot } })
 }
 
 // ── AI 小镇（世界页）──
@@ -1863,3 +2100,127 @@ export const fillAllStandingTouchLines = () => request('/expression-standings/to
 export const backfillMoments = () => request('/moments/backfill', { method: 'POST' })
 
 export const stopBackfillMoments = taskId => request(`/moments/backfill/${encodeURIComponent(taskId)}/stop`, { method: 'POST' })
+
+// ── 媒体内容页（传媒 / 板块 / 帖子）──
+
+/** 全部媒体（含板块数与帖子数） */
+export function listMediaOutlets() {
+  return request('/media/outlets')
+}
+
+export function createMediaOutlet(body) {
+  return request('/media/outlets', { method: 'POST', body })
+}
+
+export function updateMediaOutlet(id, body) {
+  return request(`/media/outlets/${id}`, { method: 'PUT', body })
+}
+
+export function deleteMediaOutlet(id) {
+  return request(`/media/outlets/${id}`, { method: 'DELETE' })
+}
+
+/** 某媒体下的板块 */
+export function listMediaBoards(outletId) {
+  return request(`/media/outlets/${outletId}/boards`)
+}
+
+export function createMediaBoard(outletId, body) {
+  return request(`/media/outlets/${outletId}/boards`, { method: 'POST', body })
+}
+
+export function updateMediaBoard(boardId, body) {
+  return request(`/media/boards/${boardId}`, { method: 'PUT', body })
+}
+
+export function deleteMediaBoard(boardId) {
+  return request(`/media/boards/${boardId}`, { method: 'DELETE' })
+}
+
+/** 帖子分页（不传 outlet 则跨媒体） */
+export function listMediaPosts({ outlet = null, board = null, category = null, limit = 40, offset = 0 } = {}) {
+  let path = `/media/posts?limit=${limit}&offset=${offset}`
+  if (outlet) path += `&outlet=${encodeURIComponent(outlet)}`
+  if (board) path += `&board=${encodeURIComponent(board)}`
+  // 分类过滤：digital = 数字报刊（周刊/海报）；social = 社交平台（帖子流）
+  if (category) path += `&category=${encodeURIComponent(category)}`
+  return request(path)
+}
+
+/** 抓一批新帖（异步：返回 started 后靠 SSE media_new_posts 得知完成） */
+export function refreshMediaPosts(body = {}) {
+  return request('/media/refresh', { method: 'POST', body })
+}
+
+/** 催一次封面补印 */
+export function fillMediaImages(limit = 6) {
+  return request('/media/fill-images', { method: 'POST', body: { limit } })
+}
+
+/** 传媒自动抓帖状态（当前档位 + 距下次还有多久 + 可选档位表） */
+export function getMediaAuto() {
+  return request('/media/auto')
+}
+
+/** 改传媒自动抓帖频率；minutes=0 关闭自动（只手动刷新） */
+export function setMediaAuto(minutes) {
+  return request('/media/auto', { method: 'PUT', body: { minutes } })
+}
+
+/** 清理未被引用的孤儿配图（重复生图的历史遗留）+ 重置卡住的生成状态 */
+export function cleanupMediaImages() {
+  return request('/media/cleanup-images', { method: 'POST' })
+}
+
+// ── 数据清理（按时间清理图片与内容记录）──
+
+/** 可清理项定义（界面据此渲染分组与说明） */
+export function getCleanupTargets() {
+  return request('/cleanup/targets')
+}
+
+/** 预览：指定天数前，各项会删多少行/多少文件/多少字节（不删任何东西） */
+export function surveyCleanup(days = 7) {
+  return request(`/cleanup/survey?days=${encodeURIComponent(days)}`)
+}
+
+/**
+ * 执行清理。**必须显式传 targets**；执行前会自动备份数据库（路径随响应返回）。
+ * @param {{days:number, targets:string[]}} body
+ */
+export function purgeCleanup(body) {
+  return request('/cleanup/purge', { method: 'POST', body })
+}
+
+/** 已有的清理前备份 */
+export function listCleanupBackups() {
+  return request('/cleanup/backups')
+}
+
+/** 为某条媒体内容重新生成配图（周刊/海报会连同小图一起重出） */
+export function regenerateMediaPostImage(postId) {
+  return request(`/media/posts/${postId}/regenerate-image`, { method: 'POST' })
+}
+
+/** 删除某条媒体内容（配图文件一并删除） */
+export function deleteMediaPost(postId) {
+  return request(`/media/posts/${postId}`, { method: 'DELETE' })
+}
+
+/** 批量删除媒体内容。ids 为帖子 id 数组，返回逐条结果（成功数 / 失败明细） */
+export function deleteMediaPosts(ids) {
+  return request('/media/posts/batch', { method: 'DELETE', body: { ids } })
+}
+
+/** 批量重新生图（清空旧图并置回待生成队列） */
+export function regenerateMediaPostImages(ids) {
+  return request('/media/posts/batch/regenerate-image', { method: 'POST', body: { ids } })
+}
+
+/**
+ * 门户：生成（或读取缓存的）某个板块的正文。
+ * 已生成过后端直接返回缓存（二次点开秒开）；首次要调 LLM，所以是同步等待。
+ */
+export function generateMediaSection(postId, sectionKey) {
+  return request(`/media/posts/${postId}/sections/${encodeURIComponent(sectionKey)}`, { method: 'POST' })
+}

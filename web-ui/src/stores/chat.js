@@ -312,8 +312,10 @@ export const useChatStore = defineStore('chat', () => {
 
   function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
 
-  async function sendMessage(content, imageMode = 'smart', deepThink = false, { townContext } = {}) {
-    if (streaming.value || !content.trim()) return
+  async function sendMessage(content, imageMode = 'smart', deepThink = false, { townContext, images = null } = {}) {
+    const attached = Array.isArray(images) ? images.filter(Boolean) : []
+    // 允许「只发图不写字」：有附件时不再要求文本非空
+    if (streaming.value || (!content.trim() && attached.length === 0)) return
     const charId = activeCharId.value
     if (!charId) return
 
@@ -325,7 +327,7 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
-    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
+    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId, ...(attached.length ? { images: [...attached] } : {}) })
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
 
@@ -478,7 +480,7 @@ export const useChatStore = defineStore('chat', () => {
         pendingTextTimers.clear()
       }
 
-      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink, townContext)
+      const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, deepThink, townContext, attached)
       abort = streamAbort
       const reader = stream.getReader()
 

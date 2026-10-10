@@ -68,6 +68,16 @@
         <span class="nav-label">相册</span>
       </router-link>
 
+      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="传媒">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
+            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
+          </svg>
+        </div>
+        <span class="nav-label">传媒</span>
+      </router-link>
+
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
@@ -158,6 +168,7 @@ const activeNavKey = computed(() => {
   if (p.startsWith('/town')) return 'town'
   if (p.startsWith('/schedule')) return 'schedule'
   if (p.startsWith('/gallery')) return 'gallery'
+  if (p.startsWith('/media')) return 'media'
   if (p.startsWith('/tavern')) return 'tavern'
   if (p.startsWith('/settings')) return 'settings'
   return 'chat'

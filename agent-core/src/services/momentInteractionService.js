@@ -18,7 +18,7 @@ import { config } from '../config.js';
 import { broadcast as broadcastToUnified } from './unifiedStreamBus.js';
 import { cropPersonalityForEmotion } from './emotionEngine.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote, firstMomentImagePrompt } from './momentForms.js';
+import { MOMENT_COMMENT_RULES, buildMomentImagePromptNote, firstMomentImagePrompt, adaptWorldForMoment } from './momentForms.js';
 
 // Sigmoid 参数（与 moments.js 多人模式一致）
 const MULTI_P_MIN = 0.30;
@@ -90,7 +90,7 @@ function formatThreadContext(threadComments, friendName, posterName, userName) {
 export async function generateFriendInitialComment(friend, posterChar, post, relDesc, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
+    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('interaction')
@@ -144,7 +144,7 @@ ${MOMENT_COMMENT_RULES}
 export async function generatePosterReplyToFriend(posterChar, friend, post, friendComment, threadContext, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
+    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('interaction')
@@ -204,7 +204,7 @@ ${MOMENT_COMMENT_RULES}
 export async function generateFriendContinuation(friend, posterChar, post, threadContext, deps = {}) {
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
+    ? getSystemRulesWithWorld({ worldTransform: adaptWorldForMoment })
     : getSystemRules();
   const worldIntegrationNote = worldSetting
     ? getWorldIntegrationRule('interaction')

@@ -44,13 +44,20 @@
         <div class="group-header">
           <span class="group-label">{{ group.label }}</span>
           <span class="group-count">{{ group.images.length }} 张</span>
+          <button
+            v-if="selectMode"
+            type="button"
+            class="group-pick"
+            @click="toggleGroup(group)"
+          >{{ groupAllSelected(group) ? '取消全选' : '全选本组' }}</button>
         </div>
         <div class="gallery-grid stagger">
           <div
             v-for="img in group.images"
             :key="img.name"
             class="gallery-item sheen"
-            @click="onPreview(img.flatIndex)"
+            :class="{ 'is-selecting': selectMode, 'is-selected': isSelected(img) }"
+            @click="onItemClick(img)"
           >
             <!-- 用 img + loading=lazy 取代 background-image：浏览器可延迟加载视口外缩略图 -->
             <img
@@ -60,6 +67,12 @@
               decoding="async"
               alt=""
             >
+            <!-- 多选态：右上角勾选标记（未选中是空心圈，选中填充打勾） -->
+            <span v-if="selectMode" class="pick" :class="{ on: isSelected(img) }" aria-hidden="true">
+              <svg v-if="isSelected(img)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </span>
           </div>
         </div>
       </div>
@@ -75,6 +88,24 @@
     </div>
     <div v-else-if="!hasMore && images.length > 0" class="load-more">— 共 {{ total }} 张 —</div>
 
+    <!-- 多选操作栏（底部悬浮，选择模式下常驻） -->
+    <Transition name="pick-bar">
+      <div v-if="selectMode" class="pick-bar">
+        <span class="pick-count">已选 <b>{{ selectedCount }}</b> 张</span>
+        <div class="pick-actions">
+          <linshe-button size="sm" variant="secondary" :disabled="deleting" @click="selectAllVisible">全选</linshe-button>
+          <linshe-button size="sm" variant="secondary" :disabled="!selectedCount || deleting" @click="clearSelection">清空</linshe-button>
+          <linshe-button
+            size="sm"
+            variant="danger"
+            :disabled="!selectedCount || deleting"
+            :loading="deleting"
+            @click="doBatchDelete"
+          >删除{{ selectedCount ? ` ${selectedCount} 张` : '' }}</linshe-button>
+        </div>
+      </div>
+    </Transition>
+
     <!-- 图片预览 Lightbox -->
     <ImageLightbox
       :visible="lightboxVisible"
@@ -89,8 +120,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { listGalleryImages } from '../api/index.js'
+import { ref, computed, inject, onMounted } from 'vue'
+import { listGalleryImages, deleteImagesBatch } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
@@ -98,7 +129,10 @@ import { useChatStore } from '../stores/chat.js'
 
 const PAGE_SIZE = 60
 
-const emit = defineEmits(['loaded'])
+const emit = defineEmits(['loaded', 'select-mode-change'])
+
+const confirmFn = inject('confirmFn', null)
+const toastFn = inject('toast', null)
 
 const images = ref([])
 const total = ref(0)
@@ -195,6 +229,109 @@ function onPreview(flatIndex) {
   lightboxVisible.value = true
 }
 
+// ── 多选与批量删除 ──
+// 选中集用文件名（img.name）而不是 URL：URL 可能带 ?_t= 防缓存参数，name 才是稳定的键。
+const selectMode = ref(false)
+const selected = ref(new Set())
+const deleting = ref(false)
+
+function isSelected(img) {
+  return selected.value.has(img.name)
+}
+
+/** 当前可见列表里被选中的张数（切筛选后旧选中项不在列表里，天然不计入） */
+const selectedCount = computed(() => {
+  let n = 0
+  for (const group of visibleDayGroups.value) {
+    for (const img of group.images) if (selected.value.has(img.name)) n++
+  }
+  return n
+})
+
+/** 按当前可见列表收集选中项的 URL（删除时要的是 URL） */
+function selectedUrls() {
+  const urls = []
+  for (const group of visibleDayGroups.value) {
+    for (const img of group.images) if (selected.value.has(img.name)) urls.push(img.url)
+  }
+  return urls
+}
+
+function onItemClick(img) {
+  // 选择模式下点击是「勾选」，不再打开大图
+  if (selectMode.value) { toggleSelect(img.name); return }
+  onPreview(img.flatIndex)
+}
+
+function toggleSelect(name) {
+  const next = new Set(selected.value)
+  if (next.has(name)) next.delete(name); else next.add(name)
+  selected.value = next
+}
+
+function clearSelection() {
+  selected.value = new Set()
+}
+
+function groupAllSelected(group) {
+  return group.images.length > 0 && group.images.every(i => selected.value.has(i.name))
+}
+
+function toggleGroup(group) {
+  const next = new Set(selected.value)
+  const all = groupAllSelected(group)
+  for (const i of group.images) { if (all) next.delete(i.name); else next.add(i.name) }
+  selected.value = next
+}
+
+function selectAllVisible() {
+  const next = new Set(selected.value)
+  for (const group of visibleDayGroups.value) for (const i of group.images) next.add(i.name)
+  selected.value = next
+}
+
+/** 进入/退出多选模式（由外层顶栏按钮触发） */
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  if (!selectMode.value) clearSelection()
+  emit('select-mode-change', selectMode.value)
+}
+
+async function doBatchDelete() {
+  const urls = selectedUrls()
+  if (!urls.length || deleting.value) return
+
+  const msg = `确定删除选中的 ${urls.length} 张图片吗？\n删除后无法恢复（聊天里引用了这些图的记录也会一并清理）。`
+  const ok = confirmFn
+    ? await confirmFn({ title: '删除图片', message: msg, okText: '删除', danger: true })
+    : window.confirm(msg)
+  if (!ok) return
+
+  deleting.value = true
+  try {
+    const res = await deleteImagesBatch(urls)
+    const n = res?.deleted ?? urls.length
+    if (res?.failed) toastFn?.(`已删除 ${n} 张，${res.failed} 张失败`, 'warning')
+    else toastFn?.(`已删除 ${n} 张`, 'success')
+    clearSelection()
+    // 必须重载：本地移除会让 loadMore 的 offset 基准失真（重复或漏加载）
+    await reloadKeepingCount()
+  } catch (err) {
+    console.error('[gallery] batch delete failed:', err)
+    toastFn?.('删除失败：' + (err?.message || ''), 'error')
+  } finally {
+    deleting.value = false
+  }
+}
+
+/**
+ * 删除后重载「当前已加载的数量」，修正分页 offset 基准。
+ * 直接 loadPage(0) 会把列表缩回一页、用户要重新往下滚；按已加载数量重载则内容不丢。
+ */
+async function reloadKeepingCount() {
+  await loadPage(0, Math.max(PAGE_SIZE, images.value.length))
+}
+
 function onRegenerated(newUrl) {
   const base = newUrl.replace(/\?.*$/, '')
   for (const img of images.value) {
@@ -213,6 +350,7 @@ function onDeleted(deletedUrl) {
 function onFolderChange(key) {
   if (activeFolder.value === key) return
   activeFolder.value = key
+  clearSelection()   // 切换筛选后列表变了，旧选中项不该被带过去
   loadPage(0)
   scrollContainer.value?.scrollTo({ top: 0 })
 }
@@ -220,6 +358,7 @@ function onFolderChange(key) {
 function onCharChange(id) {
   if (activeCharId.value === id) return
   activeCharId.value = id
+  clearSelection()
   loadPage(0)
   scrollContainer.value?.scrollTo({ top: 0 })
 }
@@ -238,11 +377,11 @@ function onCharWheel(e) {
 let loadSeq = 0
 let pendingFirstPage = false
 
-async function loadPage(offset) {
+async function loadPage(offset, limit = PAGE_SIZE) {
   const seq = ++loadSeq
   if (offset === 0) pendingFirstPage = true
   try {
-    const data = await listGalleryImages(PAGE_SIZE, offset, activeFolder.value || '', activeCharId.value)
+    const data = await listGalleryImages(limit, offset, activeFolder.value || '', activeCharId.value)
     if (seq !== loadSeq) return
     pendingFirstPage = false
     if (offset === 0) {
@@ -284,7 +423,7 @@ async function refresh() {
   await loadPage(0)
 }
 
-defineExpose({ refresh })
+defineExpose({ refresh, toggleSelectMode })
 </script>
 
 <style scoped>
@@ -416,6 +555,7 @@ defineExpose({ refresh })
 }
 
 .gallery-item {
+  position: relative;          /* 多选勾选标记的定位基准 */
   border-radius: 12px;
   overflow: hidden;
   background: var(--glass-bg-strong);
@@ -423,12 +563,79 @@ defineExpose({ refresh })
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, outline-color 0.15s ease;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
 }
 .gallery-item:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
+/* 多选态：把「点开大图」的悬浮放大收起来，避免误以为还能点开 */
+.gallery-item.is-selecting:hover { transform: none; }
+.gallery-item.is-selecting:hover .img-wrapper { transform: none; }
+.gallery-item.is-selected {
+  outline-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+.gallery-item.is-selected .img-wrapper { opacity: 0.82; }
+
+/* 勾选标记：未选 = 半透明空心圈，选中 = 实心打勾 */
+.pick {
+  position: absolute;
+  top: 8px; right: 8px;
+  width: 22px; height: 22px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.42);
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  pointer-events: none;   /* 点击交给整块 .gallery-item，圆圈本身不吃事件 */
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.pick.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  transform: scale(1.06);
+}
+
+/* 分组头的「全选本组」 */
+.group-pick {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.group-pick:hover { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+
+/* ── 底部多选操作栏 ── */
+.pick-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 12px -16px -16px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  display: flex; align-items: center; gap: 12px;
+  background: var(--popover-bg, var(--glass-bg-strong));
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--border);
+}
+.pick-count { font-size: 13px; color: var(--text-secondary); flex-shrink: 0; }
+.pick-count b { color: var(--accent); font-size: 15px; font-weight: 700; }
+.pick-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+.pick-bar-enter-active { transition: all 0.24s cubic-bezier(0.3, 1.2, 0.5, 1); }
+.pick-bar-leave-active { transition: all 0.16s cubic-bezier(0.4, 0, 0.2, 1); }
+.pick-bar-enter-from, .pick-bar-leave-to { opacity: 0; transform: translateY(16px); }
 
 .gallery-item .img-wrapper {
   display: block;
@@ -482,5 +689,13 @@ defineExpose({ refresh })
   .char-scroll {
     gap: 8px;
   }
+  /* 操作栏的负边距要跟着容器 padding 走（移动端 padding 是 12px） */
+  .pick-bar {
+    margin: 10px -12px -12px;
+    padding: 9px 12px calc(9px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+  }
+  .pick-count { font-size: 12px; }
+  .pick-actions { gap: 6px; }
 }
 </style>

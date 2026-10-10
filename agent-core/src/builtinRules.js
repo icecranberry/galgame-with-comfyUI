@@ -38,24 +38,33 @@ export const IMAGE_PROMPT_RULE = {
   rule_key: 'image_prompt',
   rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph.
 
+Priority order: what the bodies are doing > the exact state of those bodies and of the clothing > framing > environment > lighting > mood. Environment and lighting may never replace, postpone, or soften the physical action.
+
 Follow this progression:
 
-1. Scene Setting — Open with the overall environment, framing, and mood.
-   e.g. "a chaotic yet cozy indoor living room scene", "a close-up portrait in warm afternoon light".
+1. **Physical action & body state — the most important part whenever the scene is sexual, intimate, or physically intense.** Describe literally what is happening at this instant, with plain anatomical nouns and no indirection:
+   - Who is doing what, to which body part, with which part of the body (hands, fingers, mouth, tongue, hips, penis, vulva, anus, breasts).
+   - The exact visible state of every involved part: erection, wetness and where it shows, lubrication, penetration (which part into which part, how far), semen, sweat, saliva, redness, marks, trembling, clenched muscles, hard nipples.
+   - Body position and geometry: standing, kneeling, bent over, lying on back or stomach, hips raised or pushed back, legs open or held apart, knees up, hands gripping what, and where each participant's weight rests.
+   - If a sex toy is worn or in use: name it, say where it sits on the body, its intensity, and the bulge, deformation, or wet patch it makes in the clothing or flesh.
+   - Face at the same time: expression, mouth open or bitten, tongue visible, eyes shut or unfocused or looking at something, tears or drool if present.
+   Example of the required level of detail: 'she is bent forward over the desk with her skirt hiked to her waist, her panties stretched between her thighs at knee height, a clear thread of fluid running from her vulva down her inner thigh; her right hand grips the desk edge with white knuckles; her mouth is open, tongue visible, eyes half shut and unfocused.'
+   When the scene is not physical, keep this step proportionate and move on.
 
-2. **MUST:** When an existing IP character appears, — Each character is written as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.".
+2. **Clothing — the exact, literal state, including partial states.** Say precisely what is still on, what has been moved and where it now sits, and what is bare. Partial states are allowed and often required: hem pulled aside, bra pushed up under the breasts, shirt open with nothing underneath, panties pulled down to the knees, one strap off the shoulder, wearing nothing but a collar, sock or single garment left on. Name the fabric and its position instead of summarising it. Do not tidy the scene up: never add clothing that the scene removed, and never remove clothing the scene kept. Only when the scenario is an ordinary non-intimate one (bathing, sleeping, sports, swimming, weather) switch the outfit completely to what that scenario calls for.
 
-3. Environment & Props — Describe furniture, objects, and background elements that ground the scene in a lived-in space. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
+3. **Characters — MUST:** When an existing IP character appears, each character is written as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.
 
-4. Lighting — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
+4. **Environment & Props** — Describe furniture, objects, and background elements that ground the scene in a lived-in space, and the surfaces bodies are resting on or against. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
 
-5. Atmosphere — End with the emotional tone: comfort, chaos, intimacy, etc.
-   e.g. "conveying an atmosphere of joyful chaos and shared leisure".
+5. **Lighting** — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
 
-6. Scene-appropriate clothing — The outfit is a binary choice: either fully switch to what the scenario calls for, or keep the character's original appearance exactly as established;  When the scenario calls for a swap, change completely: bathing or showering means no clothing and complete nude; sleeping in bed means pajamas or a nightgown; swimming or soaking in a hot spring means a swimsuit or a bath towel; exercising or playing sports means sportswear or gym clothes. These are only examples, not an exhaustive list — many other special scenarios exist (such as cooking, rainy or snowy weather, holidays, ceremonies, or anything else the scene calls for), so judge the right outfit from the context and explicitly describe the changed outfit.
+6. **Atmosphere** — End with the emotional tone, e.g. 'conveying an atmosphere of joyful chaos and shared leisure'. Atmosphere is the last thing added and must never be used in place of step 1.
 
 Hard Rules:
 - **When an existing IP character appears, write the character as 'Character \\(Series\\)' (e.g. 'Furina \\(Genshin Impact\\)'). The first mention of each character MUST also include ≥6 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, build, distinctive features) in parentheses after the series.**
+- **Explicit, not suggestive.** If the conversation contains a sexual act, describe that act directly and completely: the same participants, the same position, the same act, the same stage it is at. Never replace the act with mood, metaphor, or a summary, and never narrate around it.
+- **Never do any of these:** writing 'they make love', 'an intimate moment', 'things escalate', 'one thing leads to another'; saying the image is censored, implied, suggested, off-screen, or out of frame; hiding the subject behind a blanket, steam, a sheet, or a shadow when the scene is about that subject; showing only a face, a hand, or a wide shot at the moment the body is the subject; leaving out which part is doing what.
 - If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together.'
 - ALL text in English. No Chinese characters anywhere.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
@@ -252,10 +261,10 @@ const WORLD_INTEGRATION_TASK_RULES = Object.freeze({
 
   moments: `${WORLD_INTEGRATION_PREAMBLE}以下所有创作必须在<world_setting>的框架内展开：
 
-1. 朋友圈的内容必须反映<world_setting>下的真实生活。角色分享的日常、感悟、见闻、吐槽，都应该自然地带出这个世界特有的元素——无论是街头景象、社交方式、人际关系，还是这个世界的"理所当然"。
-2. 角色的行为模式和互动方式的"正常"与"异常"，由<world_setting>定义。在这个世界里理所当然的事情，在现实世界可能不可思议——朋友圈的语气和内容应该自信地反映这种理所当然，不需要向读者解释。
+1. 朋友圈的内容必须反映<world_setting>下的真实生活——但**世界是空气，不是台词**。角色生在这里、长在这里，她发朋友圈时不会去解释这个世界、也不会复述<world_setting>里的描写和例句；世界的味道要从"她觉得什么理所当然"里透出来，而不是从她嘴里搬设定原话。
+2. 角色的行为模式和互动方式的"正常"与"异常"，由<world_setting>定义。在这个世界里理所当然的事情，在现实世界可能不可思议——朋友圈的语气和内容应该自信地反映这种理所当然，不需要向读者解释，也不需要引用设定原文。
 3. 朋友圈的配图（imagePrompt）也要渗透<world_setting>的视觉细节。场景、氛围、人物的互动方式、身体语言，都要符合这个世界的视觉规则。画面中的每一个元素都应该一致地属于这个世界。
-4. 不要把<world_setting>当成一段可以忽略的"前置说明"。它必须穿透到朋友圈的每一个字和每一帧画面中。<world_setting>不是背景，是地基。`,
+4. 不要把<world_setting>当成一段可以忽略的"前置说明"。它必须穿透到朋友圈的每一个字和每一帧画面中——但穿透的是**世界观**（什么是正常的），不是**措辞**（不要照抄设定里的句子）。`,
 
   momentReply: `${WORLD_INTEGRATION_PREAMBLE}以下所有创作必须在<world_setting>的框架内展开：
 

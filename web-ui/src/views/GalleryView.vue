@@ -9,6 +9,16 @@
       >相册</span>
       <div class="header-right">
         <span class="gallery-count" v-if="totalCount > 0">共 {{ totalCount }} 张</span>
+        <linshe-button
+          v-if="totalCount > 0"
+          class="btn-pick"
+          :variant="selectMode ? 'primary' : 'secondary'"
+          @click="galleryRef?.toggleSelectMode()"
+        >
+          <svg v-if="!selectMode" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
+            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>{{ selectMode ? '取消选择' : '选择' }}
+        </linshe-button>
         <linshe-button class="btn-compress" variant="secondary" @click="showModal = true">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
             <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
@@ -19,7 +29,7 @@
     </div>
 
     <!-- 内容区 -->
-    <Gallery ref="galleryRef" @loaded="onLoaded" />
+    <Gallery ref="galleryRef" @loaded="onLoaded" @select-mode-change="onSelectModeChange" />
 
     <!-- 压缩弹窗（统一 LinsheModal 基座） -->
     <linshe-modal :visible="showModal" title="图片压缩" @close="showModal = false">
@@ -132,9 +142,15 @@ const toggleMobileSidebar = inject('toggleMobileSidebar')
 const toastFn = inject('toast')
 const galleryRef = ref(null)
 const totalCount = ref(0)
+// 多选态由 Gallery 内部持有，这里只镜像一份来切换顶栏按钮的文案/样式
+const selectMode = ref(false)
 
 function onLoaded(count) {
   totalCount.value = count
+}
+
+function onSelectModeChange(active) {
+  selectMode.value = active
 }
 
 // ── 压缩弹窗状态 ──
