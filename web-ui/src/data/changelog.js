@@ -24,13 +24,23 @@
 //    手动改它没有意义（下次 tag 会被覆盖），想让用户重新看到弹窗，
 //    改文案就行了 —— 哪怕只是加一个标点。
 // ────────────────────────────────────────────────────────────────────────
-export const CHANGELOG_FLAG = 'ddd6a460d11f'
+export const CHANGELOG_FLAG = '0c767a6a49c0'
 
 /** 弹窗标题 */
 export const CHANGELOG_TITLE = '更新说明'
 
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
+  {
+    version: 'v3.8.0',
+    date: '2026-10-10',
+    title: '加入全新的媒体模块狸~以后有小道消息看狸~',
+    summary: '👀',
+    items: [
+      '加入全新媒体模块',
+      '角色设置加入了更多外观设置，可以定义多套衣服了，并根据日程安排选择穿哪套'
+    ],
+  },
   {
     version: 'v3.7.0',
     date: '2026-10-8',

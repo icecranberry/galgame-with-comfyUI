@@ -35,6 +35,6 @@ export const COMMUNITY_LINKS = [
 
 /** 特别鸣谢：names 用 、 连接展示 */
 export const SPECIAL_THANKS = [
-  { label: '技术支持', names: ['派萌=.=', '刘明诚', '千野'] },
+  { label: '技术支持', names: ['派萌=.=', '刘明诚', '千野', '快乐的莫妮卡'] },
   { label: 'Token支持', names: ['柚子', 'ギルティクラウン', '小奇wsq','QSK'] },
 ]
