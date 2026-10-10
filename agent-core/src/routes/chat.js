@@ -3,6 +3,10 @@ import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex }
 import { chatStream, chatSync } from '../llm/llm-client.js';
 import { config } from '../config.js';
 import { recallChatMemories, CHAT_RAG_TIMEOUT_MS } from '../services/memory/chatMemoryRecall.js';
+import {
+  isSoulEnabled, renderSoulStateBlock, soulReplyLengthHint, soulRecallTopK,
+  resonateSoul, reflectSoul, saveSoulState,
+} from '../services/soulEngine.js';
 import { isMemoryV3Enabled, getActiveSearchConfig } from '../services/memory/memoryConfig.js';
 import { activeMemorySearch, parseRecallInstruction, formatMemoryRecallBlock } from '../services/memory/activeSearch.js';
 import { curateChatMemories } from '../services/memoryExtractor.js';
@@ -104,6 +108,17 @@ const imageJudgeCounters = new Map();  // conversationId -> count
 
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
+
+// 灵魂快照列（memory_fragments.soul_snapshot）是 JSON 字符串；解析失败按无快照跳过。
+function parseSoulSnapshot(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 // 将 SQLite CURRENT_TIMESTAMP (UTC, 无时区标记) 转为 ISO 8601
 // SQLite: "YYYY-MM-DD HH:MM:SS"  →  JS: 被误解析为本地时间（各浏览器行为不一致）
@@ -323,6 +338,7 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
 
   const db = getDb();
   const characterId = req.params.id;
+  const soulEnabled = isSoulEnabled();
   if (!db.prepare('SELECT id FROM characters WHERE id=?').get(characterId)) return res.status(404).json({ error: '角色不存在' });
   getStandingDisplay().select(Number(characterId));
   const standingTurn = getStandingDisplay().begin(characterId, client_msg_id || standingTurnId());
@@ -813,8 +829,15 @@ ${coreRules}
     //    由 buildChatContext 插在稳定前缀之后、摘要之上，作为缓存前缀的收尾；
     //    随好感度变化的长度条单独降为 dynamicBlocks 首项——好感度换档只动提示词末尾那一小块，
     //    前面的大段（世界观、人格、格式规则、活人感规则、表情包）不再跟着重算。
+    //    灵魂系统开启时长度档位由 ExpressionDesire 主导（灵魂优先），affinity 三档不再参与长度判定；
+    //    显式生图意图的「15 字以内」硬规则始终优先。灵魂取值失败时静默回退到 affinity 三档。
+    let soulLengthHint = null;
+    if (soulEnabled) {
+      try { soulLengthHint = soulReplyLengthHint(characterId); } catch { soulLengthHint = null; }
+    }
     const sentenceHint = (() => {
       if (explicitImageIntent) return '15个汉字以内';
+      if (soulLengthHint) return soulLengthHint;
       if (affinity == null || affinity < 60) return '10~30个汉字';
       if (affinity < 80) return '10~40个汉字';
       return '10~60个汉字';
@@ -870,8 +893,14 @@ ${coreRules}
           FROM group_members WHERE character_id = ? ORDER BY group_id
         `).pluck().all(characterId);
         const memoryScope = [conversationId, ...groupConversationIds];
+        // 灵魂 RecallDepth 驱动召回量（默认关时用 memory_settings.topK）
+        let soulTopK = null;
+        if (soulEnabled) {
+          try { soulTopK = soulRecallTopK(characterId); } catch (soulErr) { console.warn('[chat] soul topK skipped:', soulErr.message); }
+        }
         const { results: memoryResults, timedOut: ragTimedOut } = await recallChatMemories(message, {
           conversationIds: memoryScope,
+          ...(soulTopK ? { topK: soulTopK } : {}),
         });
         if (ragTimedOut) {
           console.warn(`[chat] memory search exceeded ${CHAT_RAG_TIMEOUT_MS}ms; continuing without RAG memories`);
@@ -883,6 +912,21 @@ ${coreRules}
             && !judgment.includes('【奇遇')
             && !judgment.includes('未互动事件');
         });
+        // 灵魂共鸣轨（resonate）：把召回记忆携带的四维快照平均后反向推动当前灵魂状态。
+        // 必须放在 2.5 秒熔断返回之后（此处已在 recallChatMemories 之外）；灵魂关闭或无快照则跳过。
+        // 独立 try：灵魂侧任何异常都不得影响下方 <rag_memories> 注入。
+        if (soulEnabled) {
+          try {
+            const soulSnapshots = chatMemoryResults.map(m => parseSoulSnapshot(m.soul_snapshot)).filter(Boolean);
+            if (soulSnapshots.length > 0) {
+              resonateSoul(characterId, soulSnapshots);
+              // 情绪评估关闭时没有 reflect 收尾的落库点，这里补一次（情绪开启时由 emotion .then 统一落库）
+              if (!config.features.emotion) saveSoulState(characterId);
+            }
+          } catch (soulErr) {
+            console.warn('[chat] soul resonate failed:', soulErr.message);
+          }
+        }
         if (chatMemoryResults.length > 0) {
           // v3 注入单元（MMS）：语义转述（semantic_note）优先、judgment 兜底；首个视角标签进 [类型|视角] 前缀。
           // v3 关闭时完全回退旧行为（纯 judgment）。
@@ -960,6 +1004,18 @@ ${coreRules}
     const newspaperEventBlock = getCharacterEventBlockFor(characterId);
     if (newspaperEventBlock) {
       dynamicBlocks.push(newspaperEventBlock);
+    }
+
+    // ── 灵魂自我认知倾向（<soul_state>）：动态块高频端靠后——每轮 reflect/resonate 都可能变，
+    //    必须排在关系深度重申之前、不得进稳定前缀区（邻舍对前缀缓存敏感）。
+    //    与 VAD「此刻情绪」并存，措辞用「倾向」明确区分，避免两个块互相打架。
+    if (soulEnabled) {
+      try {
+        const soulBlock = renderSoulStateBlock(characterId);
+        if (soulBlock) dynamicBlocks.push(soulBlock);
+      } catch (soulErr) {
+        console.warn('[chat] soul state block skipped:', soulErr.message);
+      }
     }
 
     // ── 关系深度一句话重申（固定动态块最末）：档位全文在第 5 位按变动频率排序，
@@ -1160,6 +1216,25 @@ ${coreRules}
       // @memory 闸门主动 abort 属预期；其余错误维持原行为向上抛
       if (!recallQuery) throw err;
       console.log('[chat] first stream aborted for @memory recall');
+    }
+
+    // 空正文重试：端点在思考模式下偶发只产出推理、正文为空（finish=stop），
+    // 表现为用户看到一个空气泡（最终由下方兜底写成 "..."）。此处最多补发一次请求；
+    // 仍为空则维持原行为交给兜底，不改变任何既有分支。
+    if (!clientGone && !recallQuery
+      && !streamState.fullContent.trim()
+      && streamState.collectedSegments.length === 0) {
+      console.warn('[chat] 主聊天流返回空正文，重试一次');
+      streamState.fullContent = '';
+      streamState.splitter = new SentenceSplitter();
+      streamState.wasStopped = false;
+      try {
+        await consumeStream(msgs, upstreamAbort.signal);
+      } catch (err) {
+        if (clientGone) throw err;
+        if (!recallQuery) throw err;
+        console.log('[chat] empty-reply retry aborted for @memory recall');
+      }
     }
 
     // 流在单行 @memory 指令处结束（无换行）时补检一次
@@ -1365,6 +1440,7 @@ ${coreRules}
       const evalContext = {
         conversationId,
         characterId: parseInt(characterId, 10) || null,
+        soulEnabled,
         characterPersonality: character?.short_prompt || '',
         emotionBaseline,
         currentVad: getCompositeEmotion(emotionState),
@@ -1392,6 +1468,17 @@ ${coreRules}
         const newAffinity = evolveAffinity(emotionCleanup.currentAffinity, affinityDelta ?? 0);
         saveEmotionSnapshot(conversationId, lastInsertRowid, evolved, dominantEmotion, newAffinity, affinityDelta, reason);
         saveAffinity(characterId, newAffinity);
+        // 灵魂 reflect 轨：复用同一次 LLM 调用多要的 4 位 soul_state_code；
+        // 本轮结束时统一落库一次（resonate 已在召回段作用于内存态，此处一并写盘）。
+        // 独立 try：灵魂侧异常不得吃掉下方的情绪显示更新。
+        if (soulEnabled) {
+          try {
+            if (r.soulStateCode) reflectSoul(characterId, r.soulStateCode);
+            saveSoulState(characterId);
+          } catch (soulErr) {
+            console.warn('[chat] soul reflect failed:', soulErr.message);
+          }
+        }
         if (source === 'llm' && r.evaluationSucceeded !== false) getStandingDisplay().reason(standingTurn, reason);
         if (config.features.realtimeAffinityDisplay) {
           send('affinity_update', { affinity: newAffinity, affinityDelta: affinityDelta ?? 0, lastReason: reason || '' });

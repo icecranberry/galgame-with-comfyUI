@@ -305,6 +305,8 @@ export function formatRow(row, source, score) {
     event_time: row.event_time || null,
     valid_from: row.valid_from || null,
     valid_to: row.valid_to || null,
+    // 灵魂快照：记忆落库那一刻的四维 energy（JSON 字符串），召回时反向共鸣消费
+    soul_snapshot: row.soul_snapshot || '',
     score,
     sources: [source],
   };

@@ -48,6 +48,7 @@ function createDb() {
       strength REAL NOT NULL DEFAULT 1.0,
       retrieval_count INTEGER NOT NULL DEFAULT 0,
       last_reinforced_at DATETIME,
+      soul_snapshot TEXT NOT NULL DEFAULT '',
       embedding_state TEXT NOT NULL DEFAULT 'disabled',
       embedding_profile TEXT,
       embedding_error TEXT,
