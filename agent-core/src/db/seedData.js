@@ -31,6 +31,7 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   comfy_event_height: '900',
   // Feature Flags
   feature_emotion: 'true',
+  feature_soul: 'false',
   feature_memory: 'true',
   feature_replyGuesses: 'true',
   feature_forceImageGen: 'false',

@@ -600,6 +600,14 @@ type="range" min="1" max="10" step="1"
 
         <div class="toggle-row">
           <div>
+            <div class="tl">灵魂系统<span class="beta-tag">测试版</span></div>
+            <div class="td">角色的「自我认知」四维倾向（回忆/记住/表达/发散），跟角色走、跨重启延续，影响召回量、记忆条数与回复长度</div>
+          </div>
+          <linshe-switch v-model="features.soul" @change="saveFeature('soul', features.soul)" />
+        </div>
+
+        <div class="toggle-row">
+          <div>
             <div class="tl">聊天候选词</div>
             <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
           </div>
@@ -1317,7 +1325,7 @@ const novelaiApiKeySaved = ref(false)
 const novelaiApiKeyCleared = ref(false)
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
+const features = reactive({ emotion: false, soul: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
 // 仅换算显示，保留原有 0~1 参数；公式对应两个 scheduler 的现有间隔。

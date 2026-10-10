@@ -5,6 +5,7 @@ import { getMemorySettings, MEMORY_MODE } from './memoryConfig.js';
 import { embedMemoryText, getPreferredMemoryEmbeddingProfile } from './memoryProviders.js';
 import { upsertVector, deleteVector, deleteByConversation } from '../vectorClient.js';
 import { createMemoryIndexWorker } from './memoryIndexWorker.js';
+import { getSoulSnapshot } from '../soulEngine.js';
 
 const MEMORY_TYPES = new Set(['knowledge', 'skill', 'emotion', 'event']);
 const SUBJECTS = new Set(['user', 'character', 'relationship', 'assistant']);
@@ -35,6 +36,23 @@ const PRIORITY_HISTORY = 10;
 // 索引任务失败自动重试上限（与整理 daemon 的 MAX_ATTEMPTS 同口径）：
 // 到上限才落 failed，否则回 pending，由 worker 在 100ms 重泵时自然重试。
 export const MAX_INDEX_ATTEMPTS = 3;
+
+/**
+ * 灵魂快照：记忆落库那一刻的四维 energy（JSON 字符串）。
+ * 灵魂系统关闭（config.features.soul=false）或非 1v1 角色会话（群聊无 character 上下文）→ 空串。
+ * 存量记忆没有快照，不回填；共鸣时按无快照跳过。
+ */
+function resolveSoulSnapshot(conversationId) {
+  const match = /^char_(\d+)/.exec(String(conversationId || ''));
+  if (!match) return '';
+  try {
+    const snapshot = getSoulSnapshot(match[1]);
+    return snapshot ? JSON.stringify(snapshot) : '';
+  } catch {
+    // 灵魂侧异常不得影响记忆落库
+    return '';
+  }
+}
 
 /**
  * 索引任务失败后应落的状态（纯函数，便于单测）。
@@ -142,6 +160,8 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
   const db = getDb();
   const normalized = actions.map(validateMemoryAction);
   const profile = getPreferredMemoryEmbeddingProfile();
+  // 灵魂快照在本批记忆落库前统一取一次（同一角色同一时刻，批内一致）
+  const soulSnapshot = resolveSoulSnapshot(conversationId);
   const created = [];
   const transaction = db.transaction(() => {
     for (const item of normalized) {
@@ -160,9 +180,9 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
           memory_id, memory_type, subject, judgment, reasoning, tags, content_hash, status,
           source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at,
           keywords, perspectives, episodic_note, semantic_note,
-          event_time, valid_from, valid_to, importance, strength, retrieval_count
+          event_time, valid_from, valid_to, importance, strength, retrieval_count, soul_snapshot
         ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP,
-                  ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0)
+                  ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0, ?)
       `).run(
         conversationId, sourceMessageId, legacyType, item.memory.judgment, JSON.stringify(item.memory.tags),
         memoryId, item.memory.memoryType, item.memory.subject, item.memory.judgment, item.memory.reasoning,
@@ -170,7 +190,7 @@ export function applyMemoryActions({ conversationId, sourceRawStartId, sourceRaw
         profile?.fingerprint || null, profile ? 'pending' : 'disabled',
         JSON.stringify(item.memory.keywords), JSON.stringify(item.memory.perspectives),
         item.memory.episodicNote, item.memory.semanticNote,
-        eventTime, item.memory.importance
+        eventTime, item.memory.importance, soulSnapshot
       );
       for (const entity of item.memory.entities) {
         const entityId = upsertMemoryEntity(db, entity.name);
@@ -212,6 +232,7 @@ export function insertGeneralizedMemory({ conversationId, memory, sourceMemoryId
   const duplicate = db.prepare(`SELECT memory_id FROM memory_fragments WHERE conversation_id = ? AND content_hash = ? AND status = 'active'`).get(conversationId, contentHash);
   if (duplicate) return null;
   const memoryId = `mem_${randomUUID()}`;
+  const soulSnapshot = resolveSoulSnapshot(conversationId);
   const tx = db.transaction(() => {
     db.prepare(`
       INSERT INTO memory_fragments(
@@ -219,9 +240,9 @@ export function insertGeneralizedMemory({ conversationId, memory, sourceMemoryId
         memory_id, memory_type, subject, judgment, reasoning, tags, content_hash, status,
         source_raw_start_id, source_raw_end_id, embedding_profile, embedding_state, updated_at,
         keywords, perspectives, episodic_note, semantic_note,
-        event_time, valid_from, valid_to, importance, strength, retrieval_count
+        event_time, valid_from, valid_to, importance, strength, retrieval_count, soul_snapshot
       ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, CURRENT_TIMESTAMP,
-                ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0)
+                ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, ?, 1.0, 0, ?)
     `).run(
       conversationId, null, 'fact', normalized.judgment, JSON.stringify(normalized.tags),
       memoryId, normalized.memoryType, normalized.subject, normalized.judgment, normalized.reasoning,
@@ -231,7 +252,7 @@ export function insertGeneralizedMemory({ conversationId, memory, sourceMemoryId
       profile?.fingerprint || null, profile ? 'pending' : 'disabled',
       JSON.stringify(normalized.keywords), JSON.stringify(normalized.perspectives),
       normalized.episodicNote, normalized.semanticNote,
-      normalized.importance
+      normalized.importance, soulSnapshot
     );
     for (const entity of normalized.entities) {
       const entityId = upsertMemoryEntity(db, entity.name);
