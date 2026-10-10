@@ -3,6 +3,7 @@ import { chatSync } from '../llm/llm-client.js';
 import { hybridSearch } from './memorySearch.js';
 import { applyMemoryActions, getCheckpoint, setCheckpoint } from './memory/memoryRepository.js';
 import { isMemoryV3Enabled } from './memory/memoryConfig.js';
+import { soulCurationLimit } from './soulEngine.js';
 import { buildAnalysisUserContent, buildChatLogLines, buildSharedAnalysisSystemPrompt, wrapChatLogBlock } from './chatLogPrompt.js';
 
 const conversationQueues = new Map();
@@ -14,6 +15,18 @@ const CURATION_MAX_TOKENS = 6000;
 export const CURATION_MAX_ACTIONS = 12;
 const CURATION_COMPACT_ACTIONS = 4; // 输出被截断后重发时压小的条数
 const CURATION_MAIBOT_ACTIONS = 5; // 不落库的 maibot 路径只取判断句，输出预算 1800
+
+/**
+ * 本轮 curation 条数上限：灵魂系统开启时由 ImpressionDepth 决定，否则用硬上限。
+ * 无论灵魂给多少，都不超过 CURATION_MAX_ACTIONS（输出预算与 slice 都按它对齐）。
+ */
+function resolveCurationLimit(conversationId) {
+  const match = /^char_(\d+)/.exec(String(conversationId || ''));
+  if (!match) return CURATION_MAX_ACTIONS;
+  const limit = soulCurationLimit(match[1]);
+  if (!limit) return CURATION_MAX_ACTIONS;
+  return Math.min(CURATION_MAX_ACTIONS, Math.max(1, limit));
+}
 
 export function curateChatMemories(options) {
   const key = options.conversationId;
@@ -58,11 +71,14 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
   const timeRange = messages[0]?.created_at && eventTime ? `${messages[0].created_at} ~ ${eventTime}` : '';
   setCheckpoint(conversationId, checkpoint.last_raw_msg_id, 'processing', null);
 
+  // 灵魂 ImpressionDepth 决定本轮条数上限（默认 CURATION_MAX_ACTIONS）
+  const maxActions = resolveCurationLimit(conversationId);
+
   try {
     const related = await hybridSearch(transcript, { conversationId, topK: 12, timeoutMs: 20000 });
     // 不带 response_format 发：部分渠道会给 json 模式额外注入 token，导致 prompt 前缀与
     // 对话摘要对不上、整段聊天记录掉命中（实测 18% vs 93%）。prompt 本身已强制严格 JSON。
-    let requestMessages = buildCurationMessages({ transcript, related, timeRange });
+    let requestMessages = buildCurationMessages({ transcript, related, timeRange, maxActions });
     let result = await chatSync(requestMessages, {
       temperature: 0.2,
       max_tokens: CURATION_MAX_TOKENS,
@@ -73,7 +89,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
     // 换成条数更少的精简指令重发：共享前缀（system + <chat_log>）没动，缓存照样命中。
     if (planCurationRecovery({ finishReason: result.finishReason }) === 'compact') {
       console.warn(`[memoryExtractor] 输出被 max_tokens(${CURATION_MAX_TOKENS}) 截断，改用精简指令重发: ${conversationId} raw ${startId}-${endId}`);
-      requestMessages = buildCurationMessages({ transcript, related, timeRange, compact: true });
+      requestMessages = buildCurationMessages({ transcript, related, timeRange, compact: true, maxActions });
       result = await chatSync(requestMessages, {
         temperature: 0.2,
         max_tokens: CURATION_MAX_TOKENS,
@@ -83,7 +99,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
     }
     let actions;
     try {
-      actions = parseMemoryActions(result.content);
+      actions = parseMemoryActions(result.content).slice(0, maxActions);
     } catch (parseError) {
       // 截断导致的半截 JSON 补发 json 模式也修不好，直接抛出，省掉一次全量未命中缓存的请求
       if (planCurationRecovery({ finishReason: result.finishReason, parseFailed: true }) !== 'json') {
@@ -96,7 +112,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
         response_format: { type: 'json_object' },
         label: '聊天记忆整理(json回退)',
       });
-      actions = parseMemoryActions(strict);
+      actions = parseMemoryActions(strict).slice(0, maxActions);
     }
     const saved = applyMemoryActions({ conversationId, sourceRawStartId: startId, sourceRawEndId: endId, sourceMessageId, actions, eventTime });
     setCheckpoint(conversationId, endId, 'idle', null);
@@ -116,7 +132,7 @@ export function buildMemoryCurationPrompt({ transcript, related = [], timeRange 
   // 条数上限：与 parseMemoryActions 的 slice 保持一致。输出预算有限，条数写多了会被 max_tokens 砍断，
   // 写超 slice 的部分又会被静默丢掉，所以直接在 prompt 里钉死上限。
   const actionBudget = compact
-    ? `- 上一次输出超出长度上限被截断：这次最多输出 ${CURATION_COMPACT_ACTIONS} 条，字段从简（reasoning 一句、episodicNote/semanticNote 各一句、entities 最多 2 个、triple 可省略）`
+    ? `- 上一次输出超出长度上限被截断：这次最多输出 ${Math.min(CURATION_COMPACT_ACTIONS, maxActions)} 条，字段从简（reasoning 一句、episodicNote/semanticNote 各一句、entities 最多 2 个、triple 可省略）`
     : `- 最多输出 ${maxActions} 条：按重要性排序只留最重要的 ${maxActions} 条，同一件事不要拆成多条`;
   const common = `你是聊天长期记忆整理器。只保存未来对话仍有价值、可独立理解的信息，不保存密码、密钥、一次性请求、泛化寒暄、角色固有设定或生图提示词。
 

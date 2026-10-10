@@ -28,6 +28,9 @@ const DECAY_MOOD = 0.98;
 const MOOD_WEIGHT = 0.4;
 const INSTANT_WEIGHT = 0.6;
 const MAX_INSTANT_SHIFT = 0.3;       // 单轮 VAD 最大偏移
+// 情绪评估的输出预算：该端点默认开思考，推理长度波动很大（实测 1.1k~5k tokens）。
+// 原值 200 必然被截断、正文为空，导致每轮都静默降级为零 delta。
+const EVALUATION_MAX_TOKENS = 8000;
 
 const DEFAULT_STATE = {
   valence: 0.5,
@@ -457,6 +460,14 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
   // 人格文本中的 "assistant" 替换为真实角色名（兼容旧 short_prompt 和 cropPersonalityForEmotion 的默认行为）
   const personalityText = (characterPersonality || '').replace(/assistant/g, characterName);
 
+  // 灵魂系统开启时，在同一次调用里多要一个 4 位 soul_state_code（reflect 轨），零额外 LLM 调用。
+  // 关闭时字符串完全不变，保证提示词前缀逐字节一致。
+  const soulEnabled = context.soulEnabled === true;
+  const soulRule = soulEnabled
+    ? `\n- soul_state_code: 4 位二进制，位序为 回忆量/记住量/表达欲/发散度（1=增强 0=减弱）。判断本轮互动让角色这四项"自我倾向"往哪边走：越投入、越需要翻找过往、越愿意深想，相应位取 1；越敷衍、越封闭取 0`
+    : '';
+  const soulJsonField = soulEnabled ? `,"soul_state_code":"1001"` : '';
+
   // ===== 高缓存优化：固定指令前置，变量数据后置 =====
   // OpenAI 兼容 API 按前缀缓存 prompt，固定部分放最前面可最大化缓存命中率。
   // 所有指令正文使用「角色」「用户」占位，不插入任何变量名，确保跨角色、跨轮次完全一致。
@@ -484,7 +495,7 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
 - vad_delta.dominance: -0.3 ~ +0.3，被尊重/掌控为正，被压制为负
 - affinity_delta: -3 ~ +6，用户让角色更喜欢ta为正，更疏远为负
 - dominant_emotion: 仅限 joy|sadness|anger|fear|surprise|disgust|curiosity|boredom|fatigue|neutral
-- reason: 用角色第一人称口吻简短解释判断理由，不要提加分扣分；提及用户时应使用用户名称而非"你"（10~30字）
+- reason: 用角色第一人称口吻简短解释判断理由，不要提加分扣分；提及用户时应使用用户名称而非"你"（10~30字）${soulRule}
 
 重要提示：
 1. 角色的情绪基线见下方数据，作为中性参照点
@@ -492,7 +503,7 @@ async function llmEvaluate(userMsg, assistantMsg, context = {}) {
 3. 如果用户的消息中性平淡，delta 应接近 0，不要强行解读
 
 只返回 JSON（不要任何其他文字）：
-{"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."}
+{"vad_delta":{"valence":0,"arousal":0,"dominance":0},"dominant_emotion":"neutral","affinity_delta":0,"reason":"..."${soulJsonField}}
 
 ===== 评估数据 =====`;
 
@@ -538,11 +549,15 @@ ${characterName}: "${cleanAssistant.slice(0, 500)}"
   const prompt = staticSystem + '\n' + variableData;
 
   try {
-    let raw = await chatSync(
+    const { content, finishReason } = await chatSync(
       [{ role: 'user', content: prompt }],
-      { temperature: 0.5, max_tokens: 200, response_format: { type: 'json_object' }, label: '情绪判断' }
+      { temperature: 0.5, max_tokens: EVALUATION_MAX_TOKENS, response_format: { type: 'json_object' }, label: '情绪判断', returnMeta: true }
     );
-    raw = raw.trim();
+    // 截断时正文为空，显式识别，避免与「JSON 格式错误」混成同一条日志
+    if (finishReason === 'length') {
+      console.warn(`[emotionEngine] 情绪评估被 max_tokens(${EVALUATION_MAX_TOKENS}) 截断，本轮降级为零 delta`);
+    }
+    let raw = content.trim();
     if (raw.startsWith('```')) {
       raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
     }
@@ -556,6 +571,7 @@ ${characterName}: "${cleanAssistant.slice(0, 500)}"
       dominantEmotion: parsed.dominant_emotion || 'neutral',
       affinityDelta: clamp(parsed.affinity_delta ?? 0, -3, 6),
       reason: parsed.reason || '',
+      soulStateCode: soulEnabled && /^[01]{4}$/.test(String(parsed.soul_state_code || '')) ? String(parsed.soul_state_code) : null,
       source: 'llm',
     };
   } catch (err) {
@@ -565,6 +581,7 @@ ${characterName}: "${cleanAssistant.slice(0, 500)}"
       dominantEmotion: 'neutral',
       affinityDelta: 0,
       reason: '(LLM 评估失败，返回零 delta)',
+      soulStateCode: null,
       evaluationSucceeded: false,
       source: 'llm',
     };

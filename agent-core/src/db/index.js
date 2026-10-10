@@ -1009,6 +1009,9 @@ function initSchema(db) {
   // 迁移: 记忆 v3 —— 多重表示 + 双时态演化 + 实体/三元组索引层（见 docs/memory-upgrade-plan.md）
   migrateChatMemoryV3Schema(db);
 
+  // 迁移: 灵魂系统 —— soul_states 表 + memory_fragments.soul_snapshot 列（见 services/soulEngine.js）
+  migrateSoulSchema(db);
+
   // 迁移: 记忆整理记账表（防同一批候选被反复送进 LLM）+ 整理/审计表维护索引
   migrateMemoryConsolidationMarks(db);
 
@@ -3251,6 +3254,34 @@ export function migrateChatMemoryV3Schema(db) {
     upgradeMemoryFtsToV3(db);
   } catch (err) {
     console.error('[db] migrateChatMemoryV3Schema error:', err.message);
+    throw err;
+  }
+}
+
+// 迁移: 灵魂系统（角色的自我认知状态层，见 services/soulEngine.js）。
+//   - soul_states：四维能量槽按 character_id 键控落库，跨会话/跨重启延续
+//   - memory_fragments.soul_snapshot：记忆落库那一刻的四维 energy 快照，供召回时反向共鸣
+// 默认关（config.features.soul），关闭时不写任何数据，但建表本身幂等无副作用。
+// 设计依据 .pai/plan/memory/20261010_灵魂系统最小迁移到邻舍.md。
+export function migrateSoulSchema(db) {
+  try {
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS soul_states (
+        character_id TEXT PRIMARY KEY,
+        recall_depth REAL NOT NULL DEFAULT 0,
+        impression_depth REAL NOT NULL DEFAULT 0,
+        expression_desire REAL NOT NULL DEFAULT 0,
+        creativity REAL NOT NULL DEFAULT 0,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run();
+
+    const columns = new Set(db.prepare(`PRAGMA table_info(memory_fragments)`).all().map(c => c.name));
+    if (!columns.has('soul_snapshot')) {
+      db.prepare(`ALTER TABLE memory_fragments ADD COLUMN soul_snapshot TEXT NOT NULL DEFAULT ''`).run();
+    }
+  } catch (err) {
+    console.error('[db] migrateSoulSchema error:', err.message);
     throw err;
   }
 }
