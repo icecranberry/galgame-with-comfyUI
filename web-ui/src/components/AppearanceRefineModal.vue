@@ -2,7 +2,7 @@
   <!-- ── 修正外观弹窗：上传 / 粘贴 / 拖拽参考图，邻舍分析后重写「## 你的外观」──
        整卡文本由 basePrompt prop 传入（可以是待确认的草稿卡，不要求角色已入库）；
        应用结果通过 @applied 回传重组后的整卡，落库/回填由父级决定。 -->
-  <linshe-modal v-model="visibleModel" :title="sceneLabel ? `修正「${sceneLabel}」外观 — ${displayName || ''}` : `修正外观 — ${displayName || ''}`" wide>
+  <linshe-modal v-model="visibleModel" :title="sceneLabel ? `修正「${sceneLabel === '工装' ? '默认' : sceneLabel}」外观 — ${displayName || ''}` : `修正外观 — ${displayName || ''}`" wide>
     <div class="refine-body" :class="{ 'is-dragging': refineDragging }" @dragover.prevent="refineDragging = true" @dragleave="onRefineDragLeave" @drop.prevent="onRefineDrop">
       <!-- 两种入口：找得到参考图就用图，只想描述就用文字。默认走图片（与旧行为一致） -->
       <LinsheTabs v-model="refineMode" :options="MODE_OPTIONS" size="sm" class="refine-mode-tabs" :disabled="refineAnalyzing" />
@@ -10,7 +10,7 @@
       <!-- ── 图片模式 ── -->
       <template v-if="refineMode === 'image'">
         <p class="refine-intro">
-          提供一张该角色的参考图，邻舍会观察图片并重写<b v-if="sceneLabel">「{{ sceneLabel }}」</b><template v-else>人格卡里的「## 你的外观」</template>的外观描述，
+          提供一张该角色的参考图，邻舍会观察图片并重写<b v-if="sceneLabel">「{{ sceneLabel === '工装' ? '默认' : sceneLabel }}」</b><template v-else>人格卡里的「## 你的外观」</template>的外观描述，
           生成「名字 + 五官 + 衣着」的生图描述。支持点击上传、Ctrl+V 粘贴、拖拽到窗口<template v-if="characterId">，或从最近图片中挑选并截取</template>。
         </p>
 
@@ -47,7 +47,7 @@
       <template v-else>
         <p class="refine-intro">
           写下你想要的服装要点——<b>几个词就够</b>（单品、颜色、材质、配饰、赤足与否…），邻舍会保留你提到的每一项，再把没说到的细节补全成一段完整的
-          <b v-if="sceneLabel">「{{ sceneLabel }}」</b><template v-else>外观</template>描述。不用写得工整，想到哪写到哪。
+          <b v-if="sceneLabel">「{{ sceneLabel === '工装' ? '默认' : sceneLabel }}」</b><template v-else>外观</template>描述。不用写得工整，想到哪写到哪。
         </p>
 
         <div class="refine-brief">

@@ -34,22 +34,7 @@
                     <div v-if="isMobile" class="emoji-dropdown-head">选择角色</div>
                     <div class="emoji-char-list">
                 <div
-                  v-if="archivedCount"
-                  class="emoji-arch-toggle"
-                  role="button"
-                  tabindex="0"
-                  :aria-pressed="showArchived"
-                  :title="showArchived ? '收起归档角色' : `展开 ${archivedCount} 个归档角色`"
-                  @click="toggleShowArchived"
-                  @keydown.enter.prevent="toggleShowArchived"
-                  @keydown.space.prevent="toggleShowArchived"
-                >
-                  <svg class="emoji-arch-arrow" :class="{ open: showArchived }" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6,9 12,15 18,9" /></svg>
-                  <span>归档角色</span>
-                  <span class="emoji-arch-count">{{ archivedCount }}</span>
-                </div>
-                <div
-                  v-for="c in displayCharacters"
+                  v-for="c in characters"
                   :key="c.id"
                   class="emoji-char-item"
                   :class="{ active: selectedCharId === c.id }"
@@ -490,24 +475,6 @@ function charName(id) {
 
 const selectedCharacter = computed(() => props.characters.find(c => c.id === selectedCharId.value) || null)
 
-// ── 归档角色：默认不显示 ──
-// 表情包管理只关心还在活动的角色，归档的几十个挤在列表里纯属干扰。
-// 默认收起，需要时点列表顶部的开关展开（状态存本地）。
-const SHOW_ARCHIVED_KEY = 'linshe.emoji.showArchived'
-const showArchived = ref((() => {
-  try { return localStorage.getItem(SHOW_ARCHIVED_KEY) === '1' } catch { return false }
-})())
-function toggleShowArchived() {
-  showArchived.value = !showArchived.value
-  try { localStorage.setItem(SHOW_ARCHIVED_KEY, showArchived.value ? '1' : '0') } catch {}
-}
-const archivedCount = computed(() => props.characters.filter(c => c.archived).length)
-/** 列表实际渲染的角色：收起归档时只留活跃角色 */
-const displayCharacters = computed(() =>
-  (showArchived.value || !archivedCount.value)
-    ? props.characters
-    : props.characters.filter(c => !c.archived)
-)
 const selectedCharacterName = computed(() => selectedCharacter.value?.display_name || selectedCharacter.value?.name || '请选择角色')
 /** 当前角色的全部配置单（启用中的排最前） */
 const selectedSets = computed(() => emojiSets.value.filter(s => s.character_id === selectedCharId.value))
@@ -1219,30 +1186,6 @@ onBeforeUnmount(() => {
 .emoji-char-picker { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .emoji-char-layer { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .emoji-char-dropdown { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-/* ── 归档角色开关（列表顶部，默认收起归档角色） ── */
-.emoji-arch-toggle {
-  display: flex; align-items: center; gap: 6px;
-  margin: 0 0 2px;
-  padding: 5px 10px;
-  border-radius: 10px;
-  font-size: 12px; font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer; user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.emoji-arch-toggle:hover { background: var(--bg-hover); color: var(--accent); }
-.emoji-arch-arrow {
-  flex-shrink: 0;
-  transform: rotate(-90deg);
-  transition: transform 0.18s var(--ease-standard);
-}
-.emoji-arch-arrow.open { transform: rotate(0deg); }
-.emoji-arch-count {
-  margin-left: auto;
-  font-size: 10px; font-weight: 600;
-  padding: 0 6px; border-radius: var(--radius-full);
-  background: var(--tint-subtle);
-}
 
 .emoji-char-list {
   flex: 1;

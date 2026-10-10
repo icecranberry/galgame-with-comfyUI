@@ -144,26 +144,6 @@ export function pickReactionMarker(emojiKey) {
   return '\u{1F642}';
 }
 
-/**
- * 「我的表情库」映射：key -> image_path（跨角色通用，用户主动发送时用）。
- * 表可能还没建（旧库未迁移）时返回空 Map，不影响角色表情包。
- *
- * ⚠ 2026-10-08 合并 v3.7.0：上游在同一位置新增了 pickReactionMarker（角色通知语义标记），
- *    本地补丁新增了本函数（我的表情库）—— 两者互不相干，**一并保留**。
- */
-export function getUserEmojiMap(db = getDb()) {
-  let rows = [];
-  try {
-    rows = db.prepare(`
-      SELECT emoji_key, image_path FROM user_emojis
-      WHERE status = 'done' AND image_path IS NOT NULL
-    `).all();
-  } catch {
-    return new Map();
-  }
-  return new Map(rows.map(r => [r.emoji_key, r.image_path]));
-}
-
 // ── 表情包配置单（多套切换） ──
 
 export const DEFAULT_EMOJI_SET_NAME = '默认表情包';

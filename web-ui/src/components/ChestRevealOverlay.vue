@@ -243,7 +243,7 @@ onUnmounted(stopTips)
   width: 198px;
   height: 198px;
   border-radius: 18px;
-  background: var(--bg-tertiary);
+  background: #f5efe7;
   overflow: hidden;
   display: flex;
   align-items: center;

@@ -60,7 +60,6 @@ async function maybePostNewspaperComplaint() {
     SELECT 1 AS blocked FROM characters
     WHERE id = ? AND (
       moments_disabled = 1
-      OR COALESCE(archived, 0) = 1
       OR (is_sleeping IS NOT NULL AND is_sleeping = 1)
       OR (temporary_wake_until IS NOT NULL AND temporary_wake_until > datetime('now'))
       OR id IN (SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged'))
@@ -119,7 +118,6 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.moments_disabled = 0
-        AND COALESCE(c.archived, 0) = 0
         AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND (c.temporary_wake_until IS NULL OR c.temporary_wake_until <= datetime('now'))
         AND (c.next_moment_at IS NULL OR c.next_moment_at <= datetime('now'))
@@ -182,7 +180,7 @@ async function tick() {
       } else {
         console.log('[momentScheduler] No active characters or all have NULL next_moment_at — initializing...');
         // 首次启动：给所有角色设定首次发帖时间（基准 1~4 小时，按 momentFreq 缩放）
-        const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND COALESCE(archived, 0) = 0 AND next_moment_at IS NULL').all();
+        const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND next_moment_at IS NULL').all();
         for (const c of chars) {
           const delay = (1 * 3600_000 + Math.random() * 3 * 3600_000) / Math.max(0.01, momentFreq);
           const nextAt = new Date(Date.now() + delay).toISOString();

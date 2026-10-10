@@ -345,6 +345,7 @@ const POLL_INTERVAL_MS = 20000
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
+  initialDate: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue', 'close', 'read'])
 
@@ -418,6 +419,7 @@ async function navEdition(dir) {
   if (target.today) {
     viewDate.value = ''
     pastPaper.value = null
+    if (todayPaper.value) emit('read', todayPaper.value)
     closeDetail()
     return
   }
@@ -577,7 +579,7 @@ async function fetchPaper() {
   // 开窗期间报纸才印出来（手动补发 / 生成完成）：首见即算看过，别把红点留在导航栏
   const firstArrival = Boolean(paper) && !todayPaper.value
   todayPaper.value = paper
-  if (visible.value && firstArrival) emit('read', paper)
+  if (visible.value && isToday.value && firstArrival) emit('read', paper)
   schedulePoll()
 }
 
@@ -707,11 +709,14 @@ watch(visible, async (open) => {
     // 报纸浮现的同一拍翻一页
     playNewspaperFlipSound()
     loading.value = true
-    viewDate.value = ''
+    viewDate.value = props.initialDate && props.initialDate !== localDateKey() ? props.initialDate : ''
     pastPaper.value = null
     try {
       await fetchPaper()
-      if (todayPaper.value) emit('read', todayPaper.value)
+      if (viewDate.value) {
+        const data = await api.getNewspaperByDate(viewDate.value)
+        pastPaper.value = data?.newspaper || null
+      } else if (todayPaper.value) emit('read', todayPaper.value)
     } catch { /* 打开失败时停在空态 */ }
     finally {
       loading.value = false

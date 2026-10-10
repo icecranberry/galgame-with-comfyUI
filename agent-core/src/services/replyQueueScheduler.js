@@ -28,7 +28,6 @@ import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
 import { maybeGenerateDailyNewspaper } from './newspaperService.js';
 import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, cleanupOrphanMediaImages } from './mediaService.js';
-import { resetStaleGenerating } from './lootService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
@@ -44,7 +43,6 @@ export function startReplyQueueScheduler() {
   // 启动自愈：把上次进程中断时遗留的「正在生成」放回可重试。
   // 生图队列在内存里，重启即丢，DB 状态却会停在 generating —— 不重置的话那几条
   // 既不会被重新排队，也会被 repairMissingImages 跳过，等于永久坏掉。
-  try { resetStaleGenerating(); } catch (e) { console.error('[replyQueue] loot 状态自愈失败:', e.message); }
   try { resetStaleMediaGenerating(); } catch (e) { console.error('[replyQueue] media 状态自愈失败:', e.message); }
 
   // 首次延迟 10 秒启动（等待 DB 就绪）
@@ -103,7 +101,6 @@ async function maybeRefreshOneSchedule() {
   const candidate = db.prepare(`
     SELECT id, display_name, base_prompt FROM characters
     WHERE schedule_enabled = 1
-      AND COALESCE(archived, 0) = 0
       AND (
         next_schedule_refresh_at IS NULL
         OR next_schedule_refresh_at <= datetime('now')

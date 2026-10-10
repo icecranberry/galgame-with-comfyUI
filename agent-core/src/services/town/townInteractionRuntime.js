@@ -84,7 +84,7 @@ function runtime(target, expected = {}) {
         items.push({ key: `story:${npc.id}`, kind: 'story', npcId: npc.id,
           title: `与${npc.display_name}展开特殊奇遇`, description: `从${name}的${building ? '场景' : '服务与谈话'}出发，和${npc.display_name}一起经历一段小镇故事。` });
       } else if (!building && actor?.characterId) {
-        const character = db.prepare('SELECT id,display_name FROM characters WHERE id=? AND events_disabled=0 AND COALESCE(archived,0)=0').get(actor.characterId);
+        const character = db.prepare('SELECT id,display_name FROM characters WHERE id=? AND events_disabled=0 ').get(actor.characterId);
         if (character) items.push({ key: `story:${character.id}`, kind: 'story', characterId: character.id,
           title: `与${character.display_name}展开特殊奇遇`, description: `从${name}的服务与谈话出发，在奇遇页选择行动并继续故事。` });
       }
@@ -220,7 +220,7 @@ export async function respondTownInteraction(target, requestId, decision, expect
   try {
     if (result.npcId) return await startTownNpcStory({ context, requests, input, target, requestId, result, name, actor, source,
       npcId: result.npcId, generateNpcStory });
-    const character = db.prepare('SELECT * FROM characters WHERE id=? AND events_disabled=0 AND COALESCE(archived,0)=0').get(result.characterId);
+    const character = db.prepare('SELECT * FROM characters WHERE id=? AND events_disabled=0 ').get(result.characterId);
     if (!config.features.events || !character) throw townError('REQUEST_UNAVAILABLE');
     const existing = db.prepare(`SELECT id,title FROM character_events WHERE character_id=? AND status IN ('pending','open','engaged') LIMIT 1`).get(character.id);
     if (existing) return requests.finish(input, requestId, { kind: 'story', eventId: existing.id }, existing.id);
@@ -240,7 +240,7 @@ ${serviceTask}展开一段适合玩家参与的生活奇遇，保持${character.
       beforePersist: () => {
         requests.check(input);
         if (!config.features.events) throw townError('REQUEST_UNAVAILABLE');
-        if (!db.prepare('SELECT 1 FROM characters WHERE id=? AND events_disabled=0 AND COALESCE(archived,0)=0').get(character.id)) throw townError('REQUEST_UNAVAILABLE');
+        if (!db.prepare('SELECT 1 FROM characters WHERE id=? AND events_disabled=0 ').get(character.id)) throw townError('REQUEST_UNAVAILABLE');
         const current = resolveTownInteractionTarget(context, target);
         if (!current.capabilities.includes('service') || current.input.actorId !== input.actorId) throw townError('REQUEST_UNAVAILABLE');
         const pending = requests.get(requestId);

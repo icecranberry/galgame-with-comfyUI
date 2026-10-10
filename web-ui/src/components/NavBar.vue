@@ -33,6 +33,17 @@
         </div>
         <span class="nav-label">奇遇</span>
       </div>
+      
+      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="媒体">
+        <div class="nav-icon-wrap">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 10v4a1 1 0 0 0 1 1h4l10 4V5L8 9H4a1 1 0 0 0-1 1Z" />
+            <path d="M8 9v6M5 15l1 5h3l-1-5M21 9a5 5 0 0 1 0 6" />
+          </svg>
+          <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读" aria-label="日报有更新"></span>
+        </div>
+        <span class="nav-label">媒体</span>
+      </router-link>
 
       <router-link to="/town" data-nav="town" class="nav-item" :class="{ active: $route.path.startsWith('/town') }" title="世界">
         <div class="nav-icon-wrap">
@@ -54,7 +65,7 @@
             <line x1="3" y1="10" x2="21" y2="10" />
           </svg>
           <span v-if="scheduleStore.resetTask?.backgrounded" class="nav-reset-dot" title="日程重置中">
-            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="nav-reset-spin"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="nav-reset-spin"><polyline points="23,4 23,10 17,10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
           </span>
         </div>
         <span class="nav-label">日程</span>
@@ -62,36 +73,23 @@
 
       <router-link to="/gallery" data-nav="gallery" class="nav-item" :class="{ active: $route.path.startsWith('/gallery') }" title="相册">
         <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
-          <path stroke="currentColor" stroke-width="35" d="M898.8 748.4c-11.9 0-21.5-9.6-21.5-21.5V254.1c0-23.7-19.3-43-43-43H189.7c-23.7 0-43 19.3-43 43v515.7c0 23.7 19.3 43 43 43h537.2c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5H189.7c-47.4 0-86-38.5-86-86V254.1c0-47.4 38.5-86 86-86h644.7c47.4 0 86 38.6 86 86v472.8c0 11.8-9.6 21.4-21.5 21.4z"/>
-          <path stroke="currentColor" stroke-width="35" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z"/>
+          <path stroke="currentColor" stroke-width="35" d="M898.8 748.4c-11.9 0-21.5-9.6-21.5-21.5V254.1c0-23.7-19.3-43-43-43H189.7c-23.7 0-43 19.3-43 43v515.7c0 23.7 19.3 43 43 43h537.2c11.9 0 21.5 9.6 21.5 21.5s-9.6 21.5-21.5 21.5H189.7c-47.4 0-86-38.5-86-86V254.1c0-47.4 38.5-86 86-86h644.7c47.4 0 86 38.6 86 86v472.8c0 11.8-9.6 21.4-21.5 21.4z" />
+          <path stroke="currentColor" stroke-width="35" d="M742.1 849.5a21.3 21.3 0 0 1-15.2-6.3L311.5 427.8 139.5 571c-8.9 7.9-22.5 7.1-30.3-1.8-7.9-8.9-7.1-22.4 1.8-30.3l172-150.4c8.5-7.5 21.4-7.2 29.5 0.9l429.8 429.8c8.4 8.4 8.4 22 0 30.4zM914.2 741.9c-4.2 4.3-9.8 6.5-15.4 6.5-5.4 0-10.8-2-15-6.1L657.1 520.8l-121.9 121.9c-8.4 8.4-22 8.4-30.4 0s-8.4-22 0-30.4l137-137c8.3-8.3 21.8-8.4 30.2-0.2l221.8 213.5c8.5 8.3 8.7 21.9 0.4 30.3z" />
         </svg>
         <span class="nav-label">相册</span>
-      </router-link>
-
-      <router-link to="/media" data-nav="media" class="nav-item" :class="{ active: $route.path.startsWith('/media') }" title="传媒">
-        <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9" />
-            <path d="M18 14h-8M15 18h-5M10 6h8v4h-8z" />
-          </svg>
-        </div>
-        <span class="nav-label">传媒</span>
       </router-link>
 
       <router-link to="/tavern" data-nav="tavern" class="nav-item" :class="{ active: $route.path.startsWith('/tavern') }" title="酒馆">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 1024 1024" width="24" height="24" fill="currentColor">
-            <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z"/>
-            <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z"/>
+            <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z" />
+            <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z" />
           </svg>
           <span v-if="mailbox.unreadCount > 0" class="nav-dot">{{ mailbox.unreadCount > 99 ? '99+' : mailbox.unreadCount }}</span>
-          <!-- 《邻舍日报》未读：复用信箱同一套 nav-dot 红点语言，落在左上位避免与右上数字徽标叠在一起 -->
-          <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读"></span>
         </div>
         <span class="nav-label">酒馆</span>
       </router-link>
-
-    </div>
+</div>
 
     <div class="nav-bottom">
       <router-link to="/settings" data-nav="settings" class="nav-item" :class="{ active: $route.path === '/settings' }" :title="updateInfo.hasUpdate ? '设置 · 有新版本' : '设置'">
@@ -326,11 +324,11 @@ onUnmounted(() => {
   animation: cel-jelly 0.45s var(--ease-spring) both;
 }
 
-/* 《邻舍日报》未读点：与信箱数字徽标同皮肤同动效，只是收成小圆点、落到图标左上位 */
+/* 《邻舍日报》未读点：与信箱数字徽标同皮肤同动效，收成小圆点，显示在媒体入口 */
 .nav-dot-daily {
   top: -5px;
-  right: auto;
-  left: -8px;
+  right: -6px;
+  left: auto;
   width: 12px;
   min-width: 12px;
   height: 12px;

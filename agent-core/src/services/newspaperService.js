@@ -287,14 +287,12 @@ function maybeRefillTodayImages(row) {
 /** 抽当天特稿主角（同步查询；导出供回归测试——此函数曾被误写成 async 导致调用处拿到 Promise） */
 export function pickFeaturedCharacter(db) {
   // 需要同时具备聊天（事件注入）与朋友圈（吐槽帖）两条链路，两边都禁用的角色不抽；
-  // 归档角色同样排除（不参与任何主动行为）。
   // 注意必须是同步函数：曾误写成 async 而调用处没 await，featured 变成 Promise，
   // id/display_name 全变 undefined，报纸主角链接与提示词一起失效。
   return db.prepare(`
     SELECT id, display_name, avatar_path, short_prompt, base_prompt, loras
     FROM characters
     WHERE events_disabled = 0 AND (moments_disabled IS NULL OR moments_disabled = 0)
-      AND COALESCE(archived, 0) = 0
     ORDER BY RANDOM() LIMIT 1
   `).get() || null;
 }

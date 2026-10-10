@@ -1078,11 +1078,7 @@ function initSchema(db) {
   // 迁移: 角色文件夹 — character_folders 表 + characters.folder_id 列
   migrateCharacterFolderSchema(db);
 
-  // 迁移: 角色归档 — characters 表新增 archived 列
-  migrateCharacterArchiveSchema(db);
 
-  // 迁移: 我的表情库 — user_emojis 表
-  migrateUserEmojiSchema(db);
 
   // 迁移: 朋友圈话题可勾选 — moment_topics 加 checked 列
   migrateMomentTopicCheckedSchema(db);
@@ -1155,9 +1151,6 @@ function initSchema(db) {
   migrateCharacterReactionPacksSchema(db);
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
-
-  // 迁移: 宝箱橱窗（loot_catalog 商品清单 + loot_offers 当前橱窗）
-  migrateLootCatalogSchema(db);
 
   // 迁移: 角色间关系的亲密度分级（决定朋友圈多人场景的概率与画面尺度）
   migrateRelationshipIntimacy(db);
@@ -1770,56 +1763,6 @@ function migrateMomentTopicCheckedSchema(db) {
     }
   } catch (err) {
     console.log('[db] migrateMomentTopicCheckedSchema error:', err.message);
-  }
-}
-
-/**
- * 迁移: 我的表情库 — user_emojis 表
- *
- * 用户自己的表情包，跨角色通用（与角色的 character_emojis 分开存）。
- * 不复用 character_emojis 的原因：那张表的 character_id 是 NOT NULL 外键到 characters(id)，
- * 借一个特殊 id 代表「用户」既违反外键约束，语义上也说不通；这里也不分 set（用户只有一套）。
- */
-function migrateUserEmojiSchema(db) {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS user_emojis (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        emoji_key TEXT NOT NULL UNIQUE,
-        prompt TEXT NOT NULL DEFAULT '',
-        image_path TEXT,
-        style TEXT,
-        status TEXT NOT NULL DEFAULT 'done'
-          CHECK(status IN ('pending','prompt_ready','generating','done','failed')),
-        error_message TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-  } catch (err) {
-    console.log('[db] migrateUserEmojiSchema error:', err.message);
-  }
-}
-
-/**
- * 迁移: 角色归档 — characters 表新增 archived 列
- *
- * 归档 = 该角色不再参与任何主动行为（主动聊天 / 朋友圈 / 奇遇 / 日程刷新 / 拉群），
- * 仅保留角色卡数据与「你主动找它时仍会回复」的能力。
- *
- * 刻意做成独立的拦截层，而不是去改动 moments_disabled / proactive_disabled /
- * events_disabled / schedule_enabled 这四个开关 —— 否则归档再取消会把用户单独设过的
- * 偏好一起抹掉。各调度器的选人查询统一叠加 `COALESCE(archived, 0) = 0`。
- */
-function migrateCharacterArchiveSchema(db) {
-  try {
-    const cols = db.prepare(`PRAGMA table_info(characters)`).all();
-    if (!cols.find(c => c.name === 'archived')) {
-      db.exec(`ALTER TABLE characters ADD COLUMN archived INTEGER DEFAULT 0`);
-      console.log('[db] Added characters.archived column (default 0)');
-    }
-  } catch (err) {
-    console.log('[db] migrateCharacterArchiveSchema error:', err.message);
   }
 }
 
@@ -2764,57 +2707,14 @@ function migrateChatBgSchema(db) {
   }
 }
 
-/**
- * 迁移: 宝箱橱窗 —— 商品清单与当前橱窗
- *
- * loot_catalog：由外部清单（E:\邻舍-local\loot-catalog\catalog.json）导入的商品池。
- *   图片按「单件」缓存（image_url），因为候选组合随机、几乎不重复，按整套生图等于每次刷新都烧算力。
- * loot_offers：当前橱窗里每页的 8 个格子。放库里而不是内存 —— 刷新页面不该把橱窗清空。
- */
-function migrateLootCatalogSchema(db) {
-  try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS loot_catalog (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tag TEXT NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        meaning TEXT NOT NULL DEFAULT '',
-        cat TEXT NOT NULL,
-        slot TEXT NOT NULL,
-        page TEXT NOT NULL,
-        image_url TEXT,
-        image_status TEXT NOT NULL DEFAULT '',
-        image_error TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_loot_catalog_page ON loot_catalog(page)`);
-    // 生图用英文 Danbooru tag 组合。
-    // 原先生图 prompt 只用 tag 字段，但词典里大量 tag 是生僻写法（如 sheer_babydoll），
-    // 模型不认识就自由发挥 —— A/B 实测「纯 tag」会画出一个玻璃罐子；
-    // 「中文描述」同样无效（Danbooru 系模型不吃中文）；「英文 tag 组合」才准确。
-    {
-      const cols = db.prepare(`PRAGMA table_info(loot_catalog)`).all();
-      if (!cols.find(c => c.name === 'image_tags')) {
-        db.exec(`ALTER TABLE loot_catalog ADD COLUMN image_tags TEXT`);
-        console.log('[db] Added loot_catalog.image_tags column');
-      }
-    }
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS loot_offers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        page TEXT NOT NULL,
-        slot_index INTEGER NOT NULL,
-        item_id INTEGER NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(page, slot_index)
-      )
-    `);
-    console.log('[db] loot catalog schema ready');
-  } catch (err) {
-    console.log('[db] migrateLootCatalogSchema error:', err.message);
-  }
+/** 一次性升级旧报刊；后续启动尊重用户选择的媒体类型。 */
+export function migrateMediaOutletLayouts(db) {
+  const migrated = db.prepare(`SELECT 1 FROM system_settings WHERE setting_key = 'media_layout_editable_migrated'`).get();
+  if (migrated) return;
+  db.transaction(() => {
+    db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name IN ('狸狸通讯社','狸狸八卦') AND layout != 'portal'`).run();
+    db.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES ('media_layout_editable_migrated', '1')`).run();
+  })();
 }
 
 /**
@@ -2846,15 +2746,13 @@ function migrateMediaSchema(db) {
       console.log('[db] Added media_posts.payload_json column');
     }
 
-    // ── 形态回填（幂等，每次启动都跑）──
+    // ── 一次性形态回填（后续保留用户选择）──
     try {
       // 两个报刊升级为「门户」：原来的 weekly/poster 是「一次长 LLM + N 张图」全量产出，
       // 在电脑宽屏上还只是 880px 居中单列、两侧各空 520px。门户把它拆成两层
       //（出刊只出骨架 → 立即可读；图后台串行补；正文点开才生成）。
       // 老帖仍按 payload 形态渲染（MediaWeekly / MediaPoster 保留），不会白丢内容。
-      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name IN ('狸狸通讯社','狸狸八卦') AND layout != 'portal'`).run();
-      // 老库里可能残留「还是 feed」的狸狸通讯社（很早的版本）：一并升级
-      db.prepare(`UPDATE media_outlets SET layout = 'portal' WHERE name = '狸狸通讯社' AND layout = 'feed'`).run();
+      migrateMediaOutletLayouts(db);
     } catch { /* ignore */ }
 
     const seeded = db.prepare(

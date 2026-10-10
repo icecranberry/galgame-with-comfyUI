@@ -17,7 +17,7 @@
       <div v-if="showPicker" ref="pickerRef" class="picker-dropdown" @click.stop>
         <div class="picker-title">选择发朋友圈的角色：</div>
         <div v-if="!characters.length" class="picker-empty">
-          没有可选的角色。归档角色不参与主动发帖，如需使用请先取消归档。
+          还没有角色，先去酒馆招募吧。
         </div>
         <div
           v-for="c in characters"
@@ -33,7 +33,6 @@
 </div>
           <span>{{ c.display_name }}</span>
         </div>
-        <div v-if="archivedCount" class="picker-note">已隐藏 {{ archivedCount }} 个归档角色</div>
       </div>
     </Transition>
 
@@ -224,11 +223,7 @@ function onFilterWheel(e) {
   if (!filterScrollFrame) filterScrollFrame = requestAnimationFrame(animateFilterScroll)
 }
 
-// 归档角色不参与任何主动行为，而这个选择器正是「让某角色主动发一条朋友圈」，
-// 故归档的从候选中排除。它们已有的帖子仍会在下方筛选条里出现（那是既有内容，不算主动行为）。
-const archivedCount = computed(() => chat.characters.filter(c => c.archived).length)
 const characters = computed(() => [...chat.characters]
-  .filter(c => !c.archived)
   .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
 
 function onPreview({ images, index }) {
@@ -446,17 +441,10 @@ async function triggerGenerate(c) {
   transition: background 0.15s;
 }
 .picker-item:hover { background: rgba(var(--accent-rgb), 0.08); }
-/* 空态：候选全被归档过滤掉时给个说法，否则用户会以为列表坏了 */
 .picker-empty {
   padding: 12px 10px 8px;
   font-size: 12px; line-height: 1.6;
   color: var(--text-secondary);
-}
-/* 底部说明：告知隐藏了归档角色，避免「角色怎么少了」的困惑 */
-.picker-note {
-  margin-top: 6px; padding: 6px 10px 2px;
-  border-top: 1px solid var(--glass-border);
-  font-size: 11px; color: var(--text-secondary);
 }
 .picker-avatar {
   width: 32px; height: 32px; border-radius: 50%;

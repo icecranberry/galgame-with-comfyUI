@@ -625,7 +625,7 @@ type="range" min="1" max="10" step="1"
         <div class="toggle-row freq-row">
           <div>
             <div class="tl">主动聊天频率</div>
-            <div class="td">0 关闭，越大越频繁。</div>
+            <div class="td">{{ freqSlider <= 0 ? '关闭主动聊天。' : `频率触发间隔约 ${chatFreqLabel}，实际时间会有浮动。` }}</div>
           </div>
           <div class="freq-control">
             <input
@@ -633,14 +633,14 @@ type="range" min="0" max="1" step="0.1"
               v-model.number="freqSlider"
               @change="onFreqChange"
             />
-            <span class="freq-val">{{ freqSlider.toFixed(1) }}</span>
+            <span class="freq-val">{{ chatFreqLabel }}</span>
           </div>
         </div>
 
         <div class="toggle-row freq-row">
           <div>
             <div class="tl">奇遇触发频率</div>
-            <div class="td">0 关闭自动触发，1 为默认频率（约 30 分钟一次）。</div>
+            <div class="td">{{ eventFreqSlider <= 0 ? '关闭自动触发。' : `约每 ${eventFreqLabel} 检查一次，满足条件时触发奇遇。` }}</div>
           </div>
           <div class="freq-control">
             <input
@@ -648,7 +648,7 @@ type="range" min="0" max="1" step="0.1"
               v-model.number="eventFreqSlider"
               @change="onEventFreqChange"
             />
-            <span class="freq-val">{{ eventFreqSlider.toFixed(1) }}</span>
+            <span class="freq-val">{{ eventFreqLabel }}</span>
           </div>
         </div>
 
@@ -939,9 +939,6 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
         </div>
       </div>
 
-      <!-- 数据清理：按时间清理生成的图片与内容记录 -->
-      <DataCleanupCard />
-
       <!-- 更新说明：重新查看历次更新内容（平时只在版本变化后自动弹一次） -->
       <div class="card memory-settings-card">
         <div class="memory-settings-header">
@@ -1185,7 +1182,6 @@ import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import GearIcon from '../components/GearIcon.vue'
 import MemoryHealthPanel from '../components/MemoryHealthPanel.vue'
-import DataCleanupCard from '../components/DataCleanupCard.vue'
 import UpdateTag from '../components/UpdateTag.vue'
 import { CHANGELOG_ENTRIES } from '../data/changelog.js'
 
@@ -1324,9 +1320,17 @@ const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
+// 仅换算显示，保留原有 0~1 参数；公式对应两个 scheduler 的现有间隔。
+function frequencyTimeLabel(minutes) {
+  return minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`
+}
+const chatFreqLabel = computed(() => freqSlider.value <= 0
+  ? '关闭' : frequencyTimeLabel(Math.round(8 + (1 - freqSlider.value) / 0.9 * 112)))
+const eventFreqLabel = computed(() => eventFreqSlider.value <= 0
+  ? '关闭' : frequencyTimeLabel(Math.round(30 / eventFreqSlider.value)))
 // 朋友圈发帖频率档位：value 是 momentFreq（周期 = 基准 2~8 小时 / value）。
 // 用档位而不是连续滑块：周期跨度从 5 分钟到 32 小时，连续拖动既拖不准也说不清。
-// 顺序按「越往右越频繁」，与「频率」的直觉一致。
+// 时间档从慢到快排列，最右侧额外提供沿用原有频率的「默认」档。
 const MOMENT_FREQ_STEPS = [
   { value: 0,    label: '关闭',    hint: '关闭自动发帖（仍可手动发）。' },
   { value: 0.25, label: '8 小时',  hint: '每个角色约 8~32 小时一条。' },
@@ -1336,16 +1340,16 @@ const MOMENT_FREQ_STEPS = [
   { value: 4,    label: '30 分钟', hint: '每个角色约 30 分钟~2 小时一条。' },
   { value: 8,    label: '15 分钟', hint: '每个角色约 15~60 分钟一条。' },
   { value: 24,   label: '5 分钟',  hint: '每个角色约 5~20 分钟一条，LLM 与生图消耗很高。' },
+  { value: 1,    label: '默认',    hint: '沿用原有频率：每个角色约 2~8 小时一条，首次等待 1~4 小时。' },
 ]
-// 默认档位 = 关闭（value 0），与后端 config.features.momentFreq 的默认值保持一致 ——
-// 否则「库里还没有这个键」的新装用户，界面会显示「2 小时」而后台实际是关闭，对不上。
-const DEFAULT_MOMENT_STEP = 0   // 对应 value=0（关闭）
+const DEFAULT_MOMENT_STEP = MOMENT_FREQ_STEPS.length - 1
 const momentFreqStepIdx = ref(DEFAULT_MOMENT_STEP)
 const momentFreqHint = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.hint || '')
 const momentFreqLabel = computed(() => MOMENT_FREQ_STEPS[momentFreqStepIdx.value]?.label || '')
 /** 库里存的 momentFreq → 最接近的档位下标（老值可能是任意数） */
 function momentStepFromValue(v) {
   if (v == null) return DEFAULT_MOMENT_STEP
+  if (Number(v) === 1) return DEFAULT_MOMENT_STEP
   let best = 0
   let bestDiff = Infinity
   MOMENT_FREQ_STEPS.forEach((s, i) => {

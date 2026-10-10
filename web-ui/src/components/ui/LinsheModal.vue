@@ -3,14 +3,14 @@
     <!-- 首次直达页面时，anchor 宿主与弹窗同批挂载；等宿主插入后再解析目标。 -->
     <Transition name="modal-fade" :duration="transitionMs">
       <div v-if="isOpen" class="modal-overlay linshe-modal-overlay" :class="{ 'is-host-anchored': isAnchored }" :style="transitionMs ? {'--linshe-modal-duration':`${transitionMs}ms`} : undefined" @click.self="close">
-        <div class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full }, panelClass]" @click.stop>
+        <div class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full, 'modal-comic': variant === 'comic' }, panelClass]" @click.stop>
           <div class="modal-header">
             <h3 class="modal-title">{{ title }}</h3>
             <span v-if="$slots['header-extra']" class="modal-header-extra"><slot name="header-extra" /></span>
-            <linshe-button variant="icon" aria-label="关闭" @click="close">✕</linshe-button>
+            <slot name="close" :close="close"><linshe-button variant="icon" aria-label="关闭" @click="close">✕</linshe-button></slot>
           </div>
           <!-- 白色内衬：浮于暖纸外壳之上，标题栏留在外壳上（与 LoRA 设置窗一致） -->
-          <div class="linshe-modal-lining">
+          <div class="linshe-modal-lining" :class="{ 'has-footer': !!$slots.footer }">
             <div class="modal-body" :class="bodyClass">
               <slot />
             </div>
@@ -38,6 +38,7 @@ const props = defineProps({
   /** 旧用法仍可传 visible；新用法优先 v-model */
   visible: { type: Boolean, default: false },
   title: { type: String, default: '' },
+  variant: { type: String, default: 'default' },
   transitionMs: { type: Number, default: undefined },
   wide: { type: Boolean, default: false },   // 面板加宽（.modal-wide）
   full: { type: Boolean, default: false },   // 大型管理面板（.modal-full）
@@ -144,4 +145,26 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   /* 内衬留白收紧；底部安全区已由遮罩内边距让出，不再叠加 */
   .linshe-modal-lining { margin: var(--modal-lining-margin-mobile); }
 }
+
+/* 操作区自带底部留白；有 footer 时不再叠加内衬的底部间距。 */
+.linshe-modal-lining.has-footer { margin-bottom: 0; }
+/* 传媒的漫画阅读变体；默认弹窗不受影响。 */
+.modal-comic {
+  --modal-bg: var(--media-paper);
+  --modal-border: 3px solid var(--media-ink);
+  --modal-radius: 4px;
+  --modal-shadow: 8px 8px 0 var(--media-ink);
+  --modal-backdrop: none;
+  --modal-lining-bg: var(--media-paper);
+  --modal-lining-border: none;
+  --modal-lining-radius: 0;
+  --modal-lining-margin: 0;
+  --modal-lining-margin-mobile: 0;
+  --modal-lining-pad: 0;
+}
+.modal-comic .modal-header { background: var(--media-ink); color: var(--media-light); padding: 10px 18px; }
+.modal-comic .modal-title { color: var(--media-light); font-size: 14px; letter-spacing: .16em; }
+.modal-comic .modal-title::before { content: '✦'; color: var(--accent); font-size: 24px; }
+.modal-comic .modal-footer { border-top: 3px solid var(--media-ink); padding: 14px 20px; }
+@media (max-width: 600px) { .modal-comic .modal-footer { padding: 12px; } }
 </style>

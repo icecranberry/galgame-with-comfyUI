@@ -9,7 +9,8 @@ import { config } from '../config.js';
 import { searchCharacterInfo } from '../services/webSearch.js'; // 出站已白名单化（见 webSearch.js assertAllowedOutboundUrl / toSafeMoegirlScrapeUrl）
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache, dataUriExt } from './images.js';
-import { startEditTask } from '../services/imageEditTasks.js';
+import { startEditTask, startBackgroundTask } from '../services/imageEditTasks.js';
+import { startSceneOutfitBatch } from '../services/sceneOutfitBatch.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories } from '../services/memory/memoryRepository.js';
 import { cropPersonalityForEmotion, generateShortPromptWithLLM, runShortPromptMigration, getMigrationStatus, giveGift, getGiftCooldowns, loadEmotionState, saveEmotionSnapshot, loadOath, setOath, canSendRing, loadAffinity } from '../services/emotionEngine.js';
@@ -369,44 +370,6 @@ router.post('/schedule-enabled-all', (req, res) => {
                   WHERE schedule_enabled = 1 OR schedule_enabled IS NULL`).run();
   console.log(`[char] Schedule generation ${enabled ? 'enabled' : 'disabled'} for ${r.changes} character(s)`);
   res.json({ ok: true, schedule_enabled: enabled, changed: r.changes });
-});
-
-// POST /api/characters/archived-all — 批量归档 / 取消归档全体角色
-// 与单个归档同一语义（独立拦截层，不改写四个细分开关）；取消归档时把刷新排期置空，
-// 后台会重新把角色排进日程队列。
-router.post('/archived-all', (req, res) => {
-  const db = getDb();
-  const archived = req.body?.archived ? 1 : 0;
-  const r = archived
-    ? db.prepare(`UPDATE characters SET archived = 1, next_schedule_refresh_at = NULL
-                  WHERE COALESCE(archived, 0) = 0`).run()
-    : db.prepare(`UPDATE characters SET archived = 0, next_schedule_refresh_at = NULL
-                  WHERE COALESCE(archived, 0) = 1`).run();
-  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${r.changes} character(s) in bulk`);
-  res.json({ ok: true, archived, changed: r.changes });
-});
-
-// PUT /api/characters/:id/archived — 归档 / 取消归档
-//
-// 归档 = 该角色不再参与任何主动行为：主动聊天、发朋友圈、触发奇遇、刷新日程、
-// 自己拉群、参与小镇奇遇；但角色卡数据完整保留，你主动找它聊天它照常回复。
-//
-// 刻意做成独立的拦截层（各调度器的选人查询叠加 COALESCE(archived,0)=0），
-// 不修改四个细分开关 —— 否则归档再取消，会把用户单独设过的「不主动聊天」之类偏好一起抹掉。
-router.put('/:id/archived', (req, res) => {
-  const db = getDb();
-  const characterId = parseInt(req.params.id, 10);
-  const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(characterId);
-  if (!char) return res.status(404).json({ error: 'Character not found' });
-
-  const archived = req.body?.archived ? 1 : 0;
-  // 两种方向都把刷新排期清空：归档时避免「刚好被排到」，取消归档时让它重新进队列尽快生成一次
-  db.prepare('UPDATE characters SET archived = ?, next_schedule_refresh_at = NULL WHERE id = ?')
-    .run(archived, characterId);
-  if (archived) syncSleepingState(characterId);
-  invalidateScheduleCache(characterId);
-  console.log(`[char] ${archived ? 'Archived' : 'Unarchived'} ${char.display_name}`);
-  res.json({ ok: true, archived });
 });
 
 // PUT /api/characters/:id — 更新角色
@@ -1699,6 +1662,32 @@ router.get('/:id/standings', (req, res) => {
   res.json({ scenes: OUTFIT_SCENES, standings: listSceneStandings(char.id) });
 });
 
+async function generateSceneStandingPrompt(char, scene, requirement, mode, prompt = '') {
+  // 复用已有提示词（「再次 Roll 图」）：跳过 LLM，直接出图
+  let promptText = typeof prompt === 'string' ? prompt.trim() : '';
+  if (promptText.length < 10) {
+    const model = config.llm.model || 'deepseek-chat';
+    console.log(`[scene-standing] generating "${scene}" standing for "${char.display_name}"...`);
+    const llmResult = await chatSync(buildStandingMessages(char, requirement, mode, scene), {
+      model,
+      temperature: 0.7,
+      max_tokens: 1024,
+      label: '生成角色形象',
+    });
+    promptText = llmResult.trim()
+      .replace(/^```(?:[a-z]+)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .replace(/^["'`]+|["'`]+$/g, '')
+      .trim();
+    if (!promptText || promptText.length < 10) {
+      throw new Error('LLM 生成的提示词不完整，请重试');
+    }
+  }
+
+  return promptText;
+}
+
+
 // POST /api/characters/:id/standings/generate — 生成指定场景立绘 Body: { scene, requirement? }
 router.post('/:id/standings/generate', async (req, res) => {
   const db = getDb();
@@ -1713,27 +1702,7 @@ router.post('/:id/standings/generate', async (req, res) => {
   const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
 
   try {
-    // 复用已有提示词（「再次 Roll 图」）：跳过 LLM，直接出图
-    let promptText = typeof req.body?.prompt === 'string' ? req.body.prompt.trim() : '';
-    if (promptText.length < 10) {
-      const model = config.llm.model || 'deepseek-chat';
-      console.log(`[scene-standing] generating "${scene}" standing for "${char.display_name}"...`);
-      const llmResult = await chatSync(buildStandingMessages(char, requirement, mode, scene), {
-        model,
-        temperature: 0.7,
-        max_tokens: 1024,
-        label: '生成场景立绘提示词',
-      });
-      promptText = llmResult.trim()
-        .replace(/^```(?:[a-z]+)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .replace(/^["'`]+|["'`]+$/g, '')
-        .trim();
-      if (!promptText || promptText.length < 10) {
-        return res.status(500).json({ error: 'LLM 生成的提示词不完整，请重试' });
-      }
-    }
-
+    const promptText = await generateSceneStandingPrompt(char, scene, requirement, mode, req.body?.prompt);
     const url = await renderSceneStandingImage(char, promptText, scene);
     res.json({ ok: true, scene, image_url: url, prompt_text: promptText, standings: listSceneStandings(char.id) });
   } catch (err) {
@@ -1888,46 +1857,6 @@ router.post('/refine-appearance-draft', async (req, res) => {
   }
 });
 
-// ── 人设润色（纯文本 LLM 改写人设；「## 你的外观」段原样保留）──
-// 与「修正外观」同构：只产出草稿并回传整卡，落库由前端走既有保存链路。
-// 外观段单独剥离、润色完再拼回 —— 不依赖模型自觉，从结构上保证生图描述不被改动。
-
-const REFINE_PERSONA_SYSTEM_PROMPT = `你是角色卡人设润色助手。用户会给你一段角色卡的人设正文（Markdown，可能带「## 」小标题），请按要求改写它。
-
-【铁律】
-1. 不得新增、删除或改动任何设定事实。身份、年龄、经历、组织、人际、能力、好恶、口头禅、对特定对象的称呼方式等一律照旧 —— 只改「怎么表达」，不改「表达了什么」。
-2. 绝对不要输出「## 你的外观」段。外观由另一个工具负责，出现即属越界。
-3. 原有的「## 」小标题必须原样保留（标题文字、顺序、数量都不变）；原文没有小标题时也不要自行添加。
-4. 保持原文的人称与视角（原文用第二人称「你」就继续用「你」）。
-5. 直接输出改写后的正文，不要任何前言、后记、解释，也不要用 markdown 代码块包裹。
-
-【文字要求】
-凝练、有画面感、有张力；去掉同义反复、口水话与空泛形容。保留原文中具体的专有名词与数字。`;
-
-const PERSONA_REFINE_MODES = {
-  polish: '润色表达：信息量与篇幅与原文基本持平，只提升文字质量。',
-  enrich: '丰富细节：在原有设定骨架上补充感官细节、具体情境与内在矛盾，让形象更立体。可以增加氛围和心理描写，但不得新增原文未提及的硬设定（亲属、组织、事件、能力等）。篇幅可比原文长约五成。',
-  concise: '精简凝练：删去冗余与重复表达，保留全部设定要点，目标篇幅约为原文的七成。',
-};
-
-/**
- * 为人设润色做「三段切分」：外观标题之前（要润色的）/ 外观段（原样保留）/ 外观之后（原样保留）。
- *
- * 刻意不用 splitAppearanceSection —— 它返回的 `after` 是**外观段之后**的内容、并不含外观段本身，
- * 拿 before+after 直接拼回会把整个外观段丢掉（已用单测确认过这个坑）。
- */
-function splitPersonaAroundAppearance(basePrompt) {
-  const base = String(basePrompt || '');
-  const m = base.match(APPEARANCE_HEADING_RE);
-  if (!m) return { target: base.trim(), appearance: '', tail: '' };
-  const next = base.indexOf('\n## ', m.index + 1);
-  return {
-    target: base.slice(0, m.index).trim(),
-    appearance: base.slice(m.index, next >= 0 ? next : base.length).trim(),
-    tail: next >= 0 ? base.slice(next).trim() : '',
-  };
-}
-
 // ── 修正外观·文字模式（按用户给的文字要点扩写外观描述）──
 // 与图片模式并列的第二条入口：不想找参考图时，直接写几个词让邻舍补全细节。
 // 产出格式对齐 character_outfits.description 的既有约定（中文叙述 + 英文 tag 混合），
@@ -2013,60 +1942,6 @@ router.post('/expand-appearance-draft', async (req, res) => {
 });
 
 
-// POST /api/characters/refine-persona-draft — 润色人设（外观段原样保留）
-// Body: { base_prompt, display_name, mode: 'polish'|'enrich'|'concise' }
-// → { ok, base_prompt（润色后整卡）, original_prompt, mode }
-router.post('/refine-persona-draft', async (req, res) => {
-  const basePrompt = typeof req.body?.base_prompt === 'string' ? req.body.base_prompt : '';
-  if (!basePrompt.trim()) {
-    return res.status(400).json({ error: '人格提示词为空，没有可润色的内容' });
-  }
-  const displayName = String(req.body?.display_name || '').trim() || '角色';
-  const mode = PERSONA_REFINE_MODES[req.body?.mode] ? req.body.mode : 'polish';
-
-  // 只把「外观段之前」的部分交给模型；外观段与它之后的内容原样拼回
-  const { target, appearance, tail } = splitPersonaAroundAppearance(basePrompt);
-  if (target.length < 10) {
-    return res.status(400).json({ error: '外观段之前没有可润色的人设内容' });
-  }
-
-  try {
-    const model = config.llm.model || 'deepseek-chat';
-    console.log(`[refine-persona] polishing "${displayName}" (mode: ${mode}, ${target.length} chars)`);
-
-    const llmResult = await chatSync([
-      // system0 — 破限词（创作自由，无 roleplay），与其他创作流程口径一致
-      { role: 'system', content: getSystemRules({ roleplay: false }) },
-      { role: 'system', content: REFINE_PERSONA_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: `角色名：${displayName}\n润色方式：${PERSONA_REFINE_MODES[mode]}\n\n以下是该角色的人设正文（已排除外观段），请输出润色结果：\n\n${target}`,
-      },
-    ], { model, temperature: 0.7, max_tokens: 4096, label: '人设润色' });
-
-    let polished = String(llmResult || '').trim()
-      .replace(/^```(?:markdown|md)?\s*/i, '')   // 去掉可能的代码围栏
-      .replace(/```\s*$/, '')
-      .trim();
-    // 防御：模型若擅自带上外观段，就地截断（外观一律以拼回的原段为准）
-    const intrudedAt = polished.search(/##\s*你的外观/);
-    if (intrudedAt >= 0) polished = polished.slice(0, intrudedAt).trim();
-
-    // 合理性校验：太短多半是被截断或跑偏，宁可报错也不写坏用户的卡
-    if (polished.length < Math.max(20, target.length * 0.3)) {
-      return res.status(502).json({ error: '润色结果过短，可能被模型截断，请重试或换个力度' });
-    }
-
-    // 原顺序拼回：润色后的前段 + 原外观段 + 原外观之后的段落
-    const newBasePrompt = [polished, appearance, tail].filter(Boolean).join('\n\n');
-    console.log(`[refine-persona] done (${target.length} → ${polished.length} chars)`);
-    res.json({ ok: true, base_prompt: newBasePrompt, original_prompt: basePrompt, mode });
-  } catch (err) {
-    console.error('[refine-persona] error:', err.message);
-    res.status(500).json({ error: '人设润色失败: ' + String(err?.message || err) });
-  }
-});
-
 function _parseCharLoras(raw) {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -2099,15 +1974,36 @@ router.get('/:id/outfit-now', (req, res) => {
   res.json({ character_id: char.id, ...(getSceneOutfitForNow(char.id) || { outfit: null, scene: null, source: 'none' }) });
 });
 
-// POST /api/characters/:id/outfits/generate — 用 LLM 生成四套基础场景服装
-// Body: { save?: boolean }  save=true 时直接写入（同场景已存在则更新描述）
+// POST /api/characters/:id/outfits/generate — 基于默认外观设计私服、居家、睡衣
+// Body: { save?, baseAppearance?, scenes?, generateImages? }；自动生图返回后台 task_id，并先保存设计。
 router.post('/:id/outfits/generate', async (req, res) => {
   const db = getDb();
-  const char = db.prepare('SELECT id, display_name, base_prompt FROM characters WHERE id = ?').get(req.params.id);
+  const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
+  if (req.body?.generateImages === true) {
+    const requested = req.body?.scenes ?? ['casual', 'home', 'sleep'];
+    if (!Array.isArray(requested) || !requested.length || requested.some(scene => !['casual', 'home', 'sleep'].includes(scene))) {
+      return res.status(400).json({ error: '自动生成形象仅支持私服、居家、睡衣' });
+    }
+    const scenes = [...new Set(requested)];
+    const baseAppearance = String(req.body?.baseAppearance || '').trim();
+    if (!baseAppearance) return res.status(400).json({ error: '请先填写默认外观' });
+    const snapshot = { ...char, base_prompt: replaceAppearanceSection(char.base_prompt, baseAppearance) };
+    const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
+    const task = startSceneOutfitBatch({
+      character: snapshot, scenes, startTask: startBackgroundTask,
+      design: () => generateSceneOutfits(snapshot, { baseAppearance, scenes }),
+      save: outfits => upsertSceneOutfits(char.id, outfits),
+      render: async scene => {
+        const prompt = await generateSceneStandingPrompt(snapshot, scene, '', mode);
+        return renderSceneStandingImage(snapshot, prompt, scene);
+      },
+    });
+    return res.status(202).json({ ok: true, task_id: task.id });
+  }
   try {
     // baseAppearance：以常态外观（工装）为基准生成，只换衣服不换人；
-    // scenes：只生成指定的几套（如按工装 roll 私服/居家/睡衣），不传则四套都出
+    // scenes：只生成指定的换装，不传则设计私服/居家/睡衣；不生成默认外观。
     const outfits = await generateSceneOutfits(char, {
       baseAppearance: req.body?.baseAppearance,
       scenes: req.body?.scenes,

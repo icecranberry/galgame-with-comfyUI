@@ -67,8 +67,7 @@ router.post('/regenerate-all', async (req, res) => {
     }
 
     const db = getDb();
-    // 归档角色不参与：重置世界线是批量重刷，没理由给「不参与活动」的角色白烧一遍 token
-    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' AND COALESCE(archived, 0) = 0 ORDER BY id").all();
+    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' ORDER BY id").all();
 
     if (!characters.length) {
       return res.status(404).json({ error: '没有角色' });

@@ -440,11 +440,10 @@ router.post('/generate', async (req, res) => {
   if (characterId) {
     character = db.prepare(`SELECT * FROM characters WHERE id = ?`).get(characterId);
   } else {
-    // 随机选一个符合条件的角色（归档角色不参与）
+    // 随机选一个符合条件的角色
     const candidates = db.prepare(`
       SELECT * FROM characters
       WHERE events_disabled = 0
-        AND COALESCE(archived, 0) = 0
         AND id NOT IN (SELECT character_id FROM character_events WHERE status IN ('pending','open','engaged'))
       ORDER BY RANDOM() LIMIT 1
     `).all();

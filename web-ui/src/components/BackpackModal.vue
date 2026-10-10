@@ -11,24 +11,20 @@
                 <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z"/>
                 <path d="M10 13h4"/>
               </svg>
-              <div class="header-titles">
+              <div>
                 <h3>背包</h3>
                 <p class="header-subtitle">宝箱与道具</p>
               </div>
-              <!-- 背包 / 橱窗 视图切换：宝箱开箱演出仍是共用入口，这里只切右侧内容。
-                   ★ 放在标题旁而不是右上角 —— 右上角留给关闭按钮独占：
-                   两者挨在一起时，想点「橱窗」很容易手滑点到 ✕ 直接把弹窗关掉。 -->
-              <linshe-tabs v-model="view" :options="VIEW_OPTIONS" size="sm" class="header-tabs" aria-label="背包视图切换" />
             </div>
             <div class="header-actions">
-              <linshe-button variant="icon" @click="close" title="关闭" aria-label="关闭">&times;</linshe-button>
+              <linshe-button variant="icon" @click="close" title="关闭">&times;</linshe-button>
             </div>
           </div>
 
           <!-- ── Body ── -->
           <div class="backpack-body">
-            <!-- ── 左栏：每日宝箱（已被「橱窗」取代，见 SHOW_CHEST 注释；隐藏后右栏自动占满） ── -->
-            <div v-if="SHOW_CHEST" class="chest-panel">
+            <!-- ── Left: 每日宝箱 ── -->
+            <div class="chest-panel">
               <div
                 class="chest-stage"
                 :class="{ 'is-ready': store.chest.canOpen }"
@@ -49,15 +45,11 @@
                 :disabled="!store.chest.canOpen || chestProcessActive"
                 @click="onOpenChest"
               >{{ chestButtonLabel }}</linshe-button>
-              <p class="chest-hint">{{ formatChestCooldown(store.chest.cooldownSeconds) }}</p>
+              <p class="chest-hint">每 {{ store.chest.cooldownHours || 16 }} 小时可开启一次</p>
             </div>
 
-            <!-- ── Right: 道具网格 / 橱窗 ── -->
+            <!-- ── Right: 道具网格 ── -->
             <div class="items-panel">
-              <!-- 橱窗视图：按分类浏览商品 → 挑选 → 带走进背包 -->
-              <LootWindow v-if="view === 'loot'" @taken="onLootTaken" @use="onLootUse" />
-
-              <template v-else>
               <Transition name="effects-panel">
                 <section class="active-effects" aria-labelledby="active-effects-title">
                   <div class="effects-heading">
@@ -163,7 +155,6 @@
                   </div>
                 </div>
               </TransitionGroup>
-              </template>
             </div>
           </div>
 
@@ -218,13 +209,11 @@
     </Transition>
   </Teleport>
 
-  <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示）──
-       宝箱隐藏时一并禁用：没有任何入口会触发它，留着只会让人以为它还会出现 -->
+  <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示） ── -->
   <!-- 礼物叙事：把小镇货摊买来的道具送给角色，图片 + 描述沿用小镇服务/打工的胶片样式 -->
   <TownServiceStage :open="giftStage.open" :session="giftStage.session" @close="giftStage.open = false" />
 
   <ChestRevealOverlay
-    v-if="SHOW_CHEST"
     :show="fullscreen"
     :chest-anim="chestAnim"
     :flash-on="flashOn"
@@ -238,15 +227,12 @@
 <script setup>
 import { ref, watch, onUnmounted, inject } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
-import LinsheTabs from './ui/LinsheTabs.vue'
-import LootWindow from './LootWindow.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ChestSvg from './ChestSvg.vue'
 import ItemFallbackIcon from './ItemFallbackIcon.vue'
 import ChestRevealOverlay from './ChestRevealOverlay.vue'
 import TownServiceStage from './town/TownServiceStage.vue'
 import { useBackpackActions, ITEM_KIND_LABELS as KIND_LABELS } from '../composables/useBackpackActions.js'
-import { formatChestCooldown } from '../utils/chestCooldown.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -256,41 +242,6 @@ const emit = defineEmits(['close'])
 
 const toast = inject('toast')
 const confirmRef = ref(null)
-
-// 右侧内容视图：背包（原有道具网格） / 橱窗（分页浏览商品）
-const VIEW_OPTIONS = [
-  { value: 'backpack', label: '背包' },
-  { value: 'loot', label: '橱窗' },
-]
-const view = ref('backpack')
-
-/**
- * 是否显示「每日宝箱」面板。
- *
- * 2026-10-04 起宝箱已被「橱窗」取代（分标签页浏览 + 挑选，比盲盒单抽更直观），
- * 故默认隐藏。**代码与后端全部保留**，改回 true 即可恢复，调试时也方便对照。
- *
- * 隐藏后仍保留的部分：`store.startPolling()` 不能一起停 —— 它负责背包道具的轮询与
- * `item_ready` 事件，橱窗带走的道具也靠它刷新。
- * 随宝箱一起停掉的：开箱冷却倒计时、未完成开箱演出的恢复。
- */
-const SHOW_CHEST = false
-
-/** 从橱窗带走的商品已进背包，切回背包视图时刷新一下列表 */
-function onLootTaken() {
-  try { store.fetchItems() } catch { /* 失败不阻塞，SSE 会兜底刷新 */ }
-}
-
-/**
- * 橱窗里点「使用」：商品已由 LootWindow 带走（进背包拿了 id），
- * 这里用最小 item 结构走**背包同一套**使用流程（选角色 → 确认 → useItem）。
- * status 直接给 'ready'：用户是主动操作，不必等配图生成完。
- */
-function onLootUse({ backpackId, name, kind }) {
-  if (!backpackId) return
-  try { store.fetchItems() } catch { /* ignore */ }
-  startUse({ id: backpackId, name, kind, source_type: 'loot', status: 'ready' })
-}
 
 const {
   store,
@@ -311,15 +262,12 @@ const {
 watch(() => props.visible, (v) => {
   if (v) {
     store.startPolling()
-    // 宝箱相关：隐藏宝箱时不必空转（startPolling 不能停，背包与橱窗都依赖它）
-    if (SHOW_CHEST) {
-      startCountdown()
-      // 中途离开留下的未收下道具：重开背包时续播揭示演出
-      resumePendingReveal()
-    }
+    startCountdown()
+    // 中途离开留下的未收下道具：重开背包时续播揭示演出
+    resumePendingReveal()
   } else {
     store.stopPolling()
-    if (SHOW_CHEST) stopCountdown()
+    stopCountdown()
     resetUi()
   }
 })
@@ -343,7 +291,7 @@ function close() {
   z-index: 10000;
 }
 .backpack-modal {
-  background: var(--modal-bg);
+  background: #f4f1eeed;
   border-radius: 18px;
   width: min(1280px, 96vw);
   height: 86vh;
@@ -360,27 +308,13 @@ function close() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
   padding: 18px 22px;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
 }
-.header-left { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-primary); }
-.header-svg { color: var(--accent); flex-shrink: 0; }
-/* 标题块：允许被压缩（min-width:0），动画/长文案时不会把切换器顶出去 */
-.header-titles { min-width: 0; }
+.header-left { display: flex; align-items: center; gap: 12px; color: var(--text-primary); }
+.header-svg { color: var(--accent); }
 .header-left h3 { margin: 0; font-size: 18px; }
 .header-subtitle { margin: 2px 0 0; font-size: 12px; color: var(--text-secondary); }
-/* 视图切换：紧邻标题、与右侧关闭按钮拉开距离（避免误点 ✕ 关掉弹窗） */
-.header-tabs { margin-left: 6px; flex-shrink: 0; }
-/* ★ 这个类原先没有任何样式定义 —— 容器不是 flex，标签页与 ✕ 只是行内流动，
-   窄一点就换行错位（截图里的上下两行就是这么来的）。这里补上并锁死不换行。 */
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  margin-left: auto;
-}
 
 /* ── Body：白色衬里，与面板暖底分层 ── */
 .backpack-body {
@@ -388,7 +322,7 @@ function close() {
   gap: 16px;
   margin: 16px 22px 22px;
   padding: 16px;
-  background: var(--glass-bg);
+  background: #ffffffb3;
   border-radius: 16px;
   overflow: hidden;
   flex: 1;
@@ -402,7 +336,7 @@ function close() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--glass-bg);
+  background: rgba(255, 253, 250, 0.75);
   border-radius: 16px;
   padding: 16px 16px;
 }
@@ -426,7 +360,7 @@ function close() {
   margin-bottom: 22px;
   padding: 14px;
   border-radius: 16px;
-  background: var(--glass-bg);
+  background: rgba(255, 250, 245, 0.82);
   box-shadow: 0 2px 14px rgba(122, 91, 63, 0.04);
 }
 .effects-heading {
@@ -551,7 +485,7 @@ function close() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: var(--bg-tertiary);
+  background: #f5efe7;
   color: #8a7a6a;
 }
 .effect-thumb img { width: 100%; height: 100%; object-fit: cover; }
@@ -656,7 +590,7 @@ function close() {
   justify-content: center;
   gap: 8px;
   border-radius: 11px;
-  background: var(--glass-bg);
+  background: rgba(255, 255, 255, 0.54);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -677,7 +611,7 @@ function close() {
   gap: 14px;
 }
 .item-card {
-  background: var(--bg-secondary);
+  background: #fffdf9;
   border-radius: 14px;
   padding: 10px;
   display: flex;
@@ -693,7 +627,7 @@ function close() {
   position: relative;
   aspect-ratio: 1;
   border-radius: 10px;
-  background: var(--bg-tertiary);
+  background: #f5efe7;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -741,14 +675,14 @@ function close() {
 .item-detail-overlay {
   position: absolute;
   inset: 0;
-  background: var(--modal-bg);
+  background: #f6f2eef1;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 6;
 }
 .item-detail-dialog {
-  background: var(--bg-secondary);
+  background: #fffdf9;
   border-radius: 16px;
   padding: 16px;
   width: min(430px, 90%);
@@ -770,7 +704,7 @@ function close() {
   width: 208px;
   height: 208px;
   border-radius: 16px;
-  background: var(--bg-tertiary);
+  background: #f5efe7;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -794,14 +728,14 @@ function close() {
 .char-picker-overlay {
   position: absolute;
   inset: 0;
-  background: var(--modal-bg);
+  background: #f6f2eef1;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 7;
 }
 .char-picker-dialog {
-  background: var(--bg-secondary);
+  background: #fffdf9;
   border-radius: 16px;
   padding: 16px;
   width: min(420px, 88%);
@@ -825,7 +759,7 @@ function close() {
   overflow-y: auto;
 }
 .char-card { cursor: pointer; border-radius: 12px; transition: background 0.15s; }
-.char-card:hover { background: var(--bg-tertiary); }
+.char-card:hover { background: #f5efe7; }
 .char-card-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px; }
 .char-avatar { width: 52px; height: 52px; border-radius: 50%; object-fit: cover; }
 .char-avatar-fallback {
@@ -892,10 +826,6 @@ function close() {
 
 @media (max-width: 460px) {
   .backpack-header { padding: 14px 16px; }
-  /* 窄屏放不下「图标 + 标题 + 切换器 + 关闭」一行 → 让切换器整行换到第二行，
-     而不是让 ✕ 和被压扁的切换器挤在一起。关闭按钮始终留在右上角原位。 */
-  .header-left { flex-wrap: wrap; row-gap: 10px; }
-  .header-tabs { order: 1; flex: 1 1 100%; margin-left: 0; }
   .backpack-body {
     margin: 12px;
     padding: 12px;
@@ -917,60 +847,4 @@ function close() {
   .effect-time.urgent .effect-time-dot,
   .effect-remove { animation: none; transition: none; }
 }
-
-/* ── 暗夜主题适配 ──────────────────────────────────────────
-   上面那些语义色（区分 装备 / 状态 / 好感 等）原本是按亮色主题调的柔和彩色，
-   深色下原样保留会在深色面板里亮成一块。这里**只覆盖颜色、不动结构**：
-   保留同一色相但压暗并降到半透明，既适配深色又不丢失「一眼分辨类型」的作用。
-   亮色主题下这些规则不生效，观感与之前完全一致。 */
-[data-theme="dark"] .effect-card.card-buff {
-  --effect-surface: rgba(150, 120, 220, 0.16);
-  --effect-border: rgba(150, 120, 220, 0.30);
-  --effect-shadow: rgba(0, 0, 0, 0.32);
-}
-[data-theme="dark"] .effect-card.card-mood {
-  --effect-surface: rgba(var(--accent-rgb), 0.15);
-  --effect-border: rgba(var(--accent-rgb), 0.30);
-  --effect-shadow: rgba(0, 0, 0, 0.32);
-}
-[data-theme="dark"] .effect-card.card-favor {
-  --effect-surface: rgba(230, 170, 60, 0.15);
-  --effect-border: rgba(230, 170, 60, 0.30);
-  --effect-shadow: rgba(0, 0, 0, 0.32);
-}
-/* 0.05 的强调色在深色下几乎看不见，提到 0.12 才分得出卡片 */
-[data-theme="dark"] .effect-card.card-hairstyle,
-[data-theme="dark"] .effect-card.card-world-outfit,
-[data-theme="dark"] .effect-card.card-outfit,
-[data-theme="dark"] .effect-card.card-transform {
-  --effect-surface: rgba(var(--accent-rgb), 0.12);
-  --effect-border: rgba(var(--accent-rgb), 0.26);
-  --effect-shadow: rgba(0, 0, 0, 0.32);
-}
-/* 卡片顶部的内高光是为浅底设计的，深底上要减弱，否则边缘发白 */
-[data-theme="dark"] .effect-card {
-  box-shadow: 0 3px 0 var(--effect-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-[data-theme="dark"] .effect-card:hover,
-[data-theme="dark"] .effect-card:focus-within {
-  box-shadow: 0 4px 0 var(--effect-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.10);
-}
-
-/* 小色块（缩略图底 / 类型标签）：同色相压暗 + 文字提亮，保证在深底上可读 */
-[data-theme="dark"] .effect-thumb.thumb-world-outfit,
-[data-theme="dark"] .effect-thumb.thumb-outfit,
-[data-theme="dark"] .effect-thumb.thumb-transform,
-[data-theme="dark"] .effect-thumb.thumb-hairstyle { background: rgba(218, 140, 90, 0.20); color: #e8a97f; }
-[data-theme="dark"] .effect-thumb.thumb-buff { background: rgba(150, 120, 220, 0.22); color: #bda9ec; }
-[data-theme="dark"] .effect-thumb.thumb-mood { background: rgba(var(--accent-rgb), 0.20); color: #f09a8a; }
-[data-theme="dark"] .effect-thumb.thumb-favor { background: rgba(230, 170, 60, 0.20); color: #e2b45c; }
-
-[data-theme="dark"] .kind-world-outfit,
-[data-theme="dark"] .kind-outfit,
-[data-theme="dark"] .kind-transform,
-[data-theme="dark"] .kind-hairstyle { background: rgba(218, 140, 90, 0.20); color: #e8a97f; }
-[data-theme="dark"] .kind-buff { background: rgba(150, 120, 220, 0.22); color: #bda9ec; }
-[data-theme="dark"] .kind-mood { background: rgba(var(--accent-rgb), 0.20); color: #f09a8a; }
-[data-theme="dark"] .kind-favor { background: rgba(230, 170, 60, 0.20); color: #e2b45c; }
-[data-theme="dark"] .kind-unknown { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); }
 </style>

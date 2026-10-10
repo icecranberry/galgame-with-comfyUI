@@ -29,22 +29,7 @@
       <div v-else-if="!characters.length" class="empty">还没有角色，先去酒馆招募吧。</div>
       <div class="standing-characters">
         <div
-          v-if="archivedCount"
-          class="standing-arch-toggle"
-          role="button"
-          tabindex="0"
-          :aria-pressed="showArchived"
-          :title="showArchived ? '收起归档角色' : `展开 ${archivedCount} 个归档角色`"
-          @click="toggleShowArchived"
-          @keydown.enter.prevent="toggleShowArchived"
-          @keydown.space.prevent="toggleShowArchived"
-        >
-          <svg class="standing-arch-arrow" :class="{ open: showArchived }" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6,9 12,15 18,9" /></svg>
-          <span>归档角色</span>
-          <span class="standing-arch-count">{{ archivedCount }}</span>
-        </div>
-        <div
-          v-for="character in displayCharacters" :key="character.id" class="standing-character" role="button" tabindex="0"
+          v-for="character in characters" :key="character.id" class="standing-character" role="button" tabindex="0"
           :class="{ 'is-full': isFull(overview[character.id]), 'is-generating': overview[character.id]?.busy }"
           :aria-label="`查看${character.display_name || character.name}的立绘管理`"
           @click="openDetail(character)" @keydown.enter.prevent="openDetail(character)" @keydown.space.prevent="openDetail(character)"
@@ -88,24 +73,6 @@ const overview = ref({}), loading = ref(false), loaded = ref(false)
 const selectedCharacter = ref(null), detailOpen = ref(false)
 const rows = computed(() => props.characters.map(c => overview.value[c.id]).filter(Boolean))
 
-// ── 归档角色：默认不显示（与表情包管理同一口径）──
-// 立绘管理只关心还在活动的角色；归档的不参与任何行为，也没必要生成立绘。
-// 默认收起，需要时点列表上方的开关展开，状态存本地。
-const SHOW_ARCHIVED_KEY = 'linshe.standing.showArchived'
-const showArchived = ref((() => {
-  try { return localStorage.getItem(SHOW_ARCHIVED_KEY) === '1' } catch { return false }
-})())
-function toggleShowArchived() {
-  showArchived.value = !showArchived.value
-  try { localStorage.setItem(SHOW_ARCHIVED_KEY, showArchived.value ? '1' : '0') } catch {}
-}
-const archivedCount = computed(() => props.characters.filter(c => c.archived).length)
-/** 网格实际渲染的角色：收起归档时只留活跃角色 */
-const displayCharacters = computed(() =>
-  (showArchived.value || !archivedCount.value)
-    ? props.characters
-    : props.characters.filter(c => !c.archived)
-)
 const activity = computed(() => standingTaskActivity(rows.value))
 const taskRunning = computed(() => activity.value.standing + activity.value.stopping + activity.value.touch > 0)
 const available = computed(() => loaded.value && !submitting.value && !error.value)
@@ -205,30 +172,6 @@ async function generate(mode) {
 .standing-task-enter-from, .standing-task-leave-to { opacity: 0; transform: translateY(-4px); }
 .standing-feedback { margin: 0; color: var(--accent); font-size: var(--fs-sm); line-height: 1.7; }
 .standing-error { color: var(--danger); font-size: var(--fs-sm); }
-/* ── 归档角色开关（跨整行，默认收起归档角色）── */
-.standing-arch-toggle {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 6px;
-  padding: 5px 10px;
-  border-radius: 10px;
-  font-size: 12px; font-weight: 600;
-  color: var(--text-secondary);
-  cursor: pointer; user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.standing-arch-toggle:hover { background: var(--bg-hover); color: var(--accent); }
-.standing-arch-arrow {
-  flex-shrink: 0;
-  transform: rotate(-90deg);
-  transition: transform 0.18s var(--ease-standard);
-}
-.standing-arch-arrow.open { transform: rotate(0deg); }
-.standing-arch-count {
-  margin-left: auto;
-  font-size: 10px; font-weight: 600;
-  padding: 0 6px; border-radius: var(--radius-full);
-  background: var(--tint-subtle);
-}
 
 .standing-characters { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; padding: 4px 2px; }
 .standing-character { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 18px; background: var(--modal-lining-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); color: var(--text-primary); text-align: left; cursor: pointer; transition: transform .3s var(--ease-spring); }

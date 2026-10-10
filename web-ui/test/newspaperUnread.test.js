@@ -32,7 +32,7 @@ function newStore(t, { stored = {}, paper: today = null } = {}) {
   let current = today
   t.mock.method(globalThis, 'fetch', async (url) => {
     assert.equal(String(url), '/api/newspaper/today')
-    return { ok: true, json: async () => ({ newspaper: current }) }
+    return { ok: true, text: async () => JSON.stringify({ newspaper: current }) }
   })
   setActivePinia(createPinia())
   return { store: useNewspaperStore(), map, setPaper: p => { current = p } }

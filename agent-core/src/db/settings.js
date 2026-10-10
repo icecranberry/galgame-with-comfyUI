@@ -37,8 +37,6 @@ const DB_ONLY_KEYS = new Set([
   'emoji_style_mode',
   'standing_prompt_mode',
   'novelai_api_key',
-  // 宝箱橱窗的分页配置（由导入道具清单工具写入，运行时只读，不进 config）
-  'loot_pages',
 ]);
 
 /** 写入单条系统设置 */

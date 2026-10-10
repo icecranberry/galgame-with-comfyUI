@@ -746,7 +746,7 @@ export function updateNextProactiveAt(characterId, score) {
 function initializeFirstTimes() {
   const db = getDb();
   const chars = db.prepare(
-    'SELECT id FROM characters WHERE proactive_disabled = 0 AND COALESCE(archived, 0) = 0 AND next_proactive_at IS NULL'
+    'SELECT id FROM characters WHERE proactive_disabled = 0 AND next_proactive_at IS NULL'
   ).all();
 
   if (chars.length === 0) return;
@@ -781,7 +781,6 @@ async function tick() {
     const candidate = db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.proactive_disabled = 0
-        AND COALESCE(c.archived, 0) = 0
         AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
         AND (c.temporary_wake_until IS NULL OR c.temporary_wake_until <= datetime('now'))
         AND (c.next_proactive_at IS NULL OR c.next_proactive_at <= datetime('now'))
@@ -1109,7 +1108,7 @@ export async function forceProactiveNow(targetCharacterId) {
       console.log(`⚡ force: targeted ${candidate.display_name} (id=${targetCharacterId})`);
     } else {
       const candidates = db.prepare(
-        'SELECT * FROM characters WHERE proactive_disabled = 0 AND COALESCE(archived, 0) = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
+        'SELECT * FROM characters WHERE proactive_disabled = 0 AND (is_sleeping IS NULL OR is_sleeping = 0) AND COALESCE(proactive_streak, 0) < 3 AND id NOT IN (SELECT character_id FROM character_events WHERE status IN (\'pending\',\'open\',\'engaged\'))'
       ).all();
       if (candidates.length === 0) {
         console.log('⚡ force: no eligible characters (all sleeping, disabled, streak≥3, or have active events)');

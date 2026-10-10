@@ -33,11 +33,6 @@
                 />
               </template>
 
-              <!-- 用户节点：与角色关系图同屏，便于把「你」也连进关系网 -->
-              <template #node-userNode="nodeProps">
-                <UserNode :data="nodeProps.data" />
-              </template>
-
               <!-- Custom edge label styling -->
             </VueFlow>
           </div>
@@ -119,8 +114,6 @@ import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
 import CharacterNode from './CharacterNode.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
-import UserNode from './UserNode.vue'
-import { userAvatar, userNickname, loadUserConfig, loadUserAvatar } from '../userConfig.js'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -133,23 +126,9 @@ const confirmFn = inject('confirm')
 const toastFn = inject('toast')
 
 const { addEdges, removeEdges, fitView } = useVueFlow()
-// 与「我的关系图」同一套节点组件，这样两处视觉一致
-const nodeTypes = markRaw({ charNode: markRaw(CharacterNode), userNode: markRaw(UserNode) })
+const nodeTypes = markRaw({ charNode: markRaw(CharacterNode) })
 
 const elements = ref([])
-// 中心角色与「用户」的关系（后端 GET /api/relationships 顺带返回）
-const userRel = ref(null)
-const USER_NODE_ID = 'user'
-let userInfoLoaded = false
-/** 首次用到时才拉用户昵称/头像（关系图不总是打开，没必要启动就请求） */
-async function ensureUserInfo() {
-  if (userInfoLoaded) return
-  userInfoLoaded = true
-  try {
-    await loadUserConfig()
-    await loadUserAvatar()
-  } catch { /* 取不到就用默认「我」 */ }
-}
 const paneReady = ref(false)
 
 const inputRef = ref(null)
@@ -218,8 +197,7 @@ function isValidConnection(connection) {
 // ── Build nodes / edges from characters ──
 async function buildGraph() {
   const center = props.centerCharacter
-  // 归档角色不进关系图：它们不参与任何活动，几十个节点挤在环上只会干扰拖拽连线
-  const others = props.allCharacters.filter(c => c.id !== center.id && !c.archived)
+  const others = props.allCharacters.filter(c => c.id !== center.id)
   const radius = Math.max(336, Math.ceil(others.length * 16))
 
   // Build nodes synchronously first — show avatars immediately
@@ -269,26 +247,9 @@ async function buildGraph() {
   try {
     const res = await api.getRelationships(center.id)
     existingRels.value = res.relationships || []
-    userRel.value = res.userRelationship || null
   } catch (err) {
     console.warn('[RelationshipGraph] failed to load relationships:', err.message)
     existingRels.value = []
-    userRel.value = null
-  }
-
-  // ── 用户节点：放在中心角色的正上方留白处，避免与环形排布的角色挤在一起 ──
-  // 只有真的存在「用户↔该角色」的关系时才加，免得图里凭空多一个孤立节点。
-  await ensureUserInfo()
-  if (userRel.value) {
-    graphNodes.push({
-      id: USER_NODE_ID,
-      type: 'userNode',
-      position: { x: CENTER_X - 60, y: CENTER_Y - radius - 110 },
-      data: { avatar_url: userAvatar.value, nickname: userNickname.value || '我' },
-      draggable: true,
-      selectable: false,
-      connectable: false,
-    })
   }
 
   // Collect node IDs for edge validation
@@ -322,26 +283,6 @@ async function buildGraph() {
 
   console.log('[RelationshipGraph] built', graphNodes.length, 'nodes,', graphEdges.length, 'edges (filtered from', existingRels.value.length, 'relations)')
 
-  // 用户 ↔ 中心角色：用与角色间不同的配色（虚线），一眼区分「和你的关系」与「角色之间」
-  if (userRel.value && userRel.value.text) {
-    const userPos = nodePosMap[USER_NODE_ID]
-    const handles = userPos ? computeHandles(userPos) : { sourceHandle: 'source-top', targetHandle: 'target-top' }
-    graphEdges.push({
-      id: `e-user-${userRel.value.id}`,
-      source: String(center.id),
-      target: USER_NODE_ID,
-      sourceHandle: handles.sourceHandle,
-      targetHandle: handles.targetHandle,
-      label: userRel.value.text,
-      style: { stroke: 'var(--accent, var(--accent))', strokeWidth: 3, strokeDasharray: '6 4' },
-      labelStyle: { fill: 'var(--text-bright, #333)', fontWeight: 600, fontSize: 13 },
-      labelBgStyle: { fill: 'var(--bg-secondary)', fillOpacity: 0.92 },
-      labelBgPadding: [8, 4],
-      labelBgBorderRadius: 6,
-      animated: false,
-      markerEnd: { type: 'arrowclosed', width: 12, height: 12, color: 'var(--accent, var(--accent))' },
-    })
-  }
   // Set nodes first via v-model, wait for vue-flow to build nodeLookup, then add edges
   elements.value = graphNodes
   await new Promise(r => setTimeout(r, 0))

@@ -38,14 +38,14 @@ router.get('/outlets', (req, res) => {
   } catch (err) { fail(res, err); }
 });
 
-// POST /api/media/outlets — 新建媒体 Body: { name, tagline?, prompt, icon? }
+// POST /api/media/outlets — 新建媒体 Body: { name, tagline?, prompt, icon?, layout?: "feed"|"portal" }
 router.post('/outlets', (req, res) => {
   try {
     res.status(201).json(createOutlet(req.body || {}));
   } catch (err) { fail(res, err); }
 });
 
-// PUT /api/media/outlets/:id — 改媒体 Body: { name?, tagline?, prompt?, icon?, enabled? }
+// PUT /api/media/outlets/:id — 改媒体 Body: { name?, tagline?, prompt?, icon?, enabled?, layout?: "feed"|"portal" }
 router.put('/outlets/:id', (req, res) => {
   try {
     const o = updateOutlet(Number(req.params.id), req.body || {});

@@ -2,12 +2,11 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
-import { DEFAULT_CHEST_COOLDOWN_SECONDS } from '../utils/chestCooldown.js'
 
 export const useBackpackStore = defineStore('backpack', () => {
   const items = ref([])
   const pendingItems = ref([])
-  const chest = ref({ canOpen: true, remainingSeconds: 0, cooldownSeconds: DEFAULT_CHEST_COOLDOWN_SECONDS })
+  const chest = ref({ canOpen: true, remainingSeconds: 0, cooldownHours: 16 })
   const chestLoaded = ref(false)
   const activeEffects = ref([])
   const loading = ref(false)
@@ -50,8 +49,8 @@ export const useBackpackStore = defineStore('backpack', () => {
     const result = await api.openChest()
     if (result.ok) {
       chest.value.canOpen = false
-      // 冷却从此刻起算（用后端给的权威秒数，本地是 1 分钟）
-      chest.value.remainingSeconds = chest.value.cooldownSeconds || DEFAULT_CHEST_COOLDOWN_SECONDS
+      // 冷却从此刻起算
+      chest.value.remainingSeconds = (chest.value.cooldownHours || 16) * 3600
       await fetchItems()
     }
     return result

@@ -113,12 +113,11 @@ async function maybeCreateGroup() {
     const autoCount = db.prepare(`SELECT COUNT(*) AS c FROM group_chats WHERE created_by = 'character'`).get().c;
     if (autoCount >= MAX_AUTO_GROUPS) return;
 
-    // 候选发起人：有关系出边的角色，按好感度过滤（归档角色不参与自发行为）
+    // 候选发起人：有关系出边的角色，按好感度过滤
     const initiators = db.prepare(`
       SELECT DISTINCT c.id, c.display_name FROM characters c
       JOIN character_relationships cr ON cr.from_character_id = c.id AND cr.relationship_text != ''
       WHERE (c.is_sleeping IS NULL OR c.is_sleeping = 0)
-        AND COALESCE(c.archived, 0) = 0
     `).all().filter(c => loadAffinity(c.id) >= 60);
     if (initiators.length === 0) return;
 

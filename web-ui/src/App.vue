@@ -11,28 +11,32 @@
       <div v-if="isMobile && mobileSidebarOpen" class="mobile-scrim" @click="closeMobileSidebar"></div>
     </Transition>
     <NavBar />
-    <Sidebar
-      :is-mobile="isMobile"
-      :mobile-open="mobileSidebarOpen"
-      :collapsed="sidebarCollapsed"
-      @char-selected="closeMobileSidebar"
-    />
-    <!-- 桌面端：贴侧栏右缘的收纳手柄，点一下把侧栏向左收起（移动端用抽屉，不显示） -->
-    <div
-      v-if="!isMobile"
-      class="sidebar-handle"
-      role="button"
-      tabindex="0"
-      :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
-      :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
-      :aria-expanded="!sidebarCollapsed"
-      @click="toggleSidebar"
-      @keydown.enter.prevent="toggleSidebar"
-      @keydown.space.prevent="toggleSidebar"
-    >
-      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <polyline points="15,6 9,12 15,18" />
-      </svg>
+    <div class="sidebar-viewport">
+      <div class="sidebar-track">
+        <Sidebar
+          :is-mobile="isMobile"
+          :mobile-open="mobileSidebarOpen"
+          :collapsed="sidebarCollapsed"
+          @char-selected="closeMobileSidebar"
+        />
+        <!-- 桌面端：贴侧栏右缘的收纳手柄，点一下把侧栏向左收起（移动端用抽屉，不显示） -->
+        <div
+          v-if="!isMobile"
+          class="sidebar-handle"
+          role="button"
+          tabindex="0"
+          :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-expanded="!sidebarCollapsed"
+          @click="toggleSidebar"
+          @keydown.enter.prevent="toggleSidebar"
+          @keydown.space.prevent="toggleSidebar"
+        >
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15,6 9,12 15,18" />
+          </svg>
+        </div>
+      </div>
     </div>
     <div class="page-host">
       <router-view v-slot="{ Component }">
@@ -333,18 +337,44 @@ onUnmounted(() => {
 <style>
 .app-layout {
   display: flex; flex: 1; min-height: 0; position: relative; z-index: 1;
-  /* 侧栏宽度由这个变量驱动：折叠时置 0，侧栏与收纳手柄一起动。
-     --nav-width 是左侧图标栏（NavBar）宽度，手柄定位要把它算进去。 */
+  /* 侧栏始终保持固定宽度，收纳仅改变位移，避免内部内容被挤压。 */
   --sidebar-width: 300px;
   --nav-width: 75px;
 }
-.app-layout.sidebar-collapsed { --sidebar-width: 0px; }
+.sidebar-viewport, .sidebar-track { display: contents; }
+@media (min-width: 768px) {
+  .sidebar-viewport {
+    display: block;
+    position: absolute;
+    inset: 0 0 0 var(--nav-width);
+    overflow: clip;
+    pointer-events: none;
+    z-index: 20;
+  }
+  .sidebar-track {
+    display: block;
+    position: relative;
+    width: var(--sidebar-width);
+    height: 100%;
+    transform: translateX(0);
+    transition: transform var(--dur-interaction) var(--ease-spring);
+  }
+  .sidebar-collapsed .sidebar-track {
+    transform: translateX(-100%);
+    /* 收起不越过左边界，避免手柄随弹性过冲暂时消失。 */
+    transition-timing-function: var(--ease-standard);
+  }
+  .sidebar-track > .sidebar { height: 100%; pointer-events: auto; }
+  .sidebar-collapsed .sidebar-track > .sidebar { pointer-events: none; }
+  .app-layout > .page-host { margin-left: var(--sidebar-width); }
+  .app-layout.sidebar-collapsed > .page-host { margin-left: 0; }
+}
 
 /* ── 侧边栏收纳手柄（桌面端，贴在侧栏右缘） ── */
 .sidebar-handle {
   position: absolute;
   top: 50%;
-  left: calc(var(--nav-width) + var(--sidebar-width));
+  left: 100%;
   transform: translateY(-50%);
   width: 15px; height: 58px;
   display: flex; align-items: center; justify-content: center;
@@ -356,12 +386,13 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(12px);
   color: var(--text-secondary);
   cursor: pointer;
+  pointer-events: auto;
   z-index: 30;
   user-select: none;
-  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s ease, background 0.15s ease;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 .sidebar-handle:hover { color: var(--accent); }
-.sidebar-handle svg { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.sidebar-handle svg { transition: transform var(--dur-interaction) var(--ease-spring); }
 /* 折叠后箭头翻向另一边，提示可以再点开 */
 .app-layout.sidebar-collapsed .sidebar-handle svg { transform: rotate(180deg); }
 .page-host { position: relative; flex: 1; min-width: 0; }

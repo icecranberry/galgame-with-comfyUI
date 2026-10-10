@@ -40,8 +40,8 @@ export const DEFAULT_SYSTEM_SETTINGS = {
   feature_proactiveChatFreq: '1',
   feature_events: 'true',
   feature_eventFreq: '1',
-  // 朋友圈发帖频率：0 = 关闭自动发帖（默认）。用户想自动补内容时在设置页手动开启。
-  feature_momentFreq: '0',
+  // 朋友圈发帖频率：1 = 沿用原有 2~8 小时周期；0 = 关闭自动发帖。
+  feature_momentFreq: '1',
   feature_disturbMode: 'false',
   feature_serializeBackgroundLLM: 'false',
   feature_backgroundLLMMaxConcurrency: '3',

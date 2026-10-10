@@ -40,10 +40,10 @@
               <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
                 <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
               </div>
-              <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-error-text">{{ task.progress?.stage }}</div>
+              <div v-if="['moment_backfill', 'scene_outfits'].includes(task.action) && task.status === 'running'" class="iet-error-text">{{ task.progress?.stage }}</div>
               <div v-if="task.status === 'failed'" class="iet-error-text">{{ task.error }}</div>
               <div v-else-if="task.status === 'pending_confirm'" class="iet-error-text">等待确认</div>
-              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ task.action === 'moment_backfill' ? task.result?.summary : isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
+              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ ['moment_backfill', 'scene_outfits'].includes(task.action) ? task.result?.summary : isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
             </div>
           </div>
           <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-card-actions">
@@ -51,7 +51,7 @@
           </div>
           <div v-if="task.status === 'failed' || task.status === 'pending_confirm' || task.status === 'ready'" class="iet-card-actions">
             <linshe-button v-if="task.status === 'failed' && isDiary(task)" size="sm" @click="onRetryDiary(task)">重试</linshe-button>
-            <linshe-button v-else-if="task.status === 'failed' && task.action !== 'moment_backfill'" size="sm" @click="onRerun(task)">重试</linshe-button>
+            <linshe-button v-else-if="task.status === 'failed' && !['moment_backfill', 'scene_outfits'].includes(task.action)" size="sm" @click="onRerun(task)">重试</linshe-button>
             <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
             <linshe-button v-if="task.status === 'ready' && isDiary(task)" size="sm" @click="onViewDiary(task)">翻开看看</linshe-button>
             <linshe-button variant="secondary" size="sm" :disabled="busy" @click="onDiscard(task)">关闭</linshe-button>
@@ -128,11 +128,13 @@ function diaryTitle(task) {
 }
 
 function cardTitleLabel(task) {
+  if (task.action === 'scene_outfits') return `${task.meta?.characterName || '角色'}的服装与形象`
   if (isDiary(task)) return diaryTitle(task)
   return actionLabel(task.action)
 }
 
 function cardStatusText(task) {
+  if (task.action === 'scene_outfits') return task.status === 'ready' ? '已完成' : task.status === 'failed' ? '生成失败' : '生成中'
   if (task.action === 'moment_backfill' && task.status === 'ready') return task.result?.cancelled ? '已停止' : '完成'
   if (task.status === 'failed') return '失败'
   if (task.status === 'pending_confirm') return '待确认'

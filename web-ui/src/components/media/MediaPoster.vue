@@ -16,7 +16,17 @@
         <span class="po-issue-brand">狸狸八卦</span>
         <span class="po-issue-no">{{ issueNo }}</span>
       </div>
-      <h1 class="po-title">{{ data.bigTitle }}</h1>
+      <h1 class="po-title">
+        <span
+          :class="{ 'issue-title-link': openable }"
+          :role="openable ? 'button' : undefined"
+          :tabindex="openable ? 0 : undefined"
+          :title="openable ? '查看当期报刊详情' : undefined"
+          @click.stop="openable && emit('open')"
+          @keydown.enter.prevent="openable && emit('open')"
+          @keydown.space.prevent="openable && emit('open')"
+        >{{ data.bigTitle }}</span>
+      </h1>
       <div class="po-emblem" aria-hidden="true">
         <span class="po-emblem-line">SPECIAL</span>
         <span class="po-emblem-mid">特刊</span>
@@ -29,7 +39,7 @@
       <div class="po-main-wrap">
         <img
           v-if="post.image"
-          :src="post.image"
+          :src="bustUrlIfOverwritten(post.image)"
           class="po-main po-zoomable"
           alt=""
           title="点击放大"
@@ -59,7 +69,7 @@
         <div class="po-panel-img">
           <img
             v-if="panel.image"
-            :src="panel.image"
+            :src="bustUrlIfOverwritten(panel.image)"
             class="po-zoomable"
             alt=""
             loading="lazy"
@@ -82,19 +92,23 @@
 
 <script setup>
 import { computed } from 'vue'
+import { bustUrlIfOverwritten } from '../../utils/imageUrlRefresh.js'
 
 const props = defineProps({
   /** media_posts 行（payload 为海报结构） */
   post: { type: Object, required: true },
+  openable: { type: Boolean, default: false },
 })
 /** 点图片 → 交给父级开 lightbox（与《邻舍日报》详情同口径） */
-const emit = defineEmits(['zoom'])
+const emit = defineEmits(['open', 'zoom'])
 
 const data = computed(() => props.post?.payload || null)
 const issueNo = computed(() => String(data.value?.issueNo || 1).padStart(2, '0'))
 </script>
 
 <style scoped>
+.issue-title-link { cursor: pointer; }
+.issue-title-link:active { opacity: 0.7; }
 /* ── 海报整体：固定浅色视觉（海报是"印刷品"，不跟随应用主题变来变去）── */
 .poster {
   --po-ink: #1b1d3a;

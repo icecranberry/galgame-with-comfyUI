@@ -116,7 +116,6 @@ export function listRecentlyChattedCharacters(db, limit = 10) {
       GROUP BY conversation_id
     ) m ON m.conversation_id = 'char_' || c.id
     WHERE COALESCE(c.moments_disabled, 0) = 0
-      AND COALESCE(c.archived, 0) = 0
     ORDER BY m.last_at DESC
     LIMIT ?
   `).all(limit);
@@ -129,7 +128,7 @@ export function selectUserPostRepliers(db) {
   const recentIds = new Set(recent.map(c => c.id));
 
   const others = shuffle(
-    db.prepare('SELECT * FROM characters WHERE COALESCE(moments_disabled, 0) = 0 AND COALESCE(archived, 0) = 0').all()
+    db.prepare('SELECT * FROM characters WHERE COALESCE(moments_disabled, 0) = 0').all()
       .filter(c => !recentIds.has(c.id))
   );
   const extraCount = Math.min(others.length, 1 + Math.floor(Math.random() * 3));

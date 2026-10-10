@@ -1,6 +1,6 @@
 <template>
   <!-- 角色立绘：桌面端是主面板左侧的悬浮窗（默认），手机端内联在详情卡正文末尾（inline） -->
-  <div class="detail-standing" :class="{ 'is-inline': inline }">
+  <div class="detail-standing" :class="{ 'is-inline': inline }" :style="{ '--standing-slide-offset': `${slideDirection * 36}px` }">
     <div class="standing-panel">
       <div
         class="standing-panel-header"
@@ -21,21 +21,25 @@
       </div>
       <!-- 四套形象（工装/私服/居家/睡衣）左右切换 -->
       <div v-if="ctl.hasScenes" class="standing-switch">
-        <button
-          class="standing-switch-arrow"
-          type="button"
-          :disabled="ctl.busy || (ctl.scenes?.length || 0) <= 1"
-          title="上一个形象"
-          @click.stop="ctl.prevScene"
-        >‹</button>
-        <span class="standing-switch-label">{{ ctl.sceneLabel || '形象' }}</span>
-        <button
-          class="standing-switch-arrow"
-          type="button"
-          :disabled="ctl.busy || (ctl.scenes?.length || 0) <= 1"
-          title="下一个形象"
-          @click.stop="ctl.nextScene"
-        >›</button>
+        <linshe-button
+variant="icon" size="sm"
+          :disabled="ctl.busy || sceneSwitching || (ctl.scenes?.length || 0) <= 1"
+          title="上一个形象" aria-label="上一个形象" @click.stop="switchScene(-1)"
+>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+        </linshe-button>
+        <div class="standing-switch-label">
+          <Transition name="standing-slide">
+            <span :key="sceneKey" class="standing-label-text">{{ ctl.sceneLabel || '形象' }}</span>
+          </Transition>
+        </div>
+        <linshe-button
+variant="icon" size="sm"
+          :disabled="ctl.busy || sceneSwitching || (ctl.scenes?.length || 0) <= 1"
+          title="下一个形象" aria-label="下一个形象" @click.stop="switchScene(1)"
+>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+        </linshe-button>
       </div>
       <div
         class="standing-stage"
@@ -46,6 +50,8 @@
         @keydown.enter.prevent="ctl.onStageClick"
         @keydown.space.prevent="ctl.onStageClick"
       >
+        <Transition name="standing-slide" @after-enter="sceneSwitching = false" @enter-cancelled="sceneSwitching = false">
+          <div :key="sceneKey" class="standing-frame">
         <img v-if="ctl.displayUrl" :src="ctl.displayUrl" class="standing-img" alt="" />
         <div v-else-if="!ctl.busyForChar" class="standing-empty">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -54,11 +60,13 @@
           <p class="standing-empty-title">尚未生成{{ ctl.sceneLabel }}形象</p>
           <p class="standing-empty-hint">点下方「生成形象」让邻舍按这套服装画一张</p>
         </div>
+          </div>
+        </Transition>
         <!-- 生成中：扫描线 + 轮播趣语（与角色招募同款） -->
         <div v-if="ctl.busyForChar" class="standing-loading">
           <div class="standing-scan-line"></div>
           <div class="standing-spinner"></div>
-          <span class="standing-loading-text">正在生成「{{ ctl.sceneLabel }}」形象…</span>
+          <span class="standing-loading-text">{{ ctl.loadingText }}</span>
           <span class="standing-loading-tip">{{ ctl.tip }}</span>
         </div>
       </div>
@@ -108,7 +116,7 @@
 // 角色立绘面板：桌面端是主面板左侧的悬浮窗（默认），手机端内联在详情卡正文末尾（inline）。
 // 面板自身不持有状态与请求逻辑 —— 全部由父组件通过 ctl 传入（见 CharacterDetailModal 的
 // 立绘接口）：详情弹窗会因打开 LoRA / 外观设置而整体重建，状态留在弹窗里才不会丢。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
@@ -120,6 +128,25 @@ const props = defineProps({
   /** true = 内联在正文里（手机端）；false = 悬浮在主面板左侧（桌面端） */
   inline: { type: Boolean, default: false },
 })
+
+// 只保存过渡状态；角色与形象数据仍由父组件管理。
+const slideDirection = ref(1)
+const sceneSwitching = ref(false)
+const sceneKey = computed(() => `${props.character?.id ?? ''}:${props.ctl.sceneIndex ?? props.ctl.sceneLabel ?? ''}`)
+function switchScene(direction) {
+  if (props.ctl.busy || sceneSwitching.value || (props.ctl.scenes?.length || 0) <= 1) return
+  slideDirection.value = direction
+  sceneSwitching.value = true
+  if (direction < 0) props.ctl.prevScene()
+  else props.ctl.nextScene()
+}
+// 提前缓存已生成的场景图，减少切换时等图片下载造成的空白。
+watch(() => props.ctl.scenes?.map(scene => scene.image_url).filter(Boolean) || [], urls => {
+  for (const url of new Set(urls)) {
+    const image = new Image()
+    image.src = url
+  }
+}, { immediate: true })
 
 // 手机端内联时控件用 md（点按更稳），桌面端悬浮窗保持 sm
 const controlSize = computed(() => (props.inline ? 'md' : 'sm'))
@@ -181,27 +208,26 @@ function onFileChange(e) {
   gap: 8px;
   margin: 0 2px 8px;
 }
-.standing-switch-arrow {
-  flex-shrink: 0;
-  width: 26px; height: 26px;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--glass-border);
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-radius: 8px;
-  font-size: 16px; line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.standing-switch-arrow:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.standing-switch-arrow:disabled { opacity: 0.35; cursor: default; }
 .standing-switch-label {
+  position: relative; height: 24px; line-height: 24px;
   flex: 1; min-width: 0;
   text-align: center;
   font-size: 12px; font-weight: 600; color: var(--accent);
   letter-spacing: 0.5px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.standing-label-text { position: absolute; inset: 0; overflow: hidden; text-overflow: ellipsis; }
+.standing-frame { position: absolute; inset: 0; }
+.standing-slide-enter-active, .standing-slide-leave-active {
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.standing-slide-enter-from { opacity: 0; transform: translate3d(var(--standing-slide-offset), 0, 0); }
+.standing-slide-leave-to { opacity: 0; transform: translate3d(calc(-1 * var(--standing-slide-offset)), 0, 0); }
+@media (prefers-reduced-motion: reduce) {
+  .standing-slide-enter-active, .standing-slide-leave-active { transition: none; }
+  .standing-slide-enter-from, .standing-slide-leave-to { transform: none; }
 }
 .standing-stage {
   position: relative;

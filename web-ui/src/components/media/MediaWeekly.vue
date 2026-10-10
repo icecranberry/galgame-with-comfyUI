@@ -9,11 +9,21 @@
         <span class="wk-vol">Vol.{{ data.volume }}</span>
         <span class="wk-kind">【{{ data.kind }}】</span>
       </div>
-      <h1 class="wk-headline">{{ data.headline }}</h1>
+      <h1 class="wk-headline">
+        <span
+          :class="{ 'issue-title-link': openable }"
+          :role="openable ? 'button' : undefined"
+          :tabindex="openable ? 0 : undefined"
+          :title="openable ? '查看当期报刊详情' : undefined"
+          @click.stop="openable && emit('open')"
+          @keydown.enter.prevent="openable && emit('open')"
+          @keydown.space.prevent="openable && emit('open')"
+        >{{ data.headline }}</span>
+      </h1>
       <p v-if="data.intro" class="wk-intro">{{ data.intro }}</p>
       <img
         v-if="post.image"
-        :src="post.image"
+        :src="bustUrlIfOverwritten(post.image)"
         class="wk-hero wk-zoomable"
         alt=""
         title="点击放大"
@@ -83,13 +93,15 @@
 
 <script setup>
 import { computed } from 'vue'
+import { bustUrlIfOverwritten } from '../../utils/imageUrlRefresh.js'
 
 const props = defineProps({
   /** media_posts 行（payload 为周刊结构） */
   post: { type: Object, required: true },
+  openable: { type: Boolean, default: false },
 })
 /** 点图片 → 交给父级开 lightbox（与《邻舍日报》详情同口径） */
-const emit = defineEmits(['zoom'])
+const emit = defineEmits(['open', 'zoom'])
 
 const data = computed(() => props.post?.payload || null)
 
@@ -104,6 +116,8 @@ function changeClass(change) {
 </script>
 
 <style scoped>
+.issue-title-link { cursor: pointer; }
+.issue-title-link:active { opacity: 0.7; }
 /* 周刊也是"印刷品"，固定浅色纸感，不跟随应用主题 */
 .weekly {
   background: #fbf9f2;

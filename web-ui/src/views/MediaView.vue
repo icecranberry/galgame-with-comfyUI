@@ -1,516 +1,639 @@
 <template>
   <div class="media-view">
-    <!-- 顶栏 -->
-    <div class="media-header">
-      <!-- 移动端：侧栏入口。
-           原先靠「传媒」标题点击唤出，标题去掉后改成一个图标按钮，
-           否则手机上这一页就没有回导航的路了。 -->
-      <linshe-button
-        v-if="isMobile"
-        variant="icon"
-        class="btn-mobile-back"
-        title="导航"
-        @click="toggleMobileSidebar?.()"
-      >
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </linshe-button>
-
-      <!-- 分类分页：占原来「传媒」标题的位置。
-           报刊类不混进「社交平台」（社交平台 = 瀑布流帖子流）——
-           《邻舍日报》是整版报纸、周刊/海报是按期出刊，三者形态完全不同，
-           混在一个流里既乱又难找。 -->
-      <div class="cat-bar" role="tablist" aria-label="内容分类">
-        <button
-          v-for="c in CATEGORIES"
-          :key="c.key"
-          type="button"
-          role="tab"
-          :aria-selected="activeCategory === c.key"
-          class="cat-tab"
-          :class="{ active: activeCategory === c.key }"
-          :title="c.hint"
-          @click="onCategoryChange(c.key)"
-        >
-          <span class="cat-icon">{{ c.icon }}</span>{{ c.label }}
-          <span class="cat-num">{{ categoryCount(c.key) }}</span>
-        </button>
-      </div>
-
-      <div class="header-right">
-        <span class="media-count" v-if="activeCategory !== 'traditional' && total > 0">共 {{ total }} 帖</span>
-        <!-- 自动抓帖频率：常显当前档位，点开就地调（不塞进设置页，传媒自己管自己的节奏）
-             传统报纸分类下隐藏 —— 《邻舍日报》由镇口公告站零点自动印发，没有"抓帖"一说 -->
-        <button
-          v-if="activeCategory !== 'traditional'"
-          type="button"
-          class="auto-chip"
-          :class="{ active: freqOpen, off: auto.minutes === 0 }"
-          :title="auto.minutes === 0 ? '自动抓帖已关闭，只能手动刷新' : `每 ${autoLabel}自动抓一批`"
-          @click="freqOpen = !freqOpen"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 16,14"/>
-          </svg>
-          自动 · {{ auto.minutes === 0 ? '关闭' : autoLabel }}
-          <svg class="chip-caret" :class="{ open: freqOpen }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="6,9 12,15 18,9"/>
-          </svg>
-        </button>
-        <linshe-button class="btn-op" variant="secondary" @click="showSettings = true">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
-            <path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-          </svg>媒体设置
-        </linshe-button>
-        <linshe-button
-          v-if="activeCategory !== 'traditional'"
-          class="btn-refresh" variant="primary" :loading="refreshing" @click="onRefresh"
-        >
-          <svg v-if="!refreshing" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:3px">
-            <polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>{{ refreshing ? '刷新中…' : '刷新' }}
-        </linshe-button>
-      </div>
-    </div>
-
-    <!-- 频率面板：就地展开在顶栏下方，不遮挡内容、不引弹层定位问题 -->
-    <Transition name="freq">
-      <div v-if="freqOpen" class="freq-panel">
-        <div class="freq-row">
-          <span class="freq-label">自动抓帖频率</span>
-          <input
-            class="freq-range"
-            type="range"
-            min="0"
-            :max="Math.max(0, steps.length - 1)"
-            step="1"
-            :value="stepIdx"
-            @input="onFreqInput($event.target.value)"
-          />
-          <span class="freq-val" :class="{ off: auto.minutes === 0 }">{{ autoLabel }}</span>
-        </div>
-        <div class="freq-ticks">
-          <button
-            v-for="(s, i) in steps"
-            :key="s.minutes"
-            type="button"
-            class="freq-tick"
-            :class="{ on: i === stepIdx }"
-            @click="applyFreq(i)"
-          >{{ s.label }}</button>
-        </div>
-        <div class="freq-hint">
-          {{ currentStep?.hint || '' }}
-          <template v-if="auto.minutes > 0 && nextInText">
-            · <b v-if="nextInText === '即将'">马上开抓</b>
-            <b v-else>下次约 {{ nextInText }}后</b>
-          </template>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- 媒体标签页（跟随分类筛选） -->
-    <div class="outlet-bar">
-      <!-- 《传统报纸》分类：只有《邻舍日报》。它有自己的整版排版（报头/三栏/期号切换），
-           不按帖子流展示，所以做成一个入口按钮，点开就是原来的报纸界面。 -->
-      <template v-if="activeCategory === 'traditional'">
-        <button
-          type="button"
-          class="outlet-tab is-newspaper"
-          title="《邻舍日报》· 每天零点印发"
-          @click="showNewspaper = true"
-        >
-          <span class="outlet-icon">📰</span>邻舍日报
-          <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
-        </button>
-      </template>
-
-      <template v-else>
-        <button
-          type="button"
-          class="outlet-tab"
-          :class="{ active: activeOutlet === null }"
-          @click="onOutletChange(null)"
-        >全部<span class="outlet-num">{{ categoryTotal }}</span></button>
-        <button
-          v-for="o in filteredOutlets"
-          :key="o.id"
-          type="button"
-          class="outlet-tab"
-          :class="{ active: activeOutlet === o.id }"
-          :title="o.tagline || o.name"
-          @click="onOutletChange(o.id)"
-        >
-          <span v-if="o.icon" class="outlet-icon">{{ o.icon }}</span>{{ o.name }}
-          <!-- 形态标记：这一类不是帖子流，而是按「期」出刊。
-               portal 是周刊/海报升级后的统一形态（两个刊都在用），统一标「刊」。 -->
-          <span
-            v-if="isDigitalOutlet(o)"
-            class="outlet-kind"
-            :class="o.layout === 'poster' ? 'is-poster' : 'is-weekly'"
-          >{{ o.layout === 'poster' ? '报' : '刊' }}</span>
-          <span class="outlet-num">{{ o.post_count }}</span>
-        </button>
-      </template>
-    </div>
-
-    <!-- 传统报纸：只有一个《邻舍日报》，内容是整版报纸不在帖子流里 —— 给张入口卡 -->
-    <div v-if="activeCategory === 'traditional'" class="np-entry-wrap">
-      <button type="button" class="np-entry" @click="showNewspaper = true">
-        <span class="np-entry-icon">📰</span>
-        <span class="np-entry-main">
-          <span class="np-entry-title">
-            邻舍日报
-            <span v-if="newspaperUnread" class="outlet-dot" aria-label="今天的报纸还没读"></span>
-          </span>
-          <span class="np-entry-sub">二相乐园唯一持牌报纸 · 每天零点由镇口公告站印发</span>
-        </span>
-        <span class="np-entry-go">阅读本期 ›</span>
-      </button>
-      <p class="np-entry-hint">
-        《邻舍日报》是整版报纸（报头 / 三栏排版 / 人物特稿 / 期号切换），不按帖子流展示。
-      </p>
-    </div>
-
-    <!-- 板块筛选（选中某个媒体后才出现） -->
-    <div v-if="activeCategory !== 'traditional' && boards.length" class="board-bar">
-      <linshe-button
-        v-for="b in boardChips"
-        :key="b.id ?? 'all'"
-        variant="chip"
-        :active="activeBoard === b.id"
-        @click="onBoardChange(b.id)"
-      >
-        <span class="board-label">{{ b.name }}</span>
-        <span class="board-count">{{ b.post_count }}</span>
-      </linshe-button>
-    </div>
-
-    <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
-         （选中这类媒体时 feedPosts 为空，页面上就只有下面这一块） -->
-    <div v-if="activeCategory !== 'traditional' && specialPosts.length" class="special-list">
-      <div
-        v-for="p in specialPosts" :key="p.id"
-        class="special-wrap"
-        :class="[`is-${postKind(p)}`, { 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }]"
-      >
-        <!-- 批量模式：整幅版式外左侧一个勾选行（版式本身不适合在图上贴勾选框） -->
-        <button
-          v-if="batchMode"
-          type="button"
-          class="special-pick"
-          :class="{ on: selectedPostIds.has(p.id) }"
-          @click="togglePick(p.id)"
-        >
-          <span class="pick-box" :class="{ on: selectedPostIds.has(p.id) }" aria-hidden="true">
-            <svg v-if="selectedPostIds.has(p.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          </span>
-          <span class="special-pick-title">{{ p.title || kindLabel(p) }}</span>
-        </button>
-        <component
-          :is="componentFor(p)"
-          :post="p"
-          @zoom="zoomSrc = $event"
-          @section-loaded="onSectionLoaded"
-          @section-error="onSectionError"
-        />
-        <!-- 周刊/海报是整幅版式，不适合在图上贴按钮 → 操作放在版式下方 -->
-        <div class="special-ops">
-          <linshe-button
-            size="sm" variant="secondary"
-            :loading="regeneratingId === p.id"
-            :disabled="busyPostId !== null"
-            @click="regenerateImage(p)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">
-              <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-            </svg>重新生图
-          </linshe-button>
-          <span class="special-open" role="button" tabindex="0" @click="openPost(p)" @keydown.enter.prevent="openPost(p)">查看详情 ›</span>
-          <span style="flex:1"></span>
-          <linshe-button
-            size="sm" variant="ghost" tone="danger"
-            :disabled="busyPostId !== null"
-            title="删除这一期"
-            @click="removePost(p)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            </svg>删除
-          </linshe-button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 工具条：左上角「批量操作」。平时只一个小按钮，不占视觉；进入批量模式后
-         整行变成「已选 N 项 + 全选/取消 + 批量重新生图 + 批量删除」。
-         传统报纸分类没有帖子流，不显示。 -->
-    <div v-if="activeCategory !== 'traditional'" class="list-toolbar">
-      <template v-if="!batchMode">
-        <button
-          type="button"
-          class="batch-enter"
-          :disabled="!posts.length"
-          :title="posts.length ? '勾选多条内容后批量重新生图或删除' : '当前没有可操作的内容'"
-          @click="enterBatchMode"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="4" width="4" height="4" rx="1"/><path d="M11 6h10"/>
-            <rect x="3" y="14" width="4" height="4" rx="1"/><path d="M11 16h10"/>
-          </svg>
-          批量操作
-        </button>
-      </template>
-
-      <template v-else>
-        <span class="batch-count">已选 <b>{{ selectedPostIds.size }}</b> 项</span>
-        <button type="button" class="batch-btn" :disabled="batchBusy" @click="selectAllVisible">
-          {{ allVisibleSelected ? '取消全选' : '全选本页' }}
-        </button>
-        <button type="button" class="batch-btn" :disabled="batchBusy" @click="exitBatchMode">退出</button>
-        <span class="batch-spacer"></span>
-        <button
-          type="button" class="batch-btn"
-          :disabled="batchBusy || !selectedPostIds.size"
-          title="把这些内容的旧配图清掉并重新排队生成"
-          @click="batchRegenerate"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-          </svg>
-          重新生图
-        </button>
-        <button
-          type="button" class="batch-btn is-danger"
-          :disabled="batchBusy || !selectedPostIds.size"
-          @click="batchDelete"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-          </svg>
-          删除{{ selectedPostIds.size ? ` ${selectedPostIds.size}` : '' }}
-        </button>
-      </template>
-    </div>
-
-    <!-- ── 帖子流：瀑布流 ── -->
-    <div v-if="activeCategory !== 'traditional' && feedPosts.length" class="masonry">
-      <article
-        v-for="p in feedPosts"
-        :key="p.id"
-        class="post-card"
-        :class="{ 'is-char': p.author_type === 'character', 'is-selecting': batchMode, 'is-picked': selectedPostIds.has(p.id) }"
-        @click="onCardClick(p)"
-      >
-        <!-- 批量模式：卡片左上角勾选框。整卡可点（拿不到鼠标的触屏也好用），
-             所以这里只做视觉，不单独绑事件。 -->
-        <span v-if="batchMode" class="pick-box" :class="{ on: selectedPostIds.has(p.id) }" aria-hidden="true">
-          <svg v-if="selectedPostIds.has(p.id)" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </span>
-        <!-- 封面：有图用图，没图用渐变占位（配图由后台补印） -->
-        <div class="post-cover">
-          <img v-if="p.image" :src="bustUrlIfOverwritten(p.image)" loading="lazy" decoding="async" alt="" />
-          <div v-else class="cover-ph">
-            <span v-if="p.outlet_name" class="cover-ph-outlet">{{ p.outlet_name }}</span>
-            <span class="cover-ph-title">{{ p.title }}</span>
-          </div>
-          <span class="cover-likes">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M12 21s-7.5-4.7-9.6-9A5.6 5.6 0 0 1 12 6.1 5.6 5.6 0 0 1 21.6 12c-2.1 4.3-9.6 9-9.6 9Z"/>
-            </svg>{{ formatNum(p.likes) }}
-          </span>
-          <span v-if="p.board_name" class="cover-board">{{ p.board_name }}</span>
-          <!-- 悬浮操作：重新生图 / 删除（@click.stop 防止连带打开详情） -->
-          <div class="cover-ops">
-            <button
-              type="button" class="cover-op" title="重新生图"
-              :disabled="busyPostId !== null"
-              @click.stop="regenerateImage(p)"
+    <div class="media-shell">
+      <section class="media-deck" aria-label="传媒导航">
+        <header class="media-deck-header">
+          <div class="media-heading">
+            <media-game-button
+              v-if="isMobile"
+              variant="icon"
+              aria-label="打开导航"
+              @click="toggleMobileSidebar?.()"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-              </svg>
-            </button>
-            <button
-              type="button" class="cover-op is-danger" title="删除"
-              :disabled="busyPostId !== null"
-              @click.stop="removePost(p)"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div class="post-body">
-          <div class="post-author">
-            <span class="author-avatar" :class="{ 'is-char': p.author_type === 'character' }">
-              <img v-if="p.author_avatar" :src="p.author_avatar" alt="" />
-              <span v-else>{{ (p.author_name || '?').charAt(0) }}</span>
-            </span>
-            <span class="author-name" :class="{ 'is-char': p.author_type === 'character' }">{{ p.author_name }}</span>
-            <span v-if="p.author_type === 'character'" class="author-badge">角色</span>
-          </div>
-          <h3 class="post-title">{{ p.title }}</h3>
-          <p class="post-excerpt">{{ p.content }}</p>
-          <div v-if="p.tags.length" class="post-tags">
-            <span v-for="t in p.tags" :key="t" class="tag">#{{ t }}</span>
-          </div>
-          <div class="post-foot">
-            <span class="foot-item">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/>
-              </svg>{{ formatNum(p.views) }}
-            </span>
-            <span class="foot-item">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>{{ p.comments.length }}
+              ‹
+            </media-game-button>
+            <div class="media-brand">
+              <span class="media-kicker">邻舍情报站 / LOCAL SIGNAL</span>
+              <h1>
+                大新闻
+                <span aria-hidden="true">!!</span>
+              </h1>
+              <span class="media-brand-caption">不是，这也能上新闻？</span>
+            </div>
+            <span class="media-sticker" aria-hidden="true">
+              街巷
+              <br />
+              新鲜事
+              <span>✦</span>
             </span>
           </div>
-        </div>
-      </article>
-    </div>
-
-    <!-- 空状态：注意要基于 posts（而非 feedPosts）——
-         选中的是周刊/海报时 feedPosts 本就为空，不能因此误报"没有内容"；
-         传统报纸分类也不适用（内容在整版报纸里） -->
-    <div v-if="activeCategory !== 'traditional' && !posts.length && !loading" class="media-empty">
-      <!-- ★ 加载失败必须与"真的没有内容"区分开。
-           踩过的坑：后端 listPosts 的 COUNT 查询缺 JOIN → 接口报错 → catch 里静默置空 posts
-           → 页面显示「还没有任何帖子」，看起来像"内容被清空了"，实际是请求挂了。 -->
-      <template v-if="loadError">
-        <p class="empty-title">内容加载失败</p>
-        <p class="empty-hint">{{ loadError }}</p>
-        <linshe-button variant="secondary" size="sm" class="empty-retry" @click="reloadAll()">重试</linshe-button>
-      </template>
-      <template v-else>
-        <p class="empty-title">{{ activeOutlet === null ? '还没有任何帖子' : '这个媒体还没有内容' }}</p>
-        <p class="empty-hint">点右上角「刷新」抓一批新帖；内容由该媒体的提示词 + 世界观生成，活跃角色会随机出现在帖子里。</p>
-      </template>
-    </div>
-
-    <div v-if="loading" class="media-loading"><span class="spinner"></span> 加载中…</div>
-    <div v-if="!loading && hasMore && posts.length" class="load-more" @click="loadMore">
-      {{ loadingMore ? '加载中…' : '加载更多' }}
-    </div>
-    <div v-else-if="!loading && posts.length" class="load-more is-end">— 共 {{ total }} 帖 —</div>
-
-    <!-- 帖子详情 -->
-    <linshe-modal
-      :visible="!!detailPost"
-      :title="detailPost?.title || ''"
-      wide
-      panel-class="mp-detail-panel"
-      @close="detailPost = null"
-    >
-      <div v-if="detailPost" class="post-detail">
-        <!-- 顶部操作条：重新生图 / 删除（对三种形态都适用） -->
-        <div class="detail-ops">
-          <linshe-button
-            size="sm" variant="secondary"
-            :loading="regeneratingId === detailPost.id"
-            :disabled="busyPostId !== null"
-            title="为这条内容重新生成配图"
-            @click="regenerateImage(detailPost)"
+          <div class="media-console">
+            <div class="console-topline">
+              <span class="console-label">
+                <span aria-hidden="true">◈</span>
+                选择你的信息频道
+              </span>
+              <div class="header-actions">
+                <media-game-button variant="ghost" @click="showSettings = true">
+                  媒体设置
+                </media-game-button>
+                <media-game-button
+                  v-if="activeCategory !== 'traditional'"
+                  variant="primary"
+                  :loading="refreshing"
+                  @click="onRefresh"
+                >
+                  <span v-if="!refreshing" aria-hidden="true">↻</span>
+                  {{ refreshing ? '收集中…' : '刷新内容' }}
+                </media-game-button>
+              </div>
+            </div>
+            <div class="media-category">
+              <linshe-tabs
+                variant="comic"
+                :model-value="activeCategory"
+                :options="categoryOptions"
+                aria-label="内容分类"
+                @update:model-value="onCategoryChange"
+              />
+            </div>
+          </div>
+        </header>
+        <div v-if="activeCategory !== 'traditional'" class="media-deck-channels">
+          <span class="channel-label">
+            {{ activeCategory === 'traditional' ? '今日读物' : '收听频道' }}
+          </span>
+          <div v-if="activeCategory !== 'traditional'" class="tabs-scroll" @wheel="scrollChannelTabs">
+            <linshe-tabs
+              variant="comic"
+              size="sm"
+              :model-value="activeOutlet ?? 'all'"
+              :options="outletOptions"
+              aria-label="选择媒体"
+              @update:model-value="
+                onOutletChange($event === 'all' ? null : $event)
+              "
+            />
+          </div>
+          <span v-else class="daily-caption">邻舍日报 · 每天零点印发</span>
+          <media-game-button
+            v-if="activeCategory !== 'traditional'"
+            class="auto-action"
+            size="sm"
+            variant="ghost"
+            :aria-expanded="freqOpen"
+            aria-controls="media-frequency"
+            @click="freqOpen = !freqOpen"
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">
-              <path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>
-            </svg>重新生图
-          </linshe-button>
-          <span style="flex:1"></span>
-          <linshe-button
-            size="sm" variant="ghost" tone="danger"
-            :disabled="busyPostId !== null"
-            title="删除这条内容"
-            @click="removePost(detailPost)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-              <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
-            </svg>删除
-          </linshe-button>
+            自动 · {{ autoLabel }} {{ freqOpen ? '⌃' : '⌄' }}
+          </media-game-button>
         </div>
-
-        <!-- ★ 版式本体渲染（门户 / 周刊 / 海报），而不是把结构化内容摊成纯文本。
-             按 payload 形态分派 —— 迁移后 layout 对老帖不再可靠（见 postKind 注释）。
-             图片可点击放大。 -->
-        <component
-          v-if="postKind(detailPost) !== 'feed'"
-          :is="componentFor(detailPost)"
-          :post="detailPost"
-          @zoom="zoomSrc = $event"
-          @section-loaded="onSectionLoaded"
-          @section-error="onSectionError"
-        />
-
-        <template v-else>
-          <div class="detail-meta">
-            <span class="detail-author">
-              <span class="author-avatar" :class="{ 'is-char': detailPost.author_type === 'character' }">
-                <img v-if="detailPost.author_avatar" :src="detailPost.author_avatar" alt="" />
-                <span v-else>{{ (detailPost.author_name || '?').charAt(0) }}</span>
-              </span>{{ detailPost.author_name }}
-              <span v-if="detailPost.author_type === 'character'" class="author-badge">角色</span>
-            </span>
-            <span class="detail-stats">{{ detailPost.outlet_name }}<template v-if="detailPost.board_name"> · {{ detailPost.board_name }}</template></span>
+        <div
+          v-if="activeCategory !== 'traditional' && boards.length"
+          class="media-deck-boards"
+        >
+          <span class="filter-label">话题分区</span>
+          <div class="tabs-scroll">
+            <linshe-tabs
+              variant="comic"
+              size="sm"
+              :model-value="activeBoard ?? 'all'"
+              :options="boardOptions"
+              aria-label="选择板块"
+              @update:model-value="
+                onBoardChange($event === 'all' ? null : $event)
+              "
+            />
           </div>
-          <img
-            v-if="detailPost.image"
-            :src="bustUrlIfOverwritten(detailPost.image)"
-            class="detail-img"
-            alt=""
-            @click="zoomSrc = bustUrlIfOverwritten(detailPost.image)"
-          />
-          <p class="detail-content">{{ detailPost.content }}</p>
+        </div>
+        <Transition name="media-fade">
+          <section
+            v-if="freqOpen && activeCategory !== 'traditional'"
+            id="media-frequency"
+            class="frequency-panel"
+          >
+            <div class="frequency-intro">
+              <span class="frequency-kicker">AUTO TUNE / 收讯节奏</span>
+              <h2>
+                自动更新频率
+                <span aria-hidden="true">↻</span>
+              </h2>
+              <p>给情报站设个节奏，新消息按时送达。</p>
+              <span class="frequency-status">
+                {{ auto.minutes === 0 ? '手动收讯' : '自动收讯中' }}
+              </span>
+            </div>
+            <div class="frequency-controls" :aria-busy="freqSaving">
+              <div
+                class="frequency-presets"
+                role="group"
+                aria-label="自动更新频率"
+              >
+                <media-game-button
+                  v-for="(step, i) in steps"
+                  :key="step.minutes"
+                  size="sm"
+                  :variant="stepIdx === i ? 'primary' : 'secondary'"
+                  :aria-pressed="stepIdx === i"
+                  :disabled="freqSaving"
+                  :title="step.hint"
+                  @click="applyFreq(i)"
+                >
+                  <span v-if="stepIdx === i" aria-hidden="true">✓</span>
+                  {{ step.label }}
+                </media-game-button>
+              </div>
+              <div class="frequency-note" role="status">
+                <span class="frequency-note-label">
+                  {{ freqSaving ? '保存中' : '当前档位' }}
+                </span>
+                <p>{{ currentStep?.hint }}</p>
+                <span
+                  v-if="auto.minutes > 0 && nextInText"
+                  class="frequency-countdown"
+                >
+                  {{
+                    nextInText === '即将'
+                      ? '即将更新'
+                      : '下次约 ' + nextInText + '后'
+                  }}
+                </span>
+              </div>
+            </div>
+          </section>
+        </Transition>
+      </section>
+      <div v-if="activeCategory !== 'traditional'" class="list-toolbar">
+        <template v-if="!batchMode">
+          <div class="toolbar-note">
+            <h2 class="toolbar-heading">
+              <span aria-hidden="true">✦</span>
+              {{ activeCategory === 'digital' ? '本期刊物' : '街巷热议' }}
+            </h2>
+            <span v-if="!loading" class="toolbar-count">
+              <b>{{ total }}</b>
+              篇
+            </span>
+            <span class="toolbar-rule" aria-hidden="true" />
+          </div>
+          <media-game-button
+            size="sm"
+            variant="ghost"
+            :disabled="!posts.length || loading"
+            @click="enterBatchMode"
+          >
+            批量管理
+          </media-game-button>
         </template>
-
-        <!-- 标签 / 数据 / 评论：三种形态共用 -->
-        <div v-if="detailPost.tags.length" class="post-tags">
-          <span v-for="t in detailPost.tags" :key="t" class="tag">#{{ t }}</span>
-        </div>
-        <div class="detail-stats-row">
-          <span>♥ {{ formatNum(detailPost.likes) }}</span>
-          <span>👁 {{ formatNum(detailPost.views) }}</span>
-          <span>💬 {{ detailPost.comments.length }}</span>
-        </div>
-        <div class="comment-list">
-          <div v-for="(c, i) in detailPost.comments" :key="i" class="comment-item">
-            <span class="comment-author">{{ c.author }}</span>
-            <span class="comment-text">{{ c.content }}</span>
-          </div>
-          <div v-if="!detailPost.comments.length" class="comment-empty">还没有评论</div>
-        </div>
+        <template v-else>
+          <span class="batch-count">
+            已选
+            <b>{{ selectedPostIds.size }}</b>
+            项
+          </span>
+          <media-game-button
+            size="sm"
+            variant="ghost"
+            :disabled="batchBusy"
+            @click="selectAllVisible"
+          >
+            {{ allVisibleSelected ? '取消全选' : '全选本页' }}
+          </media-game-button>
+          <div class="toolbar-spacer"></div>
+          <media-game-button
+            size="sm"
+            :disabled="batchBusy || !selectedPostIds.size"
+            @click="batchRegenerate"
+          >
+            重新生图
+          </media-game-button>
+          <media-game-button
+            size="sm"
+            variant="danger"
+            :disabled="batchBusy || !selectedPostIds.size"
+            @click="batchDelete"
+          >
+            删除
+          </media-game-button>
+          <media-game-button
+            size="sm"
+            variant="ghost"
+            :disabled="batchBusy"
+            @click="exitBatchMode"
+          >
+            完成
+          </media-game-button>
+        </template>
       </div>
-    </linshe-modal>
+      <Transition name="media-fade" mode="out-in">
+        <section
+          :key="activeCategory + ':' + activeOutlet + ':' + activeBoard"
+          class="media-content"
+          :aria-busy="loading"
+        >
+          <NewspaperFeed
+            v-if="activeCategory === 'traditional'"
+            :today-paper="newspaperStore.todayPaper"
+            :unread="newspaperUnread"
+            :refresh-key="newspaperRefreshKey"
+            @open="openNewspaper"
+          />
+          <div
+            v-else-if="loading"
+            class="post-grid"
+            role="status"
+            aria-label="正在加载内容"
+          >
+            <div v-for="i in 6" :key="i" class="post-skeleton">
+              <div class="skeleton skeleton-cover"></div>
+              <div class="skeleton skeleton-line"></div>
+              <div class="skeleton skeleton-line short"></div>
+            </div>
+          </div>
+          <template v-else>
+            <!-- ── 周刊 / 海报：全宽版式，不参与瀑布流列布局 ──
+         （选中这类媒体时 feedPosts 为空，页面上就只有下面这一块） -->
+            <div
+              v-if="activeCategory !== 'traditional' && specialPosts.length"
+              class="special-list"
+            >
+              <div
+                v-for="p in specialPosts"
+                :key="p.id"
+                class="special-wrap"
+                :class="[
+                  `is-${postKind(p)}`,
+                  {
+                    'is-selecting': batchMode,
+                    'is-picked': selectedPostIds.has(p.id)
+                  }
+                ]"
+              >
+                <!-- 批量模式：整幅版式外左侧一个勾选行（版式本身不适合在图上贴勾选框） -->
+                <button
+                  v-if="batchMode"
+                  type="button"
+                  class="special-pick"
+                  :class="{ on: selectedPostIds.has(p.id) }"
+                  @click="togglePick(p.id)"
+                >
+                  <span
+                    class="pick-box"
+                    :class="{ on: selectedPostIds.has(p.id) }"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      v-if="selectedPostIds.has(p.id)"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </span>
+                  <span class="special-pick-title">
+                    {{ p.title || kindLabel(p) }}
+                  </span>
+                </button>
+                <component
+                  :is="componentFor(p)"
+                  :openable="!batchMode"
+                  @open="openPost(p)"
+                  :post="p"
+                  @zoom="zoomSrc = $event"
+                  @section-loaded="onSectionLoaded"
+                  @section-error="onSectionError"
+                />
 
-    <!-- 图片放大（与《邻舍日报》详情同口径：点图放大） -->
-    <ImageLightbox :visible="!!zoomSrc" :imgs="zoomSrc ? [zoomSrc] : []" @hide="zoomSrc = ''" />
+              </div>
+            </div>
 
-    <!-- 媒体设置 -->
-    <MediaSettingsModal v-model="showSettings" :outlets="outlets" @changed="reloadOutlets" />
+            <!-- ── 帖子流：瀑布流 ── -->
+            <div
+              v-if="activeCategory !== 'traditional' && feedPosts.length"
+              class="masonry"
+            >
+              <div
+                v-for="(column, index) in feedColumns"
+                :key="index"
+                class="masonry-column"
+              >
+                <article
+                  v-for="p in column"
+                  :key="p.id"
+                  class="post-card"
+                  :class="{
+                    'is-char': p.author_type === 'character',
+                    'is-selecting': batchMode,
+                    'is-picked': selectedPostIds.has(p.id)
+                  }"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="(batchMode ? '选择：' : '阅读：') + p.title"
+                  @keydown.enter.self.prevent="onCardClick(p)"
+                  @keydown.space.self.prevent="onCardClick(p)"
+                  @click="onCardClick(p)"
+                >
+                  <!-- 批量模式：卡片左上角勾选框。整卡可点（拿不到鼠标的触屏也好用），
+               所以这里只做视觉，不单独绑事件。 -->
+                  <span
+                    v-if="batchMode"
+                    class="pick-box"
+                    :class="{ on: selectedPostIds.has(p.id) }"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      v-if="selectedPostIds.has(p.id)"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3.4"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </span>
+                  <!-- 封面：有图用图，没图用渐变占位（配图由后台补印） -->
+                  <div class="post-cover">
+                    <img
+                      v-if="p.image"
+                      :src="bustUrlIfOverwritten(p.image)"
+                      loading="lazy"
+                      decoding="async"
+                      alt=""
+                    />
+                    <div v-else class="cover-ph">
+                      <span v-if="p.outlet_name" class="cover-ph-outlet">
+                        {{ p.outlet_name }}
+                      </span>
+                      <span class="cover-ph-title">{{ p.title }}</span>
+                    </div>
+                    <span class="cover-likes">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M12 21s-7.5-4.7-9.6-9A5.6 5.6 0 0 1 12 6.1 5.6 5.6 0 0 1 21.6 12c-2.1 4.3-9.6 9-9.6 9Z"
+                        />
+                      </svg>
+                      {{ formatNum(p.likes) }}
+                    </span>
+                    <span v-if="p.board_name" class="cover-board">
+                      {{ p.board_name }}
+                    </span>
+                    <!-- 悬浮操作：重新生图 / 删除（@click.stop 防止连带打开详情） -->
+                    <div class="cover-ops">
+                      <button
+                        type="button"
+                        class="cover-op"
+                        title="重新生图"
+                        :disabled="busyPostId !== null"
+                        @click.stop="regenerateImage(p)"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                          <path d="M21 3v5h-5" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="cover-op is-danger"
+                        title="删除"
+                        :disabled="busyPostId !== null"
+                        @click.stop="removePost(p)"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.4"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <polyline points="3 6 5 6 21 6" />
+                          <path
+                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                          />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+  
+                  <div class="post-body">
+                    <div class="post-author">
+                      <span
+                        class="author-avatar"
+                        :class="{ 'is-char': p.author_type === 'character' }"
+                      >
+                        <img
+                          v-if="p.author_avatar"
+                          :src="p.author_avatar"
+                          alt=""
+                        />
+                        <span v-else>{{ (p.author_name || '?').charAt(0) }}</span>
+                      </span>
+                      <span
+                        class="author-name"
+                        :class="{ 'is-char': p.author_type === 'character' }"
+                      >
+                        {{ p.author_name }}
+                      </span>
+                    </div>
+                    <h3 class="post-title">{{ p.title }}</h3>
+                    <p class="post-excerpt">{{ p.content }}</p>
+                    <div v-if="p.tags.length" class="post-tags">
+                      <span v-for="t in p.tags" :key="t" class="tag">
+                        #{{ t }}
+                      </span>
+                    </div>
+                    <div class="post-foot">
+                      <span class="foot-item">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"
+                          />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        {{ formatNum(p.views) }}
+                      </span>
+                      <span class="foot-item">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                          />
+                        </svg>
+                        {{ p.comments.length }}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
 
-    <!-- 《邻舍日报》：沿用原有整版报纸界面（报头 / 三栏 / 期号切换 / 新闻详情） -->
-    <NewspaperModal v-model="showNewspaper" @read="onNewspaperRead" />
+            <div
+              v-if="!posts.length"
+              class="media-empty"
+              :class="{ 'is-error': !!loadError }"
+            >
+              <div class="empty-art" aria-hidden="true">
+                <span class="empty-art-spark">✦</span>
+                <span class="empty-art-sheet" />
+                <span class="empty-symbol">{{ loadError ? '!' : '…' }}</span>
+                <span class="empty-stamp">
+                  {{ loadError ? '收讯中断' : '故事待续' }}
+                </span>
+              </div>
+              <div class="empty-copy">
+                <span class="empty-kicker">
+                  {{
+                    loadError
+                      ? 'SIGNAL LOST / 收讯异常'
+                      : 'STAY TUNED / 等待新消息'
+                  }}
+                </span>
+                <h3 v-if="loadError">
+                  内容暂时没有送达
+                  <span class="empty-punctuation" aria-hidden="true">!</span>
+                </h3>
+                <h3 v-else>
+                  新的故事，
+                  <br />
+                  还在路上
+                  <span class="empty-punctuation" aria-hidden="true">!!</span>
+                </h3>
+                <p>
+                  {{
+                    loadError ||
+                    (refreshing
+                      ? '正在收集邻里的新鲜事，稍候就来。'
+                      : '这里还没有帖子，刷新内容，收听邻里的新鲜事。')
+                  }}
+                </p>
+                <media-game-button
+                  v-if="loadError"
+                  size="sm"
+                  @click="reloadAll"
+                >
+                  重新加载
+                  <span aria-hidden="true">↗</span>
+                </media-game-button>
+                <media-game-button
+                  v-else
+                  size="sm"
+                  :loading="refreshing"
+                  @click="onRefresh"
+                >
+                  <span v-if="!refreshing" aria-hidden="true">↻</span>
+                  {{ refreshing ? '收集中…' : '刷新内容' }}
+                </media-game-button>
+              </div>
+            </div>
+            <div v-if="posts.length" class="list-end">
+              <media-game-button
+                v-if="hasMore"
+                :loading="loadingMore"
+                @click="loadMore"
+              >
+                加载更多
+              </media-game-button>
+              <span v-else>已经读到这里的最后一篇了</span>
+            </div>
+          </template>
+        </section>
+      </Transition>
+    </div>
+    <MediaPostDetail
+      :visible="detailVisible"
+      :post="detailPost"
+      :kind="postKind(detailPost)"
+      :busy="busyPostId !== null"
+      :regenerating="!!detailPost && regeneratingId === detailPost.id"
+      @close="detailVisible = false"
+      @delete="removePost"
+      @regenerate="regenerateImage"
+      @zoom="zoomSrc = $event"
+    >
+      <component
+        v-if="detailPost && postKind(detailPost) !== 'feed'"
+        :is="componentFor(detailPost)"
+        :key="detailPost.id"
+        :post="detailPost"
+        @zoom="zoomSrc = $event"
+        @section-loaded="onSectionLoaded"
+        @section-error="onSectionError"
+      />
+    </MediaPostDetail>
+    <Teleport to="body">
+      <div style="--vel-z-index: 14000">
+        <ImageLightbox
+          :visible="!!zoomSrc"
+          :imgs="zoomSrc ? [zoomSrc] : []"
+          :show-regenerate="true"
+          :show-upscale="true"
+          :show-delete="false"
+          @hide="zoomSrc = ''"
+        />
+      </div>
+    </Teleport>
+    <MediaSettingsModal
+      v-model="showSettings"
+      :outlets="outlets"
+      @changed="reloadAll"
+    />
+    <NewspaperModal
+      v-model="showNewspaper"
+      :initial-date="newspaperDate"
+      @read="onNewspaperRead"
+      @close="newspaperRefreshKey++"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, inject, onMounted, onUnmounted } from 'vue'
 import * as api from '../api/index.js'
-import LinsheButton from '../components/ui/LinsheButton.vue'
-import LinsheModal from '../components/ui/LinsheModal.vue'
+import MediaGameButton from '../components/media/MediaGameButton.vue'
+import LinsheTabs from '../components/ui/LinsheTabs.vue'
+import MediaPostDetail from '../components/media/MediaPostDetail.vue'
 import MediaSettingsModal from '../components/MediaSettingsModal.vue'
 import NewspaperModal from '../components/NewspaperModal.vue'
 import MediaWeekly from '../components/media/MediaWeekly.vue'
@@ -519,6 +642,10 @@ import MediaPortal from '../components/media/MediaPortal.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 import { onEvent } from '../stores/unifiedStream.js'
+import { applyMediaImageUpdate, applyMediaPortalReady } from '../utils/mediaImageUpdates.js'
+import { scrollHorizontalOnWheel as scrollChannelTabs } from '../utils/horizontalScroll.js'
+import { readMediaSeen, markMediaSeen, mediaCategoryUnread, chooseMediaCategory } from '../utils/mediaCategoryEntry.js'
+import NewspaperFeed from '../components/media/NewspaperFeed.vue'
 import { useNewspaperStore } from '../stores/newspaper.js'
 
 const isMobile = inject('isMobile')
@@ -528,12 +655,22 @@ const toastFn = inject('toast')
 const confirmFn = inject('confirm', null)
 
 // ── 《邻舍日报》入口 ──
-// 报纸有独立的整版排版，不在帖子流里展示；这里只做入口 + 未读点。
+// 预览复用当期日报缓存；真正打开整版后才消费未读状态。
 const newspaperStore = useNewspaperStore()
 const showNewspaper = ref(false)
+const newspaperDate = ref('')
+const newspaperRefreshKey = ref(0)
 const newspaperUnread = computed(() => newspaperStore.unread)
+function openNewspaper(paper) {
+  newspaperDate.value = paper?.publish_date || ''
+  showNewspaper.value = true
+}
 function onNewspaperRead(paper) {
-  try { newspaperStore.markRead(paper) } catch { /* 失败不阻塞，轮询会兜底 */ }
+  try {
+    newspaperStore.markRead(paper)
+  } catch {
+    /* 失败不阻塞，轮询会兜底 */
+  }
 }
 
 const PAGE_SIZE = 24
@@ -549,6 +686,7 @@ const loadingMore = ref(false)
 const refreshing = ref(false)
 const showSettings = ref(false)
 const detailPost = ref(null)
+const detailVisible = ref(false)
 /** 图片放大（点版式里的图 → 与《邻舍日报》详情同口径） */
 const zoomSrc = ref('')
 /** 正在重新生图的帖子 id（按钮转圈用） */
@@ -564,11 +702,39 @@ const activeBoard = ref(null)
 // 周刊/海报是按期出刊，三者形态完全不同，混在一个流里既乱又难找。
 // 分类由 layout 推导（weekly/poster → 数字报刊；feed → 社交平台），加新媒体时自动归类。
 const CATEGORIES = [
-  { key: 'traditional', label: '传统报纸', icon: '📰', hint: '《邻舍日报》—— 整版报纸，每天零点印发' },
-  { key: 'digital', label: '数字报刊', icon: '📸', hint: '周刊 / 海报 —— 按期出刊的数字刊物' },
-  { key: 'social', label: '社交平台', icon: '💬', hint: '瀑布流社交平台 —— 论坛/职场/暗网等' },
+  {
+    key: 'traditional',
+    label: '传统报纸',
+    icon: '📰',
+    hint: '《邻舍日报》—— 整版报纸，每天零点印发'
+  },
+  {
+    key: 'digital',
+    label: '数字报刊',
+    icon: '📸',
+    hint: '周刊 / 海报 —— 按期出刊的数字刊物'
+  },
+  {
+    key: 'social',
+    label: '社交平台',
+    icon: '💬',
+    hint: '瀑布流社交平台 —— 论坛/职场/暗网等'
+  }
 ]
-const activeCategory = ref('social')   // 默认落在内容最多的社交平台
+// 等待更新状态后只选择一次入口，避免先闪到随机分类；用户手动选择优先。
+const activeCategory = ref('')
+const seenMedia = ref(readMediaSeen())
+const latestMedia = ref({ digital: 0, social: 0 })
+const categoryUnread = computed(() => mediaCategoryUnread(latestMedia.value, seenMedia.value, newspaperUnread.value))
+
+async function refreshMediaUnread() {
+  await Promise.all(['digital', 'social'].map(async category => {
+    try {
+      const data = await api.listMediaPosts({ category, limit: 1 })
+      latestMedia.value[category] = data.posts?.[0]?.id || 0
+    } catch { /* 查询失败不覆盖已有更新状态，也不阻塞其他分类 */ }
+  }))
+}
 
 /** 当前分类下的媒体（普通用户自建媒体） */
 /**
@@ -591,20 +757,13 @@ function isDigitalOutlet(o) {
 const filteredOutlets = computed(() => {
   if (activeCategory.value === 'traditional') return []
   const wantDigital = activeCategory.value === 'digital'
-  return outlets.value.filter(o => isDigitalOutlet(o) === wantDigital)
+  return outlets.value.filter((o) => isDigitalOutlet(o) === wantDigital)
 })
 
 /** 「全部」标签上的数字：当前分类下所有媒体的帖子数之和 */
-const categoryTotal = computed(() => filteredOutlets.value.reduce((s, o) => s + (o.post_count || 0), 0))
-
-/** 分类分页上的数字 */
-function categoryCount(key) {
-  if (key === 'traditional') return newspaperStore.unread ? 1 : 0   // 只表示"有未读"
-  const wantDigital = key === 'digital'
-  return outlets.value
-    .filter(o => isDigitalOutlet(o) === wantDigital)
-    .reduce((s, o) => s + (o.post_count || 0), 0)
-}
+const categoryTotal = computed(() =>
+  filteredOutlets.value.reduce((s, o) => s + (o.post_count || 0), 0)
+)
 
 async function onCategoryChange(key) {
   if (activeCategory.value === key) return
@@ -615,7 +774,14 @@ async function onCategoryChange(key) {
   activeBoard.value = null
   boards.value = []
   loadError.value = ''
-  if (key === 'traditional') { posts.value = []; total.value = 0; return }
+  freqOpen.value = false
+  if (key === 'traditional') {
+    ++loadSeq
+    loading.value = false
+    posts.value = []
+    total.value = 0
+    return
+  }
   await loadPage(0)
 }
 
@@ -624,17 +790,22 @@ async function onCategoryChange(key) {
 // 这里留一份**兜底副本**：后端还没重启 / 接口临时不通时，控件至少是可用的、不显示空白。
 // 改档位时记得两边一起改（后端口径在 services/mediaService.js）。
 const FALLBACK_AUTO_STEPS = [
-  { minutes: 0,   label: '关闭',    hint: '不自动抓帖，只有你点「刷新」时才生成。' },
+  { minutes: 0, label: '关闭', hint: '不自动抓帖，只有你点「刷新」时才生成。' },
   { minutes: 720, label: '12 小时', hint: '一天两批，几乎不占算力。' },
-  { minutes: 240, label: '4 小时',  hint: '一天六批，内容慢慢积累。' },
-  { minutes: 120, label: '2 小时',  hint: '一天十几批。' },
-  { minutes: 60,  label: '1 小时',  hint: '每小时一批（每批 3 条）。' },
-  { minutes: 20,  label: '20 分钟', hint: '默认节奏，社区一直有新鲜感。' },
-  { minutes: 10,  label: '10 分钟', hint: '比较频繁，LLM 消耗明显上升。' },
-  { minutes: 5,   label: '5 分钟',  hint: '最频繁档；每批 3 条要调一次 LLM，烧 token 很快。' },
+  { minutes: 240, label: '4 小时', hint: '一天六批，内容慢慢积累。' },
+  { minutes: 120, label: '2 小时', hint: '一天十几批。' },
+  { minutes: 60, label: '1 小时', hint: '每小时一批（每批 3 条）。' },
+  { minutes: 20, label: '20 分钟', hint: '默认节奏，社区一直有新鲜感。' },
+  { minutes: 10, label: '10 分钟', hint: '比较频繁，LLM 消耗明显上升。' },
+  {
+    minutes: 5,
+    label: '5 分钟',
+    hint: '最频繁档；每批 3 条要调一次 LLM，烧 token 很快。'
+  }
 ]
 
 const freqOpen = ref(false)
+const freqSaving = ref(false)
 const steps = ref(FALLBACK_AUTO_STEPS)
 const auto = ref({ minutes: 20, nextInMs: null, generating: false })
 /** 倒计时每秒刷新用的时间戳（只用来触发 nextInText 重算） */
@@ -646,12 +817,16 @@ const stepIdx = computed(() => {
   const list = steps.value
   if (!list.length) return 0
   const m = auto.value.minutes
-  const exact = list.findIndex(s => s.minutes === m)
+  const exact = list.findIndex((s) => s.minutes === m)
   if (exact >= 0) return exact
-  let best = 0, bestDiff = Infinity
+  let best = 0,
+    bestDiff = Infinity
   list.forEach((s, i) => {
     const d = Math.abs(s.minutes - m)
-    if (d < bestDiff) { bestDiff = d; best = i }
+    if (d < bestDiff) {
+      bestDiff = d
+      best = i
+    }
   })
   return best
 })
@@ -684,41 +859,75 @@ async function loadAuto() {
     const d = await api.getMediaAuto()
     // 后端下发的档位表优先；为空则保留兜底副本，避免滑块变成空的
     if (Array.isArray(d.steps) && d.steps.length) steps.value = d.steps
-    if (d.auto) { auto.value = d.auto; _autoSyncAt = Date.now() }
+    if (d.auto) {
+      auto.value = d.auto
+      _autoSyncAt = Date.now()
+    }
   } catch (err) {
     // 后端未重启/接口不通：保留兜底档位表，控件仍可操作
-    console.warn('[media] 读取自动频率失败（用兜底档位表）:', err?.message || err)
+    console.warn(
+      '[media] 读取自动频率失败（用兜底档位表）:',
+      err?.message || err
+    )
   }
 }
 
-/** 拖动时先本地更新（跟手），松手才写库 */
-function onFreqInput(rawIdx) {
-  const i = Number(rawIdx)
-  const s = steps.value[i]
-  if (!s) return
-  auto.value = { ...auto.value, minutes: s.minutes, nextInMs: s.minutes === 0 ? null : auto.value.nextInMs }
-}
-
 async function applyFreq(i) {
+  if (freqSaving.value) return
   const s = steps.value[i]
-  if (!s || s.minutes === auto.value.minutes) { freqOpen.value = true; return }
+  if (!s || s.minutes === auto.value.minutes) {
+    freqOpen.value = true
+    return
+  }
   const prev = auto.value.minutes
+  freqSaving.value = true
   auto.value = { ...auto.value, minutes: s.minutes }
   try {
     const d = await api.setMediaAuto(s.minutes)
-    if (d.auto) { auto.value = d.auto; _autoSyncAt = Date.now() }
+    if (d.auto) {
+      auto.value = d.auto
+      _autoSyncAt = Date.now()
+    }
     if (d.steps) steps.value = d.steps
-    toastFn?.(s.minutes === 0 ? '已关闭自动抓帖（仍可手动刷新）' : `自动抓帖已设为每 ${s.label}一批`, 'success')
+    toastFn?.(
+      s.minutes === 0
+        ? '已关闭自动抓帖（仍可手动刷新）'
+        : `自动抓帖已设为每 ${s.label}一批`,
+      'success'
+    )
   } catch (err) {
     console.error('[media] 保存自动频率失败:', err)
     auto.value = { ...auto.value, minutes: prev }
     // 404 = 后端还没重启（这条路由是新增的），提示要说清楚，别让用户以为是网络问题
     toastFn?.('保存失败' + '：' + (err?.message || ''), 'error')
+  } finally {
+    freqSaving.value = false
   }
 }
 
-const totalAllOutlets = computed(() => outlets.value.reduce((s, o) => s + (o.post_count || 0), 0))
-
+const categoryOptions = computed(() =>
+  CATEGORIES.map((c, index) => ({
+    value: c.key,
+    label: c.label,
+    eyebrow: '0' + (index + 1) + ' / ' + ['PAPER', 'MAGAZINE', 'SOCIAL'][index],
+    badge: categoryUnread.value[c.key] ? '更新' : '',
+    title: c.hint
+  }))
+)
+const outletOptions = computed(() => [
+  { value: 'all', label: '全部 · ' + categoryTotal.value },
+  ...filteredOutlets.value.map((o) => ({
+    value: o.id,
+    label: (o.icon ? o.icon + ' ' : '') + o.name + ' · ' + (o.post_count || 0),
+    title: o.tagline || o.name
+  }))
+])
+const boardOptions = computed(() =>
+  boardChips.value.map((b) => ({
+    value: b.id ?? 'all',
+    label: b.name + ' · ' + b.post_count
+  }))
+)
 // 板块 chip：首位「全部」，其余为当前媒体的板块
 const boardChips = computed(() => {
   const sum = boards.value.reduce((s, b) => s + (b.post_count || 0), 0)
@@ -751,26 +960,46 @@ function postKind(p) {
 function isSpecialPost(p) {
   return postKind(p) !== 'feed'
 }
-const feedPosts = computed(() => posts.value.filter(p => !isSpecialPost(p)))
+const feedPosts = computed(() => posts.value.filter((p) => !isSpecialPost(p)))
+
+// 与历史奇遇一致：轮流分配到显式列，避免 CSS 多列平衡后整列留空。
+const feedViewportWidth = ref(window.innerWidth)
+function updateFeedViewportWidth() {
+  feedViewportWidth.value = window.innerWidth
+}
+const feedColumns = computed(() => {
+  const width = feedViewportWidth.value
+  const count = width > 1500 ? 4 : width > 1050 ? 3 : width > 700 ? 2 : 1
+  const columns = Array.from({ length: count }, () => [])
+  feedPosts.value.forEach((post, index) => columns[index % count].push(post))
+  return columns
+})
+onMounted(() => window.addEventListener('resize', updateFeedViewportWidth))
+onUnmounted(() => window.removeEventListener('resize', updateFeedViewportWidth))
+
 const specialPosts = computed(() => posts.value.filter(isSpecialPost))
 
 /** 版式组件：按 payload 形态挑 */
-const KIND_COMPONENT = { portal: MediaPortal, weekly: MediaWeekly, poster: MediaPoster }
+const KIND_COMPONENT = {
+  portal: MediaPortal,
+  weekly: MediaWeekly,
+  poster: MediaPoster
+}
+function kindLabel(p) {
+  return (
+    { portal: '报刊', weekly: '周刊', poster: '海报' }[postKind(p)] || '内容'
+  )
+}
 function componentFor(p) {
   return KIND_COMPONENT[postKind(p)] || MediaWeekly
 }
-/** 批量勾选行上的类型标签 */
-function kindLabel(p) {
-  return { portal: '报刊', weekly: '周刊', poster: '海报' }[postKind(p)] || '内容'
-}
-
 // ── 门户：板块正文取回后同步回本地列表 ──
 // 门户组件内部已经用本地缓存显示，这里再把结果写回 posts 数组，
 // 这样**关掉详情/刷新列表前**都不会丢；下次进来也少一次请求（payload 已落库）。
 function onSectionLoaded({ postId, section }) {
-  const target = posts.value.find(p => p.id === postId)
+  const target = posts.value.find((p) => p.id === postId)
   if (!target?.payload?.sections) return
-  const hit = target.payload.sections.find(s => s.key === section.key)
+  const hit = target.payload.sections.find((s) => s.key === section.key)
   if (hit) hit.body = section.body
 }
 
@@ -786,6 +1015,7 @@ function formatNum(n) {
 
 function openPost(p) {
   detailPost.value = p
+  detailVisible.value = true
 }
 
 // ── 批量操作 ──
@@ -798,8 +1028,11 @@ const selectedPostIds = ref(new Set())
 /** 当前页（含周刊/海报）可见的全部帖子 —— 「全选本页」的作用域 */
 const visiblePosts = computed(() => posts.value)
 
-const allVisibleSelected = computed(() =>
-  visiblePosts.value.length > 0 && visiblePosts.value.every(p => selectedPostIds.value.has(p.id)))
+const allVisibleSelected = computed(
+  () =>
+    visiblePosts.value.length > 0 &&
+    visiblePosts.value.every((p) => selectedPostIds.value.has(p.id))
+)
 
 function enterBatchMode() {
   if (!posts.value.length) return
@@ -822,7 +1055,7 @@ function togglePick(id) {
 function selectAllVisible() {
   selectedPostIds.value = allVisibleSelected.value
     ? new Set()
-    : new Set(visiblePosts.value.map(p => p.id))
+    : new Set(visiblePosts.value.map((p) => p.id))
 }
 
 /** 批量模式下点卡片 = 切换勾选；否则照旧打开详情 */
@@ -834,9 +1067,15 @@ function onCardClick(p) {
 async function batchDelete() {
   const ids = [...selectedPostIds.value]
   if (!ids.length || batchBusy.value) return
-  const ok = window.confirm(
-    `确定删除选中的 ${ids.length} 条内容吗？\n其中的文章与配图会一并删除，且不可恢复。`
-  )
+  const message = `确定删除选中的 ${ids.length} 条内容吗？\n其中的文章与配图会一并删除，且不可恢复。`
+  const ok = confirmFn
+    ? await confirmFn({
+        title: '批量删除',
+        message,
+        okText: '删除',
+        danger: true
+      })
+    : window.confirm(message)
   if (!ok) return
   batchBusy.value = true
   try {
@@ -865,7 +1104,10 @@ async function batchRegenerate() {
     if (r?.failed) {
       toastFn?.(`已排队 ${r.queued} 条，${r.failed} 条失败`, 'warning')
     } else {
-      toastFn?.(`已排队重新生图 ${r?.queued ?? ids.length} 条，稍候…`, 'success')
+      toastFn?.(
+        `已排队重新生图 ${r?.queued ?? ids.length} 条，稍候…`,
+        'success'
+      )
     }
     exitBatchMode()
     await loadPage(0)
@@ -901,13 +1143,22 @@ async function removePost(p) {
   // 用 postKind 而不是裸 layout：迁移后两个刊的 layout 都是 portal，
   // 拿 layout 判断会把所有刊都说成「周刊」（海报也不例外）。
   const kind = postKind(p)
-  const label = kind === 'feed' ? '这条内容'
-    : kind === 'poster' ? '这一期海报'
-    : kind === 'portal' ? '这一期刊物'
-    : '这一期周刊'
+  const label =
+    kind === 'feed'
+      ? '这条内容'
+      : kind === 'poster'
+        ? '这一期海报'
+        : kind === 'portal'
+          ? '这一期刊物'
+          : '这一期周刊'
   const msg = `确定删除${label}吗？\n\n「${p.title}」\n\n配图文件会一并删除，且不可恢复。`
   const ok = confirmFn
-    ? await confirmFn({ title: '删除', message: msg, okText: '删除', danger: true })
+    ? await confirmFn({
+        title: '删除',
+        message: msg,
+        okText: '删除',
+        danger: true
+      })
     : window.confirm(msg)
   if (!ok) return
 
@@ -915,10 +1166,10 @@ async function removePost(p) {
   try {
     await api.deleteMediaPost(p.id)
     // 本地移除，不必整页重载
-    posts.value = posts.value.filter(x => x.id !== p.id)
+    posts.value = posts.value.filter((x) => x.id !== p.id)
     total.value = Math.max(0, total.value - 1)
-    if (detailPost.value?.id === p.id) detailPost.value = null
-    await reloadOutlets()   // 标签上的计数要跟着变
+    if (detailPost.value?.id === p.id) detailVisible.value = false
+    await reloadOutlets() // 标签上的计数要跟着变
     toastFn?.('已删除', 'success')
   } catch (err) {
     toastFn?.('删除失败' + '：' + (err?.message || ''), 'error')
@@ -935,8 +1186,13 @@ async function reloadOutlets() {
   try {
     const d = await api.listMediaOutlets()
     outlets.value = d.outlets || []
+    const selected = outlets.value.find((o) => o.id === activeOutlet.value)
+    if (selected) activeCategory.value = isDigitalOutlet(selected) ? 'digital' : 'social'
     // 当前选中的媒体被删了就回到「全部」
-    if (activeOutlet.value && !outlets.value.some(o => o.id === activeOutlet.value)) {
+    if (
+      activeOutlet.value &&
+      !outlets.value.some((o) => o.id === activeOutlet.value)
+    ) {
       activeOutlet.value = null
       await reloadBoards()
     }
@@ -946,7 +1202,10 @@ async function reloadOutlets() {
 }
 
 async function reloadBoards() {
-  if (!activeOutlet.value) { boards.value = []; return }
+  if (!activeOutlet.value) {
+    boards.value = []
+    return
+  }
   try {
     const d = await api.listMediaBoards(activeOutlet.value)
     boards.value = d.boards || []
@@ -957,28 +1216,49 @@ async function reloadBoards() {
 }
 
 async function loadPage(offset = 0) {
+  if (disposed) return
   const seq = ++loadSeq
+  // 传统报纸由 NewspaperFeed 自行加载，不请求数字报刊 / 社交帖列表。
+  if (activeCategory.value === 'traditional') {
+    posts.value = []
+    total.value = 0
+    loadError.value = ''
+    loading.value = false
+    return
+  }
+  if (offset === 0) loading.value = true
   try {
     // 没选具体媒体时按分类过滤 —— 否则「全部」会把报刊也混进来
     const d = await api.listMediaPosts({
       outlet: activeOutlet.value,
       board: activeBoard.value,
-      category: activeOutlet.value ? null : (activeCategory.value === 'traditional' ? null : activeCategory.value),
+      category: activeOutlet.value ? null : activeCategory.value,
       limit: PAGE_SIZE,
-      offset,
+      offset
     })
     if (seq !== loadSeq) return
     loadError.value = ''
     if (offset === 0) posts.value = d.posts || []
     else posts.value.push(...(d.posts || []))
     total.value = d.total || 0
+    // 浏览「全部」的首页才消费该分类的更新；筛选单个媒体/板块不误清其他内容。
+    if (offset === 0 && !activeOutlet.value && !activeBoard.value) {
+      const latestId = Math.max(0, ...posts.value.map(post => post.id))
+      latestMedia.value[activeCategory.value] = latestId
+      seenMedia.value = markMediaSeen(seenMedia.value, activeCategory.value, latestId)
+    }
   } catch (err) {
     console.error('[media] 读取帖子失败:', err)
     if (seq !== loadSeq) return
     // 不能只是清空 posts —— 那会让"请求失败"看起来像"这里真的没有内容"。
     // 记下错误，交给空状态渲染成「加载失败 + 重试」。
     loadError.value = err?.message || '请求失败'
-    if (offset === 0) { posts.value = []; total.value = 0 }
+    if (offset === 0) {
+      posts.value = []
+      total.value = 0
+    }
+  } finally {
+    if (seq === loadSeq && offset === 0) loading.value = false
   }
 }
 
@@ -1017,7 +1297,10 @@ async function onRefresh() {
     toastFn?.('正在抓取新帖，稍候…', 'success')
     // 兜底轮询：即使 SSE 没连上，也能在 60s 内看到结果
     clearTimeout(refreshTimer)
-    refreshTimer = setTimeout(() => { refreshing.value = false; reloadAll() }, 60_000)
+    refreshTimer = setTimeout(() => {
+      refreshing.value = false
+      reloadAll()
+    }, 60_000)
   } catch (err) {
     console.error('[media] 刷新失败:', err)
     toastFn?.('刷新失败：' + (err?.message || ''), 'error')
@@ -1026,292 +1309,633 @@ async function onRefresh() {
 }
 
 async function reloadAll() {
-  await Promise.all([reloadOutlets(), loadPage(0)])
+  await reloadOutlets()
+  await loadPage(0)
 }
 
 // ── SSE ──
 let unsubNew = null
 let unsubImg = null
+let unsubPortal = null
+let disposed = false
 
 onMounted(async () => {
+  // Subscribe before loading data or starting image generation.
+  unsubImg = onEvent('media_image_ready', (event) => {
+    for (const post of new Set([...posts.value, detailPost.value])) {
+      applyMediaImageUpdate(post, event)
+    }
+  })
+  unsubPortal = onEvent('media_portal_ready', (event) => {
+    for (const post of new Set([...posts.value, detailPost.value])) {
+      applyMediaPortalReady(post, event)
+    }
+  })
   newspaperStore.startPolling()
-  await Promise.all([reloadOutlets(), loadAuto()])
+  await Promise.all([reloadOutlets(), loadAuto(), newspaperStore.fetchToday(), refreshMediaUnread()])
+  if (disposed) return
+  if (!activeCategory.value) {
+    activeCategory.value = chooseMediaCategory(CATEGORIES.map(c => c.key), categoryUnread.value)
+  }
   await loadPage(0)
+  if (disposed) return
   loading.value = false
 
   // 兜底补图：把上次没出图的帖子补上（生成失败 / 当时 ComfyUI 没开）。
   // **只在打开页面时补一次**，不做后台定时扫描 —— 否则会持续占用 ComfyUI。
-  api.fillMediaImages(6).catch(() => { /* 后端未重启时 404，忽略 */ })
+  api.fillMediaImages(6).catch(() => {
+    /* 后端未重启时 404，忽略 */
+  })
 
   // 倒计时每秒重算（只在展开面板时才有视觉意义，但开销可忽略）
-  tickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
+  tickTimer = setInterval(() => {
+    nowTick.value = Date.now()
+  }, 1000)
 
   unsubNew = onEvent('media_new_posts', async () => {
     refreshing.value = false
     clearTimeout(refreshTimer)
+    await refreshMediaUnread()
     await reloadAll()
-    loadAuto()   // 自动批次刚跑过 → 倒计时归零重算
+    loadAuto() // 自动批次刚跑过 → 倒计时归零重算
     toastFn?.('新帖已到', 'success')
-  })
-  // 配图就绪：只替换那一张，不整页重载
-  unsubImg = onEvent('media_image_ready', ({ postId, image }) => {
-    const p = posts.value.find(x => x.id === postId)
-    if (p) p.image = image
-    if (detailPost.value?.id === postId) detailPost.value.image = image
   })
 })
 
 onUnmounted(() => {
+  disposed = true
+  ++loadSeq
   clearTimeout(refreshTimer)
   if (tickTimer) clearInterval(tickTimer)
   newspaperStore.stopPolling()
   if (unsubNew) unsubNew()
   if (unsubImg) unsubImg()
+  if (unsubPortal) unsubPortal()
 })
 </script>
 
 <style scoped>
 .media-view {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
   height: 100dvh;
-  overflow-y: auto;
-  padding: 0 0 24px;
-}
-
-/* ── 顶栏 ── */
-.media-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 20px;
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  z-index: 6;
-}
-/* 移动端侧栏入口（原来靠「传媒」标题点击，标题去掉后换成图标按钮） */
-.btn-mobile-back {
-  width: 40px; height: 40px; flex-shrink: 0;
-  background: transparent;
-}
-.header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.media-count { font-size: 13px; color: var(--text-secondary); }
-.btn-op, .btn-refresh { padding: 8px 18px; }
-
-/* ── 自动抓帖频率 chip ── */
-.auto-chip {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px; font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.auto-chip:hover { color: var(--text-primary); }
-.auto-chip.active { border-color: var(--accent); color: var(--accent); background: rgba(var(--accent-rgb), 0.1); }
-/* 关闭态压暗一点，提示「现在不会自动更新」 */
-.auto-chip.off { opacity: 0.62; }
-.chip-caret { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
-.chip-caret.open { transform: rotate(180deg); }
-
-/* ── 频率面板 ── */
-.freq-panel {
-  flex-shrink: 0;
-  padding: 12px 20px 14px;
-  background: rgba(var(--accent-rgb), 0.05);
-  border-bottom: 1px solid var(--border);
-}
-.freq-row { display: flex; align-items: center; gap: 14px; }
-.freq-label { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--text-bright); }
-.freq-range { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
-.freq-val {
-  flex-shrink: 0; min-width: 62px; text-align: right;
-  font-size: 13px; font-weight: 700; color: var(--accent);
-}
-.freq-val.off { color: var(--text-secondary); }
-
-/* 档位刻度：直接点某一档跳过去，比拖滑块精准 */
-.freq-ticks { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0 7px; }
-.freq-tick {
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-family: inherit; font-size: 11px; font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.freq-tick:hover { color: var(--text-primary); }
-.freq-tick.on {
-  background: rgba(var(--accent-rgb), 0.14);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 700;
-}
-.freq-hint { font-size: 11px; color: var(--text-secondary); line-height: 1.6; }
-.freq-hint b { color: var(--accent); }
-
-.freq-enter-active { transition: all 0.25s cubic-bezier(0.3, 1.2, 0.5, 1); overflow: hidden; }
-.freq-leave-active { transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
-.freq-enter-from, .freq-leave-to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
-.freq-enter-to, .freq-leave-from { opacity: 1; max-height: 200px; }
-
-/* ── 分类分页：占据原「传媒」标题的位置（在顶栏左侧） ──
-   窄屏时三档放不下 → 横向滚动，不换行、不挤压右侧按钮 */
-.cat-bar {
-  display: flex;
-  gap: 2px;
-  flex: 0 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.cat-bar::-webkit-scrollbar { display: none; }
-.cat-tab {
-  flex: 0 0 auto;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
-  border: none;
-  border-radius: 10px;
-  background: none;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 13px; font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.cat-tab:hover:not(.active) { color: var(--text-primary); background: var(--bg-tertiary); }
-.cat-tab.active { color: var(--accent); background: rgba(var(--accent-rgb), 0.12); }
-.cat-icon { font-size: 14px; }
-.cat-num {
-  font-size: 11px; font-weight: 500; opacity: 0.65;
-  padding: 1px 6px; border-radius: 999px;
-  background: var(--bg-tertiary);
-}
-.cat-tab.active .cat-num { background: rgba(var(--accent-rgb), 0.16); opacity: 1; }
-
-/* ── 传统报纸：日报入口卡 ── */
-.np-entry-wrap { padding: 16px 20px; }
-.np-entry {
-  display: flex; align-items: center; gap: 16px;
-  width: 100%;
-  padding: 20px 22px;
-  border-radius: 14px;
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(8px);
-  color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.np-entry:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: var(--accent); }
-.np-entry-icon { font-size: 34px; flex-shrink: 0; }
-.np-entry-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.np-entry-title {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 17px; font-weight: 700; color: var(--text-bright);
-}
-.np-entry-sub { font-size: 12px; color: var(--text-secondary); }
-.np-entry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
-.np-entry-hint { margin: 12px 2px 0; font-size: 11.5px; line-height: 1.7; color: var(--text-secondary); opacity: 0.8; }
-
-/* ── 媒体标签页 ── */
-.outlet-bar {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 12px 20px 10px;
-  scrollbar-width: none;
-  flex-shrink: 0;
-}
-.outlet-bar::-webkit-scrollbar { display: none; }
-.outlet-tab {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--glass-border);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 13px; font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.outlet-tab:hover:not(.active) { color: var(--text-primary); }
-.outlet-tab.active {
-  background: rgba(var(--accent-rgb), 0.12);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.outlet-icon { font-size: 14px; }
-.outlet-num { font-size: 11px; opacity: 0.65; font-weight: 500; }
-/* 形态标记：周刊 / 海报不是帖子流，按「期」出刊 */
-.outlet-kind {
-  font-size: 9px; font-weight: 800; line-height: 1;
-  padding: 2px 4px; border-radius: 4px;
-}
-.outlet-kind.is-weekly { background: rgba(176, 58, 46, 0.14); color: #b03a2e; }
-.outlet-kind.is-poster { background: rgba(47, 75, 216, 0.14); color: #2f4bd8; }
-/* 日报入口：外观同其他媒体标签，但它打开的是整版报纸
-   —— 用左侧竖线把它与用户自建媒体区隔开，暗示「官方印刷品」 */
-.outlet-tab.is-newspaper {
-  position: relative;
-  border-color: rgba(var(--accent-rgb), 0.32);
+  overflow-y: auto;
+  /* 长短频道切换及内容淡出时保留滚动条占位，避免导航宽度随之抖动。 */
+  scrollbar-gutter: stable;
   color: var(--text-primary);
 }
-.outlet-tab.is-newspaper::after {
+.media-shell {
+  container-type: inline-size;
+  container-name: media-shell;
+  padding: 20px 0 32px;
+}
+/* 专属漫画频道台；列表卡片保持原有版式。 */
+.media-deck {
+  container-type: inline-size;
+  container-name: media-deck;
+  margin: 0 20px 24px;
+  border: 3px solid var(--media-ink);
+  background: var(--media-paper);
+  box-shadow: 6px 6px 0 var(--media-ink);
+}
+.media-deck-header {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(440px, 1.2fr);
+  background: var(--media-ink);
+}
+.media-heading {
+  display: flex;
+  align-items: center;
+  position: relative;
+  gap: 12px;
+  padding: 22px 28px;
+  background: var(--accent);
+  color: var(--media-ink);
+  overflow: hidden;
+}
+.media-heading::after {
   content: '';
   position: absolute;
-  right: -5px; top: 18%;
-  width: 1px; height: 64%;
-  background: var(--glass-border);
+  height: 12px;
+  width: 100px;
+  right: -15px;
+  bottom: 0;
+  transform: skewX(-30deg);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--media-ink) 0 9px,
+    transparent 9px 16px
+  );
 }
-.outlet-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--danger);
+.media-brand {
+  position: relative;
+  z-index: 1;
+}
+.media-kicker {
+  display: block;
+  font-family: monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+}
+.media-heading h1 {
+  margin: 3px 0 7px;
+  color: var(--media-ink);
+  font-size: clamp(48px, 5vw, 70px);
+  font-weight: 950;
+  font-style: italic;
+  line-height: 1.15;
+  letter-spacing: -0.08em;
+  transform: rotate(-3deg);
+}
+.media-heading h1 > span {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--media-light);
+  -webkit-text-stroke: 2px var(--media-ink);
+  text-shadow: 3px 3px 0 var(--media-ink);
+}
+.media-brand-caption {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+.media-sticker {
+  position: absolute;
+  right: 24px;
+  top: 36px;
+  display: grid;
+  place-content: center;
+  width: 76px;
+  height: 76px;
+  background: var(--media-light);
+  border: 3px solid var(--media-ink);
+  color: var(--media-ink);
+  box-shadow: 4px 4px 0 var(--media-ink);
+  font-weight: 900;
+  font-size: 18px;
+  line-height: 1.25;
+  transform: rotate(10deg);
+}
+.media-sticker > span {
+  position: absolute;
+  top: -19px;
+  right: -15px;
+  font-size: 36px;
+}
+.media-console {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  gap: 18px;
+}
+.console-topline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.console-label {
+  color: var(--media-light);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.console-label > span {
+  color: var(--accent);
+  padding-right: 4px;
+}
+.header-actions {
+  display: flex;
+  gap: 12px;
+  color: var(--media-light);
+}
+.media-category {
+  min-width: 0;
+}
+.media-deck-channels {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-top: 3px solid var(--media-ink);
+}
+.channel-label {
+  font-size: 12px;
+  font-weight: 900;
+  flex-shrink: 0;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.16em;
+  border-right: 2px solid var(--media-rule);
+  padding-right: 12px;
+}
+.tabs-scroll {
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: thin;
+  padding: 3px 0;
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior-x: contain;
+}
+.tabs-scroll > * {
+  width: max-content;
+}
+.auto-action {
+  margin-left: auto;
   flex-shrink: 0;
 }
-
-/* ── 板块 chip ── */
-.board-bar {
+.media-deck-boards {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 20px 12px;
+}
+.filter-label,
+.daily-caption {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+.frequency-panel {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.7fr) minmax(0, 2fr);
+  gap: 24px;
+  padding: 24px;
+  border-top: 3px solid var(--media-rule);
+  background: var(--bg-sunken);
+}
+.frequency-intro {
+  min-width: 0;
+  border-left: 5px solid var(--accent);
+  padding-left: 16px;
+}
+.frequency-kicker {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.frequency-intro h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+  color: var(--text-bright);
+  font-size: 22px;
+  font-weight: 900;
+}
+.frequency-intro h2 > span {
+  color: var(--accent);
+  font-size: 30px;
+  line-height: 1;
+}
+.frequency-intro p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  margin: 0;
+}
+.frequency-status {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 4px 9px;
+  background: var(--media-ink);
+  color: var(--media-light);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  transform: rotate(-2deg);
+}
+.frequency-controls {
+  min-width: 0;
+  align-self: center;
+}
+.frequency-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 3px 3px 0;
+}
+.frequency-presets > * {
+  min-width: 0;
+}
+.frequency-note {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 20px 12px;
-  flex-shrink: 0;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--media-rule);
+  font-size: 12px;
+  line-height: 1.7;
 }
-.board-label { font-weight: 500; }
-.board-count { font-size: 11px; opacity: 0.7; }
-
-/* ── 周刊 / 海报：全宽版式列表 ──
-   限宽居中 —— 这两类版式是"印刷品"排版，铺满 1920px 会极难读 */
+.frequency-note-label {
+  flex-shrink: 0;
+  font-weight: 800;
+  color: var(--text-bright);
+}
+.frequency-note p {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.frequency-countdown {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 20px 12px;
+}
+.toolbar-note {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+.toolbar-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 9px 18px 10px 14px;
+  margin: 0;
+  background: var(--media-ink);
+  color: var(--media-light);
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+}
+.toolbar-heading > span {
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+}
+.toolbar-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.toolbar-count b {
+  color: var(--text-bright);
+  font-size: 24px;
+  font-family: monospace;
+  font-style: italic;
+  font-weight: 900;
+}
+.toolbar-rule {
+  flex: 1;
+  min-width: 12px;
+  height: 3px;
+  margin-right: 8px;
+  background: var(--media-rule);
+  opacity: 0.45;
+}
+.toolbar-spacer {
+  flex: 1;
+}
+.batch-count {
+  font-size: var(--fs-sm);
+}
+.batch-count b {
+  color: var(--accent-hover);
+}
+.media-fade-enter-active,
+.media-fade-leave-active {
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+.media-fade-enter-from,
+.media-fade-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.media-empty {
+  position: relative;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  align-items: center;
+  gap: 38px;
+  max-width: 740px;
+  margin: 44px auto 56px;
+  padding: 36px 40px;
+  border: 3px solid var(--media-rule);
+  background: var(--media-paper);
+  box-shadow: 8px 8px 0 var(--media-ink);
+}
+.media-empty::after {
+  content: '';
+  position: absolute;
+  right: 16px;
+  bottom: -3px;
+  width: 80px;
+  height: 10px;
+  background: repeating-linear-gradient(
+    -55deg,
+    var(--media-rule) 0 6px,
+    transparent 6px 12px
+  );
+}
+.empty-art {
+  position: relative;
+  height: 186px;
+}
+.empty-art-sheet {
+  position: absolute;
+  inset: 24px 22px 30px 12px;
+  background: var(--bg-sunken);
+  border: 3px solid var(--media-rule);
+  transform: rotate(-12deg);
+}
+.empty-art-sheet::before,
+.empty-art-sheet::after {
+  content: '';
+  position: absolute;
+  height: 3px;
+  background: var(--media-rule);
+  left: 14px;
+  right: 14px;
+  bottom: 16px;
+}
+.empty-art-sheet::after {
+  bottom: 27px;
+  right: 36px;
+}
+.empty-symbol {
+  position: absolute;
+  inset: 12px 6px 58px 30px;
+  display: grid;
+  place-items: center;
+  background: var(--accent);
+  color: var(--media-ink);
+  border: 3px solid var(--media-ink);
+  box-shadow: 5px 5px 0 var(--media-ink);
+  font-size: 70px;
+  font-weight: 900;
+  line-height: 1;
+  transform: rotate(6deg);
+}
+.empty-symbol::after {
+  content: '';
+  position: absolute;
+  bottom: -12px;
+  left: 20px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-right: 3px solid var(--media-ink);
+  border-bottom: 3px solid var(--media-ink);
+  transform: skewY(-35deg);
+}
+.empty-art-spark {
+  position: absolute;
+  z-index: 1;
+  right: -10px;
+  top: -18px;
+  font-size: 50px;
+  line-height: 1;
+  color: var(--text-bright);
+}
+.empty-stamp {
+  position: absolute;
+  bottom: 6px;
+  left: 36px;
+  padding: 5px 12px;
+  background: var(--media-ink);
+  color: var(--media-light);
+  border: 2px solid var(--media-ink);
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  transform: rotate(-7deg);
+}
+.empty-copy {
+  min-width: 0;
+}
+.empty-kicker {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+.media-empty h3 {
+  margin: 12px 0;
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 950;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+  color: var(--text-bright);
+}
+.empty-punctuation {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--accent);
+  font-style: italic;
+  transform: rotate(8deg);
+}
+.media-empty p {
+  margin: 0 0 20px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+@container media-shell (max-width: 780px) {
+  .media-empty {
+    margin: 32px 20px 48px;
+    gap: 24px;
+    padding: 28px;
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+}
+@container media-shell (max-width: 520px) {
+  .media-empty {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    margin: 28px 14px 40px;
+    padding: 24px;
+    text-align: center;
+    box-shadow: 5px 5px 0 var(--media-ink);
+  }
+  .empty-art {
+    width: 160px;
+    height: 155px;
+    margin: 0 auto;
+  }
+  .empty-symbol {
+    font-size: 56px;
+  }
+  .empty-stamp {
+    font-size: 14px;
+    bottom: 0;
+    left: 22px;
+  }
+  .media-empty h3 {
+    font-size: 28px;
+  }
+  .toolbar-note {
+    gap: 8px;
+  }
+  .toolbar-heading {
+    font-size: 15px;
+    padding: 9px 14px 10px 10px;
+    gap: 6px;
+  }
+  .toolbar-count b {
+    font-size: 20px;
+  }
+  .toolbar-rule {
+    display: none;
+  }
+}
+.list-end {
+  padding: 30px 0 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.post-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 285px), 1fr));
+  gap: 20px;
+  padding: 0 20px;
+}
+.post-skeleton {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  padding: 16px;
+}
+.skeleton-cover {
+  height: 150px;
+  border-radius: var(--radius-sm);
+}
+.skeleton-line {
+  height: 14px;
+  margin-top: 16px;
+}
+.skeleton-line.short {
+  width: 65%;
+}
 .special-list {
-  display: flex; flex-direction: column; gap: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   padding: 0 20px;
   /* ★ 容器放开到整宽。原来这里是 max-width:880px 居中，门户的横版卡片网格被卡在
      880px 里只能排 2 列，1920 屏两侧各空 520px —— 正是这次改造要解决的问题。
@@ -1320,19 +1944,22 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* ── 瀑布流（CSS 多列，卡片高度自然错落）── */
+/* ── 瀑布流：显式等宽列，按帖子顺序横向分配 ── */
 .masonry {
-  column-count: 4;
-  column-gap: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
   padding: 0 20px;
 }
-@media (max-width: 1500px) { .masonry { column-count: 3; } }
-@media (max-width: 1050px) { .masonry { column-count: 2; } }
-@media (max-width: 700px)  { .masonry { column-count: 1; } }
+.masonry-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 
 .post-card {
-  break-inside: avoid;
-  margin-bottom: 14px;
   border-radius: 14px;
   overflow: hidden;
   background: var(--glass-bg-strong);
@@ -1340,11 +1967,19 @@ onUnmounted(() => {
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--glass-border);
   cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
-.post-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.post-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
 /* 角色本人的帖子描一圈主题色，一眼区分 */
-.post-card.is-char { border-color: rgba(var(--accent-rgb), 0.4); }
+.post-card.is-char {
+  border-color: rgba(var(--accent-rgb), 0.4);
+}
 
 /* 封面统一 3:2。
    原来用原图比例（height:auto），生图是 4:3 → 封面 272px 比列宽（约 247px）还高，
@@ -1358,142 +1993,181 @@ onUnmounted(() => {
   overflow: hidden;
   background: var(--bg-tertiary);
 }
-.post-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.post-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 /* 无图占位：与图片封面同尺寸，内容垂直居中（否则字挤在顶部、下面一大片空） */
 .cover-ph {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
   padding: 20px 16px;
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.16), rgba(var(--accent-rgb), 0.04));
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.16),
+    rgba(var(--accent-rgb), 0.04)
+  );
 }
-.cover-ph-outlet { font-size: 11px; color: var(--accent); font-weight: 600; }
+.cover-ph-outlet {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+}
 .cover-ph-title {
-  font-size: 15px; font-weight: 700; color: var(--text-bright); line-height: 1.55;
-  display: -webkit-box; -webkit-line-clamp: 5; line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .cover-likes {
   position: absolute;
-  top: 8px; left: 8px;
-  display: inline-flex; align-items: center; gap: 3px;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   padding: 3px 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
-  font-size: 11px; font-weight: 700;
+  font-size: 11px;
+  font-weight: 700;
   backdrop-filter: blur(4px);
 }
 .cover-board {
   position: absolute;
-  right: 8px; bottom: 8px;
+  right: 8px;
+  bottom: 8px;
   padding: 2px 8px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-size: 10px; font-weight: 600;
+  font-size: 10px;
+  font-weight: 600;
   backdrop-filter: blur(4px);
 }
 
 /* ── 卡片悬浮操作（重新生图 / 删除）── */
 .cover-ops {
   position: absolute;
-  top: 8px; right: 8px;
-  display: flex; gap: 5px;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 5px;
   opacity: 0;
   transform: translateY(-4px);
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
 }
 .post-card:hover .cover-ops,
-.post-card:focus-within .cover-ops { opacity: 1; transform: translateY(0); }
+.post-card:focus-within .cover-ops {
+  opacity: 1;
+  transform: translateY(0);
+}
 /* 触屏没有 hover → 常显，否则按不到 */
 @media (hover: none) {
-  .cover-ops { opacity: 1; transform: none; }
+  .cover-ops {
+    opacity: 1;
+    transform: none;
+  }
 }
 .cover-op {
-  width: 30px; height: 30px;
+  width: 30px;
+  height: 30px;
   /* ★ 必须显式清掉全局 `button { padding: 7px 14px }`（styles/base.css）。
      配合 `* { box-sizing: border-box }`，26px 宽的按钮减去左右各 14px 内边距后
      内容宽度正好是 0 —— 图标会被压成 0 宽彻底看不见，只剩一个空白方块。 */
   padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  border: none; border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 9px;
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   cursor: pointer;
   backdrop-filter: blur(4px);
-  transition: background 0.15s, transform 0.15s;
+  transition:
+    background 0.15s,
+    transform 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
 /* 图标给足尺寸并禁止收缩：flex 容器里 svg 默认 flex-shrink:1，容器一紧就被压扁 */
 .cover-op svg {
-  width: 17px; height: 17px;
+  width: 17px;
+  height: 17px;
   flex: none;
 }
-.cover-op:hover:not(:disabled) { background: rgba(0, 0, 0, 0.8); transform: scale(1.08); }
-.cover-op.is-danger:hover:not(:disabled) { background: rgba(198, 52, 52, 0.95); }
-.cover-op:disabled { opacity: 0.45; cursor: default; }
-
-/* ── 工具条：左上角「批量操作」 ── */
-.list-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 20px 10px;
-  flex-shrink: 0;
-  min-height: 30px;
+.cover-op:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.8);
+  transform: scale(1.08);
 }
-.batch-spacer { flex: 1; }
-.batch-enter,
-.batch-btn {
-  /* ★ 必须显式 padding —— 全局 button 有 padding:7px 14px，小按钮会被撑变形 */
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 11px;
-  border: 1px solid var(--glass-border);
-  border-radius: 9px;
-  background: none;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-  -webkit-tap-highlight-color: transparent;
+.cover-op.is-danger:hover:not(:disabled) {
+  background: rgba(198, 52, 52, 0.95);
 }
-.batch-enter:hover:not(:disabled),
-.batch-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.06); }
-.batch-enter:disabled,
-.batch-btn:disabled { opacity: 0.4; cursor: default; }
-.batch-btn.is-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-.batch-btn.is-danger:hover:not(:disabled) { color: #fff; background: var(--danger); border-color: var(--danger); }
-.batch-count { font-size: 12px; color: var(--text-secondary); }
-.batch-count b { color: var(--accent); font-weight: 600; }
+.cover-op:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
 /* ── 卡片勾选框（批量模式） ── */
 .pick-box {
-  width: 20px; height: 20px;
-  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1.5px solid rgba(255, 255, 255, 0.85);
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.35);
   color: #fff;
   backdrop-filter: blur(3px);
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
 }
-.pick-box.on { background: var(--accent); border-color: var(--accent); }
+.pick-box.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .post-card .pick-box {
   position: absolute;
-  top: 8px; left: 8px;
+  top: 8px;
+  left: 8px;
   z-index: 3;
 }
 /* 批量模式下卡片右上角的单条操作藏起来，避免与批量操作混淆 */
-.post-card.is-selecting .cover-ops { display: none; }
-.post-card.is-selecting { cursor: pointer; }
-.post-card.is-picked { outline: 2px solid var(--accent); outline-offset: -2px; }
-.post-card.is-picked .post-cover { opacity: 0.82; }
+.post-card.is-selecting .cover-ops {
+  display: none;
+}
+.post-card.is-selecting {
+  cursor: pointer;
+}
+.post-card.is-picked {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.post-card.is-picked .post-cover {
+  opacity: 0.82;
+}
 
 /* ── 周刊/海报的勾选行（整幅版式不适合在图上贴勾选框） ── */
 .special-pick {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   align-self: flex-start;
   max-width: 100%;
   padding: 5px 11px;
@@ -1504,22 +2178,50 @@ onUnmounted(() => {
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
   -webkit-tap-highlight-color: transparent;
 }
-.special-pick:hover { color: var(--accent); border-color: var(--accent); }
-.special-pick.on { color: var(--accent); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+.special-pick:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.special-pick.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+}
 /* 这里的勾选框在浅色卡片外，用主题描边而不是白色描边 */
-.special-pick .pick-box { background: none; border-color: var(--glass-border); color: var(--accent); }
-.special-pick .pick-box.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.special-pick .pick-box {
+  background: none;
+  border-color: var(--glass-border);
+  color: var(--accent);
+}
+.special-pick .pick-box.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 .special-pick-title {
   min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.special-wrap.is-picked { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 14px; }
+.special-wrap.is-picked {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 14px;
+}
 
 /* ── 周刊/海报：整幅版式 + 下方操作条 ── */
-.special-wrap { display: flex; flex-direction: column; gap: 8px; }
+.special-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 /* 旧版式（周刊/海报）保持原来的窄栏居中——它们按 880px 宽度设计的排版，
    拉满宽屏会显得空；门户则吃满宽度（见下）。 */
 .special-wrap.is-weekly,
@@ -1529,114 +2231,248 @@ onUnmounted(() => {
   width: 100%;
 }
 /* 门户：横版卡片网格吃满宽屏 */
-.special-wrap.is-portal { max-width: none; }
-.special-ops {
-  display: flex; align-items: center; gap: 10px;
-  padding: 0 2px;
+.special-wrap.is-portal {
+  max-width: none;
 }
-.special-open {
-  font-size: 12px; color: var(--text-secondary); cursor: pointer;
-  padding: 4px 8px; border-radius: 6px;
-  transition: color 0.15s, background 0.15s;
+.post-body {
+  padding: 10px 12px 12px;
 }
-.special-open:hover { color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
-
-/* ── 详情弹窗顶部操作条 ── */
-.detail-ops {
-  display: flex; align-items: center; gap: 8px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
+.post-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
 }
-/* 详情里的版式：去掉外投影（弹窗内已经有层次了） */
-.mp-detail-panel :deep(.weekly),
-.mp-detail-panel :deep(.poster) { box-shadow: none; border-radius: 10px; }
-
-.post-body { padding: 10px 12px 12px; }
-.post-author { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .author-avatar {
-  width: 20px; height: 20px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden; flex-shrink: 0;
-  background: var(--accent); color: #fff;
-  font-size: 11px; font-weight: 700;
-}
-.author-avatar img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
-.author-avatar.is-char { box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.35); }
-.author-name { font-size: 12px; color: var(--text-secondary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.author-name.is-char { color: var(--accent); font-weight: 600; }
-.author-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
   flex-shrink: 0;
-  font-size: 9px; font-weight: 700;
-  padding: 1px 5px; border-radius: 4px;
-  background: rgba(var(--accent-rgb), 0.16); color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.author-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+.author-avatar.is-char {
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.35);
+}
+.author-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.author-name.is-char {
+  color: var(--accent);
+  font-weight: 600;
 }
 
-.post-title { margin: 0 0 5px; font-size: 14px; font-weight: 700; color: var(--text-bright); line-height: 1.45; }
+.post-title {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1.45;
+}
 /* 摘要 3 行（原 4 行）：与固定比例封面配合，让整列卡片高度更接近，减少参差 */
 .post-excerpt {
-  margin: 0; font-size: 12px; line-height: 1.65; color: var(--text-secondary);
-  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.post-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
-.tag { font-size: 10px; color: var(--accent); background: rgba(var(--accent-rgb), 0.08); padding: 1px 6px; border-radius: 5px; }
-.post-foot { display: flex; gap: 12px; margin-top: 9px; font-size: 11px; color: var(--text-secondary); opacity: 0.75; }
-.foot-item { display: inline-flex; align-items: center; gap: 3px; }
-
-/* ── 空 / 加载 ── */
-.media-empty { padding: 60px 24px; text-align: center; }
-.empty-title { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin: 0 0 8px; }
-.empty-hint { font-size: 12px; color: var(--text-secondary); opacity: 0.75; line-height: 1.7; margin: 0 auto; max-width: 460px; }
-.empty-retry { margin-top: 14px; }
-.media-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 50px; font-size: 13px; color: var(--text-secondary); }
-.spinner {
-  width: 15px; height: 15px; border-radius: 50%;
-  border: 2px solid rgba(var(--accent-rgb), 0.2); border-top-color: var(--accent);
-  animation: media-spin 0.7s linear infinite;
+.post-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
 }
-@keyframes media-spin { to { transform: rotate(360deg); } }
-.load-more { text-align: center; padding: 20px; font-size: 12px; color: var(--accent); cursor: pointer; }
-.load-more.is-end { color: var(--text-secondary); opacity: 0.6; cursor: default; }
+.tag {
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+.post-foot {
+  display: flex;
+  gap: 12px;
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+.foot-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 
-/* ── 帖子详情 ── */
-.post-detail { display: flex; flex-direction: column; gap: 12px; }
-.detail-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.detail-author { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-bright); }
-.detail-stats { font-size: 12px; color: var(--text-secondary); }
-.detail-img { width: 100%; border-radius: 12px; display: block; }
-.detail-content { margin: 0; font-size: 13px; line-height: 1.85; color: var(--text-primary); white-space: pre-wrap; }
-.detail-stats-row { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); }
-.comment-list { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
-.comment-item { display: flex; gap: 8px; font-size: 12px; line-height: 1.7; }
-.comment-author { flex-shrink: 0; font-weight: 600; color: var(--accent); }
-.comment-text { color: var(--text-secondary); }
-.comment-empty { font-size: 12px; color: var(--text-secondary); opacity: 0.7; }
-
+@container media-deck (max-width: 680px) {
+  .frequency-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 1250px) {
+  .media-deck-header {
+    grid-template-columns: minmax(245px, 0.75fr) minmax(380px, 1.25fr);
+  }
+  .media-heading {
+    padding: 22px 20px;
+  }
+  .media-sticker {
+    display: none;
+  }
+  .console-label {
+    display: none;
+  }
+  .console-topline {
+    justify-content: flex-end;
+  }
+  .media-deck-channels {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .media-deck-channels > .tabs-scroll {
+    flex: 1;
+  }
+}
 @media (max-width: 767px) {
-  .media-header { padding: 8px 12px; gap: 8px; }
-  .btn-mobile-back { width: 34px; height: 34px; }
-  .btn-op, .btn-refresh { padding: 6px 12px; }
-  /* 窄屏顶栏挤：帖子总数去掉（分类标签上已有数字） */
-  .media-count { display: none; }
-  /* 频率 chip 只留档位文字 */
-  .auto-chip { padding: 6px 10px; font-size: 11px; }
-  .auto-chip svg:first-child { display: none; }
-  .freq-panel { padding: 10px 14px 12px; }
-  .freq-row { gap: 10px; }
-  .freq-label { font-size: 12px; }
-  .freq-val { min-width: 52px; font-size: 12px; }
-  /* 分类三档放不下 → 缩小 + 去掉图标，横向滚动 */
-  .cat-bar { gap: 0; }
-  .cat-tab { padding: 7px 9px; font-size: 12px; gap: 4px; }
-  .cat-icon { display: none; }
-  .cat-num { padding: 1px 5px; font-size: 10px; }
-  .outlet-bar { padding: 10px 14px 8px; }
-  .np-entry-wrap { padding: 12px 14px; }
-  .np-entry { padding: 16px; gap: 12px; }
-  .np-entry-icon { font-size: 26px; }
-  .np-entry-title { font-size: 15px; }
-  .np-entry-go { display: none; }
-  .board-bar { padding: 0 14px 10px; }
-  .masonry { padding: 0 14px; }
-  .special-list { padding: 0 14px; gap: 14px; }
+  .media-shell {
+    padding-top: 12px;
+  }
+  .media-deck {
+    margin: 0 14px 22px;
+    box-shadow: 4px 4px 0 var(--media-ink);
+  }
+  .media-deck-header {
+    grid-template-columns: 1fr;
+  }
+  .media-heading {
+    padding: 14px 12px;
+    gap: 12px;
+  }
+  .media-heading > .media-game-button {
+    flex-shrink: 0;
+  }
+  .media-brand {
+    min-width: 0;
+  }
+  .media-heading h1 {
+    font-size: clamp(32px, 9vw, 48px);
+    white-space: nowrap;
+  }
+  .media-kicker {
+    font-size: 9px;
+    letter-spacing: 0.03em;
+  }
+  .media-sticker {
+    display: grid;
+    width: 58px;
+    height: 58px;
+    font-size: 15px;
+    right: 22px;
+    top: 24px;
+  }
+  .media-brand-caption {
+    font-size: 11px;
+  }
+  .media-console {
+    padding: 12px 10px 10px;
+    gap: 10px;
+  }
+  .console-label {
+    display: none;
+  }
+  .header-actions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    width: 100%;
+    gap: 8px;
+  }
+  .console-topline {
+    gap: 8px;
+    justify-content: stretch;
+  }
+  .media-deck-channels {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding: 8px 10px 4px;
+  }
+  .channel-label {
+    display: block;
+    writing-mode: horizontal-tb;
+    border: 0;
+    padding: 0;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+  }
+  .auto-action {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .media-deck-channels > .tabs-scroll {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .tabs-scroll {
+    width: 100%;
+    overscroll-behavior-x: contain;
+  }
+  .media-deck-boards {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 4px 10px 8px;
+    gap: 2px;
+  }
+  .frequency-panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+    padding: 18px 14px;
+  }
+  .frequency-intro {
+    position: relative;
+    padding-left: 12px;
+  }
+  .frequency-intro h2 {
+    font-size: 20px;
+  }
+  .frequency-status {
+    margin-top: 10px;
+  }
+  .frequency-presets {
+    gap: 10px 8px;
+  }
+  .list-toolbar {
+    padding: 0 14px 12px;
+  }
+  .masonry,
+  .special-list {
+    padding: 0 14px;
+  }
+}
+@media (max-width: 480px) {
+  .media-sticker {
+    display: none;
+  }
 }
 </style>

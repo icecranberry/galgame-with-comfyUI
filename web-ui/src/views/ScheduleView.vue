@@ -46,7 +46,7 @@
 
           <div class="card-grid stagger" @scroll.passive="onScroll" ref="cardGridEl">
             <CharacterStatusCard
-              v-for="c in activeChars"
+              v-for="c in filteredChars"
               :key="c.id"
               :char="c"
               @select="onSelectChar(c.id)"
@@ -56,39 +56,6 @@
               @pin="toggleCharPin(c)"
             />
 
-            <!-- 归档角色分类栏：默认折叠，不占屏；搜索时自动展开 -->
-            <div v-if="archivedChars.length" class="archive-bar" :class="{ collapsed: !archiveGroupOpen }">
-              <span class="archive-bar-line" aria-hidden="true"></span>
-              <div
-                class="archive-bar-label"
-                role="button"
-                tabindex="0"
-                :aria-expanded="archiveGroupOpen"
-                :title="archiveGroupOpen ? '收起归档角色' : '展开归档角色'"
-                @click="toggleArchiveGroup"
-                @keydown.enter.prevent="toggleArchiveGroup"
-                @keydown.space.prevent="toggleArchiveGroup"
-              >
-                <svg class="archive-bar-arrow" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="6,9 12,15 18,9" />
-                </svg>
-                <span>归档角色</span>
-                <span class="archive-bar-count">{{ archivedChars.length }}</span>
-              </div>
-              <span class="archive-bar-line" aria-hidden="true"></span>
-            </div>
-
-            <template v-if="archiveGroupOpen">
-              <CharacterStatusCard
-                v-for="c in archivedChars"
-                :key="c.id"
-                :char="c"
-                @select="onSelectChar(c.id)"
-                @peek="onCardPeek(c.id)"
-                @wake="onCardWake(c.id)"
-                @pin="toggleCharPin(c)"
-              />
-            </template>
           </div>
         </template>
 
@@ -423,8 +390,6 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useScheduleStore } from '../stores/schedule.js'
-// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary store（日记本入口）、本地补丁新增 chat store（归档角色判定），
-//    两者用途不同且都在本文件被调用（diaryStore.openBook / chatStore），故**一并保留**。
 import { useDiaryStore } from '../stores/diary.js'
 import { useChatStore } from '../stores/chat.js'
 import { useSettingsStore } from '../stores/settings.js'
@@ -572,21 +537,6 @@ const filteredChars = computed(() => {
   if (activeFilter.value === 'sleeping') return list.filter(c => c.is_sleeping && !c.is_temp_woken)
   return list
 })
-
-// ── 归档角色分组：默认折叠，免得几十个不参与活动的角色占满整屏 ──
-const ARCHIVE_EXPANDED_KEY = 'linshe.schedule.archivedExpanded'
-const archiveExpanded = ref((() => {
-  try { return localStorage.getItem(ARCHIVE_EXPANDED_KEY) === '1' } catch { return false }
-})())
-function toggleArchiveGroup() {
-  archiveExpanded.value = !archiveExpanded.value
-  try { localStorage.setItem(ARCHIVE_EXPANDED_KEY, archiveExpanded.value ? '1' : '0') } catch {}
-}
-// 搜索时强制展开：否则搜到归档角色也看不见
-const archiveGroupOpen = computed(() => archiveExpanded.value || searchQuery.value.trim() !== '')
-
-const activeChars = computed(() => filteredChars.value.filter(c => !c.archived))
-const archivedChars = computed(() => filteredChars.value.filter(c => c.archived))
 
 // ── 选中角色 / 抽屉 ──
 const drawerOpen = ref(false)
@@ -1423,51 +1373,6 @@ function finishReset() {
   align-content: start;
 }
 
-/* ── 归档角色分类栏：横跨整行，可点击折叠 ── */
-.archive-bar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 6px 0 2px;
-}
-.archive-bar-line {
-  flex: 1;
-  height: 1px;
-  background: var(--glass-border);
-}
-.archive-bar-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--glass-border);
-  background: var(--glass-bg);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  user-select: none;
-  transition: all var(--dur-fast) ease;
-}
-.archive-bar-label:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.archive-bar-arrow {
-  flex-shrink: 0;
-  transition: transform var(--dur-fast) var(--ease-standard);
-}
-.archive-bar.collapsed .archive-bar-arrow { transform: rotate(-90deg); }
-.archive-bar-count {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.6;
-  padding: 0 6px;
-  border-radius: var(--radius-full);
-  background: var(--tint-subtle);
-}
 
 /* ── Placeholder ── */
 .sched-placeholder {

@@ -76,7 +76,7 @@
             v-for="c in g.characters"
             :key="c.id"
             class="char-item"
-            :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat'), 'in-folder': g.name !== null, archived: c.archived }"
+            :class="{ active: c.id === chat.activeCharId && route.path.startsWith('/chat'), 'in-folder': g.name !== null }"
             @click="onCharClick(c)"
           >
             <div class="char-avatar-wrap">
@@ -87,7 +87,7 @@
             </div>
             <div class="char-info">
               <div class="char-name">
-                {{ c.display_name }}<span v-if="c.archived" class="char-archived-tag" title="已归档：不参与任何主动活动">归档</span>
+                {{ c.display_name }}
               </div>
               <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
               <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
@@ -130,7 +130,7 @@
       </div>
     </div>
 
-    <!-- 移动端底部：朋友圈 + 奇遇 + 更多 -->
+    <!-- 移动端底部：朋友圈 + 媒体 + 更多 -->
     <div v-if="isMobile" class="sidebar-footer">
       <div class="footer-nav-btn" role="button" tabindex="0" :aria-current="$route.path === '/moments' ? 'page' : undefined" @click="onMomentsClick" @keydown.enter.prevent="onMomentsClick" @keydown.space.prevent="onMomentsClick">
         <div class="nav-icon-wrap">
@@ -141,17 +141,17 @@
         </div>
         <span>朋友圈</span>
       </div>
-      <div class="footer-nav-btn" role="button" tabindex="0" :aria-current="$route.path === '/events' ? 'page' : undefined" @click="onEventsClick" @keydown.enter.prevent="onEventsClick" @keydown.space.prevent="onEventsClick">
+      <router-link to="/media" class="footer-nav-btn" :aria-current="$route.path.startsWith('/media') ? 'page' : undefined" @click="onMenuItemClick">
         <div class="nav-icon-wrap">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 10v4a1 1 0 0 0 1 1h4l10 4V5L8 9H4a1 1 0 0 0-1 1Z" />
+            <path d="M8 9v6M5 15l1 5h3l-1-5M21 9a5 5 0 0 1 0 6" />
           </svg>
-          <span v-if="events.newEventCount > 0" class="nav-dot">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
+          <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读" aria-label="日报有更新"></span>
         </div>
-        <span>奇遇</span>
-      </div>
-      <div class="footer-more-btn" role="button" tabindex="0" @click="showMoreMenu = !showMoreMenu" @keydown.enter.prevent="showMoreMenu = !showMoreMenu" @keydown.space.prevent="showMoreMenu = !showMoreMenu">
+        <span>媒体</span>
+      </router-link>
+      <div class="footer-more-btn" role="button" tabindex="0" aria-label="更多" :aria-expanded="showMoreMenu" @click="showMoreMenu = !showMoreMenu" @keydown.enter.prevent="showMoreMenu = !showMoreMenu" @keydown.space.prevent="showMoreMenu = !showMoreMenu">
         <svg viewBox="0 0 1024 1024" width="22" height="22" fill="currentColor">
           <path d="M436 128H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V168a40 40 0 0 0-40-40z m-32 276H200V200h204z m32 144H168a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H200V620h204z m452-276H588a40 40 0 0 0-40 40v268a40 40 0 0 0 40 40h268a40 40 0 0 0 40-40V588a40 40 0 0 0-40-40z m-32 276H620V620h204zM716 118c-104.9 0-190 85.1-190 190s85.1 190 190 190 190-85.1 190-190-85.1-190-190-190z m83.4 273.4A117.8 117.8 0 1 1 834 308a117 117 0 0 1-34.6 83.4z"/>
         </svg>
@@ -161,15 +161,23 @@
     <!-- 更多菜单弹窗 -->
     <Transition name="menu-slide">
       <div v-if="showMoreMenu" class="more-menu-overlay" @click.self="showMoreMenu = false">
-        <div class="more-menu-panel">
+        <div class="more-menu-panel more-menu-grid">
+          <router-link to="/events" class="more-menu-item" @click.prevent="onEventsClick">
+            <div class="nav-icon-wrap">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+              </svg>
+              <span v-if="events.newEventCount > 0" class="nav-dot nav-dot-count">{{ events.newEventCount > 99 ? '99+' : events.newEventCount }}</span>
+            </div>
+            <span>奇遇</span>
+          </router-link>
           <router-link to="/tavern" class="more-menu-item" @click="onMenuItemClick">
             <div class="nav-icon-wrap">
               <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">
                 <path d="M924.4 85.5H100.9c-19.3 0-35 15.7-35 35s15.7 35 35 35h59.7v790.2l348.7-179.8 355.3 179.2V155.5h59.7c19.3 0 35-15.7 35-35 0.1-19.4-15.6-35-34.9-35zM794.7 831.4L509 687.3 230.6 830.8V155.5h564.1v675.9z"/>
                 <path d="M416.8 489.1h60.8v60.8c0 19.3 15.7 35 35 35s35-15.7 35-35v-60.8h60.8c19.3 0 35-15.7 35-35s-15.7-35-35-35h-60.8v-60.8c0-19.3-15.7-35-35-35s-35 15.7-35 35v60.8h-60.8c-19.3 0-35 15.7-35 35s15.7 35 35 35z"/>
               </svg>
-              <!-- 《邻舍日报》未读：与 NavBar 酒馆项同源红点 -->
-              <span v-if="newspaper.unread" class="nav-dot nav-dot-daily" title="今天的《邻舍日报》还没读"></span>
             </div>
             <span>酒馆</span>
           </router-link>
@@ -211,7 +219,7 @@
                 <rect x="2" y="4" width="20" height="16" rx="2"/>
                 <path d="M2 4L12 13L22 4"/>
               </svg>
-              <span v-if="mailbox.unreadCount > 0" class="nav-dot">{{ mailbox.unreadCount > 99 ? '99+' : mailbox.unreadCount }}</span>
+              <span v-if="mailbox.unreadCount > 0" class="nav-dot nav-dot-count">{{ mailbox.unreadCount > 99 ? '99+' : mailbox.unreadCount }}</span>
             </div>
             <span>信箱</span>
           </router-link>
@@ -342,7 +350,7 @@ import { selectStandingCharacter } from '../utils/standingDisplay.js'
 const props = defineProps({
   isMobile: { type: Boolean, default: false },
   mobileOpen: { type: Boolean, default: false },
-  // 桌面端收纳状态：宽度由 .app-layout 的 --sidebar-width 变量驱动，这里只用于可达性
+  // 桌面端保持固定宽度，通过位移收纳并同步可达性状态。
   collapsed: { type: Boolean, default: false },
 })
 
@@ -502,6 +510,7 @@ function onMomentsClick() {
 }
 
 function onEventsClick() {
+  showMoreMenu.value = false
   if (route.path === '/events') {
     events.requestScrollToTop()
   } else {
@@ -538,7 +547,7 @@ function formatTime(iso) {
 
 <style scoped>
 .sidebar {
-  /* 宽度由 .app-layout 的 --sidebar-width 驱动：桌面端收纳时被置 0，配 transition 向左收起 */
+  /* 收纳时不改变宽度，列表与文字在滑动过程中保持原有排版。 */
   width: var(--sidebar-width, 300px); min-width: var(--sidebar-width, 300px);
   height: 100vh; height: 100dvh;
   background: var(--glass-bg);
@@ -548,9 +557,6 @@ function formatTime(iso) {
   display: flex; flex-direction: column; overflow: hidden;
   position: relative;
   user-select: none;
-  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 0.22s ease;
 }
 
 .char-list {
@@ -716,20 +722,6 @@ function formatTime(iso) {
 .folder-group-body { position: relative; }
 .char-item.in-folder { margin-left: 20px; }
 
-/* 已归档：压暗 + 小角标，位置不动 */
-.char-item.archived { opacity: 0.5; }
-.char-item.archived:hover { opacity: 0.85; }
-.char-archived-tag {
-  margin-left: 5px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: rgba(0, 0, 0, 0.07);
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 600;
-  vertical-align: middle;
-  white-space: nowrap;
-}
 
 /* 折叠/展开的淡入淡出；离开项脱离文档流，避免下方条目跟着跳 */
 .folder-chars-enter-active { transition: opacity 0.18s ease; }
@@ -1047,17 +1039,41 @@ function formatTime(iso) {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px 20px 0 0;
-  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .more-menu-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 14px 16px; border-radius: 12px;
-  font-size: 15px; color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 96px;
+  padding: 16px 4px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-primary);
+  text-align: center;
   text-decoration: none;
-  transition: background 0.15s;
+  white-space: nowrap;
+  transition: transform var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
 }
-.more-menu-item:hover { background: var(--tint-subtle); }
-.more-menu-item svg { flex-shrink: 0; }
+.more-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
+}
+/* 只在按下时反馈，不保留当前路由或触屏悬停的选中痕迹。 */
+.more-menu-item:active {
+  transform: scale(0.96);
+  opacity: 0.72;
+}
+.more-menu-item svg { width: 28px; height: 28px; flex-shrink: 0; }
 
 /* 菜单徽标统一贴图标左上角；数字变宽时向左延展，避免遮挡图标。 */
 .more-menu-item .nav-dot {
@@ -1073,9 +1089,19 @@ function formatTime(iso) {
   line-height: 9px;
 }
 
+.more-menu-item .nav-dot-count {
+  width: auto;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
 /* 弹窗动画 */
 .menu-slide-enter-active, .menu-slide-leave-active {
-  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .menu-slide-enter-from, .menu-slide-leave-to {
   opacity: 0;

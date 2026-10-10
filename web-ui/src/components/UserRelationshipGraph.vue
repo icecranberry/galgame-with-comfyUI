@@ -168,8 +168,7 @@ function isValidConnection(connection) {
 
 // ── Build nodes / edges from characters ──
 async function buildGraph() {
-  // 归档角色不进关系图：与角色关系图保持同一口径，免得一堆不参与活动的节点干扰连线
-  const others = (props.allCharacters || []).filter(c => !c.archived)
+  const others = (props.allCharacters || [])
   const radius = Math.max(336, Math.ceil(others.length * 16))
 
   // Build nodes

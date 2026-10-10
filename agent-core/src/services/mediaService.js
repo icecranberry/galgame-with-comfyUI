@@ -15,7 +15,7 @@
  * ── 角色怎么参与（用户要求「活跃角色随机在帖子里」）──
  *
  * 两个方向都用：
- *   ① 作为**发帖人**：随机抽 1~2 个活跃角色（排除归档），由 LLM 用其人格与口吻写一条帖，
+ *   ① 作为**发帖人**：随机抽 1~2 个活跃角色，由 LLM 用其人格与口吻写一条帖，
  *      落库时带 character_id 与头像 —— 且**流量更高**（浏览/点赞按角色影响力放大）。
  *   ② 作为**被讨论对象**：其余帖子由匿名 NPC 发，内容里会提到这些角色（八卦/见闻）。
  * 为避免靠名字匹配出错，发帖人**按下标指派**：提示词里明确「第 N 条由『某某』本人发布」。
@@ -126,7 +126,15 @@ export function getOutlet(id) {
   return { ...r, enabled: !!r.enabled, layout: r.layout || 'feed' };
 }
 
-export function createOutlet({ name, tagline = '', prompt = '', icon = '' }) {
+function validateOutletLayout(layout) {
+  if (!['feed', 'portal'].includes(layout)) {
+    throw Object.assign(new Error('媒体类型必须为社交平台或数字报刊'), { statusCode: 400 });
+  }
+  return layout;
+}
+
+export function createOutlet({ name, tagline = '', prompt = '', icon = '', layout = 'feed' }) {
+  validateOutletLayout(layout);
   const nm = clampText(name, 24);
   if (!nm) throw Object.assign(new Error('媒体名称不能为空'), { statusCode: 400 });
   if (!clampText(prompt, 8000)) throw Object.assign(new Error('媒体提示词不能为空'), { statusCode: 400 });
@@ -135,9 +143,9 @@ export function createOutlet({ name, tagline = '', prompt = '', icon = '' }) {
   if (dup) throw Object.assign(new Error('同名媒体已存在'), { statusCode: 400 });
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM media_outlets').get().m;
   const r = db.prepare(`
-    INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled)
-    VALUES (?, ?, ?, ?, ?, 1)
-  `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1);
+    INSERT INTO media_outlets (name, tagline, prompt, icon, sort_order, enabled, layout)
+    VALUES (?, ?, ?, ?, ?, 1, ?)
+  `).run(nm, clampText(tagline, 60), clampText(prompt, 8000), clampText(icon, 8), maxOrder + 1, layout);
   return getOutlet(Number(r.lastInsertRowid));
 }
 
@@ -145,6 +153,7 @@ export function updateOutlet(id, patch = {}) {
   const db = getDb();
   const cur = db.prepare('SELECT * FROM media_outlets WHERE id = ?').get(id);
   if (!cur) return null;
+  const layout = patch.layout === undefined ? cur.layout : validateOutletLayout(patch.layout);
   const name = patch.name !== undefined ? clampText(patch.name, 24) : cur.name;
   if (!name) throw Object.assign(new Error('媒体名称不能为空'), { statusCode: 400 });
   if (patch.name !== undefined) {
@@ -152,7 +161,7 @@ export function updateOutlet(id, patch = {}) {
     if (dup) throw Object.assign(new Error('同名媒体已存在'), { statusCode: 400 });
   }
   db.prepare(`
-    UPDATE media_outlets SET name = ?, tagline = ?, prompt = ?, icon = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+    UPDATE media_outlets SET name = ?, tagline = ?, prompt = ?, icon = ?, enabled = ?, layout = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     name,
@@ -160,6 +169,7 @@ export function updateOutlet(id, patch = {}) {
     patch.prompt !== undefined ? clampText(patch.prompt, 8000) : cur.prompt,
     patch.icon !== undefined ? clampText(patch.icon, 8) : cur.icon,
     patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : cur.enabled,
+    layout,
     id,
   );
   return getOutlet(id);
@@ -294,7 +304,7 @@ export function listPostsNeedingImage(limit = 8) {
     SELECT p.id, p.image_prompt, p.character_id FROM media_posts p
     LEFT JOIN media_outlets o ON o.id = p.outlet_id
     WHERE p.image_status = 'pending' AND p.image_prompt IS NOT NULL AND p.image_prompt != ''
-      AND COALESCE(o.layout, 'feed') != 'portal'
+      AND COALESCE(json_extract(CASE WHEN json_valid(p.payload_json) THEN p.payload_json ELSE '{}' END, '$.portal'), 0) != 1
     ORDER BY p.id DESC LIMIT ?
   `).all(limit);
 }
@@ -338,7 +348,7 @@ function claimPostForImage(postId) {
 // ══════════════════════════════════════════
 
 /**
- * 抽参与本次生成的活跃角色（排除归档：归档 = 不参与任何主动行为）。
+ * 抽参与本次生成的活跃角色。
  * 返回带人格与头像的行，供提示词与落库使用。
  */
 export function pickActiveCharacters(count = 2) {
@@ -347,7 +357,6 @@ export function pickActiveCharacters(count = 2) {
   return getDb().prepare(`
     SELECT id, display_name, avatar_path, short_prompt, base_prompt, loras, custom_workflow, artist_override
     FROM characters
-    WHERE COALESCE(archived, 0) = 0
     ORDER BY RANDOM() LIMIT ?
   `).all(n);
 }
@@ -810,22 +819,42 @@ function buildPortalFormatPrompt() {
   return `本期请**只输出门户骨架**（不要写正文内容），严格按以下 JSON 格式，不要输出任何解释或 JSON 以外的文字：
 
 {
-  "issue": 数字（本期编号，比上一期大 1；我会告诉你上一期是几号）,
+  "issue": 1,
   "title": "本期总标题（震撼体，把本期最劲爆的那件事写进去，≤40字）",
   "lead": "一句话导语（勾人，≤60字）",
   "sections": [
     {
-      "key": "板块的英文短标识（如 headline / gossip / column1 / ranking，全小写无空格）",
+      "key": "headline",
       "name": "板块名（4~12字，是这一块的小标题）",
       "lead": "这一块的导语（一句话剧透这块讲什么，≤45字）",
       "image_prompt": "英文：这一块的头图画什么（用于配图，也用作点开后的详情配图）"
+    },
+    {
+      "key": "gossip",
+      "name": "第二个板块名（4~12字，与其他板块主题不同）",
+      "lead": "第二块的具体导语（≤45字，不重复第一块）",
+      "image_prompt": "英文：第二块独立的头图，写清主体、动作、环境、光线"
+    },
+    {
+      "key": "column",
+      "name": "第三个板块名（4~12字，与其他板块主题不同）",
+      "lead": "第三块的具体导语（≤45字，不重复其他板块）",
+      "image_prompt": "英文：第三块独立的头图，写清主体、动作、环境、光线"
+    },
+    {
+      "key": "ranking",
+      "name": "第四个板块名（4~12字，与其他板块主题不同）",
+      "lead": "第四块的具体导语（≤45字，不重复其他板块）",
+      "image_prompt": "英文：第四块独立的头图，写清主体、动作、环境、光线"
     }
   ],
   "credits": { "reporter": "记者/撰稿名", "editor": "编辑名" }
 }
 
 字段要求：
-- "sections"：**4~6 个**，彼此主题明显不同，合起来覆盖本期所有看点。
+- "issue"：示例中的 1 仅为数字格式示意，实际使用用户消息指定的本期编号。
+- "sections"：**必须恰好 4 个栏目，不多不少**，彼此主题明显不同，合起来覆盖本期所有看点。
+- "key"：各栏目的唯一英文短标识，全小写无空格，不得重复；示例标识可按栏目性质调整。
 - 每块的 "lead" 要具体、有信息量，让人想点开看 —— 不要写「详见内文」这类空话。
 - 每块的 "image_prompt" 必须独立可画：写清主体、动作、环境、光线；各块画面不要重复。
 - 所有中文文字字段用中文；image_prompt 用英文。
@@ -891,12 +920,13 @@ export function normalizePortalDraft(raw, prevIssue = 0) {
       };
     })
     .filter(s => s.name)
-    .slice(0, 8);
+    .slice(0, 4);
 
-  if (!sections.length) throw new Error('门户一个板块都没有，模型返回异常');
+  if (sections.length !== 4) throw new Error('数字报刊必须包含 4 个有效栏目，模型返回不足，请重试');
 
-  const noRaw = Number(raw.issue);
-  const issue = Number.isFinite(noRaw) && noRaw > 0 ? Math.floor(noRaw) : (prevIssue + 1);
+  // 期号由服务端递增，不能采信模型返回的旧期号或跳号。
+  const previous = Number(prevIssue);
+  const issue = (Number.isSafeInteger(previous) && previous > 0 ? previous : 0) + 1;
 
   return {
     portal: true,       // 前端据此认出这是门户（比按 layout 判断更可靠：老帖的 layout 取自 outlet）
@@ -925,12 +955,14 @@ async function generatePortalIssue(outlet) {
   const db = getDb();
   const worldSetting = getWorldSetting();
 
+  // 查历史最大期号，避免旧数据重复编号、媒体类型切换后最新一条没有期号而重置。
   const prev = db.prepare(`
-    SELECT payload_json FROM media_posts
-    WHERE outlet_id = ? AND payload_json IS NOT NULL
-    ORDER BY id DESC LIMIT 1
+    SELECT MAX(CAST(json_extract(
+      CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END, '$.issue'
+    ) AS INTEGER)) AS issue
+    FROM media_posts WHERE outlet_id = ?
   `).get(outlet.id);
-  const prevIssue = Number(safeParse(prev?.payload_json, null)?.issue) || 0;
+  const prevIssue = Number(prev?.issue) || 0;
 
   const msgs = [
     { role: 'system', content: [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n') },
@@ -968,6 +1000,7 @@ async function generatePortalIssue(outlet) {
   );
   const postId = Number(r.lastInsertRowid);
   console.log(`[media] ${outlet.name} 第${p.issue}期门户已出刊（post #${postId}，${p.sections.length} 个板块），配图后台补印`);
+  broadcast('media_new_posts', { outletId: outlet.id, count: 1 });
 
   // ★ 出刊即开始补图（用户口径）。**不 await** —— 出刊要立刻返回，这正是两层设计的意义。
   setTimeout(() => {
@@ -975,7 +1008,7 @@ async function generatePortalIssue(outlet) {
       .catch(err => console.error('[media] 门户补图失败:', err.message));
   }, 0);
 
-  return db.prepare('SELECT * FROM media_posts WHERE id = ?').get(postId);
+  return { outletId: outlet.id, outletName: outlet.name, batchId, inserted: 1, postId };
 }
 
 /**
@@ -990,7 +1023,7 @@ export async function fillPortalImages(limit = 6) {
   const rows = db.prepare(`
     SELECT p.id, p.payload_json FROM media_posts p
     JOIN media_outlets o ON o.id = p.outlet_id
-    WHERE o.layout = 'portal' AND p.payload_json IS NOT NULL
+    WHERE json_extract(CASE WHEN json_valid(p.payload_json) THEN p.payload_json ELSE '{}' END, '$.portal') = 1
     ORDER BY p.id DESC LIMIT 12
   `).all();
 
@@ -1310,7 +1343,7 @@ async function fillPosterPanelImages(limit = 3) {
   const posts = db.prepare(`
     SELECT p.id, p.payload_json FROM media_posts p
     JOIN media_outlets o ON o.id = p.outlet_id
-    WHERE o.layout = 'poster' AND p.payload_json IS NOT NULL
+    WHERE json_type(CASE WHEN json_valid(p.payload_json) THEN p.payload_json ELSE '{}' END, '$.panels') = 'array'
     ORDER BY p.id DESC LIMIT 12
   `).all();
 
@@ -1319,7 +1352,6 @@ async function fillPosterPanelImages(limit = 3) {
     if (filled >= limit) break;
     const payload = safeParse(row.payload_json, null);
     const panels = Array.isArray(payload?.panels) ? payload.panels : [];
-    let touched = false;
 
     for (const panel of panels) {
       if (filled >= limit) break;
@@ -1328,7 +1360,8 @@ async function fillPosterPanelImages(limit = 3) {
         const result = await generateMediaImage(panel.image_prompt, null);
         if (!result) continue;
         panel.image = result.url;
-        touched = true;
+        // Persist each panel before notifying clients so a reload sees the completed image.
+        db.prepare('UPDATE media_posts SET payload_json = ? WHERE id = ?').run(JSON.stringify(payload), row.id);
         filled++;
         recordCompletedImageTask({
           conversationId: 'media_poster_panel',
@@ -1340,13 +1373,10 @@ async function fillPosterPanelImages(limit = 3) {
           workflowTemplate: result.wfMode,
           db,
         });
-        broadcast('media_image_ready', { postId: row.id, image: result.url, panel: true });
+        broadcast('media_image_ready', { postId: row.id, image: result.url, panel: true, panelIndex: panels.indexOf(panel) });
       } catch (err) {
         console.error(`[media] 海报小图失败 #${row.id}:`, err.message);
       }
-    }
-    if (touched) {
-      db.prepare('UPDATE media_posts SET payload_json = ? WHERE id = ?').run(JSON.stringify(payload), row.id);
     }
   }
   return filled;

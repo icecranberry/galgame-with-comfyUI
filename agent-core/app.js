@@ -16,7 +16,6 @@ import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
 import charactersRoutes from './src/routes/characters.js';
 import emojiRoutes from './src/routes/emoji.js';
-import userEmojiRoutes from './src/routes/userEmoji.js';
 import configRoutes from './src/routes/config.js';
 import momentsRoutes from './src/routes/moments.js';
 import relationshipsRoutes from './src/routes/relationships.js';
@@ -32,12 +31,10 @@ import mailboxRoutes from './src/routes/mailbox.js';
 import groupsRoutes from './src/routes/groups.js';
 import libraryRoutes from './src/routes/library.js';
 import itemsRoutes from './src/routes/items.js';
-import lootRoutes from './src/routes/loot.js';
 import newspaperRoutes from './src/routes/newspaper.js';
-// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary 路由、本地新增 media/cleanup 路由 —— 都保留。
+// ⚠ 2026-10-08 合并 v3.7.0：上游新增 diary 路由、本地新增 media 路由 —— 都保留。
 import diaryRoutes from './src/routes/diary.js';
 import mediaRoutes from './src/routes/media.js';
-import cleanupRoutes from './src/routes/cleanup.js';
 import townRoutes from './src/routes/town.js';
 import characterReactionsRoutes from './src/routes/characterReactions.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
@@ -125,7 +122,6 @@ app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/c
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
 app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
-app.use('/api/user-emoji', wrapRouterAsync(userEmojiRoutes));    // 我的表情库（用户自己的，跨角色通用）
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/moments', wrapRouterAsync(momentsRoutes));
@@ -141,12 +137,10 @@ app.use('/api/mailbox', wrapRouterAsync(mailboxRoutes));
 app.use('/api/groups', wrapRouterAsync(groupsRoutes));
 app.use('/api/library', wrapRouterAsync(libraryRoutes));   // /api/library/event-types, /api/library/topics
 app.use('/api/items', wrapRouterAsync(itemsRoutes));
-app.use('/api/loot', wrapRouterAsync(lootRoutes));       // 宝箱橱窗（分页候选 + 带走）
 app.use('/api/newspaper', wrapRouterAsync(newspaperRoutes));   // /api/newspaper/today 《小镇早知道》
-// ⚠ 2026-10-08 合并 v3.7.0：上游挂载 diaries、本地挂载 media/cleanup —— 都保留。
+// ⚠ 2026-10-08 合并 v3.7.0：上游挂载 diaries、本地挂载 media —— 都保留。
 app.use('/api/diaries', wrapRouterAsync(diaryRoutes));         // /api/diaries/:id 角色日记（后台生成 + SSE）
 app.use('/api/media', wrapRouterAsync(mediaRoutes));           // 媒体内容页（传媒/板块/帖子/刷新）
-app.use('/api/cleanup', wrapRouterAsync(cleanupRoutes));       // 按时间清理图片与内容记录（两段式：survey → purge）
 app.use('/api/town', wrapRouterAsync(townRoutes));
 // 角色操作反馈：/api/character-reactions/instant 低概率即时反应（额度 + 幂等在后端）
 app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));

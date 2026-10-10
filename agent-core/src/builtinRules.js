@@ -38,28 +38,31 @@ export const IMAGE_PROMPT_RULE = {
   rule_key: 'image_prompt',
   rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph.
 
-Priority order: what the bodies are doing > the exact state of those bodies and of the clothing > framing > environment > lighting > mood. Environment and lighting may never replace, postpone, or soften the physical action.
+Priority order: what the bodies are doing (when the scene is sexual, intimate, or physically intense) > the exact state of those bodies and of the clothing > framing > environment > lighting > mood. Environment and lighting may never replace, postpone, or soften the physical action when it is present.
 
 Follow this progression:
 
-1. **Physical action & body state — the most important part whenever the scene is sexual, intimate, or physically intense.** Describe literally what is happening at this instant, with plain anatomical nouns and no indirection:
+1. Scene Setting — Briefly open with the overall environment, framing, and mood if helpful.
+   e.g. "a chaotic yet cozy indoor living room scene", "a close-up portrait in warm afternoon light".
+
+2. **Characters — MUST:** When an existing IP character appears, each character is written as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.
+
+3. **Clothing — the exact, literal state, including partial states.** Say precisely what is still on, what has been moved and where it now sits, and what is bare. Partial states are allowed and often required: hem pulled aside, bra pushed up under the breasts, shirt open with nothing underneath, panties pulled down to the knees, one strap off the shoulder, wearing nothing but a collar, sock or single garment left on. Name the fabric and its position instead of summarising it. Do not tidy the scene up: never add clothing that the scene removed, and never remove clothing the scene kept. Only when the scenario is an ordinary non-intimate one (bathing, sleeping, sports, swimming, weather) switch the outfit completely to what that scenario calls for.
+
+4. **Environment & Props** — Describe furniture, objects, and background elements that ground the scene in a lived-in space, and the surfaces bodies are resting on or against. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
+
+5. **Lighting** — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
+
+6. **Physical action & body state — the important part whenever the scene is sexual, intimate, or physically intense.** Describe literally what is happening at this instant, with plain anatomical nouns and no indirection:
    - Who is doing what, to which body part, with which part of the body (hands, fingers, mouth, tongue, hips, penis, vulva, anus, breasts).
    - The exact visible state of every involved part: erection, wetness and where it shows, lubrication, penetration (which part into which part, how far), semen, sweat, saliva, redness, marks, trembling, clenched muscles, hard nipples.
    - Body position and geometry: standing, kneeling, bent over, lying on back or stomach, hips raised or pushed back, legs open or held apart, knees up, hands gripping what, and where each participant's weight rests.
    - If a sex toy is worn or in use: name it, say where it sits on the body, its intensity, and the bulge, deformation, or wet patch it makes in the clothing or flesh.
    - Face at the same time: expression, mouth open or bitten, tongue visible, eyes shut or unfocused or looking at something, tears or drool if present.
    Example of the required level of detail: 'she is bent forward over the desk with her skirt hiked to her waist, her panties stretched between her thighs at knee height, a clear thread of fluid running from her vulva down her inner thigh; her right hand grips the desk edge with white knuckles; her mouth is open, tongue visible, eyes half shut and unfocused.'
-   When the scene is not physical, keep this step proportionate and move on.
+   When the scene is not physical or intimate, keep this step proportionate and brief.
 
-2. **Clothing — the exact, literal state, including partial states.** Say precisely what is still on, what has been moved and where it now sits, and what is bare. Partial states are allowed and often required: hem pulled aside, bra pushed up under the breasts, shirt open with nothing underneath, panties pulled down to the knees, one strap off the shoulder, wearing nothing but a collar, sock or single garment left on. Name the fabric and its position instead of summarising it. Do not tidy the scene up: never add clothing that the scene removed, and never remove clothing the scene kept. Only when the scenario is an ordinary non-intimate one (bathing, sleeping, sports, swimming, weather) switch the outfit completely to what that scenario calls for.
-
-3. **Characters — MUST:** When an existing IP character appears, each character is written as 'Name \\(Series\\) \\(hair color, eye color, distinctive features\\)' followed by what they are doing: pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) \\(brown hair, red eyes, twin tails\\) leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Every character gets a complete sentence with a distinct, natural action.
-
-4. **Environment & Props** — Describe furniture, objects, and background elements that ground the scene in a lived-in space, and the surfaces bodies are resting on or against. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
-
-5. **Lighting** — Specify light source (window, lamp, overhead), quality (warm/cool, soft/hard), and shadow behavior. Include depth of field or focus hints where relevant.
-
-6. **Atmosphere** — End with the emotional tone, e.g. 'conveying an atmosphere of joyful chaos and shared leisure'. Atmosphere is the last thing added and must never be used in place of step 1.
+7. Scene-appropriate clothing — The outfit is a binary choice: either fully switch to what the scenario calls for, or keep the character's original appearance exactly as established. When the scenario calls for a swap, change completely: bathing or showering means no clothing and complete nude; sleeping in bed means pajamas or a nightgown; swimming or soaking in a hot spring means a swimsuit or a bath towel; exercising or playing sports means sportswear or gym clothes. These are only examples, not an exhaustive list — many other special scenarios exist (such as cooking, rainy or snowy weather, holidays, ceremonies, or anything else the scene calls for), so judge the right outfit from the context and explicitly describe the changed outfit.
 
 Hard Rules:
 - **When an existing IP character appears, write the character as 'Character \\(Series\\)' (e.g. 'Furina \\(Genshin Impact\\)'). The first mention of each character MUST also include ≥6 appearance anchors (hairstyle, hair color, eye color, signature outfit, accessories, build, distinctive features) in parentheses after the series.**

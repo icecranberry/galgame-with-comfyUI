@@ -46,7 +46,6 @@ export function collectDueSpecialMoments(now = new Date()) {
     JOIN characters c ON c.id = d.character_id
     WHERE d.schedule_date = ?
       AND (c.schedule_enabled = 1 OR c.schedule_enabled IS NULL)
-      AND COALESCE(c.archived, 0) = 0
   `).all(getLocalDateKey(now));
 
   const nowMin = now.getHours() * 60 + now.getMinutes();
