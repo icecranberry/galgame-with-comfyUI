@@ -35,6 +35,7 @@ import { migrateCharacterReactionPacksSchema } from './characterReactionPackSche
 import { migrateCharacterDiarySchema } from './diarySchema.js';
 import { migrateMediaAvatarLibrary } from './mediaAvatarSchema.js';
 import { migrateMediaFavorites } from './mediaFavorites.js';
+import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,7 @@ export function getDb() {
 // ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
 // moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
 function cleanupOrphanedInFlight(database) {
+  recoverSpeechJobs(database);
   recoverExpressionStandingJobs(database);
   cleanupTownDialogueRequests(database);
   const tasks = [
@@ -1168,6 +1170,7 @@ function initSchema(db) {
   migrateCharacterReactionPacksSchema(db);
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
+  migrateTtsSchema(db);
 
   // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
   migrateCharacterOutfitScene(db);

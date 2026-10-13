@@ -68,6 +68,7 @@ function _connect() {
   if (_conn && !_conn._closed) _conn.close()
 
   _conn = api.connectUnifiedStream({
+    speech_update: d => _dispatch('speech_update', d),
     connected:         () => { _dispatch('connected', {}); _stableTimer = setTimeout(_onStable, 15000) },
     standing_display_state: d => _dispatch('standing_display_state', d),
     character_standing_state: d => _dispatch('character_standing_state', d),

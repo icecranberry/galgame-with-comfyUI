@@ -2,7 +2,7 @@
   <Teleport to="body">
     <!-- ── 角色详情弹窗 ── -->
     <Transition name="modal-fade">
-      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
+      <div v-if="visible && !showLoraModal && !showOutfitModal && !showRefineModal && !showVoiceModal" class="modal-overlay" :class="{ 'detail-inline': inlineLayout }" @mousedown="onOverlayMouseDown" @click.self="onOverlayClick">
         <div class="modal-panel modal-wide detail-panel">
           <div class="modal-header">
             <div class="detail-title-row">
@@ -224,6 +224,7 @@
           <div class="modal-footer">
             <div class="detail-actions">
               <linshe-button variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
+              <linshe-button variant="secondary" :title="`声音 · ${voiceLabel}`" @click="showVoiceModal = true">声音设置</linshe-button>
               <linshe-button variant="secondary" @click="openRefineModal">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m13 7 3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                 修正外观
@@ -505,11 +506,13 @@
       apply-hint="应用后写回该场景并自动保存"
       @applied="onAppearanceRefined"
     />
-
+    <VoiceManagerModal v-model="showVoiceModal" :character="character" @saved="refreshVoiceLabel" />
   </Teleport>
 </template>
 
 <script setup>
+import VoiceManagerModal from './VoiceManagerModal.vue'
+import { ttsApi } from '../api/tts.js'
 import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '../stores/chat.js'
 import * as api from '../api/index.js'
@@ -530,6 +533,20 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   character: { type: Object, default: null },
 })
+const showVoiceModal = ref(false)
+const voiceLabel = ref('未设置')
+async function refreshVoiceLabel() {
+  const id = props.character?.id
+  if (!id) return
+  try {
+    const binding = await ttsApi(`/characters/${id}`)
+    if (props.character?.id === id) voiceLabel.value = binding?.name || '未设置'
+  } catch { if (props.character?.id === id) voiceLabel.value = '待检查' }
+}
+watch([() => props.visible, () => props.character?.id], ([visible]) => {
+  if (visible) { voiceLabel.value = '读取中'; refreshVoiceLabel() }
+}, { immediate: true })
+watch(() => props.visible, visible => { if (!visible) showVoiceModal.value = false })
 
 const emit = defineEmits([
   'close',
