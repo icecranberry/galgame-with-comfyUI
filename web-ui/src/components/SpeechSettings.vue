@@ -3,7 +3,7 @@
     <div class="speech-heading">
       <div class="speech-title">
         <h4>让角色开口说话</h4>
-        <p>绑定音色后，点击聊天气泡即可朗读</p>
+        <p>保存音色后，点击聊天气泡下方的「朗读」</p>
       </div>
       <linshe-switch :model-value="speechEnabled" :disabled="busy" size="sm" aria-label="启用语音朗读" on-text="已开启" off-text="未开启" @update:model-value="toggle" />
     </div>

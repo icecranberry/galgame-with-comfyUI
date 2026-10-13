@@ -38,11 +38,12 @@ function enqueue(job) {
   }, cancelled).then(output => updateJob(job.id, 'completed', null, output))
     .catch(error => updateJob(job.id, 'failed', error.message));
 }
-export function requestSpeech({ voiceId, sampleId, text, params, messageId }) {
+export function requestSpeech({ characterId, voiceId, sampleId, text, params, messageId }) {
   const db = getDb();
-  if (!getSpeechSettings().enabled) throw new Error('请先在系统参数中启用角色语音');
+  if (!getSpeechSettings().enabled) throw new Error('请先在声音设置或酒馆的音色管理中启用语音朗读');
   const voice = voiceId ? db.prepare('SELECT * FROM voices WHERE id=?').get(voiceId) : null;
   if (voiceId && !voice) throw new Error('音色不存在');
+  if (voice && (!characterId || voice.character_id !== characterId)) throw new Error('音色不属于当前角色，请为该角色创建声音');
   const sample = db.prepare('SELECT * FROM voice_samples WHERE id=?').get(voice?.sample_id || sampleId || '');
   if (!sample?.reference_path) throw new Error('请先选择并处理参考片段');
   const cleaned = speechText(text, db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key));
@@ -69,7 +70,7 @@ export function speakMessage(characterId, messageId) {
   if (!message || message.event_id || (message.speaker_character_id && message.speaker_character_id !== characterId)) throw new Error('消息不存在、不是对白或不属于这个角色');
   const binding = db.prepare('SELECT * FROM character_voices WHERE character_id=? AND enabled=1').get(characterId);
   if (!binding) throw new Error('角色尚未设置声音，请在角色详情中添加');
-  return requestSpeech({ voiceId: binding.voice_id, text: message.content, messageId: message.id });
+  return requestSpeech({ characterId, voiceId: binding.voice_id, text: message.content, messageId: message.id });
 }
 export function cancelSpeech(id) {
   const db = getDb();

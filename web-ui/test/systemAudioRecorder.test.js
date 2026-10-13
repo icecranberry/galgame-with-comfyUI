@@ -8,7 +8,7 @@ function setup(extra = {}) {
     addEventListener(name, fn) { this.handlers[name] = fn },
   }))
   const source = { getTracks: () => tracks, getAudioTracks: () => tracks.filter(t => t.kind === 'audio') }
-  const instances = [], states = [], results = []
+  const instances = [], states = [], results = [], captureRequests = []
   class Recorder {
     static isTypeSupported() { return true }
     constructor(stream, options) { this.stream = stream; this.mimeType = options.mimeType; instances.push(this) }
@@ -16,13 +16,16 @@ function setup(extra = {}) {
     stop() { this.state = 'inactive'; queueMicrotask(() => { this.ondataavailable({ data: new Blob(['audio']) }); this.onstop() }) }
   }
   class Stream { constructor(tracks) { this.tracks = tracks } }
-  const recorder = createSystemAudioRecorder({ Recorder, Stream, getDisplayMedia: async () => source,
+  const recorder = createSystemAudioRecorder({ Recorder, Stream, getDisplayMedia: async options => { captureRequests.push(options); return source },
     onState: s => states.push(s), onResult: b => results.push(b), ...extra })
-  return { recorder, tracks, source, instances, states, results }
+  return { recorder, tracks, source, instances, states, results, captureRequests }
 }
 const flush = () => new Promise(resolve => setImmediate(resolve))
 test('records only audio, stops every capture track, and returns the final chunk once', async () => {
   const s = setup(); await s.recorder.start(); await s.recorder.start()
+  assert.equal(s.captureRequests.length, 1)
+  assert.deepEqual(s.captureRequests[0].audio, { autoGainControl: false, echoCancellation: false, noiseSuppression: false })
+  assert.equal(s.captureRequests[0].systemAudio, 'include')
   assert.equal(s.instances.length, 1)
   assert.deepEqual(s.instances[0].stream.tracks.map(t => t.kind), ['audio'])
   s.recorder.stop(); s.recorder.stop()

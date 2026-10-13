@@ -8,6 +8,7 @@ import multiprocessing as mp
 import os
 from pathlib import Path
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,14 @@ MODEL_VERSION = f"IndexTTS-2.5:{VERSIONS['model_revision']}:{VERSIONS['code_revi
 AUDIO_ROOT = Path(os.environ.get("TTS_AUDIO_DIR", HERE.parent / "agent-core/data/audio")).resolve()
 MODEL_DIR = Path(os.environ.get("TTS_MODEL_DIR", HERE / "checkpoints")).resolve()
 TOKEN = os.environ.get("TTS_SERVICE_TOKEN", "")
+
+
+def configure_stdio():
+    # Redirected Windows output can default to GBK. Upstream prints the input
+    # text during inference, so logging a music note/emoji must not abort a job.
+    for stream in (sys.stdout, sys.stderr):
+        if callable(getattr(stream, "reconfigure", None)):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
 def controlled_path(relative, kind):
@@ -50,6 +59,8 @@ def worker(pipe):
     # CUDA libraries are imported in the child only; terminating it releases the
     # complete CUDA context, including hidden/global caches in upstream code.
     try:
+        # Windows uses spawn: configuring only the HTTP parent is insufficient.
+        configure_stdio()
         from indextts.infer_v2_5 import IndexTTS2
         model = IndexTTS2(cfg_path=str(MODEL_DIR / "config.yaml"), model_dir=str(MODEL_DIR),
                           use_bf16=True, use_cuda_kernel=False, use_qwen_emo=False)
@@ -198,6 +209,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    configure_stdio()
     mp.freeze_support()
     server = ThreadingHTTPServer(("127.0.0.1", int(os.environ.get("TTS_PORT", "7861"))), Handler)
     try:

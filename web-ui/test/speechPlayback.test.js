@@ -29,3 +29,17 @@ test('original audio joins the same player; blocked autoplay can be retried', as
   player.stop()
   assert.equal(paused, true)
 })
+
+test('recorder playback callbacks work without a method receiver and stop the previous audio', async () => {
+  const player = createSpeechPlayback()
+  let firstPaused = false, secondPaused = false
+  const { adopt, begin, current, stop } = player
+  adopt({ currentTime: 3, pause() { firstPaused = true } })
+  adopt({ currentTime: 1, pause() { secondPaused = true } })
+  assert.equal(firstPaused, true)
+  const ticket = begin()
+  assert.equal(secondPaused, true)
+  assert.equal(current(ticket), true)
+  stop()
+  assert.equal(current(ticket), false)
+})

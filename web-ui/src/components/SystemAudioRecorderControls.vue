@@ -9,7 +9,6 @@
       <linshe-button v-if="!active" variant="primary" :disabled="!supported" @click="$emit('start')">{{ audioUrl ? '重新录制' : '开始录制' }}</linshe-button>
       <linshe-button v-else variant="danger" :disabled="state.phase === 'stopping'" @click="$emit('stop')">{{ state.phase === 'requesting' ? '取消等待' : '停止录制' }}</linshe-button>
       <linshe-button v-if="audioUrl && !active" @click="$emit('use')">使用这段录音</linshe-button>
-      <linshe-button v-if="canFloat" variant="ghost" @click="$emit('float')">桌面置顶小窗</linshe-button>
     </div>
     <p class="recorder-hint">最长录制 119 秒后自动停止。关闭录音窗即停止采集；录好后可继续裁剪，建议保留 6～12 秒单人对白，无需填写参考台词。</p>
   </div>
@@ -17,8 +16,8 @@
 <script setup>
 import { computed } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
-const props = defineProps({ state: Object, audioUrl: String, supported: Boolean, canFloat: Boolean })
-defineEmits(['start', 'stop', 'use', 'float', 'play'])
+const props = defineProps({ state: Object, audioUrl: String, supported: Boolean })
+defineEmits(['start', 'stop', 'use', 'play'])
 const active = computed(() => ['requesting', 'recording', 'stopping'].includes(props.state.phase))
 const labels = { idle: '准备录音', requesting: '等待选择共享来源', recording: '正在录制系统声音', stopping: '正在整理录音', ready: '录音已就绪', error: '录音未完成' }
 </script>

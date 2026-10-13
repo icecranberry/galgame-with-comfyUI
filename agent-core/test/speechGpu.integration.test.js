@@ -59,6 +59,7 @@ test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
       VALUES(?,?,?,?,?,?)`).run(sample.id, sample.original_path, sample.preview_path, sample.reference_path, sample.content_hash, sample.duration);
     db.prepare('INSERT INTO voices(id,name,sample_id) VALUES(?,?,?)').run(`gpu-voice-${i}`, `GPU fixture ${i}`, sample.id);
     const id = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt) VALUES(?,?,?)').run(`gpu-test-${i}`, `GPU fixture ${i}`, 'test').lastInsertRowid);
+    db.prepare('UPDATE voices SET character_id=? WHERE id=?').run(id, `gpu-voice-${i}`);
     db.prepare('INSERT INTO character_voices(character_id,voice_id) VALUES(?,?)').run(id, `gpu-voice-${i}`);
     characters.push(id);
   }
@@ -89,8 +90,8 @@ test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
   }
   const longText = '清晨的小镇渐渐醒来。阳光照在窗台上，街角的咖啡馆飘来香气。我整理好桌上的书，准备出门散步，看看今天会遇到怎样有趣的事情。'.repeat(20).slice(0, 1000);
   assert.equal(longText.length, 1000);
-  await terminal(service.requestSpeech({ voiceId: 'gpu-voice-0', text: longText }), '1000-characters');
-  assert.throws(() => service.requestSpeech({ voiceId: 'gpu-voice-0', text: longText + '字' }), /1000/);
+  await terminal(service.requestSpeech({ characterId: characters[0], voiceId: 'gpu-voice-0', text: longText }), '1000-characters');
+  assert.throws(() => service.requestSpeech({ characterId: characters[0], voiceId: 'gpu-voice-0', text: longText + '字' }), /1000/);
   const invalidPrompt = () => fetch(`${comfy}/prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: {} }) });
   assert.equal((await invalidPrompt()).status, 423, 'lease must reject external image submissions');
   await delay(17500);
@@ -123,7 +124,7 @@ test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
     if (q.queue_running.some(item => item[1] === imageId)) break;
     assert.ok(i < 99, 'Anima did not start'); await delay(100);
   }
-  const pending = service.requestSpeech({ voiceId: 'gpu-voice-1', text: '图片已经画好了，现在轮到我说话。' });
+  const pending = service.requestSpeech({ characterId: characters[1], voiceId: 'gpu-voice-1', text: '图片已经画好了，现在轮到我说话。' });
   await delay(500);
   assert.equal(service.getSpeechJob(pending.id).status, 'queued', 'TTS must wait for the running external image');
   assert.equal((await ttsHealth()).worker_alive, false, 'TTS must not load over the running image');

@@ -13,6 +13,10 @@ const id = value => { const n = Number(value); if (!Number.isSafeInteger(n) || n
 const sampleView = s => ({ id: s.id, duration: s.duration, peaks: s.peaks,
   preview_url: audioUrl(s.preview_path), reference_url: s.reference_path ? audioUrl(s.reference_path) : null,
   warnings: JSON.parse(s.warnings || '[]') });
+const voiceView = voiceId => {
+  const { reference_path, ...voice } = getDb().prepare('SELECT v.*, s.reference_path FROM voices v JOIN voice_samples s ON s.id=v.sample_id WHERE v.id=?').get(voiceId);
+  return { ...voice, reference_url: audioUrl(reference_path) };
+};
 
 router.get('/settings', route((req, res) => res.json(getSpeechSettings())));
 router.put('/settings', route((req, res) => {
@@ -41,50 +45,67 @@ router.post('/samples/:id/crop', route(async (req, res) => {
   res.status(201).json(sampleView(s));
 }));
 router.get('/voices', route((req, res) => {
-  res.json(getDb().prepare('SELECT v.*, s.reference_path FROM voices v JOIN voice_samples s ON s.id=v.sample_id ORDER BY v.created_at DESC').all()
+  const characterId = req.query.character_id === undefined ? null : id(req.query.character_id);
+  res.json(getDb().prepare(`SELECT v.*, s.reference_path FROM voices v JOIN voice_samples s ON s.id=v.sample_id
+    ${characterId === null ? '' : 'WHERE v.character_id=@characterId'} ORDER BY v.created_at DESC`).all(characterId === null ? {} : { characterId })
     .map(({ reference_path, ...v }) => ({ ...v, reference_url: audioUrl(reference_path) })));
 }));
 function voiceFields(body) {
   const params = speechParams(body);
   const name = String(body.name || '日常声音').trim().slice(0, 80);
+  if (!name) throw new Error('请填写音色名称');
   const sample = getDb().prepare('SELECT * FROM voice_samples WHERE id=?').get(body.sample_id || '');
   if (!sample?.reference_path) throw new Error('请先处理参考音频');
   return { name, sample_id: sample.id, language: params.language, speed: params.speed,
     notes: String(body.notes || '').slice(0, 1000), transcript: String(body.transcript || '').slice(0, 2000) };
 }
 router.post('/voices', route((req, res) => {
-  const voice = { id: randomUUID(), ...voiceFields(req.body) };
-  getDb().prepare('INSERT INTO voices(id,name,sample_id,language,speed,notes,transcript) VALUES(@id,@name,@sample_id,@language,@speed,@notes,@transcript)').run(voice);
-  res.status(201).json(voice);
+  const characterId = id(req.body.character_id);
+  if (!getDb().prepare('SELECT 1 FROM characters WHERE id=?').get(characterId)) throw new Error('角色不存在');
+  const voice = { id: randomUUID(), character_id: characterId, ...voiceFields(req.body) };
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare('INSERT INTO voices(id,character_id,name,sample_id,language,speed,notes,transcript) VALUES(@id,@character_id,@name,@sample_id,@language,@speed,@notes,@transcript)').run(voice);
+    db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, voice.id);
+  })();
+  res.status(201).json(voiceView(voice.id));
 }));
 router.put('/voices/:id', route((req, res) => {
+  if (!getDb().prepare('SELECT 1 FROM voices WHERE id=? AND character_id=?').get(req.params.id, id(req.body.character_id))) throw new Error('音色不属于当前角色');
   const voice = { id: req.params.id, ...voiceFields(req.body) };
   const result = getDb().prepare('UPDATE voices SET name=@name,sample_id=@sample_id,language=@language,speed=@speed,notes=@notes,transcript=@transcript,version=version+1 WHERE id=@id').run(voice);
   if (!result.changes) throw new Error('音色不存在');
-  res.json(voice);
+  res.json(voiceView(voice.id));
 }));
 router.delete('/voices/:id', route((req, res) => {
   const db = getDb();
-  if (db.prepare('SELECT 1 FROM character_voices WHERE voice_id=?').get(req.params.id)) throw new Error('音色仍被角色使用，请先解除绑定');
-  db.prepare('DELETE FROM voices WHERE id=?').run(req.params.id);
+  const voice = db.prepare('SELECT * FROM voices WHERE id=?').get(req.params.id);
+  if (!voice) throw new Error('音色不存在');
+  db.transaction(() => {
+    const wasCurrent = db.prepare('SELECT 1 FROM character_voices WHERE voice_id=?').get(voice.id);
+    db.prepare('DELETE FROM character_voices WHERE voice_id=?').run(voice.id);
+    db.prepare('DELETE FROM voices WHERE id=?').run(voice.id);
+    if (wasCurrent && voice.character_id) {
+      const next = db.prepare('SELECT id FROM voices WHERE character_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(voice.character_id);
+      if (next) db.prepare('INSERT INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(voice.character_id, next.id);
+    }
+  })();
   // Immutable samples and synthesis records remain retained, including shared originals.
-  res.json({ ok: true });
+  const currentVoice = db.prepare('SELECT c.voice_id,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id WHERE c.character_id=?').get(voice.character_id);
+  res.json({ ok: true, current_voice: currentVoice || null });
 }));
 router.get('/characters/:id', route((req, res) => {
-  const binding = getDb().prepare('SELECT c.*,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id WHERE character_id=?').get(id(req.params.id));
+  const binding = getDb().prepare('SELECT c.*,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id WHERE c.character_id=? AND v.character_id=c.character_id').get(id(req.params.id));
   res.json(binding || null);
 }));
 router.put('/characters/:id', route((req, res) => {
   const characterId = id(req.params.id), db = getDb();
   if (!db.prepare('SELECT 1 FROM characters WHERE id=?').get(characterId)) throw new Error('角色不存在');
-  if (req.body.voice_id === null) db.prepare('DELETE FROM character_voices WHERE character_id=?').run(characterId);
-  else {
-    if (!db.prepare('SELECT 1 FROM voices WHERE id=?').get(req.body.voice_id || '')) throw new Error('音色不存在');
-    db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, req.body.voice_id);
-  }
+  if (!db.prepare('SELECT 1 FROM voices WHERE id=? AND character_id=?').get(req.body.voice_id || '', characterId)) throw new Error('请选择该角色自己的音色');
+  db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, req.body.voice_id);
   res.json({ ok: true });
 }));
-router.post('/preview', route((req, res) => res.status(202).json(requestSpeech({ voiceId: req.body.voice_id, sampleId: req.body.sample_id, text: req.body.text, params: req.body }))));
+router.post('/preview', route((req, res) => res.status(202).json(requestSpeech({ characterId: id(req.body.character_id), voiceId: req.body.voice_id, sampleId: req.body.sample_id, text: req.body.text, params: req.body }))));
 router.post('/characters/:id/messages/:messageId', route((req, res) => res.status(202).json(speakMessage(id(req.params.id), id(req.params.messageId)))));
 router.get('/characters/:id/messages', route((req, res) => {
   const jobs = getDb().prepare(`SELECT j.*, m.id AS message_id FROM message_speech ms JOIN messages m ON m.id=ms.message_id

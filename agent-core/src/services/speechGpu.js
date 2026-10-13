@@ -46,7 +46,7 @@ function scheduleRelease() {
 export function withSpeechGpu(work, isCancelled = () => false) {
   return withGpu(async () => {
     if (isCancelled()) throw new Error('任务已取消');
-    if (releaseError) throw new Error('上次语音资源释放未确认，请在系统参数中恢复显存调度');
+    if (releaseError) throw new Error('上次语音资源释放未确认，请在音色管理的服务维护中恢复显存调度');
     const health = await ttsHealth();
     if (!health.online || !health.compatible || !health.ready) throw new Error(health.error || 'TTS 模型尚未安装或版本不匹配');
     clearTimeout(idleTimer);

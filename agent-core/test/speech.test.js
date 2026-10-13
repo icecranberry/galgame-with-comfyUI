@@ -38,13 +38,13 @@ test('GPU FIFO does not overlap, does not starve images, and recovers from failu
   release(); await Promise.all([failed, image, second]);
   assert.deepEqual(order, ['speech', 'image', 'speech2']);
 });
-test('schema recovery and deletion preserve shared reference assets', () => {
+test('schema recovery and deletion preserve reference assets', () => {
   const db = new Database(':memory:');
   db.pragma('foreign_keys=ON');
   db.exec('CREATE TABLE characters(id INTEGER PRIMARY KEY); CREATE TABLE messages(id INTEGER PRIMARY KEY); INSERT INTO characters VALUES(1); INSERT INTO messages VALUES(1);');
   migrateTtsSchema(db); migrateTtsSchema(db);
   db.exec(`INSERT INTO voice_samples(id,original_path,preview_path,duration) VALUES('s','a','b',10);
-    INSERT INTO voices(id,name,sample_id) VALUES('v','日常','s');
+    INSERT INTO voices(id,name,sample_id,character_id) VALUES('v','日常','s',1);
     INSERT INTO character_voices VALUES(1,'v',1);
     INSERT INTO speech_jobs(id,cache_key,text,voice_id,voice_version,sample_id,model_version,params,status)
       VALUES('j','key','你好','v',1,'s','model','{}','generating');
@@ -59,14 +59,41 @@ test('schema recovery and deletion preserve shared reference assets', () => {
   db.close();
 });
 
+test('legacy migration retains owners and unused recordings without allowing shared bindings', () => {
+  const db = new Database(':memory:');
+  db.pragma('foreign_keys=ON');
+  db.exec(`CREATE TABLE characters(id INTEGER PRIMARY KEY, name TEXT, display_name TEXT);
+    CREATE TABLE messages(id INTEGER PRIMARY KEY);
+    CREATE TABLE voices(id TEXT PRIMARY KEY, name TEXT, created_at TEXT);
+    INSERT INTO characters VALUES(1,'elysia','爱莉希雅'),(2,'anby','安比'),(3,'a','同名'),(4,'b','同名');
+    INSERT INTO voices VALUES('v','爱莉希雅 · 日常',''),('old','爱莉希雅 · 日常 2',''),
+      ('custom','自定义',''),('unknown','未命名',''),('ambiguous','同名 · 日常','');
+    CREATE TABLE character_voices(character_id INTEGER PRIMARY KEY REFERENCES characters(id), voice_id TEXT REFERENCES voices(id), enabled INTEGER DEFAULT 1);
+    INSERT INTO character_voices VALUES(1,'v',1),(2,'v',1),(3,'custom',1);`);
+  migrateTtsSchema(db);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='v'").pluck().get(), 1);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='old'").pluck().get(), 1);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='custom'").pluck().get(), 3);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='unknown'").pluck().get(), null);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='ambiguous'").pluck().get(), null);
+  assert.equal(db.prepare('SELECT count(*) FROM character_voices WHERE character_id=2').pluck().get(), 0);
+  db.exec("UPDATE voices SET name='改名' WHERE id='old'; DELETE FROM character_voices;");
+  migrateTtsSchema(db);
+  assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='old'").pluck().get(), 1, 'unbinding and renaming do not erase ownership');
+  assert.equal(db.prepare('SELECT count(*) FROM character_voices').pluck().get(), 2, 'legacy characters with voices automatically get a current voice');
+  assert.equal(db.prepare('SELECT count(*) FROM voices').pluck().get(), 5, 'migration never deletes recordings');
+  db.close();
+});
+
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'linshe-tts-test-'));
 process.env.DB_PATH = ':memory:';
 process.env.TTS_AUDIO_DIR = root;
 const originalFetch = globalThis.fetch;
-let inferCount = 0, acquireCount = 0, failInference = false, offline = false;
+let inferCount = 0, acquireCount = 0, failInference = false, offline = false, fetchFailure = null;
 globalThis.fetch = async (url, options) => {
   const u = String(url);
   if (u.includes(':7861')) {
+    if (fetchFailure) throw fetchFailure;
     if (offline) throw new Error('offline');
     if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true });
     if (u.endsWith('/unload')) return Response.json({ unloaded: true });
@@ -98,12 +125,24 @@ async function terminal(id) {
   }
   throw new Error('job did not finish');
 }
+test('TTS transport failures explain connection and timeout errors while preserving their cause', async () => {
+  const { ttsRequest, ttsHealth } = await import('../src/services/indexTtsClient.js');
+  try {
+    fetchFailure = new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+    await assert.rejects(ttsRequest('/health'), error => error.cause === fetchFailure && /无法连接本地语音服务/.test(error.message));
+    assert.match((await ttsHealth()).error, /请启动服务后重试/);
+    fetchFailure = new DOMException('timed out', 'TimeoutError');
+    await assert.rejects(ttsRequest('/health'), /响应超时/);
+  } finally { fetchFailure = null; }
+});
+
 test('saved bubble identity, dedup, history, cache invalidation, retry and offline isolation', async () => {
   const db = getDb();
   const char = db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('tts-test','测试','persona')").run().lastInsertRowid;
   await fs.mkdir(path.join(root, 'generated'), { recursive: true });
   db.exec(`INSERT INTO voice_samples(id,original_path,preview_path,reference_path,content_hash,duration) VALUES('tts-s','a','b','references/s.wav','hash',10);
     INSERT INTO voices(id,name,sample_id) VALUES('tts-v','日常','tts-s');`);
+  db.prepare('UPDATE voices SET character_id=? WHERE id=?').run(char, 'tts-v');
   db.prepare('INSERT INTO character_voices(character_id,voice_id) VALUES(?,?)').run(char, 'tts-v');
   const msg = db.prepare("INSERT INTO messages(conversation_id,role,content) VALUES(?,'assistant','你好呀')").run(`char_${char}`).lastInsertRowid;
   assert.throws(() => service.speakMessage(char, msg), /启用/);
@@ -111,7 +150,7 @@ test('saved bubble identity, dedup, history, cache invalidation, retry and offli
   assert.throws(() => service.speakMessage(char + 1, msg), /不属于/);
   const user = db.prepare("INSERT INTO messages(conversation_id,role,content) VALUES(?,'user','不要读')").run(`char_${char}`).lastInsertRowid;
   assert.throws(() => service.speakMessage(char, user), /不属于/);
-  assert.throws(() => service.requestSpeech({ voiceId: 'tts-v', text: '（微笑）' }), /没有可朗读/);
+  assert.throws(() => service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '（微笑）' }), /没有可朗读/);
   const first = service.speakMessage(char, msg);
   assert.equal(service.speakMessage(char, msg).id, first.id);
   assert.equal((await terminal(first.id)).status, 'completed');
@@ -125,18 +164,19 @@ test('saved bubble identity, dedup, history, cache invalidation, retry and offli
   assert.equal(acquireCount, 1, 'consecutive synthesis reuses the lease and loaded worker');
   await gpu.withImageGpu(async () => {});
   failInference = true;
-  const failed = service.requestSpeech({ voiceId: 'tts-v', text: '失败测试' });
+  const failed = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '失败测试' });
   assert.match((await terminal(failed.id)).error, /out of memory/);
   failInference = false;
-  const retry = service.requestSpeech({ voiceId: 'tts-v', text: '失败测试' });
+  const retry = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '失败测试' });
   assert.notEqual(retry.id, failed.id); assert.equal((await terminal(retry.id)).status, 'completed');
   offline = true;
   const before = acquireCount;
-  const unavailable = service.requestSpeech({ voiceId: 'tts-v', text: '服务离线测试' });
+  const unavailable = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '服务离线测试' });
   assert.equal((await terminal(unavailable.id)).status, 'failed');
+  assert.match(service.getSpeechJob(unavailable.id).error, /无法连接本地语音服务/);
   assert.equal(acquireCount, before, 'offline service must not lock ComfyUI');
   offline = false;
-  const cancelled = service.requestSpeech({ voiceId: 'tts-v', text: '取消测试' });
+  const cancelled = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '取消测试' });
   service.cancelSpeech(cancelled.id);
   assert.equal((await terminal(cancelled.id)).status, 'cancelled');
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -174,7 +214,7 @@ test('browser-style streaming WebM without duration imports and still enforces t
   await assert.rejects(assets.importAudio(await record(121)), /120/);
 });
 
-test('HTTP upload, crop, immutable voice versioning, reuse and deletion guards', async () => {
+test('HTTP audio lifecycle, character-owned voices and cross-character guards', async () => {
   const { default: express } = await import('express');
   const { default: router } = await import('../src/routes/tts.js');
   const app = express();
@@ -198,18 +238,46 @@ test('HTTP upload, crop, immutable voice versioning, reuse and deletion guards',
     const originalMedia = await originalFetch(base.replace('/api/tts', '') + sample.preview_url, { headers: { Range: 'bytes=0-43' } });
     assert.equal(originalMedia.status, 206);
     assert.equal((await originalMedia.arrayBuffer()).byteLength, 44);
-    const voice = await request('/voices', { sample_id: crop.body.id, name: '接口测试' });
-    assert.equal(voice.status, 201);
     const character = getDb().prepare("SELECT id FROM characters WHERE name='tts-test'").pluck().get();
-    assert.equal((await request(`/characters/${character}`, { voice_id: voice.body.id }, 'PUT')).status, 200);
+    const voice = await request('/voices', { character_id: character, sample_id: crop.body.id, name: '接口测试' });
+    assert.equal(voice.status, 201);
+    assert.equal(voice.body.version, 1);
+    assert.equal(voice.body.reference_url, crop.body.reference_url, 'saved voice remains playable when binding needs a retry');
+    assert.equal(voice.body.character_id, character);
+    const other = Number(getDb().prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('anby-test','安比','test')").run().lastInsertRowid);
+    const ownList = await (await originalFetch(`${base}/voices?character_id=${character}`)).json();
+    const otherList = await (await originalFetch(`${base}/voices?character_id=${other}`)).json();
+    assert.ok(ownList.some(row => row.id === voice.body.id));
+    assert.deepEqual(otherList, []);
+    assert.equal((await request('/voices', { sample_id: crop.body.id, name: '无归属' })).status, 400);
+    assert.equal((await request(`/characters/${other}`, { voice_id: voice.body.id }, 'PUT')).status, 400);
+    assert.equal((await request('/preview', { character_id: other, voice_id: voice.body.id, text: '不能跨角色试听' })).status, 400);
+    assert.equal((await request(`/voices/${voice.body.id}`, { character_id: other, sample_id: crop.body.id, name: '不能跨角色修改' }, 'PUT')).status, 400);
+    assert.throws(() => service.requestSpeech({ characterId: other, voiceId: voice.body.id, text: '不能绕过接口' }), /不属于/);
+    assert.equal((await request('/voices', { sample_id: crop.body.id, name: '   ' })).status, 400);
+    const currentVoice = await originalFetch(`${base}/characters/${character}`);
+    assert.equal(currentVoice.status, 200);
+    assert.equal((await currentVoice.json()).voice_id, voice.body.id);
+    assert.equal(await (await originalFetch(`${base}/characters/${other}`)).json(), null);
     const bindings = await (await originalFetch(`${base}/bindings`)).json();
     assert.ok(bindings.some(row => row.character_id === character && row.voice_id === voice.body.id && row.name === '接口测试'));
-    assert.equal((await request(`/voices/${voice.body.id}`, {}, 'DELETE')).status, 400);
-    assert.equal((await request(`/voices/${voice.body.id}`, { sample_id: crop.body.id, speed: 1.5 }, 'PUT')).status, 200);
+    assert.equal((await request(`/characters/${character}`, { voice_id: 'tts-v' }, 'PUT')).status, 200);
+    assert.equal((await (await originalFetch(`${base}/characters/${character}`)).json()).voice_id, 'tts-v');
+    assert.equal((await request(`/characters/${character}`, { voice_id: voice.body.id }, 'PUT')).status, 200);
+    const updated = await request(`/voices/${voice.body.id}`, { character_id: character, sample_id: crop.body.id, speed: 1.5 }, 'PUT');
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.version, 2);
+    assert.equal(updated.body.reference_url, crop.body.reference_url);
     assert.equal(getDb().prepare('SELECT version FROM voices WHERE id=?').pluck().get(voice.body.id), 2);
     assert.equal((await request('/settings', { enabled: 'false' }, 'PUT')).status, 400);
-    assert.equal((await request(`/characters/${character}`, { voice_id: null }, 'PUT')).status, 200);
-    assert.equal((await request(`/voices/${voice.body.id}`, {}, 'DELETE')).status, 200);
+    assert.equal((await request(`/characters/${character}`, { voice_id: null }, 'PUT')).status, 400);
+    assert.equal(getDb().prepare('SELECT character_id FROM voices WHERE id=?').pluck().get(voice.body.id), character);
+    assert.equal((await request(`/characters/${other}`, { voice_id: voice.body.id }, 'PUT')).status, 400);
+    const deleted = await request(`/voices/${voice.body.id}`, {}, 'DELETE');
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.current_voice.voice_id, 'tts-v', 'deleting the current voice automatically uses the remaining own voice');
+    assert.equal((await request('/voices/tts-v', {}, 'DELETE')).body.current_voice, null);
+    assert.equal(await (await originalFetch(`${base}/characters/${character}`)).json(), null);
     assert.ok(getDb().prepare('SELECT id FROM voice_samples WHERE id=?').get(crop.body.id));
   } finally { await new Promise(resolve => server.close(resolve)); }
 });

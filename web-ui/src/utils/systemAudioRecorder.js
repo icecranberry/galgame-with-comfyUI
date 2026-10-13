@@ -33,7 +33,13 @@ export function createSystemAudioRecorder({
     publish('requesting')
     try {
       if (!Recorder || !Stream) throw new Error('浏览器不支持录音，请使用桌面 Chrome / Edge，或上传音频文件。')
-      const stream = await getDisplayMedia({ video: true, audio: true, systemAudio: 'include', selfBrowserSurface: 'exclude' })
+      const stream = await getDisplayMedia({
+        video: true,
+        // Preserve the source audio for voice cloning instead of applying call
+        // processing. Plain booleans remain best-effort on unsupported sources.
+        audio: { autoGainControl: false, echoCancellation: false, noiseSuppression: false },
+        systemAudio: 'include', selfBrowserSurface: 'exclude',
+      })
       if (current !== generation) { stream.getTracks().forEach(track => track.stop()); return }
       source = stream
       const tracks = stream.getAudioTracks().filter(track => track.readyState !== 'ended')

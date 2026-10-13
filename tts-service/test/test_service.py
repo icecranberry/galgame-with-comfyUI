@@ -1,8 +1,11 @@
 import importlib.util
+import io
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,6 +21,50 @@ adapter = load("tts_adapter", ROOT / "server.py")
 
 
 class ServiceTests(unittest.TestCase):
+    def test_worker_can_log_unicode_with_gbk_redirected_streams(self):
+        # Reproduce Windows background launches: both handles start as GBK,
+        # and upstream logs the text before generating its WAV.
+        text = "诶——？冰乐你终于冒头了！ ♪ 😊 𠮷"
+        seen = []
+
+        class Model:
+            def __init__(self, **kwargs):
+                print("加载音色 ♪", file=sys.stderr)
+
+            def infer(self, *, text, output_path, **kwargs):
+                print(f"text after normalization: {text}")
+                seen.append(text)
+                Path(output_path).write_bytes(b"RIFFtest-wave")
+
+        class Pipe:
+            def __init__(self): self.messages = []; self.closed = False; self.received = False
+            def send(self, value): self.messages.append(value)
+            def recv(self):
+                if self.received: raise EOFError()
+                self.received = True
+                return {"reference": "references/test.wav", "output": "generated/test.wav",
+                        "text": text, "language": "zh", "duration_factor": 1}
+            def close(self): self.closed = True
+
+        module = types.ModuleType("indextts.infer_v2_5")
+        module.IndexTTS2 = Model
+        pipe = Pipe()
+        with tempfile.TemporaryDirectory() as directory, \
+                io.TextIOWrapper(io.BytesIO(), encoding="gbk") as stdout, \
+                io.TextIOWrapper(io.BytesIO(), encoding="gbk") as stderr, \
+                patch.object(adapter, "AUDIO_ROOT", Path(directory)), \
+                patch.dict(sys.modules, {"indextts": types.ModuleType("indextts"), "indextts.infer_v2_5": module}), \
+                patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
+            adapter.worker(pipe)
+            self.assertEqual(pipe.messages[:2], [{"loaded": True}, {"ok": True}])
+            self.assertEqual(seen, [text])
+            self.assertEqual((Path(directory) / "generated/test.wav").read_bytes(), b"RIFFtest-wave")
+            self.assertFalse((Path(directory) / "generated/test.partial.wav").exists())
+            stdout.flush(); stderr.flush()
+            self.assertIn(text, stdout.buffer.getvalue().decode("utf-8"))
+            self.assertIn("加载音色 ♪", stderr.buffer.getvalue().decode("utf-8"))
+        self.assertTrue(pipe.closed)
+
     def test_http_requires_loopback_host_and_rejects_browser_origin(self):
         handler = object.__new__(adapter.Handler)
         handler.headers = {"Host": "127.0.0.1:7861", "X-TTS-Token": adapter.TOKEN}

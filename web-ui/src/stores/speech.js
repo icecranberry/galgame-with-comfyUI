@@ -22,7 +22,11 @@ export async function waitSpeech(job, signal) {
   while (['queued', 'generating'].includes(job.status)) {
     if (signal?.aborted) throw new DOMException('已停止等待', 'AbortError')
     if (Date.now() > deadline) throw new Error('等待语音超时，可稍后再次点击查询')
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); reject(new DOMException('已停止等待', 'AbortError')) }
+      const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, 1000)
+      signal?.addEventListener('abort', abort, { once: true })
+    })
     job = await ttsApi(`/jobs/${job.id}`, undefined, 'GET', signal)
     speechJobs[job.id] = job
   }
