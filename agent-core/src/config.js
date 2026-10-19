@@ -616,8 +616,8 @@ export function updateEventFreq(value) {
 
 /**
  * 更新朋友圈发帖频率（0~24）
- * 默认保持 2~8 小时；interval 模式以 2 小时 / freq 为中心浮动 ±20%。
- * 模式用于区分同为 freq=1 的「默认」与「2 小时」；0 = 关闭自动发帖。
+ * 默认保持角色各自 2~8 小时；interval 模式角色统一每 2 小时 / freq 生成一条。
+ * 模式用于区分同为 freq=1 的「默认」与「2 小时」；0 = 同时关闭角色和镇民自动发帖。
  */
 export function updateMomentFreq(value, mode) {
   const f = Math.max(0, Math.min(24, parseFloat(value) || 0));

@@ -80,6 +80,13 @@ let portalImageQueue = Promise.resolve();
 const manualImagePosts = new Set(); // 手动刷新批次由高优通道负责，后台扫描不能抢走。
 let lastAutoAt = 0;             // 上次自动补充时间
 
+/** dev 热重启不立即抓新帖：从启动时等待完整间隔，不能只跳过首轮 tick。 */
+export function initializeMediaAutoSchedule(now = Date.now()) {
+  if (!config.isDev || lastAutoAt !== 0) return;
+  lastAutoAt = now;
+  console.log('[media] Dev mode: automatic generation waits one interval after startup');
+}
+
 function imagePostScope(postIds) {
   return {
     sql: `AND p.id ${postIds ? 'IN' : 'NOT IN'} (SELECT value FROM json_each(?))`,

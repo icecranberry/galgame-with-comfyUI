@@ -25,6 +25,7 @@ export function getSetting(key) {
 
 // 有意不纳入 SETTING_TO_CONFIG 的 DB-only 键（用于存储时间戳等运行时状态，不走 config 加载路径）
 const DB_ONLY_KEYS = new Set([
+  'moment_interval_schedule',
   'last_moments_seen_at',
   'last_events_seen_at',
   'llm_profiles',

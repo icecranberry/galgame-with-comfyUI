@@ -27,7 +27,7 @@ import { broadcast } from './unifiedStreamBus.js';
 import { getStandingDisplay } from './standingDisplay.js';
 import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 import { maybeGenerateDailyNewspaper } from './newspaperService.js';
-import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating } from './mediaService.js';
+import { maybeAutoGenerate as maybeAutoGenerateMedia, resetStaleMediaGenerating, initializeMediaAutoSchedule } from './mediaService.js';
 
 const CHECK_INTERVAL = 1 * 60 * 1000; // 1 分钟
 
@@ -44,6 +44,7 @@ export function startReplyQueueScheduler() {
   // 生图队列在内存里，重启即丢，DB 状态却会停在 generating —— 不重置的话那几条
   // 既不会被重新排队，也会被 repairMissingImages 跳过，等于永久坏掉。
   try { resetStaleMediaGenerating(); } catch (e) { console.error('[replyQueue] media 状态自愈失败:', e.message); }
+  initializeMediaAutoSchedule();
 
   // 首次延迟 10 秒启动（等待 DB 就绪）
   timer = setTimeout(() => {
@@ -73,8 +74,8 @@ async function tick() {
     //    fire-and-forget——生成含 LLM 与逐张配图，不能阻塞下面的调度）
     maybeGenerateDailyNewspaper();
 
-    // 0.5 媒体内容页：到点补一批新帖；每轮顺带补几张缺封面（同为 fire-and-forget，
-    //     内部自带节流与并发守卫，不阻塞下面的调度）
+    // 0.5 媒体内容页：仅到点补一批新帖（fire-and-forget，内部节流与并发守卫）。
+    // dev 启动时已初始化等待间隔；配图只由新批次或前端按需触发。
     maybeAutoGenerateMedia();
 
     // 1. 日程分散刷新（每次 tick 最多 1 个角色）

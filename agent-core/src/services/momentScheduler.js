@@ -2,7 +2,8 @@ import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 朋友圈定时发帖调度器
  *
- * - 每 5 分钟扫描一次
+ * - 角色默认每 5 分钟扫描；自定义档每 30 秒检查角色全局计时，每个间隔只发一条
+ * - 镇民使用自己的默认排期与 5 分钟检查；关闭档同时停止角色和镇民
  * - 找出 next_moment_at <= now 或 NULL 的角色 / 镇民（双来源，谁先到期谁先发）
  * - 镇民每个自然滚动 24 小时最多发一条（调度查询里硬过滤，生成器排期兜底）
  * - 每次只处理一个（排队），避免并发生图撑爆 ComfyUI
@@ -11,7 +12,8 @@ import { isMomentBackfillRunning } from './momentBackfill.js';
 
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
-import { getMomentDelay, isDefaultMomentTiming } from './momentTiming.js';
+import { getMomentDelay, getMomentIntervalMs } from './momentTiming.js';
+import { getMomentIntervalSchedule, resetMomentIntervalSchedule, runIntervalMomentTick } from './momentIntervalScheduler.js';
 import { getTownMaps } from './town/townService.js';
 import { getPendingComplaint, markComplaintDone, postponeComplaint, buildComplaintTopic } from './newspaperService.js';
 
@@ -30,7 +32,25 @@ export function setTownNpcPostGenerator(fn) {
 const CHECK_INTERVAL = 5 * 60 * 1000;
 
 let timer = null;
+let startupTimer = null;
 let processing = false;
+let nextNpcCheckAt = 0;
+
+const checkInterval = () => getMomentIntervalMs(config.features) ? 30_000 : CHECK_INTERVAL;
+
+/** 切换模式仅重置一个全局计时；默认档的逐角色排期保留。 */
+export function refreshMomentFrequency(previousFeatures) {
+  if (getMomentIntervalMs(previousFeatures) === getMomentIntervalMs(config.features)
+    && (previousFeatures.momentFreq ?? 1) === (config.features.momentFreq ?? 1)) {
+    getMomentIntervalSchedule();
+    return;
+  }
+  resetMomentIntervalSchedule();
+  if (timer) {
+    clearInterval(timer);
+    timer = setInterval(tick, checkInterval());
+  }
+}
 
 function toSQLiteDate(iso) {
   if (!iso) return iso;
@@ -42,7 +62,7 @@ function toSQLiteDate(iso) {
 /**
  * 当期报纸主角的额外吐槽帖：complaint_after 到期且角色可发时，用强制话题生成一条。
  * 成功后若角色原有的 next_moment_at 仍在未来则恢复原值——吐槽帖是"额外"的，不推迟常规发帖节奏。
- * @returns {boolean} 本 tick 是否已处理吐槽帖（true 时调用方直接结束本 tick）
+ * @returns {number|false} 已处理吐槽帖的角色 id；没有发帖则返回 false。
  */
 async function maybePostNewspaperComplaint() {
   const pending = getPendingComplaint();
@@ -74,7 +94,6 @@ async function maybePostNewspaperComplaint() {
     return false;
   }
 
-  processing = true;
   try {
     const prevNextAt = character.next_moment_at;
     await momentPostGenerator(character, { forcedTopic: topic });
@@ -84,15 +103,13 @@ async function maybePostNewspaperComplaint() {
       db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?').run(prevNextAt, character.id);
     }
     console.log(`[momentScheduler] Newspaper complaint posted for ${character.display_name}`);
-    return true;
+    return character.id;
   } catch (err) {
     if (err.message !== 'ALREADY_GENERATING') {
       postponeComplaint(newspaper.id, 30);
       console.error(`[momentScheduler] Newspaper complaint failed for ${character.display_name}:`, err.message);
     }
     return false;
-  } finally {
-    processing = false;
   }
 }
 
@@ -102,29 +119,28 @@ async function tick() {
     return;
   }
 
-  // 频率闸门：momentFreq=0 表示关闭自动发帖（报纸吐槽帖也一并停，因为它同样是自动触发）
+  // 关闭档是总开关；其他时间档只调整角色频率，镇民保留默认排期。
   const momentFreq = config.features.momentFreq ?? 1;
-  if (momentFreq <= 0) {
-    return;
-  }
+  if (momentFreq <= 0) return;
+  const intervalMode = !!getMomentIntervalMs(config.features);
+  const defaultCharacterMode = momentFreq > 0 && !intervalMode;
 
   const db = getDb();
+  processing = true;
   try {
-    // 0. 报纸吐槽帖：《小镇早知道》当期主角的额外发圈（优先于常规发帖，处理过就结束本 tick）
-    if (await maybePostNewspaperComplaint()) return;
-
-    // 具体时间档先初始化首帖时间，避免 NULL 候选绕过首次等待直接发帖。
-    if (!isDefaultMomentTiming(config.features)) {
-      const unscheduled = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND next_moment_at IS NULL').all();
-      for (const character of unscheduled) {
-        const nextAt = new Date(Date.now() + getMomentDelay(config.features, { initial: true })).toISOString();
-        db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?').run(toSQLiteDate(nextAt), character.id);
-      }
+    if (intervalMode) {
+      const attempted = await runIntervalMomentTick({
+        generateCharacter: momentPostGenerator,
+        postComplaint: maybePostNewspaperComplaint,
+      });
+      if (attempted) return;
     }
+    // 0. 报纸吐槽帖：《小镇早知道》当期主角的额外发圈（优先于常规发帖，处理过就结束本 tick）
+    if (defaultCharacterMode && await maybePostNewspaperComplaint()) return;
 
     // 找出下一个需要发帖的角色（next_moment_at <= now 或 NULL）
     // 跳过有活跃奇遇事件的角色
-    const candidate = db.prepare(`
+    const candidate = defaultCharacterMode ? db.prepare(`
       SELECT c.* FROM characters c
       WHERE c.moments_disabled = 0
         AND (c.is_sleeping IS NULL OR c.is_sleeping = 0)
@@ -135,7 +151,11 @@ async function tick() {
         )
       ORDER BY c.next_moment_at ASC NULLS FIRST
       LIMIT 1
-    `).get();
+    `).get() : null;
+
+    // 快速档只加快角色检查，不能把镇民的扫描也加快到每 30 秒。
+    if (intervalMode && Date.now() < nextNpcCheckAt) return;
+    nextNpcCheckAt = Date.now() + CHECK_INTERVAL;
 
     // 镇民朋友圈总开关（管理面板）：关闭后镇民不再进入调度，角色发帖不受影响
     // 多地图：只有玩家当前所在地图（聚焦图）的镇民能发帖，否则不消耗 LLM
@@ -178,6 +198,7 @@ async function tick() {
     const pickedNpc = useNpc ? npcCandidate : null;
 
     if (!candidate && !pickedNpc) {
+      if (!defaultCharacterMode) return;
       // 没有需要发帖的角色——给下一个最早发帖的角色估算时间
       const nextUp = db.prepare(`
         SELECT display_name, next_moment_at FROM characters
@@ -188,7 +209,7 @@ async function tick() {
         console.log(`[momentScheduler] No pending posts. Next: ${nextUp.display_name} at ${nextUp.next_moment_at}`);
       } else {
         console.log('[momentScheduler] No active characters or all have NULL next_moment_at — initializing...');
-        // 首次启动：默认 1~4 小时，具体时间档按所选间隔浮动 ±20%。
+        // 默认档首次启动：1~4 小时。
         const chars = db.prepare('SELECT id FROM characters WHERE moments_disabled = 0 AND next_moment_at IS NULL').all();
         for (const c of chars) {
           const delay = getMomentDelay(config.features, { initial: true });
@@ -278,19 +299,27 @@ function cleanupStuckPosts() {
 }
 
 export function startMomentScheduler() {
-  console.log('[momentScheduler] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
+  if (timer || startupTimer) return;
+  console.log('[momentScheduler] Starting (interval:', checkInterval() / 60000, 'min)');
 
   // 启动时立即清理僵尸帖，无需等 30 秒
   cleanupStuckPosts();
+  getMomentIntervalSchedule();
 
   // 启动后先等 30 秒再首次检查，让服务稳定下来
-  setTimeout(() => {
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
     tick();
-    timer = setInterval(tick, CHECK_INTERVAL);
+    timer = setInterval(tick, checkInterval());
   }, 30_000);
 }
 
 export function stopMomentScheduler() {
+  nextNpcCheckAt = 0;
+  if (startupTimer) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+  }
   if (timer) {
     clearInterval(timer);
     timer = null;

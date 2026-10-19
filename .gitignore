@@ -58,8 +58,10 @@ agent-core/test/*
 !agent-core/test/chatModePrompt.test.js
 !agent-core/test/chatImageRagQuery.test.js
 !agent-core/test/momentTiming.test.js
+!agent-core/test/momentIntervalScheduler.test.js
 !agent-core/test/mediaFavorites.test.js
 !agent-core/test/mediaOutputFormat.test.js
+!agent-core/test/mediaAutoStartup.test.js
 !agent-core/test/expressionStandingAppearance.test.js
 !agent-core/test/expressionStandingOutfitBatch.test.js
 !agent-core/test/expressionStandingOutfitPreflight.test.js

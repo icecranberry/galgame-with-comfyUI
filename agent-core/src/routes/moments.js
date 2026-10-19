@@ -699,11 +699,11 @@ async function generateMomentPostImpl(character, opts = {}) {
     }
   }
 
-  // 1.5 发布形态抽取：做梦/幻想 → 采纳动因时可写长文，否则回到日程短句；
+  // 1.5 发布形态抽取：只作表达参考；做梦/幻想采纳动因后可展开叙述；
   //     其余（自由模式与主路径）→ 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
   let pickedForm = null;
   if (isSpecialMode) {
-    pickedForm = { name: '叙事长文', desc: '仅在采用梦境或幻想动因时可展开叙事长文；否则围绕当前日程随手写一两个短句，不凑长文', len: '梦境叙事80-200字，否则按日程写短句' };
+    pickedForm = { name: '叙事长文', desc: '采用梦境或幻想动因时，可以把最想分享的梦内经历讲清；否则围绕当前日程表达真实感想，不凑长文', len: '梦境可以稍作展开，日常通常简短，保留意思后自然收住' };
   } else {
     const _hour = (opts.postedAt || new Date()).getHours();
     const _isNight = _hour >= 22 || _hour < 5;
@@ -846,9 +846,9 @@ ${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}
 - text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。`;
 
-    const dynamicRules = `- text用中文（参考 ${pickedForm ? pickedForm.len : '30-80字'}，不凑字数），imagePrompt 用英文
+    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文长短参考：${pickedForm ? pickedForm.len : '通常简短，有具体感想时可以稍作展开'}，以表达完整为准
 ${multiImageRule}
-${pickedForm ? `- **发布形态**：${pickedForm.desc}。` : ''}
+${pickedForm ? `- **发布形态参考（可不用）**：${pickedForm.desc}。` : ''}
 ${isSpecialMode ? '- **梦境采纳条件**：有当前日程时，做梦/幻想动因也必须非常契合日程才可采用；否则完全忽略梦境及其配图建议，图文正常记录当前日程。未提供日程时可采用。采用后正文分清梦与现实，配图只取梦内同一场景，不得借梦境绕开日程。' : ''}
 ${imperfectionNote}
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
@@ -994,7 +994,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     WHERE id = ?
   `).run(text, imagePrompt, JSON.stringify(imageUrls), opts.postedAt ? toSQLite(opts.postedAt.toISOString()) : null, postId);
 
-  // 5. 默认保持原有节奏；具体时间档以所选间隔为中心浮动 ±20%。
+  // 5. 维护默认档的逐角色排期；自定义档由全局计时触发，不消费此时间。
   const nextDelay = getMomentDelay(config.features);
   const nextAt = new Date(Date.now() + nextDelay).toISOString();
   db.prepare('UPDATE characters SET next_moment_at = ? WHERE id = ?')

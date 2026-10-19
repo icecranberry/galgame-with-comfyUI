@@ -164,7 +164,8 @@ ${MOMENT_IMAGE_RULES}
 ${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心' })}
 
 本次要求：
-- text 用中文，第一人称（可省略主语），参考 ${pickedForm.len}，不凑字数；${pickedForm.desc}
+- text 用中文，第一人称（可省略主语）；长短参考：${pickedForm.len}，以表达完整为准
+- 发布形态参考（可不用）：${pickedForm.desc}
 - ${factsRule}
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告
 - text 中的事符合当前时间和天气，不用报时或报天气；只有它直接触发了这次反应才自然提及

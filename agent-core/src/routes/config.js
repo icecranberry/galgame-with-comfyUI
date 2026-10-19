@@ -13,6 +13,7 @@ import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWo
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
 import { restartEventScheduler } from '../services/eventScheduler.js';
+import { refreshMomentFrequency } from '../services/momentScheduler.js';
 import { restartComfyClient } from '../services/comfyClient.js';
 import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 import { restartWeatherScheduler, triggerUpdate as triggerWeatherUpdate } from '../services/weatherService.js';
@@ -270,7 +271,7 @@ router.put('/event-freq', (req, res) => {
   res.json({ ok: true, eventFreq: config.features.eventFreq });
 });
 
-// PUT /api/config/moment-freq — 具体时间档 ±20%，mode 区分默认与 2 小时档
+// PUT /api/config/moment-freq — 具体时间档控制全局间隔，mode 区分默认与 2 小时档
 router.put('/moment-freq', (req, res) => {
   const { value, mode } = req.body;
   if (!Number.isFinite(value) || value < 0 || value > 24) {
@@ -279,7 +280,9 @@ router.put('/moment-freq', (req, res) => {
   if (mode !== undefined && (mode !== 'default' && mode !== 'interval' || mode === 'default' && value !== 1)) {
     return res.status(400).json({ error: 'mode must be interval, or default with value=1' });
   }
+  const previousFeatures = { ...config.features };
   updateMomentFreq(value, mode);
+  refreshMomentFrequency(previousFeatures);
   res.json({ ok: true, momentFreq: config.features.momentFreq, momentFreqMode: config.features.momentFreqMode });
 });
 

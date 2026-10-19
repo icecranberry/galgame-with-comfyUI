@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { MOMENT_COMMENT_RULES } from '../src/services/momentForms.js';
 process.env.DB_PATH = ':memory:';
 globalThis.fetch = async () => { throw new Error('Network forbidden'); };
 
@@ -264,7 +265,7 @@ test('triggerUserPostReplies 按选人结果逐个评论，落库 + 广播（fak
   // prompt 结构：包含帖子正文与评论区规则（对齐现有朋友圈评论口径）
   const flat = seenMsgs.map(m => m.map(x => x.content).join('\n')).join('\n');
   assert.ok(flat.includes('周末去海边啦'), '评论 prompt 应包含帖子正文');
-  assert.ok(flat.includes('3~25 字'), '评论 prompt 应带上评论风格规则');
+  assert.ok(flat.includes(MOMENT_COMMENT_RULES), '评论 prompt 应带上共用评论风格规则');
   // 用户帖没有 prompt → 不注入配图说明
   assert.ok(!flat.includes('配图的画面描述'));
 });
@@ -493,7 +494,7 @@ test('handleUserComment 普通评论：帖主回评 + reply_to_comment_id 指向
   const flat = seen.map(m => m.map(x => x.content).join('\n')).join('\n');
   assert.ok(flat.includes('a new cup on the desk'), '帖主回评 prompt 注入配图画面描述');
   assert.ok(flat.includes('新买的杯子'));
-  assert.ok(flat.includes('3~25 字'));
+  assert.ok(flat.includes(MOMENT_COMMENT_RULES));
 });
 
 test('handleUserComment @ 点名：被点名的角色回复，帖主不再默认回评', async t => {

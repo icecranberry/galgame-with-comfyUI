@@ -82,7 +82,7 @@ export async function describeUserMomentImages(images = [], deps = {}) {
     {
       role: 'user',
       content: [
-        { type: 'text', text: '这些是同一条朋友圈的配图。请压缩成 100 字以内；多张图时用「第1张：」「第2张：」标明顺序。' },
+        { type: 'text', text: '这些是同一条朋友圈的配图。请简洁描述，保留理解照片所需的人物、动作和场景细节；多张图时用「第1张：」「第2张：」标明顺序。' },
         ...imageParts,
       ],
     },

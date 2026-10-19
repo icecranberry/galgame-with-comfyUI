@@ -25,10 +25,10 @@ test('具体时间档的首帖先排期，关闭自动发帖时不初始化或�
   const before = Date.now();
   await sched.runSchedulerTick();
   const after = Date.now();
-  const scheduled = db.prepare('SELECT next_moment_at FROM characters WHERE id = ?').get(id).next_moment_at;
-  const at = Date.parse(scheduled.replace(' ', 'T') + 'Z');
-  assert.ok(at >= before + 1.6 * 3600_000 - 1000);
-  assert.ok(at <= after + 2.4 * 3600_000);
+  const scheduled = JSON.parse(db.prepare("SELECT setting_value FROM system_settings WHERE setting_key = 'moment_interval_schedule'").get().setting_value);
+  assert.ok(scheduled.nextAt >= before + 2 * 3600_000);
+  assert.ok(scheduled.nextAt <= after + 2 * 3600_000);
+  assert.equal(db.prepare('SELECT next_moment_at FROM characters WHERE id = ?').get(id).next_moment_at, null);
   assert.equal(calls.length, 0, '新角色不能绕过首次等待立即发帖');
 });
 
