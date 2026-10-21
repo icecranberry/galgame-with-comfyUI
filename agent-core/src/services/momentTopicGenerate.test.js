@@ -14,8 +14,9 @@ config.features.serializeBackgroundLLM = false;
 const { resetClient } = await import('../llm/llm-client.js');
 resetClient();
 const { getDb, closeDb } = await import('../db/index.js');
-const { default: router } = await import('../routes/moments.js');
-afterEach(closeDb);
+const { default: router, generateMomentPost } = await import('../routes/moments.js');
+const { invalidateAllCache } = await import('./scheduleManager.js');
+afterEach(() => { invalidateAllCache(); closeDb(); });
 
 function seedCharacter() {
   const db = getDb();
@@ -102,8 +103,10 @@ test('随机梦境：单图与多图请求均强化梦内画面，普通朋友�
     assert.match(task, /ethereal soft lighting/);
     assert.match(task, /Environment reference 只约束醒着时的叙述/);
     assert.match(task, /未采纳梦境时完全忽略本条/);
-    assert.match(task, /有当前日程时，做梦\/幻想动因也必须非常契合日程才可采用/);
+    assert.match(task, /日程为主时，仅在梦境动因自然契合日程时采用/);
+    assert.match(task, /动因为主时可以直接分享梦境/);
     const example = JSON.parse(task.split('输出格式（严格 JSON）：\n')[1].split('\n')[0]);
+    assert.match(example.text, /80-400字/);
     assert.equal(Object.keys(example).length, imageCount + 1);
     for (const [field, value] of Object.entries(example)) {
       if (field === 'text') continue;
@@ -118,4 +121,61 @@ test('随机梦境：单图与多图请求均强化梦内画面，普通朋友�
   assert.equal((await generate({ character_id: characterId })).payload.error, 'TEST_PROMPT_CAPTURED');
   const ordinary = requests.at(-1).messages.map(m => m.content).join('\n');
   assert.doesNotMatch(ordinary, /A surreal dreamscape scene|梦境配图（仅在采纳/);
+});
+
+test('random topic source and focus determine schedule detail in the actual LLM request', async t => {
+  const characterId = seedCharacter();
+  const db = getDb();
+  const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
+  db.prepare('UPDATE moment_topics SET is_active = 0').run();
+  const insertTopic = db.prepare('INSERT INTO moment_topics (name, desc, source, is_active) VALUES (?, ?, ?, 0)');
+  // 同名话题仍按 source 区分，不能靠名称或描述猜来源。
+  const customId = Number(insertTopic.run('同名来源测试', '发现新手机壳', 'custom').lastInsertRowid);
+  const systemId = Number(insertTopic.run('同名来源测试', '发现新手机壳', 'default').lastInsertRowid);
+  const { createLorebookRepository } = await import('../db/lorebookRepository.js');
+  const worldId = db.prepare('SELECT id FROM world_settings WHERE is_active = 1').get().id;
+  createLorebookRepository(db).save(worldId, {
+    document: { entries: {
+      0: { uid: 0, constant: true, position: 0, content: 'FOCUS_STABLE_RULE' },
+      1: { uid: 1, constant: false, key: ['独有日程细节'], position: 0, content: 'DETAIL_ONLY_LORE' },
+    } },
+    settings: { positionPolicy: 'cache', contextTokens: 32768, budgetPercent: 100, budgetCap: 0 },
+  });
+  const requests = [];
+  t.mock.method(OpenAI.Chat.Completions.prototype, 'create', async params => {
+    requests.push(params);
+    throw Object.assign(new Error('TEST_PROMPT_CAPTURED'), { status: 400 });
+  });
+  let rolls = [];
+  t.mock.method(Math, 'random', () => rolls.length ? rolls.shift() : 0.5);
+  const activity = { location: '裁缝店', activity: '整理量尺', description: '独有日程细节：用户帮忙熨平布料' };
+  for (const [id, coin, focus] of [[customId, 0, 'motive'], [systemId, 0.49, 'schedule'], [systemId, 0.5, 'motive']]) {
+    db.prepare('UPDATE moment_topics SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END').run(id);
+    // 模式、话题、形态、张数，然后才是系统话题的主次硬币（自定义不消耗）。
+    rolls = [0.5, 0, 0.5, 0.5, coin];
+    await assert.rejects(generateMomentPost(character, { backfill: true, activity }), /TEST_PROMPT_CAPTURED/);
+    const messages = requests.at(-1).messages;
+    const user = messages.at(-1).content;
+    assert.match(user, /【此刻正在做】.*裁缝店整理量尺/);
+    assert.match(user, /【本次发朋友圈动因】发现新手机壳/);
+    assert.match(user, focus === 'schedule' ? /【本次内容主次】日程为主/ : /【本次内容主次】动因为主/);
+    const all = messages.map(m => m.content).join('\n');
+    if (focus === 'schedule') {
+      assert.match(user, /独有日程细节/);
+      assert.match(user, /DETAIL_ONLY_LORE/);
+      assert.ok(messages.some(m => m.content.startsWith('**【此刻与你同在的人：')));
+    } else {
+      assert.doesNotMatch(all, /独有日程细节|熨平布料/);
+      assert.doesNotMatch(all, /DETAIL_ONLY_LORE/);
+      assert.ok(!messages.some(m => m.content.startsWith('**【此刻与你同在的人：')));
+    }
+    const task = messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
+    assert.ok(task.indexOf('FOCUS_STABLE_RULE') >= 0);
+    assert.ok(task.indexOf('FOCUS_STABLE_RULE') < task.indexOf('输出格式（严格 JSON）：'));
+    const example = JSON.parse(task.split('输出格式（严格 JSON）：\n')[1].split('\n')[0]);
+    assert.match(example.text, /字数范围：\d+-\d+字/);
+    assert.equal(messages.filter(m => m.role === 'user').length, 1);
+  }
+  const prefixes = requests.map(r => r.messages.find(m => m.content.startsWith('你正在发朋友圈。')).content.split('输出格式（严格 JSON）：')[0]);
+  assert.ok(prefixes.every(prefix => prefix === prefixes[0]), 'source/focus must not enter the static prefix');
 });

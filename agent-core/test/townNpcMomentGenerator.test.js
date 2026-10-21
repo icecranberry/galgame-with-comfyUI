@@ -52,7 +52,7 @@ test('town npc moments post with npc authorship, day facts in the prompt, and de
   assert.ok(promptText.includes('阿圆和路过的货郎在茶摊聊起了南边的新鲜货'), 'encounter summary should feed the prompt');
   assert.ok(promptText.includes('茶摊主'), 'job persona should be injected');
   assert.ok(promptText.includes('禁止否认或编造更大的事'), 'facts must not be contradicted or inflated');
-  assert.ok(promptText.includes('单中心、日程优先（最高优先级）'), 'moments prompt should enforce a single narrative center');
+  assert.ok(promptText.includes('单中心、按本次主次（最高优先级）'), 'moments prompt should enforce a single narrative center');
   assert.ok(promptText.includes('只从中选一件最想分享的事'), 'npc day facts should be framed as candidates for one main thread');
   assert.ok(promptText.includes('只围绕一个具体中心'), 'json text example should mirror the single-center rule');
 

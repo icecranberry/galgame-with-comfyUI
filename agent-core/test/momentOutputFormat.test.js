@@ -28,6 +28,14 @@ test('quotes, multiline requirements and backslashes cannot break the JSON examp
   assert.equal(parseMomentResponse(JSON.stringify(example)).text, example.text);
 });
 
+test('JSON text constraints carry the selected length without applying it to images', () => {
+  const format = buildMomentOutputFormat({ textLength: '5-40字', imageCount: 2 });
+  const example = JSON.parse(format.split('\n')[1]);
+  assert.match(example.text, /字数范围：5-40字/);
+  assert.doesNotMatch(example.imagePrompt, /5-40字/);
+  assert.doesNotMatch(example.imagePrompt2, /5-40字/);
+});
+
 test('the output contract rejects unsupported image counts instead of teaching an incomplete shape', () => {
   for (const imageCount of [0, 4, 1.5, NaN]) {
     assert.throws(() => buildMomentOutputFormat({ imageCount }), RangeError);

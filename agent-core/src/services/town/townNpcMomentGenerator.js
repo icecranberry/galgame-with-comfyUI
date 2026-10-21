@@ -161,10 +161,10 @@ ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}
 
-${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心' })}
+${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心', textLength: pickedForm.len })}
 
 本次要求：
-- text 用中文，第一人称（可省略主语）；长短参考：${pickedForm.len}，以表达完整为准
+- text 用中文，第一人称（可省略主语）；字数范围：${pickedForm.len}，不凑字，保留关键意思
 - 发布形态参考（可不用）：${pickedForm.desc}
 - ${factsRule}
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告

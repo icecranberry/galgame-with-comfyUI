@@ -4,6 +4,9 @@ import {
   buildMomentMotiveDirective,
   buildMomentScheduleContext,
   buildMomentMultiImageRule,
+  pickMomentFocus,
+  buildMomentFocusDirective,
+  MOMENT_FORMS,
 } from './momentForms.js';
 
 test('motive directive states the selected subject without restating system rules', () => {
@@ -22,6 +25,38 @@ test('schedule context states only the current place and activity', () => {
   assert.match(prompt, /【此刻正在做】林此刻正在书房整理书架（随手翻到一本旧书）/);
   assert.doesNotMatch(prompt, /同等重要/);
   assert.equal(buildMomentScheduleContext('', { location: '书房', activity: '整理书架' }), '');
+});
+
+test('motive-focused schedule omits its description at serialization', () => {
+  const prompt = buildMomentScheduleContext('林', {
+    location: '书房', activity: '整理书架', description: '用户带着另一个话题前来帮忙',
+  }, { includeDescription: false });
+  assert.match(prompt, /书房整理书架/);
+  assert.doesNotMatch(prompt, /用户|另一个话题|帮忙/);
+});
+
+test('custom topics always focus on motive without rolling the system-topic coin', () => {
+  assert.equal(pickMomentFocus({ hasSchedule: true, hasMotive: true, topicSource: 'custom',
+    random: () => { throw new Error('custom topics must not roll'); } }), 'motive');
+});
+
+test('system topics use the exact 50 percent boundary when a schedule exists', () => {
+  for (const [roll, expected] of [[0, 'schedule'], [0.499999, 'schedule'], [0.5, 'motive'], [0.999999, 'motive']]) {
+    assert.equal(pickMomentFocus({ hasSchedule: true, hasMotive: true, topicSource: 'default', random: () => roll }), expected);
+  }
+  const noRoll = () => { throw new Error('no competing sources'); };
+  assert.equal(pickMomentFocus({ hasSchedule: false, hasMotive: true, random: noRoll }), 'motive');
+  assert.equal(pickMomentFocus({ hasSchedule: true, hasMotive: false, random: noRoll }), 'schedule');
+  assert.equal(pickMomentFocus({ hasSchedule: false, hasMotive: false, random: noRoll }), 'free');
+  assert.equal(pickMomentFocus({ hasSchedule: true, hasMotive: true, explicitTopic: true, random: noRoll }), 'motive');
+  assert.match(buildMomentFocusDirective('schedule'), /日程为主，动因为弱参考/);
+  assert.match(buildMomentFocusDirective('motive'), /动因为主，简要日程仅作低优先级背景/);
+});
+
+test('restored form ranges keep the original lower bounds and double only upper bounds', () => {
+  assert.deepEqual(MOMENT_FORMS.map(f => f.len), [
+    '5-40字', '1-30字', '15-90字', '10-90字', '15-90字', '1-40字', '1-24字', '5-60字',
+  ]);
 });
 
 test('multi-image rule asks for a continuous photo sequence with shared anchors', () => {

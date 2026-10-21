@@ -18,7 +18,7 @@ import { publishUserMoment } from '../services/momentUserPostService.js';
 import { handleUserComment } from '../services/momentCommentService.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE } from '../services/momentForms.js';
+import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE, pickMomentFocus, buildMomentFocusDirective } from '../services/momentForms.js';
 import { MOMENT_DREAM_IMAGE_RULES, MOMENT_DREAM_IMAGE_REQUIREMENT } from '../services/momentForms.js';
 
 import { startMomentBackfill, stopMomentBackfill, isMomentBackfillRunning } from '../services/momentBackfill.js';
@@ -627,7 +627,7 @@ async function generateMomentPostImpl(character, opts = {}) {
     if (!Number.isSafeInteger(opts.topicId) || opts.topicId <= 0) {
       throw Object.assign(new Error('话题参数无效，请重新选择'), { status: 400 });
     }
-    selectedTopic = db.prepare('SELECT name, desc FROM moment_topics WHERE id = ? AND is_active = 1').get(opts.topicId);
+    selectedTopic = db.prepare('SELECT name, desc, source FROM moment_topics WHERE id = ? AND is_active = 1').get(opts.topicId);
     if (!selectedTopic) throw Object.assign(new Error('这个话题已删除，请刷新话题库后重试'), { status: 404 });
   }
 
@@ -659,7 +659,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   // 1. 一维/二维组合选取，代码侧硬随机避免 LLM 偏见
 
   const SPECIAL_MODES = [
-    { name: '做梦/幻想', desc: '候选动因：分享怪梦或白日梦。仅在非常契合当前日程或未提供日程时采用；采用后描述一场具体的梦境或超现实体验，配图必须呈现梦内的超现实意象与梦幻光影' },
+    { name: '做梦/幻想', desc: '候选动因：分享怪梦或白日梦。按本次内容主次决定是否采用；采用后描述一场具体的梦境或超现实体验，配图呈现梦内的超现实意象与梦幻光影' },
   ];
 
   // 5% 特殊叙事模式 / 10% 完全自由发挥 / 85% Topic 模式
@@ -677,6 +677,7 @@ async function generateMomentPostImpl(character, opts = {}) {
     pickedTopic = {
       name: String(opts.forcedTopic.name || '今日话题'),
       desc: String(opts.forcedTopic.desc),
+      source: opts.forcedTopic.source || 'default',
     };
     combinedStyle = pickedTopic.name;
   } else {
@@ -689,7 +690,7 @@ async function generateMomentPostImpl(character, opts = {}) {
       isFreeMode = true;
     } else {
       // 话题库存于 moment_topics 表（用户可在「朋友圈话题库」弹窗中管理），代码侧硬随机避免 LLM 偏见
-      const topics = db.prepare(`SELECT name, desc FROM moment_topics WHERE is_active = 1 AND COALESCE(checked, 1) = 1`).all();
+      const topics = db.prepare(`SELECT name, desc, source FROM moment_topics WHERE is_active = 1 AND COALESCE(checked, 1) = 1`).all();
       if (topics.length === 0) {
         isFreeMode = true; // 库被清空时兜底自由发挥
       } else {
@@ -703,7 +704,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   //     其余（自由模式与主路径）→ 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
   let pickedForm = null;
   if (isSpecialMode) {
-    pickedForm = { name: '叙事长文', desc: '采用梦境或幻想动因时，可以把最想分享的梦内经历讲清；否则围绕当前日程表达真实感想，不凑长文', len: '梦境可以稍作展开，日常通常简短，保留意思后自然收住' };
+    pickedForm = { name: '叙事长文', desc: '采用梦境或幻想动因时，可以把最想分享的梦内经历讲清；否则围绕当前日程表达真实感想，不凑长文', len: '梦境叙事80-400字，否则按日程写30-160字的短文' };
   } else {
     const _hour = (opts.postedAt || new Date()).getHours();
     const _isNight = _hour >= 22 || _hour < 5;
@@ -808,6 +809,34 @@ async function generateMomentPostImpl(character, opts = {}) {
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
 
+  // 先确定主次，再序列化日程；动因为主时不传 description，也不据它推断同行者。
+  let currentActivity = null;
+  try {
+    if (!selectedTopic && (opts.backfill || (!isFreeMode && config.features.schedule !== false))) {
+      const activity = opts.backfill ? opts.activity : getCurrentActivity(character.id);
+      if (activity && activity.activity !== '自由时间'
+          && buildMomentScheduleContext(character.display_name, activity, { includeDescription: false })) {
+        currentActivity = activity;
+      }
+    }
+  } catch { /* schedule not available, skip */ }
+  const momentFocus = pickMomentFocus({
+    hasSchedule: Boolean(currentActivity),
+    hasMotive: Boolean(pickedTopic || pickedSpecialMode),
+    topicSource: pickedTopic?.source || 'default',
+    explicitTopic: Boolean(selectedTopic || opts.forcedTopic?.desc),
+  });
+  const focusDirective = buildMomentFocusDirective(momentFocus);
+  const scheduleContext = currentActivity
+    ? buildMomentScheduleContext(character.display_name, currentActivity, { includeDescription: momentFocus !== 'motive' })
+    : '';
+  const nickname = (config.user.nickname || '').trim();
+  const schedulePeopleText = currentActivity
+    ? `${currentActivity.activity || ''}${currentActivity.location || ''}${momentFocus === 'motive' ? '' : currentActivity.description || ''}`
+    : '';
+  const scheduleWithUser = Boolean(scheduleContext)
+    && ((nickname.length >= 2 && schedulePeopleText.includes(nickname)) || schedulePeopleText.includes('用户'));
+
   // 续集感：取最近一条已完成朋友圈，供"回应/后续"动机写续集，或自然呼应
   let prevMomentText = '';
   try {
@@ -826,30 +855,34 @@ async function generateMomentPostImpl(character, opts = {}) {
     ? `\n- 如果这条朋友圈与最近一条“${prevMomentText.slice(0, 60)}...”是同一件事的自然延续，可以顺带呼应；否则忽略它。不要为了呼应而把旧内容单独写成第二段。`
     : '';
 
+  const postingStablePrefix = `${postingTaskIntro}
+
+通用规则：
+- 只输出 JSON，不要解释
+${MOMENT_SINGLE_FOCUS_RULE}
+${MOMENT_TONE_RULES}
+${MOMENT_IMAGE_RULES}
+- text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。
+
+`;
   const postingTask = (() => {
     const textShape = isSpecialMode
-      ? '中文口语，第一人称，优先围绕当前日程；仅在梦境或幻想动因符合采纳条件时讲一场梦或幻想'
+      ? '中文口语，第一人称，按本次内容主次决定写日程感想或梦境片段，分清梦与现实'
       : '中文口语，只围绕一个具体中心，用角色自己的语气表达';
     const jsonFmt = buildMomentOutputFormat({
       imageCount,
       textRequirement: textShape,
+      textLength: pickedForm?.len || '30-160字',
       imageRequirement: isSpecialMode ? MOMENT_DREAM_IMAGE_REQUIREMENT : '',
     });
 
     const multiImageRule = buildMomentMultiImageRule(imageCount);
 
-    // 缓存约束：通用规则放在按张数变化的 jsonFmt 之前；天气、同行者等放 dynamicRules。
-    const staticRules = `通用规则：
-- 只输出 JSON，不要解释
-${MOMENT_SINGLE_FOCUS_RULE}
-${MOMENT_TONE_RULES}
-${MOMENT_IMAGE_RULES}
-- text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。`;
-
-    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文长短参考：${pickedForm ? pickedForm.len : '通常简短，有具体感想时可以稍作展开'}，以表达完整为准
+    // 主次判断放在动态尾部，不改变共用静态前缀。
+    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文字数范围：${pickedForm?.len || '30-160字'}，不凑字，保留关键意思
 ${multiImageRule}
 ${pickedForm ? `- **发布形态参考（可不用）**：${pickedForm.desc}。` : ''}
-${isSpecialMode ? '- **梦境采纳条件**：有当前日程时，做梦/幻想动因也必须非常契合日程才可采用；否则完全忽略梦境及其配图建议，图文正常记录当前日程。未提供日程时可采用。采用后正文分清梦与现实，配图只取梦内同一场景，不得借梦境绕开日程。' : ''}
+${isSpecialMode ? '- **梦境采纳条件**：动因为主时可以直接分享梦境，简要日程只作背景，不必解释梦与日程的联系；日程为主时，仅在梦境动因自然契合日程时采用，否则忽略梦境及其配图建议。采用后正文分清梦与现实，配图只取梦内同一场景。' : ''}
 ${imperfectionNote}
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
 ${continuationNote}
@@ -861,11 +894,7 @@ ${isSpecialMode ? MOMENT_DREAM_IMAGE_RULES : ''}
 ${multiPersonImageNote}
 ${oathImageNote}`;
 
-    return `${postingTaskIntro}
-
-${staticRules}
-
-${jsonFmt}
+    return `${postingStablePrefix}${jsonFmt}
 
 本次要求（随本次情况变化，与上方通用规则同时生效）：
 ${dynamicRules}`;
@@ -873,36 +902,22 @@ ${dynamicRules}`;
 
   const timeTag = getTimeTag(now, false);
 
-  // 日程注入：图文主线以当前日程为准，发圈动因仅在非常契合时弱影响表达
-  let scheduleContext = '';
-  let scheduleWithUser = false; // 日程提到了用户（如聊天约定改写的日程）→ 本条朋友圈带上用户
-  try {
-    if (!selectedTopic && (opts.backfill || (!isFreeMode && config.features.schedule !== false))) {
-      const activity = opts.backfill ? opts.activity : getCurrentActivity(character.id);
-      if (activity && activity.activity !== '自由时间') {
-        scheduleContext = buildMomentScheduleContext(character.display_name, activity);
-        const nickname = (config.user.nickname || '').trim();
-        const haystack = `${activity.activity || ''}${activity.description || ''}${activity.location || ''}`;
-        scheduleWithUser = (nickname.length >= 2 && haystack.includes(nickname)) || haystack.includes('用户');
-      }
-    }
-  } catch { /* schedule not available, skip */ }
-
   const styleDirective = isFreeMode || selectedTopic
     ? ''
     : buildMomentMotiveDirective(
         isSpecialMode
           ? `${pickedSpecialMode.name}：${pickedSpecialMode.desc}`
-          : pickedTopic.desc
+          : pickedTopic.desc || pickedTopic.name
       );
 
   const userMsg = multiPersons.length > 0
-    ? `${timeTag}${scheduleContext}${styleDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。发一条朋友圈。`
-    : `${timeTag}${scheduleContext}${styleDirective} 发一条朋友圈。`;
+    ? `${timeTag}${scheduleContext}${styleDirective}${focusDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。发一条朋友圈。`
+    : `${timeTag}${scheduleContext}${styleDirective}${focusDirective} 发一条朋友圈。`;
 
   // 舞台（含基础世界观）→ 世界观强化（有世界观时）→ 任务 → 角色 → 交互(多人) → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });
+  const postingTaskIndex = msgs.length;
   msgs.push({ role: 'system', content: postingTask });
   // 整卡人格（统一入口，含生效外观注入；输出含 imagePrompt，配图需体现当前外观）
   const lorePersona = buildCharacterPersona(character, { variant: 'full' });
@@ -954,7 +969,15 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
       if (lifeContext) msgs.splice(msgs.length - 1, 0, { role: 'system', content: `${MOMENT_RECORD_BACKDROP_RULE}\n\n${lifeContext}` });
     } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
   }
-  const result = await chatWithPreset(msgs, { temperature: 0.8, response_format: { type: 'json_object' }, label: '发朋友圈助手', lorebook:{personaTexts:[lorePersona],characterName:character.display_name,scenario:scheduleContext} });
+  const result = await chatWithPreset(msgs, {
+    temperature: 0.8, response_format: { type: 'json_object' }, label: '发朋友圈助手',
+    lorebook: {
+      personaTexts: [lorePersona], staticTexts: [postingStablePrefix],
+      cacheBoundary: { index: postingTaskIndex, offset: postingStablePrefix.length },
+      characterName: character.display_name, scenario: scheduleContext,
+      history: [{ role: 'user', content: `${selectedTopic ? `${selectedTopic.name}\n${selectedTopic.desc || ''}\n` : ''}${userMsg}` }],
+    },
+  });
 
   // 解析 LLM 输出；失败时只回收正文，避免把 JSON 原文写进 content
   const parsed = parseMomentResponse(result);
