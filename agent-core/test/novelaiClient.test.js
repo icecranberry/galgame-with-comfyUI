@@ -107,6 +107,37 @@ test('restricted model/subscription endpoints do not declare relay generation cr
   assert.equal(official.connected, false);
 });
 
+const html = (body = '<!doctype html><html><head><title>app</title></head><body>spa</body></html>') =>
+  new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+
+test('站点只有生图接口时按「无法验证」处理，并确认生图接口在线', async () => {
+  for (const apiFormat of ['native', 'relay']) {
+    const calls = [];
+    const deps = mock(async (url, init = {}) => {
+      calls.push(`${init.method || 'GET'} ${url}`);
+      // 生图接口存在：空 body 会得到参数校验错误，而不是网页
+      if (url.endsWith('/ai/generate-image') || url.endsWith('/v1/images/generations')) {
+        return json({ message: '请求参数不合法：action 只允许 generate' }, 400);
+      }
+      return html();
+    });
+    const result = await checkNovelaiConnection({ ...options, apiFormat }, deps);
+    assert.equal(result.connected, null);
+    assert.equal(result.authenticated, null);
+    assert.equal(result.detectionEndpoint, false);
+    assert.match(result.error, /返回的是网页/);
+    assert.match(result.error, /已确认 .* 提供生图接口/);
+    assert.ok(!result.error.includes('secret-key'));
+  }
+});
+
+test('生图接口也没有时不会谎称「已确认提供生图接口」', async () => {
+  const result = await checkNovelaiConnection({ ...options }, mock(async () => html()));
+  assert.equal(result.connected, null);
+  assert.match(result.error, /返回的是网页/);
+  assert.ok(!result.error.includes('已确认'));
+});
+
 test('relay list is optional, returned model IDs are retained', async () => {
   const empty = await checkNovelaiConnection({ ...options, apiFormat: 'relay' }, mock(async () => json({ data: [] })));
   assert.equal(empty.connected, true);

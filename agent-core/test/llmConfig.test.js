@@ -158,3 +158,66 @@ test('MAX_tokens persists, round-trips profiles and survives free mode; invalid 
   assert.equal(getLlmConfig().thinkingMode, 'disabled');
   assert.match(memoryFs.saved, /LLM_MAX_TOKENS=65536/);
 });
+
+test('NovelAI profiles snapshot the current config, switch cleanly and follow later edits', () => {
+  const { config, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile,
+    activateNovelaiProfile, updateComfyConfig, deleteNovelaiProfile, getNovelaiApiKey } = runtime;
+  settings.values.clear();
+  updateComfyConfig({
+    novelaiApiFormat: 'relay', novelaiUrl: 'https://relay-a.example', novelaiModel: 'nai-diffusion-4-5-full',
+    novelaiArtist: '@aaa', novelaiWidth: 832, novelaiHeight: 1216, novelaiSteps: 20,
+    novelaiQualityPrompt: 'quality a', novelaiNegativePrompt: 'negative a', novelaiApiKey: 'key-a',
+  });
+  // 首次读取自动用当前配置生成「默认配置」，界面永远有一套生效中的配置
+  const initial = getNovelaiProfiles();
+  assert.equal(initial.length, 1);
+  assert.equal(initial[0].name, '默认配置');
+  assert.equal(initial[0].hasApiKey, true);
+  assert.equal(JSON.stringify(initial).includes('key-a'), false);
+  const defaultId = getActiveNovelaiProfileId();
+  assert.equal(defaultId, initial[0].id);
+
+  // 新增配置＝复制当前这套（含密钥），名称与快照内容都独立
+  const created = addNovelaiProfile('中转 B').profile;
+  assert.equal(created.name, '中转 B');
+  assert.equal(created.apiFormat, 'relay');
+  assert.equal(created.url, 'https://relay-a.example');
+  assert.equal(created.steps, 20);
+  assert.equal(created.qualityPrompt, 'quality a');
+  assert.equal(created.apiKey, undefined);
+  assert.equal(created.hasApiKey, true);
+  assert.equal(getNovelaiProfiles().length, 2);
+
+  // 在 B 上改参数：自动回写 B，不影响 A
+  assert.equal(activateNovelaiProfile(created.id).ok, true);
+  assert.equal(getActiveNovelaiProfileId(), created.id);
+  updateComfyConfig({ novelaiUrl: 'https://relay-b.example', novelaiModel: 'nai-diffusion-4-5-curated', novelaiSteps: 33, novelaiApiKey: 'key-b' });
+  const afterEdit = getNovelaiProfiles().find(profile => profile.id === created.id);
+  assert.equal(afterEdit.url, 'https://relay-b.example');
+  assert.equal(afterEdit.model, 'nai-diffusion-4-5-curated');
+  assert.equal(afterEdit.steps, 33);
+
+  // 切回 A：整套参数与密钥一起还原，并写回持久化的单项设置
+  activateNovelaiProfile(defaultId);
+  assert.equal(config.comfyui.novelaiUrl, 'https://relay-a.example');
+  assert.equal(config.comfyui.novelaiModel, 'nai-diffusion-4-5-full');
+  assert.equal(config.comfyui.novelaiSteps, 20);
+  assert.equal(config.comfyui.novelaiQualityPrompt, 'quality a');
+  assert.equal(config.comfyui.novelaiArtist, '@aaa');
+  assert.equal(getNovelaiApiKey(), 'key-a');
+  assert.equal(settings.values.get('novelai_url'), 'https://relay-a.example');
+
+  activateNovelaiProfile(created.id);
+  assert.equal(config.comfyui.novelaiUrl, 'https://relay-b.example');
+  assert.equal(getNovelaiApiKey(), 'key-b');
+
+  // 删除守卫：不存在的配置报错；删掉激活配置后回落到剩下的那套；最后一套不可删
+  assert.equal(deleteNovelaiProfile('missing').ok, false);
+  assert.equal(deleteNovelaiProfile(created.id).ok, true);
+  assert.equal(getNovelaiProfiles().length, 1);
+  assert.equal(getActiveNovelaiProfileId(), defaultId);
+  assert.equal(config.comfyui.novelaiUrl, 'https://relay-a.example');
+  assert.equal(getNovelaiApiKey(), 'key-a');
+  assert.equal(deleteNovelaiProfile(defaultId).ok, false);
+  settings.values.clear();
+});

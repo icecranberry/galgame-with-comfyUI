@@ -749,6 +749,24 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
             </div>
           </div>
           <div v-else key="novelai" class="image-connection-fields">
+            <div class="llm-profile-toolbar" role="group" aria-label="已保存的 NovelAI 配置">
+              <div v-for="profile in novelaiProfiles" :key="profile.id" class="llm-profile-item">
+                <linshe-button
+                  variant="chip"
+                  size="sm"
+                  :active="profile.id === activeNovelaiProfileId"
+                  :aria-pressed="profile.id === activeNovelaiProfileId"
+                  :title="`${profile.name} · ${profile.model || '未选择模型'}`"
+                  @click="switchNovelaiProfile(profile.id)"
+                >
+                  <span class="llm-profile-label">{{ profile.name }}</span>
+                  <span v-if="profile.id === activeNovelaiProfileId" aria-hidden="true">●</span>
+                </linshe-button>
+                <linshe-button v-if="novelaiProfiles.length > 1 && profile.id !== activeNovelaiProfileId" variant="link" tone="danger" size="sm" :aria-label="`删除配置 ${profile.name}`" :title="`删除配置 ${profile.name}`" @click="removeNovelaiProfile(profile.id)">×</linshe-button>
+              </div>
+              <linshe-button size="sm" variant="chip" @click="showAddNovelaiProfile = true">+ 新增配置</linshe-button>
+            </div>
+            <p class="novelai-model-hint">切换配置会整组替换下面的接口、模型、参数与提示词；新增配置以当前这套为底复制一份。</p>
             <p class="fd">NovelAI 生图固定单张，使用这里设置的分辨率和参数，不跟随系统分辨率。免费标准档适用尺寸：512×512、832×1216、1216×832、1024×1024，步数上限为 28。</p>
             <label class="novelai-setting-label" for="novelai-protocol">连接方式</label>
             <linshe-select id="novelai-protocol" v-model="novelaiApiFormat" aria-label="NovelAI 连接方式" :options="novelaiApiFormatOptions" @update:model-value="changeNovelaiFormat" />
@@ -891,6 +909,21 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
 推荐中转站
 </div>
         </div>
+
+        <linshe-modal v-model="showAddNovelaiProfile" title="新增 NovelAI 配置">
+          <p class="llm-help-copy">会以当前生效的这套配置为底复制一份（含接口、模型、参数、提示词与 API Key），之后可分别修改，保存后互不影响。</p>
+          <linshe-input
+            v-model="newNovelaiProfileName"
+            placeholder="输入配置名称，如：官方直连、中转 A"
+            aria-label="NovelAI 配置名称"
+            @keyup.enter="addNovelaiProfileDraft"
+            ref="newNovelaiProfileInput"
+          />
+          <template #footer>
+            <linshe-button variant="secondary" @click="showAddNovelaiProfile = false">取消</linshe-button>
+            <linshe-button variant="primary" :disabled="!newNovelaiProfileName.trim() || novelaiProfileBusy" :loading="novelaiProfileBusy" @click="addNovelaiProfileDraft">确定</linshe-button>
+          </template>
+        </linshe-modal>
       </div>
 
       <!-- 聊天记忆 -->
@@ -1208,7 +1241,7 @@ import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue
 import { useRouter } from 'vue-router'
 import DeepseekSetup from '../components/DeepseekSetup.vue'
 import { canUseDeepseekSetup, initialLlmSetupMode, readLlmSetupPreference, writeLlmSetupPreference } from '../utils/llmSetup.js'
-import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile } from '../api/index.js'
+import { getConfig, updateComfyConfig, updateLlmConfig, testLlmConnection, setLlmFreeEgg, fetchLlmModels, fetchLlmApiKey, updateFeatureFlag, imageProviderHealth, testStyle, testHires, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWeatherCity, getArtistFavorites, addArtistFavorite, deleteArtistFavorite, listCharacters, restoreWorkflow, getWorkflows, updateWorkflowMode, updateWorkflowScene, getLlmProfiles, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile } from '../api/index.js'
 import { useSettingsStore } from '../stores/settings.js'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -1371,6 +1404,20 @@ const novelaiModelsLoading = ref(false)
 const novelaiApiKey = ref('')
 const novelaiApiKeySaved = ref(false)
 const novelaiApiKeyCleared = ref(false)
+// NovelAI 多套配置：与 LLM 配置胶囊同一套交互（切换 / 新增快照 / 删除）
+const novelaiProfiles = ref([])
+const activeNovelaiProfileId = ref('')
+const showAddNovelaiProfile = ref(false)
+const newNovelaiProfileName = ref('')
+const novelaiProfileBusy = ref(false)
+const newNovelaiProfileInput = ref(null)
+watch(() => showAddNovelaiProfile.value, async (visible) => {
+  if (visible) {
+    newNovelaiProfileName.value = ''
+    await nextTick()
+    newNovelaiProfileInput.value?.focus?.()
+  }
+})
 const connDirty = ref(false)
 const connSaved = ref(false)
 const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
@@ -2186,21 +2233,7 @@ onMounted(async () => {
     comfyUrl.value = data.comfy.url || 'http://localhost:8188'
     comfySkipTls.value = data.comfy.tlsVerify === false
     imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
-    novelaiApiFormat.value = data.comfy.novelaiApiFormat || 'relay'
-    novelaiProxyUrl.value = data.comfy.novelaiProxyUrl || ''
-    novelaiModels.value = novelaiApiFormat.value === 'relay' ? [] : novelaiBuiltinModels
-    novelaiUrl.value = data.comfy.novelaiUrl ?? ''
-    novelaiModel.value = data.comfy.novelaiModel || 'nai-diffusion-4-5-full'
-    novelaiArtist.value = data.comfy.novelaiArtist ?? '@ebora'
-    novelaiWidth.value = data.comfy.novelaiWidth || 1216
-    novelaiHeight.value = data.comfy.novelaiHeight || 832
-    novelaiSteps.value = data.comfy.novelaiSteps || 28
-    novelaiSampler.value = data.comfy.novelaiSampler || 'k_euler_ancestral'
-    novelaiNoiseSchedule.value = data.comfy.novelaiNoiseSchedule || 'karras'
-    novelaiGuidance.value = data.comfy.novelaiGuidance ?? 5
-    novelaiQualityPrompt.value = data.comfy.novelaiQualityPrompt ?? 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025'
-    novelaiNegativePrompt.value = data.comfy.novelaiNegativePrompt ?? novelaiDefaultNegativePrompt
-    novelaiApiKeySaved.value = data.comfy.novelaiApiKeySet === true
+    applyNovelaiConfig(data.comfy)
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
@@ -2239,6 +2272,7 @@ onMounted(async () => {
       workflowScene.value = { chat: 'turbo', group: 'base', moments: 'base', events: 'base', schedule: 'base', mailbox: 'base', ...data.workflow.scene }
     }
     loadLlmProfiles(data)
+    loadNovelaiProfiles(data)
     llmSetupMode.value = initialLlmSetupMode(data, readLlmSetupPreference(localStorage))
     llmCardFirst.value = llmSetupMode.value === 'guided' || !data.llm.hasApiKey
   } catch {
@@ -2280,6 +2314,101 @@ function onNovelaiKeyInput() {
 function clearNovelaiKey() {
   novelaiApiKeyCleared.value = true
   markConnDirty()
+}
+
+/** 把后端返回的 NovelAI 生效配置铺回表单（切换配置 / 删除激活配置后复用） */
+function applyNovelaiConfig(data) {
+  if (!data) return
+  novelaiApiFormat.value = data.novelaiApiFormat || 'relay'
+  novelaiProxyUrl.value = data.novelaiProxyUrl || ''
+  novelaiModels.value = novelaiApiFormat.value === 'relay' ? [] : novelaiBuiltinModels
+  novelaiUrl.value = data.novelaiUrl ?? ''
+  novelaiModel.value = data.novelaiModel || 'nai-diffusion-4-5-full'
+  novelaiArtist.value = data.novelaiArtist ?? '@ebora'
+  novelaiWidth.value = data.novelaiWidth || 1216
+  novelaiHeight.value = data.novelaiHeight || 832
+  novelaiSteps.value = data.novelaiSteps || 28
+  novelaiSampler.value = data.novelaiSampler || 'k_euler_ancestral'
+  novelaiNoiseSchedule.value = data.novelaiNoiseSchedule || 'karras'
+  novelaiGuidance.value = data.novelaiGuidance ?? 5
+  novelaiQualityPrompt.value = data.novelaiQualityPrompt ?? 'masterpiece, best quality, score_9, score_8, highres, absurdres, year 2025'
+  novelaiNegativePrompt.value = data.novelaiNegativePrompt ?? novelaiDefaultNegativePrompt
+  novelaiApiKeySaved.value = data.novelaiApiKeySet === true
+  novelaiApiKey.value = ''
+  novelaiApiKeyCleared.value = false
+  connDirty.value = false
+  connSaved.value = false
+  health.value = null
+}
+
+async function loadNovelaiProfiles(data) {
+  if (data) {
+    novelaiProfiles.value = data.novelaiProfiles || []
+    activeNovelaiProfileId.value = data.activeNovelaiProfileId || ''
+  } else {
+    const res = await getNovelaiProfiles()
+    novelaiProfiles.value = res.profiles || []
+    activeNovelaiProfileId.value = res.activeProfileId || ''
+  }
+}
+
+async function switchNovelaiProfile(id) {
+  if (id === activeNovelaiProfileId.value) return
+  try {
+    const result = await activateNovelaiProfile(id)
+    if (!result.ok) return
+    novelaiProfiles.value = result.profiles || []
+    activeNovelaiProfileId.value = result.activeProfileId || ''
+    applyNovelaiConfig(result)
+    const name = novelaiProfiles.value.find(p => p.id === activeNovelaiProfileId.value)?.name || ''
+    toastFn?.(name ? `已切换到配置「${name}」` : '已切换 NovelAI 配置', 'success')
+  } catch (err) {
+    console.error('[novelai] switch profile failed:', err)
+    toastFn?.(err.message || '切换 NovelAI 配置失败', 'error')
+  }
+}
+
+async function addNovelaiProfileDraft() {
+  const name = newNovelaiProfileName.value.trim()
+  if (!name || novelaiProfileBusy.value) return
+  novelaiProfileBusy.value = true
+  try {
+    const result = await addNovelaiProfile(name)
+    novelaiProfiles.value = result.profiles || []
+    activeNovelaiProfileId.value = result.activeProfileId || novelaiProfiles.value[0]?.id || ''
+    showAddNovelaiProfile.value = false
+    newNovelaiProfileName.value = ''
+    toastFn?.(`已复制当前配置为「${name}」，改完保存后可用上方胶囊切换`, 'success')
+  } catch (err) {
+    console.error('[novelai] add profile failed:', err)
+    toastFn?.(err.message || '新增配置失败', 'error')
+  } finally {
+    novelaiProfileBusy.value = false
+  }
+}
+
+async function removeNovelaiProfile(id) {
+  if (novelaiProfiles.value.length <= 1) return
+  const name = novelaiProfiles.value.find(p => p.id === id)?.name || '该配置'
+  const title = `删除「${name}」`
+  const body = '将删除该配置快照，当前正在使用的配置不受影响，此操作不可撤销'
+  if (!confirmFn) {
+    if (!window.confirm(`${title}\n\n${body}`)) return
+  } else {
+    const ok = await confirmFn({ title, message: body, danger: true, okText: '删除' })
+    if (!ok) return
+  }
+  try {
+    const result = await deleteNovelaiProfile(id)
+    if (!result.ok) return
+    novelaiProfiles.value = result.profiles || []
+    activeNovelaiProfileId.value = result.activeProfileId || ''
+    applyNovelaiConfig(result)
+    toastFn?.(`已删除配置「${name}」`, 'success')
+  } catch (err) {
+    console.error('[novelai] delete profile failed:', err)
+    toastFn?.(err.message || '删除配置失败', 'error')
+  }
 }
 
 async function saveComfy() {
@@ -2405,6 +2534,8 @@ async function saveComfyUrl() {
     novelaiApiKeyCleared.value = false
     connDirty.value = false; connSaved.value = true
     setTimeout(() => connSaved.value = false, 2000)
+    // 保存会同步进当前激活的配置快照，刷新胶囊上的密钥/模型状态
+    if (imageProvider.value === 'novelai') await loadNovelaiProfiles()
     await checkHealth()
   } catch (err) {
     toastFn?.(err.message || '生图连接设置保存失败', 'error')

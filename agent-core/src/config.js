@@ -472,6 +472,13 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
       delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
     }
   }
+  // 有 NovelAI 字段被改动时，把当前值回写进激活中的 NovelAI 配置快照，
+  // 这样在配置面板里改完参数后切换走再切换回来不会丢改动。
+  const touchedNovelai = [novelaiApiFormat, novelaiUrl, novelaiProxyUrl, novelaiModel, novelaiArtist,
+    novelaiWidth, novelaiHeight, novelaiSteps, novelaiSampler, novelaiNoiseSchedule, novelaiGuidance,
+    novelaiQualityPrompt, novelaiNegativePrompt, novelaiApiKey, clearNovelaiApiKey]
+    .some(value => value !== undefined);
+  if (touchedNovelai) syncActiveNovelaiProfile();
   console.log('[config] Image generation settings saved');
 }
 
@@ -1088,6 +1095,156 @@ export function syncActiveLlmProfile() {
     backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,
   };
   writeProfilesToDb(profiles);
+}
+
+// ── NovelAI 多配置 Profile 管理 ──
+//
+// 存 DB（system_settings.novelai_profiles），一份快照＝整套 NovelAI 生图参数：
+// 接口协议 / 地址 / 代理 / 模型 / 画师串 / 分辨率 / 采样参数 / 提示词 / API Key。
+// 生效配置始终是 config.comfyui 的 novelai* 字段（各字段仍按单键持久化），
+// 切换＝把快照写回这些字段；编辑这些字段时自动回写激活中的快照。
+
+function readNovelaiProfilesFromDb() {
+  try {
+    const raw = getSetting('novelai_profiles');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function writeNovelaiProfilesToDb(profiles) {
+  persistSettingSync('novelai_profiles', JSON.stringify(profiles));
+}
+
+/** 当前生效的 NovelAI 参数快照（不含 id / name / 密钥） */
+function snapshotNovelaiSettings() {
+  return {
+    apiFormat: normalizeNovelaiFormat(config.comfyui.novelaiApiFormat),
+    url: config.comfyui.novelaiUrl || '',
+    proxyUrl: config.comfyui.novelaiProxyUrl || '',
+    model: config.comfyui.novelaiModel || 'nai-diffusion-4-5-full',
+    artist: config.comfyui.novelaiArtist ?? '',
+    width: config.comfyui.novelaiWidth,
+    height: config.comfyui.novelaiHeight,
+    steps: config.comfyui.novelaiSteps,
+    sampler: config.comfyui.novelaiSampler,
+    noiseSchedule: config.comfyui.novelaiNoiseSchedule,
+    guidance: config.comfyui.novelaiGuidance,
+    qualityPrompt: config.comfyui.novelaiQualityPrompt ?? '',
+    negativePrompt: config.comfyui.novelaiNegativePrompt ?? '',
+  };
+}
+
+function publicNovelaiProfile(profile) {
+  const { apiKey: _apiKey, ...rest } = profile;
+  return { ...rest, ...maskApiKey(profile.apiKey) };
+}
+
+function newNovelaiProfileId() {
+  return `np_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** 首次使用时用当前配置生成「默认配置」，保证界面上永远有一套生效中的配置 */
+function ensureNovelaiProfiles() {
+  const profiles = readNovelaiProfilesFromDb();
+  if (profiles.length > 0) return profiles;
+  const profile = {
+    id: newNovelaiProfileId(),
+    name: '默认配置',
+    ...snapshotNovelaiSettings(),
+    apiKey: normalizeNovelaiKey(getNovelaiApiKey()),
+    createdAt: new Date().toISOString(),
+  };
+  const next = [profile];
+  writeNovelaiProfilesToDb(next);
+  persistSettingSync('active_novelai_profile_id', profile.id);
+  return next;
+}
+
+export function getNovelaiProfiles() {
+  return ensureNovelaiProfiles().map(publicNovelaiProfile);
+}
+
+export function getActiveNovelaiProfileId() {
+  try { return getSetting('active_novelai_profile_id') || null; } catch { return null; }
+}
+
+/** 新增配置：默认复制当前生效的整套配置（含 API Key） */
+export function addNovelaiProfile(name) {
+  const label = String(name || '').trim();
+  if (!label) return { ok: false, error: '请填写配置名称' };
+  const profiles = ensureNovelaiProfiles();
+  const profile = {
+    id: newNovelaiProfileId(),
+    name: label,
+    ...snapshotNovelaiSettings(),
+    apiKey: normalizeNovelaiKey(getNovelaiApiKey()),
+    createdAt: new Date().toISOString(),
+  };
+  profiles.push(profile);
+  writeNovelaiProfilesToDb(profiles);
+  return { ok: true, profile: publicNovelaiProfile(profile) };
+}
+
+/** 把快照写回生效字段；走 updateComfyConfig 以复用同一套校验与持久化 */
+function _applyNovelaiProfile(profile) {
+  if (!profile) return;
+  // 先落密钥：updateComfyConfig 末尾会把当前生效值回写进激活快照，
+  // 顺序反了会把上一套的密钥写进刚切过来的这一套。
+  persistSettingSync('novelai_api_key', normalizeNovelaiKey(profile.apiKey || ''));
+  updateComfyConfig({
+    novelaiApiFormat: profile.apiFormat,
+    novelaiUrl: profile.url,
+    novelaiProxyUrl: profile.proxyUrl,
+    novelaiModel: profile.model,
+    novelaiArtist: profile.artist,
+    novelaiWidth: profile.width,
+    novelaiHeight: profile.height,
+    novelaiSteps: profile.steps,
+    novelaiSampler: profile.sampler,
+    novelaiNoiseSchedule: profile.noiseSchedule,
+    novelaiGuidance: profile.guidance,
+    novelaiQualityPrompt: profile.qualityPrompt,
+    novelaiNegativePrompt: profile.negativePrompt,
+  });
+}
+
+export function activateNovelaiProfile(id) {
+  const profiles = readNovelaiProfilesFromDb();
+  const profile = profiles.find(p => p.id === id);
+  if (!profile) return { ok: false, error: '配置不存在' };
+  persistSettingSync('active_novelai_profile_id', id);
+  _applyNovelaiProfile(profile);
+  return { ok: true };
+}
+
+/** 编辑生效参数后回写激活中的快照（幂等；没有激活配置时不做任何事） */
+export function syncActiveNovelaiProfile() {
+  const activeId = getActiveNovelaiProfileId();
+  if (!activeId) return;
+  const profiles = readNovelaiProfilesFromDb();
+  const idx = profiles.findIndex(p => p.id === activeId);
+  if (idx === -1) return;
+  profiles[idx] = {
+    ...profiles[idx],
+    ...snapshotNovelaiSettings(),
+    apiKey: normalizeNovelaiKey(getNovelaiApiKey()),
+  };
+  writeNovelaiProfilesToDb(profiles);
+}
+
+export function deleteNovelaiProfile(id) {
+  let profiles = readNovelaiProfilesFromDb();
+  if (profiles.length <= 1) return { ok: false, error: '不可删除最后一套配置' };
+  const target = profiles.find(p => p.id === id);
+  if (!target) return { ok: false, error: '配置不存在' };
+  const activeId = getActiveNovelaiProfileId();
+  profiles = profiles.filter(p => p.id !== id);
+  writeNovelaiProfilesToDb(profiles);
+  if (activeId === id) {
+    persistSettingSync('active_novelai_profile_id', profiles[0].id);
+    _applyNovelaiProfile(profiles[0]);
+  }
+  return { ok: true };
 }
 
 /**

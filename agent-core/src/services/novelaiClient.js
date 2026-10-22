@@ -110,6 +110,28 @@ export function describeNovelaiError(error, key = '') {
   return redact(error?.message || '请求失败', key);
 }
 
+/** 站点把未实现的路径交给前端页面处理时返回 200 + HTML，用内容类型和首字节识别 */
+function looksLikeHtml(bytes, response) {
+  const type = String(response.headers?.get?.('content-type') || '').toLowerCase();
+  if (type.includes('text/html')) return true;
+  const head = bytes.subarray(0, 200).toString('utf8').trimStart().toLowerCase();
+  return head.startsWith('<!doctype html') || head.startsWith('<html');
+}
+
+/**
+ * 部分中转站只实现生图接口，没有订阅/模型检测接口，请求会落到站点网页。
+ * 这不是「连不上」，也不能据此判定 Key 无效，因此单独标记，交由调用方按「无法验证」处理。
+ */
+function noDetectionEndpoint(apiFormat, endpoint) {
+  const target = new URL(endpoint);
+  const hint = apiFormat === 'relay'
+    ? '该站点没有 OpenAI 兼容接口（/v1/models 返回的是网页），如站点支持原生协议请改用「NovelAI 原生协议中转」。'
+    : '该站点没有订阅/模型检测接口（只提供生图接口），本页无法验证鉴权，请用「画风测试」或图片实验室实际生成一张确认。';
+  const error = new Error(`${target.origin}${target.pathname} 返回的是网页（HTML）而不是 API。${hint}`);
+  error.noDetectionEndpoint = true;
+  return error;
+}
+
 function createDispatcher(proxyUrl) {
   if (proxyUrl) return new ProxyAgent(validateNovelaiUrl(proxyUrl, '代理地址').toString());
   return new EnvHttpProxyAgent(); // Explicit opt-in also works on bundled Node versions without --use-env-proxy.
@@ -136,7 +158,9 @@ async function withTransport(options, run, dependencies = {}) {
     };
     return await run(request, key);
   } catch (error) {
-    throw new NovelaiError(describeNovelaiError(signal?.aborted ? signal.reason : error, key), error.status);
+    const wrapped = new NovelaiError(describeNovelaiError(signal?.aborted ? signal.reason : error, key), error.status);
+    if (error?.noDetectionEndpoint) wrapped.noDetectionEndpoint = true;
+    throw wrapped;
   } finally { await dispatcher?.close(); }
 }
 
@@ -196,6 +220,32 @@ export async function generateNovelaiImage(prompt, options, dependencies) {
   }, dependencies);
 }
 
+/**
+ * 没有检测接口时，用一次空 body 的生图请求确认生图接口本身是否在线：
+ * 空 body 不含 prompt/action，服务端只会返回参数校验错误（不会真的出图、不消耗额度），
+ * 404/405 或返回网页则说明这个地址根本没有生图接口。
+ */
+async function probeGenerateEndpoint(options, dependencies) {
+  try {
+    return await withTransport({ ...options, timeoutMs: options.timeoutMs ?? 15_000 }, async (request, key) => {
+      const endpoint = novelaiEndpoint(options);
+      const response = await request(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const bytes = await readBytes(response, 8 * 1024);
+      const target = new URL(endpoint);
+      if (looksLikeHtml(bytes, response) || [404, 405].includes(response.status)) {
+        return { exists: false, target: `${target.origin}${target.pathname}` };
+      }
+      return { exists: true, status: response.status, target: `${target.origin}${target.pathname}` };
+    }, dependencies);
+  } catch {
+    return { exists: false };
+  }
+}
+
 export async function checkNovelaiConnection(options, dependencies) {
   const apiFormat = normalizeNovelaiFormat(options.apiFormat);
   let endpoint;
@@ -206,6 +256,7 @@ export async function checkNovelaiConnection(options, dependencies) {
       await checkResponse(response, key, endpoint);
       let payload;
       const bytes = await readBytes(response, 1024 * 1024);
+      if (looksLikeHtml(bytes, response)) throw noDetectionEndpoint(apiFormat, endpoint);
       try { payload = JSON.parse(bytes.toString('utf8')); }
       catch { throw new Error('检测接口未返回有效 JSON，请核对地址与协议'); }
       if (apiFormat !== 'relay') {
@@ -220,6 +271,15 @@ export async function checkNovelaiConnection(options, dependencies) {
         message: models.length ? '模型列表接口鉴权成功；生图权限以实际请求为准。' : '接口可访问，但未返回模型列表；可手动填写模型后测试生图。' };
     }, dependencies);
   } catch (error) {
+    // 站点只有生图接口、没有检测接口：既不是连不上，也不能据此判定 Key 无效
+    if (error?.noDetectionEndpoint) {
+      const probe = await probeGenerateEndpoint(options, dependencies);
+      const suffix = probe.exists
+        ? ` 已确认 ${probe.target} 提供生图接口（返回参数校验结果），鉴权与出图请用实际生成验证。`
+        : '';
+      return { connected: null, authenticated: null, models: [], detectionEndpoint: false,
+        error: `${describeNovelaiError(error)}${suffix}` };
+    }
     const unknown = [401, 403, 404, 405, 501].includes(error.status) && apiFormat !== 'official';
     return { connected: unknown ? null : false, authenticated: unknown ? null : false, models: [],
       error: `${describeNovelaiError(error)}${unknown ? ' 此检测接口可能未开放，不能据此确定生图 Key 无效；可手动填写模型后测试生图。' : ''}` };

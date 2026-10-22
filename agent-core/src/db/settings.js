@@ -30,6 +30,8 @@ const DB_ONLY_KEYS = new Set([
   'last_events_seen_at',
   'llm_profiles',
   'active_llm_profile_id',
+  'novelai_profiles',
+  'active_novelai_profile_id',
   'memory_settings',
   'workflow_mode_auto_detected',
   'maibot_webui_url',

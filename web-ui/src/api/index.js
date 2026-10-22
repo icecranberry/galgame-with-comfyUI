@@ -748,6 +748,25 @@ export async function syncActiveLlmProfile() {
   await request(`/config/llm/profiles/active/sync`, { method: 'PUT' })
 }
 
+// ── NovelAI 配置 Profile 管理 ──
+
+export async function getNovelaiProfiles() {
+  return request(`/config/novelai/profiles`)
+}
+
+/** 新增配置：后端默认复制当前生效的整套 NovelAI 参数（含 API Key） */
+export async function addNovelaiProfile(name) {
+  return request(`/config/novelai/profiles`, { method: 'POST', body: { name } })
+}
+
+export async function deleteNovelaiProfile(id) {
+  return request(`/config/novelai/profiles/${id}`, { method: 'DELETE' })
+}
+
+export async function activateNovelaiProfile(id) {
+  return request(`/config/novelai/profiles/${id}/activate`, { method: 'POST' })
+}
+
 // ── Chat Memory ──
 async function jsonRequest(url, options) {
   const res = await fetch(url, options)
