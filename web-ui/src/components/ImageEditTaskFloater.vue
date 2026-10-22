@@ -26,36 +26,73 @@
         </div>
       </Transition>
 
-      <div class="iet-cards">
-        <div v-for="task in cornerTasks" :key="task.id" class="iet-card" :class="{ 'is-error': task.status === 'failed', 'is-done': task.status === 'ready' }">
-          <div class="iet-card-body">
-            <span v-if="isDiary(task)" class="iet-avatar">
-              <img v-if="diaryAvatar(task)" :src="diaryAvatar(task)" alt="" />
-              <span v-else>{{ (task.meta?.characterName || '角色').charAt(0) }}</span>
-            </span>
-            <span v-else-if="task.status === 'running'" class="iet-spinner"></span>
-            <span v-else class="iet-state-icon">{{ task.status === 'failed' ? '!' : '✓' }}</span>
-            <div class="iet-card-text">
-              <div class="iet-card-title">{{ cardTitleLabel(task) }}{{ cardStatusText(task) }}</div>
-              <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
-                <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
+      <div class="iet-stack">
+        <div v-for="task in cornerTasks" :key="task.id" class="iet-slot">
+          <!-- 手机端收起态：屏幕右侧中下部只留一个圆环进度 + 进度数字，点一下展开详情卡 -->
+          <div
+            v-if="isMobile"
+            class="iet-ring"
+            :class="{
+              'is-error': task.status === 'failed',
+              'is-done': task.status === 'ready',
+              'is-indeterminate': task.status === 'running' && progressPct(task) == null,
+            }"
+            role="button"
+            tabindex="0"
+            :aria-expanded="openTaskId === task.id"
+            :aria-label="ringAria(task)"
+            :title="ringAria(task)"
+            @click="toggleOpen(task)"
+            @keydown.enter.prevent="toggleOpen(task)"
+            @keydown.space.prevent="toggleOpen(task)"
+          >
+            <svg class="iet-ring-svg" viewBox="0 0 44 44" aria-hidden="true">
+              <circle class="iet-ring-track" cx="22" cy="22" :r="RING_R" />
+              <circle
+                class="iet-ring-fill"
+                cx="22"
+                cy="22"
+                :r="RING_R"
+                :stroke-dasharray="ringDashArray(task)"
+                :stroke-dashoffset="ringDashOffset(task)"
+              />
+            </svg>
+            <span class="iet-ring-label">{{ ringLabel(task) }}</span>
+          </div>
+
+          <!-- 详情卡：桌面常显，手机端仅在点开时从圆环上方展开 -->
+          <Transition name="iet-pop">
+            <div v-if="!isMobile || openTaskId === task.id" class="iet-card" :class="{ 'is-error': task.status === 'failed', 'is-done': task.status === 'ready' }">
+              <div class="iet-card-body">
+                <span v-if="isDiary(task)" class="iet-avatar">
+                  <img v-if="diaryAvatar(task)" :src="diaryAvatar(task)" alt="" />
+                  <span v-else>{{ (task.meta?.characterName || '角色').charAt(0) }}</span>
+                </span>
+                <span v-else-if="task.status === 'running'" class="iet-spinner"></span>
+                <span v-else class="iet-state-icon">{{ task.status === 'failed' ? '!' : '✓' }}</span>
+                <div class="iet-card-text">
+                  <div class="iet-card-title">{{ cardTitleLabel(task) }}{{ cardStatusText(task) }}</div>
+                  <div v-if="task.status === 'running'" class="iet-progress" :class="{ 'iet-progress-indeterminate': progressPct(task) == null }">
+                    <div v-if="progressPct(task) != null" class="iet-progress-fill" :style="{ width: progressPct(task) + '%' }"></div>
+                  </div>
+                  <div v-if="['moment_backfill', 'scene_outfits'].includes(task.action) && task.status === 'running'" class="iet-error-text">{{ task.progress?.stage }}</div>
+                  <div v-if="task.status === 'failed'" class="iet-error-text">{{ task.error }}</div>
+                  <div v-else-if="task.status === 'pending_confirm'" class="iet-error-text">等待确认</div>
+                  <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ ['moment_backfill', 'scene_outfits'].includes(task.action) ? task.result?.summary : isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
+                </div>
               </div>
-              <div v-if="['moment_backfill', 'scene_outfits'].includes(task.action) && task.status === 'running'" class="iet-error-text">{{ task.progress?.stage }}</div>
-              <div v-if="task.status === 'failed'" class="iet-error-text">{{ task.error }}</div>
-              <div v-else-if="task.status === 'pending_confirm'" class="iet-error-text">等待确认</div>
-              <div v-else-if="task.status === 'ready'" class="iet-error-text">{{ ['moment_backfill', 'scene_outfits'].includes(task.action) ? task.result?.summary : isDiary(task) ? `「${task.result?.date || task.meta?.date || ''}」的事情已经记录下来了~` : '等待确认' }}</div>
+              <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-card-actions">
+                <linshe-button size="sm" :disabled="stoppingTaskId === task.id || task.progress?.phase === 'stopping'" @click="onStopBackfill(task)">{{ task.progress?.phase === 'stopping' ? '正在停止' : '停止' }}</linshe-button>
+              </div>
+              <div v-if="task.status === 'failed' || task.status === 'pending_confirm' || task.status === 'ready'" class="iet-card-actions">
+                <linshe-button v-if="task.status === 'failed' && isDiary(task)" size="sm" @click="onRetryDiary(task)">重试</linshe-button>
+                <linshe-button v-else-if="task.status === 'failed' && !['moment_backfill', 'scene_outfits'].includes(task.action)" size="sm" @click="onRerun(task)">重试</linshe-button>
+                <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
+                <linshe-button v-if="task.status === 'ready' && isDiary(task)" size="sm" @click="onViewDiary(task)">翻开看看</linshe-button>
+                <linshe-button variant="secondary" size="sm" :disabled="busy" @click="onDiscard(task)">关闭</linshe-button>
+              </div>
             </div>
-          </div>
-          <div v-if="task.action === 'moment_backfill' && task.status === 'running'" class="iet-card-actions">
-            <linshe-button size="sm" :disabled="stoppingTaskId === task.id || task.progress?.phase === 'stopping'" @click="onStopBackfill(task)">{{ task.progress?.phase === 'stopping' ? '正在停止' : '停止' }}</linshe-button>
-          </div>
-          <div v-if="task.status === 'failed' || task.status === 'pending_confirm' || task.status === 'ready'" class="iet-card-actions">
-            <linshe-button v-if="task.status === 'failed' && isDiary(task)" size="sm" @click="onRetryDiary(task)">重试</linshe-button>
-            <linshe-button v-else-if="task.status === 'failed' && !['moment_backfill', 'scene_outfits'].includes(task.action)" size="sm" @click="onRerun(task)">重试</linshe-button>
-            <linshe-button v-if="task.status === 'pending_confirm'" size="sm" @click="showConfirm(task)">查看</linshe-button>
-            <linshe-button v-if="task.status === 'ready' && isDiary(task)" size="sm" @click="onViewDiary(task)">翻开看看</linshe-button>
-            <linshe-button variant="secondary" size="sm" :disabled="busy" @click="onDiscard(task)">关闭</linshe-button>
-          </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -86,6 +123,49 @@ async function onStopBackfill(task) {
 const busy = ref(false)
 const activeTaskId = ref(null)
 
+// ── 手机端：屏幕右侧中下部只留圆环进度 + 数字，点开才展开详情卡 ──
+// App.vue 已 provide('isMobile')，这里直接复用；脱离 App 时退回 matchMedia
+const injectedIsMobile = inject('isMobile', null)
+const localMobile = ref(false)
+if (!injectedIsMobile && typeof window !== 'undefined' && window.matchMedia) {
+  const mq = window.matchMedia('(max-width: 767px)')
+  localMobile.value = mq.matches
+  mq.addEventListener?.('change', (e) => { localMobile.value = e.matches })
+}
+const isMobile = computed(() => (injectedIsMobile ? !!injectedIsMobile.value : localMobile.value))
+
+const openTaskId = ref(null)
+function toggleOpen(task) {
+  openTaskId.value = openTaskId.value === task.id ? null : task.id
+}
+
+const RING_R = 19
+const RING_CIRC = 2 * Math.PI * RING_R
+const RING_ARC = 26 // 进度未知时转圈弧长
+
+function ringLabel(task) {
+  if (task.status === 'failed') return '!'
+  if (task.status === 'ready') return '✓'
+  const pct = progressPct(task)
+  return pct == null ? '' : pct + '%'
+}
+
+function ringDashArray(task) {
+  return task.status === 'running' && progressPct(task) == null ? `${RING_ARC} ${RING_CIRC}` : String(RING_CIRC)
+}
+
+function ringDashOffset(task) {
+  const pct = progressPct(task)
+  if (task.status !== 'running' || pct == null) return 0
+  return RING_CIRC * (1 - pct / 100)
+}
+
+function ringAria(task) {
+  const pct = progressPct(task)
+  const state = task.status === 'failed' ? '失败' : task.status === 'ready' ? '已完成' : pct == null ? '进行中' : `进行中 ${pct}%`
+  return `${cardTitleLabel(task)}：${state}，点按查看详情`
+}
+
 const visibleTasks = computed(() => store.tasks)
 const modalTask = computed(() => {
   if (activeTaskId.value) {
@@ -99,6 +179,19 @@ const cornerTasks = computed(() => visibleTasks.value.filter(t => t.id !== modal
 watch(modalTask, (t) => {
   if (!t) activeTaskId.value = null
 })
+
+// 手机端：任务结束（完成/失败）时自动展开对应卡片，避免只看到小圆环却没察觉要处理；
+// 卡片被关掉后清空展开态，避免指向已消失的任务
+watch(
+  () => cornerTasks.value.map(t => `${t.id}:${t.status}`).join('|'),
+  () => {
+    if (openTaskId.value && !cornerTasks.value.some(t => t.id === openTaskId.value)) openTaskId.value = null
+    if (!isMobile.value) return
+    const needAttention = cornerTasks.value.find(t => t.status !== 'running')
+    if (needAttention && openTaskId.value !== needAttention.id) openTaskId.value = needAttention.id
+  },
+  { immediate: true },
+)
 
 store.connect()
 
@@ -231,7 +324,7 @@ async function onRetryDiary(task) {
   font-family: var(--font-ui, 'HarmonyOS Sans SC', sans-serif);
 }
 
-.iet-cards {
+.iet-stack {
   position: fixed;
   right: 18px;
   bottom: 18px;
@@ -242,13 +335,68 @@ async function onRetryDiary(task) {
   max-width: min(340px, calc(100vw - 36px));
 }
 
+/* 单个任务：手机端＝圆环在上、展开的卡片在下，桌面端只有卡片 */
+.iet-slot { display: flex; flex-direction: column; gap: 8px; }
+
 .iet-card {
-  background: #fff;
-  border: 1px solid rgba(120, 90, 70, 0.16);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(60, 40, 25, 0.18);
+  box-shadow: var(--shadow-md);
   padding: 12px 14px;
+  transform-origin: top right;
 }
+
+/* 手机端收起态：只留一个圆环进度 + 进度数字 */
+.iet-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform var(--dur-fast, 0.15s) var(--ease-standard, ease);
+}
+.iet-ring:active { transform: scale(0.94); }
+.iet-ring:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.iet-ring-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.iet-ring-track { fill: none; stroke: var(--border); stroke-width: 3; }
+.iet-ring-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.4s var(--ease-standard, ease);
+}
+.iet-ring.is-done .iet-ring-fill { stroke: var(--accent-light); }
+/* 进度未知：整圈弧线匀速转，表示“还在跑” */
+.iet-ring.is-indeterminate .iet-ring-svg { animation: iet-spin 1.2s linear infinite; }
+
+.iet-ring-label {
+  position: relative;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.2px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.iet-ring.is-error .iet-ring-label,
+.iet-ring.is-done .iet-ring-label { color: var(--accent); font-size: 13px; }
 
 .iet-card.is-error { border-color: rgba(var(--accent-rgb), 0.5); }
 .iet-card.is-done { border-color: rgba(var(--accent-rgb), 0.32); }
@@ -270,7 +418,7 @@ async function onRetryDiary(task) {
 
 .iet-spinner {
   width: 18px; height: 18px; flex: none;
-  border: 2px solid rgba(120, 90, 70, 0.2);
+  border: 2px solid var(--border);
   border-top-color: var(--accent, #b0755a);
   border-radius: 50%;
   animation: iet-spin 0.8s linear infinite;
@@ -282,14 +430,14 @@ async function onRetryDiary(task) {
   border-radius: 50%;
   font-size: 12px; font-weight: 700;
   background: rgba(120, 90, 70, 0.12);
-  color: #6f675f;
+  color: var(--text-secondary);
 }
 
 .iet-card.is-error .iet-state-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); }
 
 .iet-card-text { min-width: 0; flex: 1; }
 
-.iet-card-title { font-size: 13px; font-weight: 700; color: #3d332c; margin-bottom: 6px; }
+.iet-card-title { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
 
 .iet-error-text { font-size: 12px; color: var(--accent); line-height: 1.45; word-break: break-word; }
 
@@ -380,6 +528,10 @@ async function onRetryDiary(task) {
 .iet-modal-enter-from, .iet-modal-leave-to { opacity: 0; }
 .iet-modal-enter-from .iet-modal-card, .iet-modal-leave-to .iet-modal-card { transform: scale(0.96); }
 
+/* 手机端详情卡从圆环上方渐入渐出（0.3s，符合全局窗口动效约定） */
+.iet-pop-enter-active, .iet-pop-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.iet-pop-enter-from, .iet-pop-leave-to { opacity: 0; transform: translateY(6px) scale(0.96); }
+
 @keyframes iet-spin { to { transform: rotate(360deg); } }
 @keyframes iet-slide {
   0% { transform: translateX(-120%); }
@@ -387,11 +539,25 @@ async function onRetryDiary(task) {
 }
 
 @media (max-width: 767px) {
-  .iet-cards {
-    right: 12px;
-    left: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    max-width: none;
+  /* 手机端不再在底部堆叠整卡，收到屏幕右侧约 3/4 屏高处只留圆环进度
+     （避开页头、底部输入栏与右下角角色通知）；点圆环才在它上方展开详情卡 */
+  .iet-stack {
+    top: auto;
+    bottom: calc(20vh + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20dvh + env(safe-area-inset-bottom, 0px));
+    right: max(14px, env(safe-area-inset-right, 0px));
+    left: auto;
+    max-width: calc(100vw - 24px);
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  /* 圆环钉在锚点（右侧中下），详情卡从它上方展开，展开过程中圆环不跟着跑 */
+  .iet-slot { align-items: flex-end; flex-direction: column-reverse; }
+
+  .iet-card {
+    width: min(300px, calc(100vw - 24px));
+    transform-origin: bottom right;
   }
 
   /* 整屏对比：把高度交给「预览区 flex:1 + 图片按容器收敛」，
