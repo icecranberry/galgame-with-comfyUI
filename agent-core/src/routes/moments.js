@@ -855,6 +855,10 @@ async function generateMomentPostImpl(character, opts = {}) {
     ? `\n- 如果这条朋友圈与最近一条“${prevMomentText.slice(0, 60)}...”是同一件事的自然延续，可以顺带呼应；否则忽略它。不要为了呼应而把旧内容单独写成第二段。`
     : '';
 
+  // 生图格式是全局静态规则，必须留在静态前缀内：它原本排在「每张数不同」的
+  // 输出格式之后，于是每次张数变化都会让这段规则及其后内容重新计费。
+  const imageFormatRule = imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。';
+
   const postingStablePrefix = `${postingTaskIntro}
 
 通用规则：
@@ -863,6 +867,9 @@ ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}
 - text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。
+
+生图格式（每个 imagePrompt 均适用）：
+${imageFormatRule}
 
 `;
   const postingTask = (() => {
@@ -879,6 +886,7 @@ ${MOMENT_IMAGE_RULES}
     const multiImageRule = buildMomentMultiImageRule(imageCount);
 
     // 主次判断放在动态尾部，不改变共用静态前缀。
+    // 张数、形态、天气等每次不同的内容全部压在这里，静态前缀到输出格式为止。
     const dynamicRules = `- text 用中文，imagePrompt 用英文；正文字数范围：${pickedForm?.len || '30-160字'}，不凑字，保留关键意思
 ${multiImageRule}
 ${pickedForm ? `- **发布形态参考（可不用）**：${pickedForm.desc}。` : ''}
@@ -886,9 +894,6 @@ ${isSpecialMode ? '- **梦境采纳条件**：动因为主时可以直接分享�
 ${imperfectionNote}
 ${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
 ${continuationNote}
-
-生图格式（每个 imagePrompt 均适用）：
-${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 ${weatherHint}
 ${isSpecialMode ? MOMENT_DREAM_IMAGE_RULES : ''}
 ${multiPersonImageNote}
@@ -1131,6 +1136,7 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
   const userDesc = [config.user.gender, config.user.appearance || config.user.persona]
     .filter(Boolean).join('；');
 
+  // 静态规则（含生图格式）在前，随本次变化的字段（同框人物、誓约、天气）压到后面。
   const postingTask = `你正在发朋友圈。像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。
 
 通用规则：
@@ -1140,14 +1146,14 @@ ${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}
 - text 中的事符合当前时间，不用特意报时。
 
+生图格式（每个 imagePrompt 均适用）：
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
+
 ${buildMomentOutputFormat({ textRequirement: `中文口语，第一人称，写你和${userName}赴约时的一个细节或互动` })}
 
 本次要求（随本次情况变化，与上方通用规则同时生效）：
 - **这条朋友圈是履约现场**：只突出你们约好的这件事本身，不要扯别的话题。
 - **画面必须同框**：imagePrompt 中必须同时出现你和${userName}两个人，分别描述各自外观、动作与互动，贴合你们的关系，用句号分隔两人描述。${oathImageNote}
-
-生图格式：
-${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 ${weatherHint}`;
 
   const timeTag = getTimeTag(now, false);

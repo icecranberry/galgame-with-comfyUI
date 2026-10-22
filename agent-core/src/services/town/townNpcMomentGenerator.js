@@ -155,11 +155,16 @@ export async function generateTownNpcMoment(npc, opts = {}) {
     ? `- 上面「今天真实发生的事」是你今天亲历的记录：只从中选一件最想分享的事作为唯一主线，其余都忽略；没提到的部分写日常即可。禁止否认或编造更大的事`
     : `- 今天没什么特别的事，就选一件符合你身份和此刻时段的小事作为唯一主线，随手记录小镇日常`;
 
+  // 静态规则（含生图格式）放最前，形态字数、素材与天气等每次变化的内容压到后面，
+  // 避免静态的「生图格式」被夹在动态字段之后反复重新计费。
   const formatPrompt = `规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}
+
+生图格式：
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 
 ${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心', textLength: pickedForm.len })}
 
@@ -170,9 +175,6 @@ ${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省�
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告
 - text 中的事符合当前时间和天气，不用报时或报天气；只有它直接触发了这次反应才自然提及
 - **画面里只有你自己**（或你正在看的风景/物件），不要出现玩家
-
-生图格式：
-${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 ${weatherHint}`;
 
   const personaMsg = `以下是小镇镇民「${npc.display_name}」的资料，发帖时保持这个人设：\n\n${npcPersonaBlock(npc)}`;

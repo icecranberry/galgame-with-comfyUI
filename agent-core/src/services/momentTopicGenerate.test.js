@@ -179,3 +179,30 @@ test('random topic source and focus determine schedule detail in the actual LLM 
   const prefixes = requests.map(r => r.messages.find(m => m.content.startsWith('你正在发朋友圈。')).content.split('输出格式（严格 JSON）：')[0]);
   assert.ok(prefixes.every(prefix => prefix === prefixes[0]), 'source/focus must not enter the static prefix');
 });
+
+test('发朋友圈 system2：生图格式留在静态区，随本次变化的字段只在输出格式之后', async t => {
+  const characterId = seedCharacter();
+  const requests = [];
+  t.mock.method(OpenAI.Chat.Completions.prototype, 'create', async params => {
+    requests.push(params);
+    throw Object.assign(new Error('TEST_PROMPT_CAPTURED'), { status: 400 });
+  });
+  let rolls = [];
+  t.mock.method(Math, 'random', () => rolls.length ? rolls.shift() : 0.5);
+  const prefixes = [];
+  // 模式、话题、形态、张数；张数取三段不同区间，验证静态区不随张数变化。
+  for (const [index, countRoll] of [0.5, 0.75, 0.95].entries()) {
+    rolls = [0.5, 0.5, 0.5, countRoll];
+    assert.equal((await generate({ character_id: characterId })).payload.error, 'TEST_PROMPT_CAPTURED');
+    const task = requests.at(-1).messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
+    const [prefix, tail] = task.split('输出格式（严格 JSON）：\n');
+    prefixes.push(prefix);
+    // 静态区含生图格式，且不含任何按本次调用变化的字段。
+    assert.match(prefix, /生图格式（每个 imagePrompt 均适用）：\n\S/);
+    // 生图规则正文本身含 "Environment reference" 字样，这里只认天气提示的全角冒号写法。
+    assert.doesNotMatch(prefix, /Environment reference：|发布形态参考|正文字数范围：|已缔结誓约/);
+    // 张数只改输出格式的字段数与其后的动态要求。
+    assert.equal(Object.keys(JSON.parse(tail.split('\n')[0])).length, index + 2);
+  }
+  assert.ok(prefixes.every(prefix => prefix === prefixes[0]), 'image count must not enter the static prefix');
+});
