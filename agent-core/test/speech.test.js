@@ -5,8 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
-import { speechText, speechCacheKey, speechParams, MODEL_VERSION } from '../src/services/speechText.js';
+import { speechText, speechCacheKey, speechParams, speechGenerationParams, GENERATION_DEFAULTS, MODEL_VERSION } from '../src/services/speechText.js';
 import { createGpuQueue } from '../src/services/gpuQueue.js';
 import { migrateTtsSchema, recoverSpeechJobs } from '../src/db/ttsSchema.js';
 
@@ -19,6 +20,13 @@ test('dialogue cleanup keeps speech and removes stage directions/internal materi
 });
 test('cache covers reference, model, text and synthesis defaults; parameter order is irrelevant', () => {
   const base = speechCacheKey('你好', 'hash', speechParams());
+  const uncheckedCacheKey = createHash('sha256').update(JSON.stringify({ text: '你好', hash: 'hash',
+    modelVersion: MODEL_VERSION, textVersion: 'dialogue-v1', language: 'zh', speed: 1, duration_factor: 1 })).digest('hex');
+  assert.notEqual(base, uncheckedCacheKey, 'never reuse output from synthesis without stop-token validation');
+  const previousProfileKey = createHash('sha256').update(JSON.stringify({ text: '你好', hash: 'hash',
+    modelVersion: MODEL_VERSION, textVersion: 'dialogue-v1', synthesisVersion: 'checked-eos-v2',
+    language: 'zh', speed: 1, duration_factor: 1 })).digest('hex');
+  assert.notEqual(base, previousProfileKey, 'the top_p=0.9 profile must not reuse top_p=0.8 audio');
   assert.equal(base, speechCacheKey('你好', 'hash', { duration_factor: 1, speed: 1, language: 'zh' }));
   for (const key of [speechCacheKey('好', 'hash', speechParams()), speechCacheKey('你好', 'other', speechParams()),
     speechCacheKey('你好', 'hash', speechParams({ speed: 1.2 })), speechCacheKey('你好', 'hash', speechParams(), 'other-model')]) assert.notEqual(base, key);
@@ -37,6 +45,22 @@ test('GPU FIFO does not overlap, does not starve images, and recovers from failu
   await Promise.resolve(); assert.deepEqual(order, ['speech']);
   release(); await Promise.all([failed, image, second]);
   assert.deepEqual(order, ['speech', 'image', 'speech2']);
+});
+
+test('voice generation parameters validate ranges, inherit defaults and isolate caches', () => {
+  assert.deepEqual(speechParams().generation_params, GENERATION_DEFAULTS);
+  assert.deepEqual(speechParams({ generation_params: '{}' }).generation_params, GENERATION_DEFAULTS);
+  const base = speechCacheKey('你好', 'reference', speechParams());
+  for (const [key, value] of Object.entries({ temperature: 0.75, top_k: 40, top_p: 0.95, num_beams: 2 })) {
+    const params = speechParams({ generation_params: { [key]: value } });
+    assert.equal(params.generation_params[key], value);
+    assert.notEqual(base, speechCacheKey('你好', 'reference', params));
+  }
+  assert.equal(base, speechCacheKey('你好', 'reference', speechParams({ generation_params: { num_beams: 3, top_p: 0.9, top_k: 30, temperature: 0.8 } })));
+  for (const invalid of [null, [], 'bad', { top_p: 0 }, { top_p: 1.1 }, { temperature: '' }, { temperature: NaN }, { temperature: Infinity }, { top_k: 1.5 }, { top_k: -1 }, { num_beams: 6 }, { num_beams: true }, { do_sample: false }]) {
+    assert.throws(() => speechGenerationParams(invalid));
+  }
+  assert.equal(speechGenerationParams({ top_k: 0 }).top_k, 0);
 });
 test('schema recovery and deletion preserve reference assets', () => {
   const db = new Database(':memory:');
@@ -72,6 +96,7 @@ test('legacy migration retains owners and unused recordings without allowing sha
     INSERT INTO character_voices VALUES(1,'v',1),(2,'v',1),(3,'custom',1);`);
   migrateTtsSchema(db);
   assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='v'").pluck().get(), 1);
+  assert.equal(db.prepare("SELECT generation_params FROM voices WHERE id='v'").pluck().get(), '{}');
   assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='old'").pluck().get(), 1);
   assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='custom'").pluck().get(), 3);
   assert.equal(db.prepare("SELECT character_id FROM voices WHERE id='unknown'").pluck().get(), null);
@@ -90,23 +115,27 @@ process.env.DB_PATH = ':memory:';
 process.env.TTS_AUDIO_DIR = root;
 const originalFetch = globalThis.fetch;
 let inferCount = 0, acquireCount = 0, failInference = false, offline = false, fetchFailure = null;
+const gpuEvents = [];
+const synthesisRequests = [];
 globalThis.fetch = async (url, options) => {
   const u = String(url);
   if (u.includes(':7861')) {
     if (fetchFailure) throw fetchFailure;
     if (offline) throw new Error('offline');
     if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true });
-    if (u.endsWith('/unload')) return Response.json({ unloaded: true });
+    if (u.endsWith('/unload')) { gpuEvents.push('unload'); return Response.json({ unloaded: true }); }
     if (u.endsWith('/synthesize')) {
       inferCount++;
       if (failInference) return Response.json({ error: 'CUDA out of memory' }, { status: 500 });
       const body = JSON.parse(options.body);
+      synthesisRequests.push(body);
       await fs.writeFile(path.join(root, body.output), 'test-wave');
       return Response.json({ ok: true });
     }
   }
   if (u.includes('/linshe/gpu/')) {
     if (u.endsWith('/acquire')) acquireCount++;
+    if (u.endsWith('/release')) gpuEvents.push('release');
     return Response.json({ ok: true });
   }
   throw new Error(`Test forbids unexpected network: ${u}`);
@@ -134,6 +163,36 @@ test('TTS transport failures explain connection and timeout errors while preserv
     fetchFailure = new DOMException('timed out', 'TimeoutError');
     await assert.rejects(ttsRequest('/health'), /响应超时/);
   } finally { fetchFailure = null; }
+});
+
+test('speech stays warm for ten idle minutes, resets on reuse and yields before image work', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  try {
+    await gpu.withSpeechGpu(async () => {});
+    gpuEvents.length = 0;
+    t.mock.timers.tick(9 * 60 * 1000);
+    await settle();
+    assert.deepEqual(gpuEvents, []);
+    await gpu.withSpeechGpu(async () => {});
+    t.mock.timers.tick(10 * 60 * 1000 - 1);
+    await settle();
+    assert.deepEqual(gpuEvents, [], 'reuse starts a new ten-minute idle window');
+    t.mock.timers.tick(1);
+    await settle();
+    assert.deepEqual(gpuEvents, ['unload', 'release']);
+    await gpu.withSpeechGpu(async () => {});
+    gpuEvents.length = 0;
+    await gpu.withImageGpu(async () => { gpuEvents.push('image'); });
+    assert.deepEqual(gpuEvents, ['unload', 'release', 'image'], 'worker exit and lease release precede image work');
+    t.mock.timers.tick(10 * 60 * 1000);
+    await settle();
+    assert.deepEqual(gpuEvents, ['unload', 'release', 'image'], 'image handoff cancels the idle timer');
+  } finally {
+    await gpu.recoverSpeechGpu();
+    t.mock.timers.reset();
+    acquireCount = 0;
+  }
 });
 
 test('saved bubble identity, dedup, history, cache invalidation, retry and offline isolation', async () => {
@@ -269,6 +328,29 @@ test('HTTP audio lifecycle, character-owned voices and cross-character guards', 
     assert.equal(updated.body.version, 2);
     assert.equal(updated.body.reference_url, crop.body.reference_url);
     assert.equal(getDb().prepare('SELECT version FROM voices WHERE id=?').pluck().get(voice.body.id), 2);
+    assert.deepEqual(updated.body.generation_params, GENERATION_DEFAULTS);
+    const custom = { ...GENERATION_DEFAULTS, top_p: 0.95, temperature: 0.75 };
+    const savedParams = await request(`/voices/${voice.body.id}/parameters`, { character_id: character, generation_params: custom }, 'PUT');
+    assert.equal(savedParams.status, 200);
+    assert.equal(savedParams.body.version, 3);
+    assert.equal(savedParams.body.speed, 1.5, 'parameter edits preserve existing voice fields');
+    assert.deepEqual(savedParams.body.generation_params, custom);
+    assert.equal((await request(`/voices/${voice.body.id}/parameters`, { character_id: other, generation_params: {} }, 'PUT')).status, 400);
+    assert.equal((await request(`/voices/${voice.body.id}/parameters`, { character_id: character, generation_params: { num_beams: 1.5 } }, 'PUT')).status, 400);
+    const reread = await (await originalFetch(`${base}/voices?character_id=${character}`)).json();
+    assert.deepEqual(reread.find(row => row.id === voice.body.id).generation_params, custom);
+    const line = '检查高级参数传递与缓存。';
+    const draft = await request('/preview', { character_id: character, voice_id: voice.body.id, text: line, generation_params: GENERATION_DEFAULTS });
+    assert.equal((await terminal(draft.body.id)).status, 'completed');
+    assert.deepEqual(synthesisRequests.at(-1).generation_params, GENERATION_DEFAULTS);
+    assert.equal(synthesisRequests.at(-1).duration_factor, 1 / 1.5);
+    assert.deepEqual(JSON.parse(getDb().prepare('SELECT generation_params FROM voices WHERE id=?').pluck().get(voice.body.id)), custom, 'preview must not persist the draft');
+    const normal = service.requestSpeech({ characterId: character, voiceId: voice.body.id, text: line });
+    assert.notEqual(normal.id, draft.body.id, 'saved parameters do not reuse draft audio');
+    assert.equal((await terminal(normal.id)).status, 'completed');
+    assert.deepEqual(synthesisRequests.at(-1).generation_params, custom);
+    const reset = await request(`/voices/${voice.body.id}/parameters`, { character_id: character, generation_params: {} }, 'PUT');
+    assert.deepEqual(reset.body.generation_params, GENERATION_DEFAULTS);
     assert.equal((await request('/settings', { enabled: 'false' }, 'PUT')).status, 400);
     assert.equal((await request(`/characters/${character}`, { voice_id: null }, 'PUT')).status, 400);
     assert.equal(getDb().prepare('SELECT character_id FROM voices WHERE id=?').pluck().get(voice.body.id), character);

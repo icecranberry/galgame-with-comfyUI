@@ -20,7 +20,7 @@ function fixture(t, api = async route => route === '/voices?character_id=1' ? []
   const deps = { Vue, speechEnabled, speechJobs, createSpeechTask, stopSpeech: () => { stops++; speechPlayer.stop() },
     speechPlayer, ttsApi: async (...args) => { calls.push(args); return api(...args) }, uploadVoice: options.upload || (async () => null),
     waitSpeech: options.wait || (async job => { const ready = { ...job, status: 'completed', audio_url: '/preview.wav' }; speechJobs[job.id] = ready; return ready }),
-    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, SpeechSettings: {} }
+    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSlider: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, SpeechSettings: {}, VoiceAudioPlayer: {} }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() {
@@ -39,9 +39,63 @@ function readyPreview(f, play = async () => {}) {
   f.speechEnabled.value = true
   f.state.original.value = { id: 'original', duration: 12 }
   f.state.sample.value = { id: 'sample' }
-  f.state.previewAudio.value = audio
+  f.state.previewAudio.value = { media: audio }
   return { actions, audio }
 }
+
+test('advanced draft previews separately, saves to its voice, restores defaults and reloads on reopen', async t => {
+  const defaults = { temperature: 0.8, top_k: 30, top_p: 0.9, num_beams: 3 }
+  let saved = { id: 'voice', character_id: 1, name: '日常', generation_params: { ...defaults, top_p: 0.95 } }
+  const f = fixture(t, async (route, body) => {
+    if (route.startsWith('/voices?')) return [structuredClone(saved)]
+    if (route === '/characters/1') return { voice_id: 'voice', name: '日常' }
+    if (route === '/preview') return { id: 'draft', status: 'queued' }
+    if (route === '/voices/voice/parameters') { saved = { ...saved, generation_params: body.generation_params }; return structuredClone(saved) }
+  })
+  await flush(); f.speechEnabled.value = true
+  assert.equal(f.state.advancedOpen.value, false)
+  assert.equal(f.state.generationParams.value.top_p, 0.95)
+  assert.equal(f.state.parametersDirty.value, false)
+  f.state.generationParams.value.temperature = 0.75
+  assert.equal(f.state.parametersDirty.value, true)
+  await f.state.preview()
+  assert.equal(f.calls.find(([route]) => route === '/preview')[1].generation_params.temperature, 0.75)
+  assert.equal(saved.generation_params.temperature, 0.8)
+  f.state.generationParams.value.top_k = 40
+  assert.equal(f.state.previewId.value, null, 'edited parameters invalidate the previous audition')
+  await f.state.saveParameters()
+  assert.equal(saved.generation_params.top_k, 40)
+  assert.equal(f.state.parametersDirty.value, false)
+  f.state.resetParameters()
+  assert.deepEqual({ ...f.state.generationParams.value }, defaults)
+  assert.equal(f.state.parametersDirty.value, true)
+  f.state.generationParams.value.num_beams = 1.5
+  assert.equal(f.state.parametersValid.value, false)
+  assert.equal(f.state.canPreview.value, false)
+  const count = f.calls.length
+  await f.state.preview(); await f.state.saveParameters()
+  assert.equal(f.calls.length, count)
+  f.props.modelValue = false; await Vue.nextTick()
+  f.props.modelValue = true; await flush()
+  assert.equal(f.state.generationParams.value.top_k, 40)
+  assert.equal(f.state.generationParams.value.num_beams, 3)
+  f.state.resetParameters(); await f.state.saveParameters()
+  assert.deepEqual(saved.generation_params, defaults)
+})
+
+test('new voices save audition parameters and cannot save an outdated preview', async t => {
+  const f = fixture(t, async (route, body) => route.startsWith('/voices?') ? [] : route === '/preview' ? { id: 'new-preview', status: 'queued' } : route === '/voices' ? { id: 'new', ...body } : null)
+  await flush(); readyPreview(f)
+  f.state.generationParams.value.top_p = 0.95
+  await f.state.preview()
+  assert.equal(f.state.canSave.value, true)
+  f.state.generationParams.value.temperature = 0.75
+  assert.equal(f.state.canSave.value, false)
+  await f.state.preview(); await f.state.save()
+  const payload = f.calls.find(([route]) => route === '/voices')[1]
+  assert.equal(payload.generation_params.temperature, 0.75)
+  assert.equal(payload.generation_params.top_p, 0.95)
+})
 
 test('completed synthesis reveals and auto-plays the visible player, closing stops it', async t => {
   const f = fixture(t, async route => route === '/preview' ? { id: 'preview', status: 'queued' } : route.startsWith('/voices?') ? [] : null)

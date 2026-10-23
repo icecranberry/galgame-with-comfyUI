@@ -14,6 +14,9 @@
   /* ── 底色与文字（对应 v3.2 原始暖纸配色）── */
   --bg-primary: #f0ece8;
   --bg-secondary: #ffffff;
+  --audio-track: #ddd1c6;
+  --audio-track-border: #a79687;
+  --audio-progress: #b64f41;
   --bg-tertiary: #ebebeb;
   --bg-hover: #e0e0e0;
   --bg-sunken: #f5f1ec;          /* 凹陷槽底色（分段控件/页签轨道，暖色沿用旧暖纸） */
@@ -248,6 +251,9 @@
 
   --bg-primary: #16131a;
   --bg-secondary: #221e28;
+  --audio-track: #504758;
+  --audio-track-border: #84748f;
+  --audio-progress: #ff947e;
   --bg-tertiary: #2b2633;
   --bg-hover: #383142;
   --bg-sunken: #2b2633;          /* 凹陷槽底色：暗夜沿用原分段轨道 */

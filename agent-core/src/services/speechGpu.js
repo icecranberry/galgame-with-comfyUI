@@ -40,7 +40,7 @@ function scheduleRelease() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
     withGpu(releaseSpeech).catch(e => console.warn('[TTS] 空闲卸载失败，请恢复显存调度:', e.message));
-  }, 15000);
+  }, 10 * 60 * 1000);
   idleTimer.unref?.();
 }
 export function withSpeechGpu(work, isCancelled = () => false) {
@@ -83,5 +83,16 @@ export function recoverSpeechGpu() {
     speechUsed = false;
     releaseError = false;
     return result;
+  });
+}
+
+export function restartSpeechGpu(restart) {
+  return withGpu(async () => {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    const status = await restart();
+    // The new adapter has no model loaded. Release any lease held by this Node.
+    if (speechUsed || leaseToken || releaseError) await releaseSpeech();
+    return status;
   });
 }

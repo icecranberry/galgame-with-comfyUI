@@ -9,10 +9,11 @@
     </div>
     <div class="speech-service-row">
       <span class="speech-status" :class="{ 'is-ready': ready, 'is-error': !!error }" role="status">
-        <i aria-hidden="true" />{{ checking ? '正在检查服务…' : ready ? '本地服务已就绪' : error ? '服务需要检查' : '本地服务待检查' }}
+        <i aria-hidden="true" />{{ restarting ? '正在重启声音服务…' : checking ? '正在检查服务…' : ready ? '本地服务已就绪' : error ? '服务需要检查' : '本地服务待检查' }}
       </span>
       <div class="speech-actions">
-        <linshe-button variant="link" size="sm" :loading="checking" :disabled="recovering" @click="check">检查连接</linshe-button>
+        <linshe-button variant="link" size="sm" :loading="checking" :disabled="recovering || restarting" @click="check">检查连接</linshe-button>
+        <linshe-button variant="secondary" size="sm" :loading="restarting" :disabled="checking || recovering" @click="restart">重启声音服务</linshe-button>
         <linshe-button variant="ghost" size="sm" :aria-expanded="maintenanceOpen" @click="maintenanceOpen = !maintenanceOpen">
           服务维护
           <svg class="speech-chevron" :class="{ 'is-open': maintenanceOpen }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
@@ -28,7 +29,7 @@
           <p>声音生成卡住时可尝试恢复，当前任务结束后会回收语音模型。</p>
           <span class="speech-endpoint">本地服务 · 127.0.0.1:7861</span>
         </div>
-        <linshe-button size="sm" :loading="recovering" :disabled="checking" @click="recover">恢复显存调度</linshe-button>
+        <linshe-button size="sm" :loading="recovering" :disabled="checking || restarting" @click="recover">恢复显存调度</linshe-button>
       </div>
     </Transition>
   </section>
@@ -39,7 +40,7 @@ import LinsheButton from './ui/LinsheButton.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
 import { ttsApi } from '../api/tts.js'
 import { speechEnabled, stopSpeech } from '../stores/speech.js'
-const busy = ref(true), checking = ref(false), recovering = ref(false), ready = ref(false)
+const busy = ref(true), checking = ref(false), recovering = ref(false), restarting = ref(false), ready = ref(false)
 const maintenanceOpen = ref(false), error = ref(''), notice = ref('')
 async function toggle(enabled) {
   busy.value = true; error.value = ''; notice.value = ''
@@ -48,6 +49,7 @@ async function toggle(enabled) {
   finally { busy.value = false }
 }
 async function check() {
+  if (checking.value || recovering.value || restarting.value) return
   checking.value = true; error.value = ''; notice.value = ''
   try {
     const s = await ttsApi('/health')
@@ -57,10 +59,23 @@ async function check() {
   finally { checking.value = false }
 }
 async function recover() {
+  if (checking.value || recovering.value || restarting.value) return
   recovering.value = true; error.value = ''; notice.value = ''
   try { await ttsApi('/recover', {}); notice.value = '语音模型已释放，调度已恢复' }
   catch (e) { error.value = e.message }
   finally { recovering.value = false }
+}
+async function restart() {
+  if (checking.value || recovering.value || restarting.value) return
+  restarting.value = true; ready.value = false; error.value = ''; notice.value = '正在等待当前任务结束并重启服务…'
+  stopSpeech()
+  try {
+    const s = await ttsApi('/restart', {})
+    ready.value = !!(s.online && s.compatible && s.ready)
+    if (ready.value) notice.value = '声音服务已重启，可以继续试听或朗读'
+    else { notice.value = ''; error.value = s.error || '服务已启动，但模型尚未就绪或版本不匹配' }
+  } catch (e) { notice.value = ''; error.value = e.message }
+  finally { restarting.value = false }
 }
 onMounted(async () => {
   try { speechEnabled.value = (await ttsApi('/settings')).enabled }
@@ -80,7 +95,7 @@ onMounted(async () => {
 .speech-status i { width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
 .speech-status.is-ready { color:var(--success); }
 .speech-status.is-error,.speech-feedback.is-error { color:var(--danger); }
-.speech-actions { display:flex; align-items:center; gap:10px; margin-left:auto; }
+.speech-actions { display:flex; align-items:center; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-left:auto; }
 .speech-chevron { width:14px; height:14px; transition:transform .3s ease; }
 .speech-chevron.is-open { transform:rotate(180deg); }
 .speech-feedback { margin:10px 0 0; font-size:var(--fs-xs); line-height:1.6; color:var(--text-secondary); overflow-wrap:anywhere; }

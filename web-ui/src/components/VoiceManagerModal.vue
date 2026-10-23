@@ -15,7 +15,7 @@
           <div ref="uploadPicker" hidden><linshe-input type="file" accept="audio/*" :disabled="busy" tabindex="-1" @change="upload" /></div>
           <template v-if="original">
             <div class="voice-section-heading"><div><h4>新素材 · 尚未保存</h4><p class="voice-hint">{{ sourceName }}</p></div><span>原音 {{ original.duration.toFixed(1) }} 秒</span></div>
-            <audio ref="sourceAudio" :src="original.preview_url" controls preload="metadata" aria-label="原音试听" @play="playOriginal" @timeupdate="loopOriginal" @ended="restartOriginal" />
+            <VoiceAudioPlayer ref="sourceAudio" :src="original.preview_url" preload="metadata" label="原音试听" @play="playOriginal" @timeupdate="loopOriginal" @ended="restartOriginal" />
             <div class="voice-section-heading"><h4>选取参考片段</h4><span>拖动两端，保留 1～15 秒对白</span></div>
             <svg class="voice-wave" viewBox="0 0 720 100" role="group" aria-label="拖动左右端点选择参考片段" @pointermove="moveHandle" @pointerup="dragging = ''" @pointercancel="dragging = ''">
               <line v-for="(peak, i) in original.peaks" :key="i" :x1="i * 3 + 1" :x2="i * 3 + 1" :y1="50 - Math.max(2, peak * 46)" :y2="50 + Math.max(2, peak * 46)" class="wave-line" />
@@ -31,7 +31,7 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
           </template>
           <section v-if="sample" class="voice-reference" aria-label="处理后的参考音">
             <div class="voice-section-heading"><h4>处理后的参考音</h4><span>{{ sample.duration.toFixed(1) }} 秒</span></div>
-            <audio :src="sample.reference_url" controls aria-label="处理后的参考音试听" @play="speechPlayer.adopt($event.target)" />
+            <VoiceAudioPlayer :src="sample.reference_url" label="处理后的参考音试听" @play="speechPlayer.adopt($event.target)" />
             <p v-for="warning in sample.warnings" :key="warning" class="fd">{{ warning }}</p>
           </section>
           <label class="voice-field">音色名称<linshe-input v-model="name" maxlength="80" :disabled="busy" /></label>
@@ -39,15 +39,42 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
         <div v-else key="existing" class="voice-fields">
           <label class="voice-field">已存音色<linshe-select :model-value="selected" :disabled="busy" :options="voiceOptions" @update:model-value="selectVoice" /></label>
           <div class="voice-section-heading"><h4>{{ selectedVoice?.name }}</h4><span>{{ selected === binding?.voice_id ? '当前角色正在使用' : '选择后立即使用' }}</span></div>
-          <audio :src="selectedVoice?.reference_url" controls aria-label="已有音色参考试听" @play="speechPlayer.adopt($event.target)" />
+          <VoiceAudioPlayer :src="selectedVoice?.reference_url" label="已有音色参考试听" @play="speechPlayer.adopt($event.target)" />
           <div class="voice-inline-action"><linshe-button variant="danger" size="sm" :disabled="busy" :loading="busy && operation === 'delete'" @click="deleteSelectedVoice">删除音色</linshe-button></div>
         </div>
       </Transition>
+      <section class="voice-advanced" :class="{ 'is-open': advancedOpen }" aria-label="音色高级参数">
+        <div class="voice-advanced-heading" role="button" tabindex="0" :aria-expanded="advancedOpen" aria-controls="voice-advanced-fields" @click="advancedOpen = !advancedOpen" @keydown.enter.prevent="advancedOpen = !advancedOpen" @keydown.space.prevent="advancedOpen = !advancedOpen">
+          <h4>高级参数</h4>
+          <span class="voice-advanced-status">{{ parametersDirty ? '参数已修改，尚未保存' : isDefaultParameters ? '使用默认参数' : '使用此音色的专属参数' }}</span>
+          <svg class="voice-advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+        </div>
+        <div id="voice-advanced-fields" class="voice-advanced-content" :aria-hidden="!advancedOpen" :inert="!advancedOpen">
+          <div class="voice-advanced-clip">
+          <div class="voice-advanced-body">
+            <p class="voice-hint">仅调整当前音色。先生成试听确认效果，保存后用于聊天朗读；未保存的修改会在关闭或切换音色时丢弃。</p>
+            <div class="voice-parameter-grid">
+              <label v-for="field in parameterFields" :key="field.key" class="voice-field">
+                <span class="voice-parameter-label"><span>{{ field.label }} <span class="voice-parameter-key">{{ field.key }}</span></span><output :for="`voice-param-${field.key}`" class="voice-parameter-value">{{ field.step === 1 ? generationParams[field.key] : generationParams[field.key].toFixed(2) }}</output></span>
+                <linshe-slider :id="`voice-param-${field.key}`" v-model="generationParams[field.key]" :min="field.min" :max="field.max" :step="field.step" :disabled="busy || voicesLoading" :aria-label="field.label + ' ' + field.key" />
+                <span class="voice-hint">{{ field.hint }}</span>
+              </label>
+            </div>
+            <p v-if="!parametersValid" class="voice-hint voice-parameter-error" role="alert">请按提示范围填写参数，候选数量和搜索束数必须为整数。</p>
+            <div class="voice-inline-action">
+              <linshe-button variant="ghost" size="sm" :disabled="busy || voicesLoading || isDefaultParameters" @click="resetParameters">恢复默认</linshe-button>
+              <linshe-button v-if="selected" size="sm" :disabled="busy || voicesLoading || !parametersDirty || !parametersValid" :loading="busy && operation === 'parameters'" @click="saveParameters">保存音色参数</linshe-button>
+              <span v-else class="voice-hint">参数将随新音色一起保存</span>
+            </div>
+          </div>
+          </div>
+        </div>
+      </section>
       <section class="voice-fields voice-test">
       <div class="voice-section-heading"><h4>听听效果</h4><span>换一句台词，确认声音是否合适</span></div>
       <Transition name="voice-content">
         <div v-if="previewJob?.audio_url" class="voice-preview-result">
-          <audio ref="previewAudio" :src="previewJob.audio_url" controls preload="metadata" aria-label="合成试听" @play="playPreview" />
+          <VoiceAudioPlayer ref="previewAudio" :src="previewJob.audio_url" preload="metadata" label="合成试听" @play="playPreview" />
           <p v-if="playbackHint" class="voice-hint" role="status">{{ playbackHint }}</p>
         </div>
       </Transition>
@@ -78,10 +105,12 @@ import { computed, inject, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
+import LinsheSlider from './ui/LinsheSlider.vue'
 import LinsheSelect from './ui/LinsheSelect.vue'
 import LinsheTabs from './ui/LinsheTabs.vue'
 import SystemAudioRecorder from './SystemAudioRecorder.vue'
 import SpeechSettings from './SpeechSettings.vue'
+import VoiceAudioPlayer from './VoiceAudioPlayer.vue'
 import { ttsApi, uploadVoice } from '../api/tts.js'
 import { speechEnabled, speechJobs, speechPlayer, stopSpeech, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
@@ -93,6 +122,23 @@ const sourceName = ref(''), voicesLoading = ref(true)
 const start = ref(0), end = ref(10), dragging = ref(''), sourceAudio = ref(null)
 const name = ref('日常')
 const voiceDefaults = { speed: 1, language: 'zh' }
+const generationDefaults = { temperature: 0.8, top_k: 30, top_p: 0.9, num_beams: 3 }
+const generationParams = ref({ ...generationDefaults }), advancedOpen = ref(false)
+const parameterFields = [
+  { key: 'temperature', label: '采样温度', min: 0.1, max: 1.5, step: 0.05, hint: '默认 0.8 · 范围 0.1～1.5，影响语调变化与稳定性' },
+  { key: 'top_p', label: '概率范围', min: 0.1, max: 1, step: 0.05, hint: '默认 0.9 · 范围 0.1～1，影响采样候选范围' },
+  { key: 'top_k', label: '候选数量', min: 0, max: 100, step: 1, hint: '默认 30 · 整数 0～100，0 表示不限制候选数量' },
+  { key: 'num_beams', label: '搜索束数', min: 1, max: 5, step: 1, hint: '默认 3 · 整数 1～5，较高时通常更慢' },
+]
+function validParameter(field) {
+  const value = generationParams.value[field.key]
+  return typeof value === 'number' && Number.isFinite(value) && value >= field.min && value <= field.max && (field.step !== 1 || Number.isInteger(value))
+}
+const parametersValid = computed(() => parameterFields.every(validParameter))
+const sameParameters = (a, b) => Object.keys(generationDefaults).every(key => a[key] === b[key])
+const isDefaultParameters = computed(() => sameParameters(generationParams.value, generationDefaults))
+const parametersDirty = computed(() => !sameParameters(generationParams.value, { ...generationDefaults, ...selectedVoice.value?.generation_params }))
+function resetParameters() { generationParams.value = { ...generationDefaults } }
 const busy = ref(false), operation = ref(''), error = ref(''), notice = ref(''), previewId = ref(null)
 const recorderOpen = ref(false), recorderPanel = ref(null), uploadPicker = ref(null)
 const previewAudio = ref(null), playbackHint = ref('')
@@ -116,19 +162,21 @@ const auditionSource = computed(() => voicesLoading.value ? '正在读取声音�
 const previewJob = computed(() => speechJobs[previewId.value])
 watch(previewId, () => { playbackHint.value = '' })
 const validRange = computed(() => original.value && Number.isFinite(start.value) && Number.isFinite(end.value) && start.value >= 0 && end.value <= original.value.duration && end.value - start.value >= 1 && end.value - start.value <= 15)
-const canPreview = computed(() => speechEnabled.value && !!text.value.trim() && (!!selectedVoice.value || (!selected.value && !!validRange.value)))
-const canSave = computed(() => !selected.value && !!name.value.trim() && !!sample.value && previewJob.value?.status === 'completed')
+const canPreview = computed(() => parametersValid.value && speechEnabled.value && !!text.value.trim() && (!!selectedVoice.value || (!selected.value && !!validRange.value)))
+const canSave = computed(() => parametersValid.value && !selected.value && !!name.value.trim() && !!sample.value && previewJob.value?.status === 'completed')
 const previewHint = computed(() => !speechEnabled.value ? '请先开启上方的语音朗读开关' : !selected.value && !original.value ? '先上传或录制一段声音' : !selected.value && !validRange.value ? '请先选取 1～15 秒参考片段' : !text.value.trim() ? '请输入试听台词' : '首次生成需要加载模型，请稍候；试听不会更换当前声音')
 
 watch([start, end], () => { sample.value = null; previewId.value = null; stopSpeech() })
 watch([selected, text], () => { previewId.value = null; stopSpeech() })
-watch(selected, () => { notice.value = '' }, { flush: 'sync' })
+watch(selected, () => { notice.value = ''; generationParams.value = { ...generationDefaults, ...selectedVoice.value?.generation_params } }, { flush: 'sync' })
+watch(generationParams, () => { previewId.value = null; stopSpeech() }, { deep: true, flush: 'sync' })
 watch([() => props.modelValue, () => props.character?.id], async ([open, characterId]) => {
   const current = ++session
   previewTask?.cancel().catch(() => {}); previewTask = null; stopSpeech(); busy.value = false; operation.value = ''
   recorderOpen.value = false
   if (!open || !characterId) return
   voicesLoading.value = true
+  advancedOpen.value = false; resetParameters()
   text.value = testLines[0].value
   error.value = ''; notice.value = ''; original.value = null; sample.value = null; previewId.value = null
   voices.value = []; binding.value = null; selected.value = ''; sourceName.value = ''
@@ -225,7 +273,7 @@ function preview() {
           if (signal.aborted || !current()) throw new DOMException('已取消试听', 'AbortError')
           sample.value = cropped
         }
-        return ttsApi('/preview', { character_id: props.character.id, voice_id: selected.value || undefined, sample_id: sample.value?.id, text: text.value, ...voiceDefaults })
+        return ttsApi('/preview', { character_id: props.character.id, voice_id: selected.value || undefined, sample_id: sample.value?.id, text: text.value, ...voiceDefaults, generation_params: { ...generationParams.value } })
       },
       wait: waitSpeech,
       cancel: job => ttsApi(`/jobs/${job.id}/cancel`, {}),
@@ -235,7 +283,7 @@ function preview() {
     try {
       const result = await task.run()
       await nextTick()
-      const audio = previewAudio.value
+      const audio = previewAudio.value?.media
       if (!current() || task.cancelled || !speechEnabled.value || !audio || previewId.value !== result.id || !speechPlayer.current(playbackTicket)) return
       audio.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
       speechPlayer.adopt(audio)
@@ -261,8 +309,19 @@ function save() {
   if (busy.value || !canSave.value) return
   const characterId = props.character.id
   return perform('save', async current => {
-    await ttsApi('/voices', { character_id: characterId, sample_id: sample.value.id, name: name.value, ...voiceDefaults })
+    await ttsApi('/voices', { character_id: characterId, sample_id: sample.value.id, name: name.value, ...voiceDefaults, generation_params: { ...generationParams.value } })
     if (current()) { emit('saved'); emit('update:modelValue', false) }
+  })
+}
+function saveParameters() {
+  const voice = selectedVoice.value
+  if (busy.value || !voice || !parametersValid.value || !parametersDirty.value) return
+  return perform('parameters', async current => {
+    const saved = await ttsApi(`/voices/${voice.id}/parameters`, { character_id: props.character.id, generation_params: { ...generationParams.value } }, 'PUT')
+    if (!current()) return
+    voices.value = voices.value.map(item => item.id === saved.id ? saved : item)
+    notice.value = '音色参数已保存，之后的聊天朗读将使用这组参数。'
+    emit('saved')
   })
 }
 function selectVoice(voiceId) {
@@ -298,7 +357,6 @@ onBeforeUnmount(() => { session++; previewTask?.cancel().catch(() => {}); stopSp
 .voice-manager { color:var(--text-primary); gap:18px; }
 .voice-fields { gap:16px; padding:20px 0; border-top:1px solid var(--border); }
 .voice-field { gap:8px; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
-.voice-manager audio { width:100%; max-width:100%; }
 .voice-wave { width:100%; height:100px; background:var(--bg-sunken); border-radius:var(--radius-sm); touch-action:none; overflow:visible; }
 .wave-line { stroke:var(--text-secondary); stroke-width:2; }
 .wave-selection { fill:var(--accent); opacity:0.18; pointer-events:none; }
@@ -324,10 +382,26 @@ onBeforeUnmount(() => { session++; previewTask?.cancel().catch(() => {}); stopSp
 .voice-source-actions p { margin:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
 .voice-inline-action,.voice-presets,.voice-footer-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .voice-test { padding-bottom:0; }
+.voice-advanced { border-top:1px solid var(--border); }
+.voice-advanced-heading { display:flex; align-items:center; gap:12px; padding:16px 0; cursor:pointer; text-align:left; border-radius:var(--radius-sm); }
+.voice-advanced-heading h4 { margin:0; font-size:var(--fs-sm); font-weight:700; }
+.voice-advanced-heading:hover h4 { color:var(--accent); }
+.voice-advanced-status { margin-left:auto; color:var(--text-secondary); font-size:var(--fs-xs); line-height:1.6; text-align:right; }
+.voice-advanced-chevron { flex-shrink:0; color:var(--text-secondary); transition:transform .3s var(--ease-standard); }
+.voice-advanced.is-open .voice-advanced-chevron { transform:rotate(180deg); }
+.voice-advanced-content { display:grid; grid-template-rows:0fr; opacity:0; visibility:hidden; transition:grid-template-rows .3s var(--ease-standard), opacity .3s var(--ease-standard), visibility .3s; }
+.voice-advanced.is-open .voice-advanced-content { grid-template-rows:1fr; opacity:1; visibility:visible; }
+.voice-advanced-clip { min-height:0; overflow:hidden; }
+.voice-advanced-body { display:grid; gap:16px; padding:0 0 4px; }
+.voice-parameter-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.voice-parameter-key { font-size:var(--fs-xs); color:var(--text-secondary); margin-left:6px; }
+.voice-parameter-label { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.voice-parameter-value { flex-shrink:0; font-size:var(--fs-sm); font-weight:600; font-variant-numeric:tabular-nums; color:var(--text-primary); }
+.voice-parameter-error { color:var(--danger); }
 .voice-preview-source { margin:0; padding:10px 14px; border-left:3px solid var(--accent); background:var(--bg-sunken); border-radius:var(--radius-sm); font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; overflow-wrap:anywhere; }
 .voice-preview-source strong { color:var(--text-primary); font-weight:600; }
-.voice-manager audio { height:40px; }
 .voice-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; width:100%; }
 .voice-footer-actions { margin-left:auto; }
 @media(max-width:480px) { .voice-fields { padding-top:16px; gap:14px; } .voice-source-actions { grid-template-columns:minmax(0,1fr); } .voice-footer > .voice-hint { width:100%; } .voice-footer-actions { gap:8px; } }
+@media(max-width:480px) { .voice-parameter-grid { grid-template-columns:minmax(0,1fr); } }
 </style>

@@ -1,4 +1,4 @@
-param([string]$RuntimeDir = (Join-Path $PSScriptRoot 'runtime'))
+param([string]$RuntimeDir = $(if ($env:TTS_RUNTIME_DIR) { $env:TTS_RUNTIME_DIR } else { Join-Path $PSScriptRoot 'runtime' }))
 $ErrorActionPreference = 'Stop'
 $RuntimeDir = [System.IO.Path]::GetFullPath($RuntimeDir)
 $upstream = Join-Path $RuntimeDir 'index-tts'

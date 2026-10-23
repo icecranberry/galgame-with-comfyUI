@@ -49,7 +49,9 @@ export function requestSpeech({ characterId, voiceId, sampleId, text, params, me
   const cleaned = speechText(text, db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key));
   if (!/[\p{L}\p{N}]/u.test(cleaned)) throw new Error('这条消息没有可朗读的对白');
   if (cleaned.length > 1000) throw new Error('单次朗读最多 1000 字，请选择较短的气泡');
-  const actualParams = speechParams(voice || params);
+  // Preview drafts can override sampling without mutating the saved voice.
+  // Message playback always uses the saved profile.
+  const actualParams = speechParams(voice ? { ...voice, ...(!messageId && params?.generation_params !== undefined ? { generation_params: params.generation_params } : {}) } : params);
   const key = speechCacheKey(cleaned, sample.content_hash, actualParams);
   let job = db.prepare("SELECT * FROM speech_jobs WHERE cache_key=? AND status IN ('queued','generating','completed')").get(key);
   if (job?.status === 'completed' && !fs.existsSync(audioPath(job.output_path))) { updateJob(job.id, 'failed', '缓存文件已丢失'); job = null; }

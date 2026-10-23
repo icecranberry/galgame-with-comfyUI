@@ -19,9 +19,9 @@ export async function ttsRequest(route, body, timeout = 10000) {
   if (!response.ok) throw new Error(data.error || `TTS 服务错误 (${response.status})`);
   return data;
 }
-export async function ttsHealth() {
+export async function ttsHealth(timeout = 10000) {
   try {
-    const status = await ttsRequest('/health');
+    const status = await ttsRequest('/health', undefined, timeout);
     return { ...status, online: true, compatible: status.model_version === MODEL_VERSION };
   } catch (e) { return { online: false, compatible: false, error: e.message }; }
 }

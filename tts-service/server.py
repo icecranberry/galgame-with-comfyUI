@@ -4,6 +4,7 @@ Run in the pinned IndexTTS environment; see README.md. No web framework needed.
 """
 import hmac
 import json
+import math
 import multiprocessing as mp
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = Path(__file__).resolve().parent
@@ -19,6 +21,24 @@ MODEL_VERSION = f"IndexTTS-2.5:{VERSIONS['model_revision']}:{VERSIONS['code_revi
 AUDIO_ROOT = Path(os.environ.get("TTS_AUDIO_DIR", HERE.parent / "agent-core/data/audio")).resolve()
 MODEL_DIR = Path(os.environ.get("TTS_MODEL_DIR", HERE / "checkpoints")).resolve()
 TOKEN = os.environ.get("TTS_SERVICE_TOKEN", "")
+DEFAULT_GENERATION_OPTIONS = {"num_beams": 3, "temperature": 0.8, "top_p": 0.9, "top_k": 30}
+
+
+def generation_options(value=None):
+    if value is None:
+        return dict(DEFAULT_GENERATION_OPTIONS)
+    if not isinstance(value, dict) or set(value) - set(DEFAULT_GENERATION_OPTIONS):
+        raise ValueError("Invalid generation parameters")
+    result = DEFAULT_GENERATION_OPTIONS | value
+    for key, (low, high) in {"temperature": (0.1, 1.5), "top_k": (0, 100), "top_p": (0.1, 1), "num_beams": (1, 5)}.items():
+        number = result[key]
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number) or not low <= number <= high:
+            raise ValueError(f"Invalid {key}")
+        if key in ("top_k", "num_beams"):
+            if int(number) != number:
+                raise ValueError(f"Invalid {key}")
+            result[key] = int(number)
+    return result
 
 
 def configure_stdio():
@@ -55,6 +75,33 @@ def installation_error():
     return None
 
 
+def synthesize_to_file(model, args, temporary, *, generation_options=None):
+    # The pinned upstream warns when EOS is missing, but then decodes all 1500
+    # tokens anyway. Turn ONLY that warning into an error before vocoding or
+    # publishing. Retry once with shorter segments and deterministic decoding;
+    # never truncate a bad waveform and present it as a complete utterance.
+    # The worker supplies the production profile; standalone comparisons may
+    # supply their own settings without changing the service defaults.
+    base_options = dict(generation_options or {})
+    attempts = (base_options, {**base_options, "max_text_tokens_per_segment": 24, "do_sample": False})
+    for attempt, options in enumerate(attempts):
+        temporary.unlink(missing_ok=True)
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", message=r"WARN: generation stopped due to exceeding `max_mel_tokens`", category=RuntimeWarning)
+                model.infer(spk_audio_prompt=str(controlled_path(args["reference"], "references")),
+                            text=args["text"], lang=args["language"], output_path=str(temporary),
+                            duration_factor=args["duration_factor"], use_emo_text=False, **options)
+            return
+        except RuntimeWarning as error:
+            if not str(error).startswith("WARN: generation stopped due to exceeding `max_mel_tokens`"):
+                raise
+            temporary.unlink(missing_ok=True)
+            print(f"TTS attempt {attempt + 1}: missing audio stop token; output rejected", file=sys.stderr, flush=True)
+            if attempt == len(attempts) - 1:
+                raise RuntimeError("语音未正常结束，自动重试后仍异常，已丢弃结果。请换一段清晰、无背景音乐的参考音频后重试。") from error
+
+
 def worker(pipe):
     # CUDA libraries are imported in the child only; terminating it releases the
     # complete CUDA context, including hidden/global caches in upstream code.
@@ -72,9 +119,7 @@ def worker(pipe):
             # An incomplete file never becomes playable.
             temporary = output.with_name(output.stem + ".partial.wav")
             try:
-                model.infer(spk_audio_prompt=str(controlled_path(args["reference"], "references")),
-                            text=args["text"], lang=args["language"], output_path=str(temporary),
-                            duration_factor=args["duration_factor"], use_emo_text=False)
+                synthesize_to_file(model, args, temporary, generation_options=generation_options(args.get("generation_params")))
                 temporary.replace(output)
                 pipe.send({"ok": True})
             finally:
@@ -178,7 +223,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         error = installation_error()
-        self.respond(200, {"model_version": MODEL_VERSION, "ready": error is None, "error": error,
+        self.respond(200, {"model_version": MODEL_VERSION, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
                            "loaded": ENGINE.loaded, "worker_alive": bool(ENGINE.process and ENGINE.process.is_alive()),
                            "busy": ENGINE.inference.locked()})
 
@@ -200,6 +245,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid text length")
             if body.get("language") not in ("zh", "en", "ja") or not 0.5 <= float(body.get("duration_factor", 0)) <= 2:
                 raise ValueError("Invalid synthesis parameters")
+            body["generation_params"] = generation_options(body.get("generation_params"))
             if not controlled_path(body["reference"], "references").is_file():
                 raise ValueError("Reference file missing")
             controlled_path(body["output"], "generated")

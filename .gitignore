@@ -73,6 +73,7 @@ agent-core/test/*
 !agent-core/test/llmConfig.test.js
 !agent-core/test/novelaiClient.test.js
 !agent-core/test/vertexClient.test.js
+!agent-core/test/speechServiceProcess.test.js
 !agent-core/test/promptPresets.test.js
 !agent-core/test/townMapCapabilities.test.js
 !agent-core/test/imageCacheRevalidation.test.js

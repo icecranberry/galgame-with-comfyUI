@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+import warnings
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,11 +22,102 @@ adapter = load("tts_adapter", ROOT / "server.py")
 
 
 class ServiceTests(unittest.TestCase):
+    def test_generation_options_validate_and_preserve_defaults(self):
+        self.assertEqual(adapter.generation_options({}), adapter.DEFAULT_GENERATION_OPTIONS)
+        self.assertEqual(adapter.generation_options({"top_p": 0.95}), adapter.DEFAULT_GENERATION_OPTIONS | {"top_p": 0.95})
+        self.assertEqual(adapter.generation_options({"top_k": 0})["top_k"], 0)
+        for invalid in ([], "bad", {"top_p": 0}, {"top_p": 1.1}, {"temperature": "0.8"}, {"temperature": float('nan')}, {"top_k": 2.5}, {"num_beams": True}, {"num_beams": 6}, {"do_sample": False}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                adapter.generation_options(invalid)
+
+    def test_custom_parameters_survive_stop_token_retry(self):
+        calls = []
+        class Model:
+            def infer(self, *, output_path, **kwargs):
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    warnings.warn("WARN: generation stopped due to exceeding `max_mel_tokens` (1500).", RuntimeWarning)
+                Path(output_path).write_bytes(b"audio")
+        params = adapter.generation_options({"temperature": 0.75, "top_k": 40, "top_p": 0.95, "num_beams": 2})
+        with tempfile.TemporaryDirectory() as directory:
+            adapter.synthesize_to_file(Model(), {"reference": "references/test.wav", "text": "你好", "language": "zh", "duration_factor": 1}, Path(directory) / "test.wav", generation_options=params)
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual({key: call[key] for key in params}, params)
+
+    def test_unterminated_audio_is_retried_without_publishing_bad_output(self):
+        calls = []
+        class Model:
+            def infer(self, *, output_path, **kwargs):
+                calls.append(kwargs)
+                if len(calls) == 1:
+                    Path(output_path).write_bytes(b"partial previous segment")
+                    warnings.warn("WARN: generation stopped due to exceeding `max_mel_tokens` (1500). Input text tokens: 38.", RuntimeWarning)
+                    raise AssertionError("must abort before decoding runaway tokens")
+                self.assert_no_partial = not Path(output_path).exists()
+                Path(output_path).write_bytes(b"complete retry")
+        model = Model()
+        args = {"reference": "references/test.wav", "text": "一句很短的话。", "language": "zh", "duration_factor": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory) / "test.partial.wav"
+            adapter.synthesize_to_file(model, args, temporary, generation_options=adapter.DEFAULT_GENERATION_OPTIONS)
+            self.assertEqual(temporary.read_bytes(), b"complete retry")
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(model.assert_no_partial)
+        self.assertEqual(calls[1]["text"], args["text"])
+        self.assertEqual(calls[1]["max_text_tokens_per_segment"], 24)
+        self.assertFalse(calls[1]["do_sample"])
+        for call in calls:
+            self.assertEqual(call["top_p"], 0.9)
+            self.assertEqual(call["num_beams"], 3)
+            self.assertEqual(call["temperature"], 0.8)
+
+    def test_repeated_missing_stop_token_fails_and_removes_partial_audio(self):
+        calls = []
+        class Model:
+            def infer(self, *, output_path, **kwargs):
+                calls.append(kwargs)
+                Path(output_path).write_bytes(b"bad")
+                warnings.warn("WARN: generation stopped due to exceeding `max_mel_tokens` (1500).", RuntimeWarning)
+        args = {"reference": "references/test.wav", "text": "你好", "language": "zh", "duration_factor": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory) / "test.partial.wav"
+            with self.assertRaisesRegex(RuntimeError, "自动重试后仍异常"):
+                adapter.synthesize_to_file(Model(), args, temporary)
+            self.assertFalse(temporary.exists())
+        self.assertEqual(len(calls), 2)
+
+    def test_other_inference_errors_are_not_retried(self):
+        calls = []
+        class Model:
+            def infer(self, **kwargs):
+                calls.append(kwargs)
+                raise RuntimeError("CUDA out of memory")
+        args = {"reference": "references/test.wav", "text": "你好", "language": "zh", "duration_factor": 1}
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "CUDA out of memory"):
+                adapter.synthesize_to_file(Model(), args, Path(directory) / "test.partial.wav")
+        self.assertEqual(len(calls), 1)
+
+    def test_unrelated_runtime_warning_does_not_reject_valid_synthesis(self):
+        class Model:
+            def infer(self, *, output_path, **kwargs):
+                warnings.warn("unrelated backend warning", RuntimeWarning)
+                Path(output_path).write_bytes(b"valid")
+        args = {"reference": "references/test.wav", "text": "你好", "language": "zh", "duration_factor": 1}
+        with tempfile.TemporaryDirectory() as directory, warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            temporary = Path(directory) / "test.partial.wav"
+            adapter.synthesize_to_file(Model(), args, temporary)
+            self.assertEqual(temporary.read_bytes(), b"valid")
+            self.assertEqual(str(captured[0].message), "unrelated backend warning")
+
     def test_worker_can_log_unicode_with_gbk_redirected_streams(self):
         # Reproduce Windows background launches: both handles start as GBK,
         # and upstream logs the text before generating its WAV.
         text = "诶——？冰乐你终于冒头了！ ♪ 😊 𠮷"
         seen = []
+        generation_calls = []
 
         class Model:
             def __init__(self, **kwargs):
@@ -34,6 +126,7 @@ class ServiceTests(unittest.TestCase):
             def infer(self, *, text, output_path, **kwargs):
                 print(f"text after normalization: {text}")
                 seen.append(text)
+                generation_calls.append(kwargs)
                 Path(output_path).write_bytes(b"RIFFtest-wave")
 
         class Pipe:
@@ -43,7 +136,7 @@ class ServiceTests(unittest.TestCase):
                 if self.received: raise EOFError()
                 self.received = True
                 return {"reference": "references/test.wav", "output": "generated/test.wav",
-                        "text": text, "language": "zh", "duration_factor": 1}
+                        "text": text, "language": "zh", "duration_factor": 1, "generation_params": {"top_p": 0.95, "num_beams": 2}}
             def close(self): self.closed = True
 
         module = types.ModuleType("indextts.infer_v2_5")
@@ -58,6 +151,8 @@ class ServiceTests(unittest.TestCase):
             adapter.worker(pipe)
             self.assertEqual(pipe.messages[:2], [{"loaded": True}, {"ok": True}])
             self.assertEqual(seen, [text])
+            self.assertEqual({key: generation_calls[0][key] for key in ("num_beams", "temperature", "top_p", "top_k")},
+                             {"num_beams": 2, "temperature": 0.8, "top_p": 0.95, "top_k": 30})
             self.assertEqual((Path(directory) / "generated/test.wav").read_bytes(), b"RIFFtest-wave")
             self.assertFalse((Path(directory) / "generated/test.partial.wav").exists())
             stdout.flush(); stderr.flush()

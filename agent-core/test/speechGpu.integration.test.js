@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 // Explicit opt-in: real local GPU, installed guard/API, and three reference WAVs.
 // Never touches the user's database or changes their character bindings.
 test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
-  skip: process.env.RUN_TTS_GPU_TESTS !== '1', timeout: 1200000,
+  skip: process.env.RUN_TTS_GPU_TESTS !== '1', timeout: 1800000,
 }, async t => {
   process.env.DB_PATH = ':memory:';
   const { getDb, closeDb } = await import('../src/db/index.js');
@@ -94,7 +94,7 @@ test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
   assert.throws(() => service.requestSpeech({ characterId: characters[0], voiceId: 'gpu-voice-0', text: longText + '字' }), /1000/);
   const invalidPrompt = () => fetch(`${comfy}/prompt`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: {} }) });
   assert.equal((await invalidPrompt()).status, 423, 'lease must reject external image submissions');
-  await delay(17500);
+  await delay(10 * 60 * 1000 + 2500);
   assert.equal((await ttsHealth()).worker_alive, false, 'idle timeout must terminate the real worker');
   assert.notEqual((await invalidPrompt()).status, 423, 'idle timeout must release ComfyUI');
   report.cases.push({ label: 'idle-unload-and-external-prompt-guard', status: 'passed' });

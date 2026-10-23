@@ -2,8 +2,9 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../db/index.js';
 import { importAudio, cropAudio, audioPath, audioUrl } from '../services/voiceAssets.js';
-import { speechParams } from '../services/speechText.js';
+import { speechParams, speechGenerationParams } from '../services/speechText.js';
 import { ttsHealth } from '../services/indexTtsClient.js';
+import { restartSpeechService } from '../services/speechServiceProcess.js';
 import { recoverSpeechGpu } from '../services/speechGpu.js';
 import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech } from '../services/speechService.js';
 
@@ -15,7 +16,7 @@ const sampleView = s => ({ id: s.id, duration: s.duration, peaks: s.peaks,
   warnings: JSON.parse(s.warnings || '[]') });
 const voiceView = voiceId => {
   const { reference_path, ...voice } = getDb().prepare('SELECT v.*, s.reference_path FROM voices v JOIN voice_samples s ON s.id=v.sample_id WHERE v.id=?').get(voiceId);
-  return { ...voice, reference_url: audioUrl(reference_path) };
+  return { ...voice, generation_params: speechParams(voice).generation_params, reference_url: audioUrl(reference_path) };
 };
 
 router.get('/settings', route((req, res) => res.json(getSpeechSettings())));
@@ -28,6 +29,7 @@ router.get('/bindings', route((req, res) => {
   res.json(getDb().prepare('SELECT c.character_id,c.voice_id,c.enabled,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id').all());
 }));
 router.post('/recover', route(async (req, res) => res.json(await recoverSpeechGpu())));
+router.post('/restart', route(async (req, res) => res.json(await restartSpeechService())));
 router.post('/samples', express.raw({ type: 'application/octet-stream', limit: '25mb' }), route(async (req, res) => {
   const s = await importAudio(req.body);
   getDb().prepare('INSERT INTO voice_samples(id,original_path,preview_path,duration) VALUES(?,?,?,?)').run(s.id, s.original_path, s.preview_path, s.duration);
@@ -48,7 +50,7 @@ router.get('/voices', route((req, res) => {
   const characterId = req.query.character_id === undefined ? null : id(req.query.character_id);
   res.json(getDb().prepare(`SELECT v.*, s.reference_path FROM voices v JOIN voice_samples s ON s.id=v.sample_id
     ${characterId === null ? '' : 'WHERE v.character_id=@characterId'} ORDER BY v.created_at DESC`).all(characterId === null ? {} : { characterId })
-    .map(({ reference_path, ...v }) => ({ ...v, reference_url: audioUrl(reference_path) })));
+    .map(({ reference_path, ...v }) => ({ ...v, generation_params: speechParams(v).generation_params, reference_url: audioUrl(reference_path) })));
 }));
 function voiceFields(body) {
   const params = speechParams(body);
@@ -56,7 +58,7 @@ function voiceFields(body) {
   if (!name) throw new Error('请填写音色名称');
   const sample = getDb().prepare('SELECT * FROM voice_samples WHERE id=?').get(body.sample_id || '');
   if (!sample?.reference_path) throw new Error('请先处理参考音频');
-  return { name, sample_id: sample.id, language: params.language, speed: params.speed,
+  return { name, sample_id: sample.id, language: params.language, speed: params.speed, generation_params: JSON.stringify(params.generation_params),
     notes: String(body.notes || '').slice(0, 1000), transcript: String(body.transcript || '').slice(0, 2000) };
 }
 router.post('/voices', route((req, res) => {
@@ -65,17 +67,26 @@ router.post('/voices', route((req, res) => {
   const voice = { id: randomUUID(), character_id: characterId, ...voiceFields(req.body) };
   const db = getDb();
   db.transaction(() => {
-    db.prepare('INSERT INTO voices(id,character_id,name,sample_id,language,speed,notes,transcript) VALUES(@id,@character_id,@name,@sample_id,@language,@speed,@notes,@transcript)').run(voice);
+    db.prepare('INSERT INTO voices(id,character_id,name,sample_id,language,speed,notes,transcript,generation_params) VALUES(@id,@character_id,@name,@sample_id,@language,@speed,@notes,@transcript,@generation_params)').run(voice);
     db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, voice.id);
   })();
   res.status(201).json(voiceView(voice.id));
 }));
 router.put('/voices/:id', route((req, res) => {
-  if (!getDb().prepare('SELECT 1 FROM voices WHERE id=? AND character_id=?').get(req.params.id, id(req.body.character_id))) throw new Error('音色不属于当前角色');
-  const voice = { id: req.params.id, ...voiceFields(req.body) };
-  const result = getDb().prepare('UPDATE voices SET name=@name,sample_id=@sample_id,language=@language,speed=@speed,notes=@notes,transcript=@transcript,version=version+1 WHERE id=@id').run(voice);
+  const existing = getDb().prepare('SELECT * FROM voices WHERE id=? AND character_id=?').get(req.params.id, id(req.body.character_id));
+  if (!existing) throw new Error('音色不属于当前角色');
+  const voice = { id: req.params.id, ...voiceFields({ ...existing, ...req.body }) };
+  const result = getDb().prepare('UPDATE voices SET name=@name,sample_id=@sample_id,language=@language,speed=@speed,notes=@notes,transcript=@transcript,generation_params=@generation_params,version=version+1 WHERE id=@id').run(voice);
   if (!result.changes) throw new Error('音色不存在');
   res.json(voiceView(voice.id));
+}));
+router.put('/voices/:id/parameters', route((req, res) => {
+  const characterId = id(req.body.character_id);
+  if (!getDb().prepare('SELECT 1 FROM voices WHERE id=? AND character_id=?').get(req.params.id, characterId)) throw new Error('音色不属于当前角色');
+  const params = speechGenerationParams(req.body.generation_params);
+  getDb().prepare('UPDATE voices SET generation_params=?,version=version+1 WHERE id=? AND character_id=?')
+    .run(JSON.stringify(params), req.params.id, characterId);
+  res.json(voiceView(req.params.id));
 }));
 router.delete('/voices/:id', route((req, res) => {
   const db = getDb();

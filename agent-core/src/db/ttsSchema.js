@@ -32,6 +32,9 @@ export function migrateTtsSchema(db) {
       job_id TEXT NOT NULL REFERENCES speech_jobs(id)
     );
   `);
+  if (!db.prepare('PRAGMA table_info(voices)').all().some(column => column.name === 'generation_params')) {
+    db.exec("ALTER TABLE voices ADD COLUMN generation_params TEXT NOT NULL DEFAULT '{}'");
+  }
   if (!db.prepare('PRAGMA table_info(voices)').all().some(column => column.name === 'character_id')) {
     db.transaction(() => {
       db.exec('ALTER TABLE voices ADD COLUMN character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL');
