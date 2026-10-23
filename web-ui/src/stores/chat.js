@@ -141,6 +141,7 @@ export const useChatStore = defineStore('chat', () => {
           ...msg,
           content,
           type: msg.type || 'text',
+          speech_message_id: msg.id,
           sticker_images: emojiImages.map(url => ({ url, base64: null })),
         });
       }
@@ -680,6 +681,7 @@ export const useChatStore = defineStore('chat', () => {
                const m = messages.value.find(x => x.id === tempId)
                if (m) {
                  m.id = d.id
+                 m.speech_message_id = d.id
                   if (d.content !== undefined) m.content = d.content
                   if (Array.isArray(d.images) && d.images.length && !m.sticker_images?.length && !pendingStickerTimers.has(m)) {
                     scheduleSticker(m, d.images, !!d.leadingSticker)
@@ -851,6 +853,7 @@ export const useChatStore = defineStore('chat', () => {
       for (let i = 0; i < segments.length; i++) {
         messages.value.push({
           id: msgIds[i] || (i === 0 ? data.msg_id : uid()),
+          speech_message_id: msgIds[i] || (i === 0 ? data.msg_id : null),
           role: 'assistant',
           type: 'text',
           content: segments[i],
