@@ -26,7 +26,7 @@
     },
     {
       "name": "end_turn",
-      "description": "End this turn: nothing more you want to say or do right now. New events will wake you again. This is the normal way to finish a turn.",
+      "description": "End this turn: nothing more you want to say or do right now. New events or the heartbeat will wake you again. This is the normal way to finish a turn.",
       "parameters": {
         "type": "object",
         "properties": {},
@@ -36,8 +36,8 @@
         "flow"
       ],
       "summary": {
-        "zh": "结束这一轮,等新事件再醒。",
-        "en": "Ends the turn until a new event arrives."
+        "zh": "结束这一轮,等新事件或心跳再醒。",
+        "en": "Ends the turn until a new event or the heartbeat arrives."
       }
     }
   ],

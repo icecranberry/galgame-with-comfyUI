@@ -12,6 +12,8 @@ const HERE = resolve(import.meta.dirname);
 export interface LinsheConfig extends CoreConfig {
   /** 一轮唤醒里模型最多调几次工具:软上限提醒收尾,硬上限强制收尾。归 Persona。 */
   rounds: { soft: number; hard: number };
+  /** null 关闭心跳自醒;否则是自醒的基准分钟数(连续空转自动退避,最长 8 倍)。 */
+  tick: { intervalMinutes: number | null };
   /** 邻舍 World 的段;这里只读 baseUrl 供 Persona 拉人设,其余归 World 自己。 */
   worlds: { linshe?: { baseUrl?: string } };
 }
@@ -21,17 +23,26 @@ const DECLARES: readonly WorldDeclaration[] = ['console', 'qq', 'linshe'];
 
 function build(loaded: LoadedConfig<LinsheConfig>, worlds: World[]): BotParts<LinsheConfig> {
   const cfg = loaded.config;
-  return {
-    persona: new LinshePersona({
-      memoryDir: loaded.memoryDir,
-      packageDir: HERE,
-      worlds,
-      rounds: () => cfg.rounds,
-      bridge: () => ({
-        baseUrl: cfg.worlds?.linshe?.baseUrl || 'http://127.0.0.1:3099',
-        token: loaded.secret('LINSHE_BRIDGE_TOKEN'),
-      }),
+  const persona = new LinshePersona({
+    memoryDir: loaded.memoryDir,
+    packageDir: HERE,
+    worlds,
+    rounds: () => cfg.rounds,
+    bridge: () => ({
+      baseUrl: cfg.worlds?.linshe?.baseUrl || 'http://127.0.0.1:3099',
+      token: loaded.secret('LINSHE_BRIDGE_TOKEN'),
     }),
+    // 每次现读配置,WebUI 热改的间隔立即生效。
+    tickDelayMs: () => (cfg.tick?.intervalMinutes ?? null) === null ? null : cfg.tick.intervalMinutes * 60_000,
+  });
+  return {
+    persona,
+    onStart: () => {
+      persona.startRhythm();
+    },
+    onStop: () => {
+      persona.stopRhythm();
+    },
   };
 }
 
@@ -47,13 +58,15 @@ const definition: BotDefinition<LinsheConfig> = {
     paths: { memory: 'memory', data: 'data' },
     // 发一张图要 draft→confirm 往返;比模板略宽。
     rounds: { soft: 8, hard: 16 },
+    // 心跳自醒的基准间隔;部署可改或置 null 关闭。
+    tick: { intervalMinutes: 45 },
   }),
   build,
   // 自描述不进提示词。summary 按工具名给,可以只写一种语言。
   describe: {
     tools: describeTools(LINSHE_PERSONA_TOOL_DECLS, {
       memory_write: { zh: '往 MEMORY.md 末尾追加一行。', en: 'Appends one line to MEMORY.md.' },
-      end_turn: { zh: '结束这一轮,等新事件再醒。', en: 'Ends the turn until a new event arrives.' },
+      end_turn: { zh: '结束这一轮,等新事件或心跳再醒。', en: 'Ends the turn until a new event or the heartbeat arrives.' },
     }),
     memory: { form: { zh: '一份 MEMORY.md,整份进系统前缀;附件存在 blobs/ 下。', en: 'One MEMORY.md, all of it in the system prefix; attachments go under blobs/.' } },
   },
