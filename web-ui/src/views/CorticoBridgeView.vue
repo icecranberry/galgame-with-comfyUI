@@ -54,7 +54,7 @@
           <div class="section-heading"><h3>初始角色人格</h3><linshe-switch v-model="draft.inject_persona" aria-label="注入邻舍人物卡" /></div>
           <label class="field-label" for="cortico-character">选择邻舍角色</label>
           <linshe-select id="cortico-character" v-model="draft.character_id" :options="characterOptions" searchable placeholder="选择初始角色" />
-          <p class="hint">人物卡随角色更新，Cortico 人格前缀实时拉取（约半分钟内生效）。切换角色后建议新建对话。</p>
+          <p class="hint">选择即保存。人物卡随角色更新，Cortico 人格前缀实时拉取（约半分钟内生效）；切换角色后建议在 Cortico 后台重置会话，避免旧角色的对话记忆串味。</p>
           <Transition name="bridge-fade" mode="out-in"><div :key="previewKey" class="persona-preview"><p v-if="personaLoading" class="description">正在读取人物卡…</p><p v-else-if="personaError" class="error-text">{{ personaError }}</p><pre v-else-if="personaText">{{ personaText }}</pre><p v-else class="description">{{ characters.length ? '选择一个角色，预览她的初始人格。' : '还没有邻舍角色，请先在角色管理中添加。' }}</p></div></Transition>
           <p class="hint">关闭人格注入后仍可使用已开放的工具。省略角色 ID 的工具默认使用上方角色。</p>
         </section>
@@ -64,7 +64,6 @@
           <div class="tool-grid"><div v-for="group in groups" :key="group.id" class="tool-row"><div><h4>{{ group.label }}</h4><p class="hint">{{ group.description }}</p></div><linshe-switch :model-value="draft.tools.includes(group.id)" :aria-label="`开放${group.label}工具`" @update:model-value="toggleTool(group.id, $event)" /></div></div>
           <p class="hint">生图需要已配置 LLM 与生图服务；TTS 需要启用语音服务并绑定角色音色。Cortico 侧接入范围由 QQ World 的监听名单决定。</p>
         </section>
-        <div class="save-bar"><span class="status-line" role="status">{{ dirty ? '有未保存的修改' : '配置已保存' }}</span><div class="actions"><linshe-button :loading="testing" :disabled="dirty" @click="testConnection">测试邻舍接口</linshe-button><linshe-button variant="primary" :loading="saving" @click="save">保存配置</linshe-button></div></div>
       </div>
     </Transition>
   </div>
@@ -78,15 +77,14 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
-import { corticoGetSettings, corticoSaveSettings, corticoGetPersona, corticoTestConnection } from '../api/index.js'
+import { corticoGetSettings, corticoSaveSettings, corticoGetPersona } from '../api/index.js'
 
 const router = useRouter(), toast = inject('toast', null)
-const loading = ref(true), loadError = ref(''), saving = ref(false), testing = ref(false)
+const loading = ref(true), loadError = ref('')
 const draft = ref({ enabled: false, inject_persona: true, character_id: null, public_url: '', tools: [] }), saved = ref(null)
 const characters = ref([]), tools = ref([])
 const personaText = ref(''), personaError = ref(''), personaLoading = ref(false)
 const characterOptions = computed(() => characters.value.map(c => ({ value: c.id, label: c.display_name || c.name })))
-const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(saved.value))
 const enabledToolCount = computed(() => tools.value.filter(t => draft.value.tools.includes(t.group)).length)
 const previewKey = computed(() => `${draft.value.character_id}:${personaLoading.value}`)
 const groups = [
@@ -101,7 +99,7 @@ const groups = [
   { id: 'diary', label: '角色日记', description: '查询已写下的日记' },
   { id: 'world', label: '世界观', description: '邻舍当前世界设定' },
 ]
-function toggleTool(id, enabled) { draft.value.tools = enabled ? [...draft.value.tools, id] : draft.value.tools.filter(t => t !== id) }
+function toggleTool(id, enabled) { draft.value.tools = enabled ? [...draft.value.tools, id] : draft.value.tools.filter(t => t !== id); save() }
 async function load() {
   loading.value = true; loadError.value = ''
   try {
@@ -111,27 +109,26 @@ async function load() {
   } catch (e) { loadError.value = e.message } finally { loading.value = false }
 }
 let previewRequest = 0
+watch(() => draft.value.inject_persona, () => { save() })
 watch(() => draft.value.character_id, async id => {
   const request = ++previewRequest
   personaText.value = ''; personaError.value = ''; personaLoading.value = !!id
+  save()
   if (!id) return
   try { const data = await corticoGetPersona(id); if (request === previewRequest) personaText.value = data.system_prompt }
   catch (e) { if (request === previewRequest) personaError.value = e.message }
   finally { if (request === previewRequest) personaLoading.value = false }
 })
 async function save() {
-  saving.value = true
-  try { const data = await corticoSaveSettings(JSON.parse(JSON.stringify(draft.value))); saved.value = data.settings; draft.value = structuredClone(data.settings); toast?.('Cortico 配置已保存', 'success') }
-  catch (e) { toast?.(e.message, 'error') } finally { saving.value = false }
+  try {
+    const data = await corticoSaveSettings(JSON.parse(JSON.stringify(draft.value)))
+    saved.value = data.settings; draft.value = structuredClone(data.settings)
+  }
+  catch (e) { toast?.(e.message, 'error'); draft.value = structuredClone(saved.value) }
 }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); toast?.('已复制', 'success') }
   catch { toast?.('复制失败，请手动选择并复制', 'error') }
-}
-async function testConnection() {
-  testing.value = true
-  try { await corticoTestConnection(); toast?.('邻舍桥接接口可用，Cortico 侧请发起一次对话验证', 'success') }
-  catch (e) { toast?.(e.message, 'error') } finally { testing.value = false }
 }
 onMounted(load)
 </script>
@@ -211,9 +208,8 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border); }
 .tools-card > .hint { margin-top: 14px; }
 .compact-stat, .status-line { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }.compact-stat b { color: var(--accent); }
-.save-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 0 0 28px; }.save-bar .actions { margin: 0; }
 .error-text, .error-state p { color: var(--danger); font-size: var(--fs-sm); line-height: 1.7; }
 .bridge-fade-enter-active, .bridge-fade-leave-active { transition: opacity .3s var(--ease-standard); }.bridge-fade-enter-from, .bridge-fade-leave-to { opacity: 0; }
 @media (max-width: 767px) { .admin-links-grid { grid-template-columns: 1fr; } .tool-grid { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .cortico-page { padding: 16px; }.card { padding: 18px; }.page-header { align-items: flex-start; gap: 12px; }.save-bar .actions { width: 100%; } }
+@media (max-width: 600px) { .cortico-page { padding: 16px; }.card { padding: 18px; }.page-header { align-items: flex-start; gap: 12px; } }
 </style>
