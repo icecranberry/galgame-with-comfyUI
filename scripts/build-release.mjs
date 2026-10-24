@@ -644,7 +644,7 @@ async function main() {
     ensureDir(RELEASE_DIR);
 
     // robocopy 排除目录
-    const robocopyExclude = [".git", "node_modules", "release", "__pycache__", ".cache", "AstrBot"];
+    const robocopyExclude = [".git", "node_modules", "release", "__pycache__", ".cache", "AstrBot", "Cortico"];
     // 运行时临时快照（如 agent-core/townstate.tmp.json）不属于发布内容，别带进用户包里
     const robocopyExcludeFiles = ["*.tmp.json"];
     const rcOk = await robocopy(ROOT, RELEASE_DIR, robocopyExclude, robocopyExcludeFiles);

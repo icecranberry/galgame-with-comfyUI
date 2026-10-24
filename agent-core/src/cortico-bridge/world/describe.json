@@ -1,0 +1,205 @@
+{
+  "tools": [
+    {
+      "name": "linshe_characters",
+      "description": "列出邻舍角色及其 ID，指定其他角色前先查询。",
+      "parameters": { "type": "object", "properties": {}, "additionalProperties": false, "required": [] },
+      "tags": ["read"],
+      "summary": { "zh": "列出邻舍角色及其 ID。", "en": "Lists Linshe characters with their IDs." }
+    },
+    {
+      "name": "linshe_character",
+      "description": "查询邻舍角色人物卡。不传 character_id 使用初始角色。",
+      "parameters": {
+        "type": "object",
+        "properties": { "character_id": { "type": "integer", "minimum": 1, "description": "邻舍角色 ID，省略为初始角色" } },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询邻舍角色人物卡。", "en": "Fetches a Linshe character card." }
+    },
+    {
+      "name": "linshe_appearance",
+      "description": "查询角色原本外观、当前生效衣装、限时服饰及可用形态。",
+      "parameters": {
+        "type": "object",
+        "properties": { "character_id": { "type": "integer", "minimum": 1 } },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询角色外观、生效衣装与可用形态。", "en": "Fetches appearance, active outfits and forms." }
+    },
+    {
+      "name": "linshe_moments",
+      "description": "查询邻舍朋友圈最新动态。默认返回全镇所有人（角色、镇民、用户）混排的动态；只要看某个人（包括自己）发的，传 character_id。before_id 用于继续向前翻页。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50 },
+          "before_id": { "type": "integer", "minimum": 1 },
+          "character_id": { "type": "integer", "minimum": 1, "description": "邻舍角色 ID，只返回该角色发的动态；查询自己的最近动态时必传" }
+        },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "分页查询朋友圈动态，可按角色过滤。", "en": "Lists moments with paging and character filter." }
+    },
+    {
+      "name": "linshe_moment",
+      "description": "查询一条朋友圈及其评论，post_id 来自朋友圈列表。",
+      "parameters": {
+        "type": "object",
+        "properties": { "post_id": { "type": "integer", "minimum": 1 } },
+        "required": ["post_id"],
+        "additionalProperties": false
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询一条朋友圈及其评论。", "en": "Fetches one moment with comments." }
+    },
+    {
+      "name": "linshe_events",
+      "description": "查询角色及镇民当前奇遇、近期奇遇历史；仅查询，推进选项请在邻舍奇遇页进行。",
+      "parameters": {
+        "type": "object",
+        "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 50 } },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询角色与镇民的奇遇列表。", "en": "Lists active and recent events." }
+    },
+    {
+      "name": "linshe_event",
+      "description": "按奇遇列表返回的 ID 查询内容、选项和选择历史。",
+      "parameters": {
+        "type": "object",
+        "properties": { "event_id": { "type": "string", "maxLength": 80, "description": "奇遇 ID，如 123 或 town:123" } },
+        "required": ["event_id"],
+        "additionalProperties": false
+      },
+      "tags": ["read"],
+      "summary": { "zh": "按 ID 查询奇遇详情与选项。", "en": "Fetches one event with options." }
+    },
+    {
+      "name": "linshe_schedule",
+      "description": "查询邻舍角色今日日程和当前活动，不生成或重置日程。",
+      "parameters": {
+        "type": "object",
+        "properties": { "character_id": { "type": "integer", "minimum": 1 } },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询角色今日日程与当前活动。", "en": "Fetches today's schedule and current activity." }
+    },
+    {
+      "name": "linshe_newspaper",
+      "description": "查询邻舍日报，省略日期查询今天；不存在时如实告知。",
+      "parameters": {
+        "type": "object",
+        "properties": { "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "YYYY-MM-DD，省略为今天" } },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询邻舍日报。", "en": "Fetches the Linshe newspaper." }
+    },
+    {
+      "name": "linshe_diary",
+      "description": "查询邻舍角色某日已生成的日记。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "character_id": { "type": "integer", "minimum": 1 },
+          "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询角色某日已生成的日记。", "en": "Fetches a generated diary entry." }
+    },
+    {
+      "name": "linshe_world",
+      "description": "查询邻舍当前世界观。",
+      "parameters": { "type": "object", "properties": {}, "additionalProperties": false, "required": [] },
+      "tags": ["read"],
+      "summary": { "zh": "查询邻舍当前世界观。", "en": "Fetches the active world setting." }
+    },
+    {
+      "name": "linshe_task",
+      "description": "查询一个邻舍生图任务的最新状态；完成时回执带可发送的图片。linshe_generate_image 等待超时后用任务 ID 继续查询。",
+      "parameters": {
+        "type": "object",
+        "properties": { "task_id": { "type": "integer", "minimum": 1, "description": "linshe_generate_image 回执给出的任务 ID" } },
+        "required": ["task_id"],
+        "additionalProperties": false
+      },
+      "tags": ["read"],
+      "summary": { "zh": "查询生图任务状态，完成时带可发送图片。", "en": "Polls an image task; returns the image when done." }
+    },
+    {
+      "name": "linshe_moment_images",
+      "description": "取回朋友圈配图供你发送；需要给用户看朋友圈照片时用本工具。传 post_id 取该帖全部配图，或传 paths 直接取查询结果 images 字段里已携带的图片路径（如 /images/moments/xx.png），二者至少传一个。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "post_id": { "type": "integer", "minimum": 1 },
+          "paths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 9, "description": "朋友圈查询结果 images 字段中的图片路径，可一次多张" }
+        },
+        "additionalProperties": false,
+        "required": []
+      },
+      "tags": ["act"],
+      "summary": { "zh": "取回朋友圈配图供发送。", "en": "Retrieves moment images for sending." }
+    },
+    {
+      "name": "linshe_generate_image",
+      "description": "按用户要求为邻舍角色生成图片，自动采用该角色外观、衣装与生图配置。工具会等待生成完成并返回可发送的图片；相同参数返回同一张图，想要不同的图请改变描述或传入不同 nonce。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "requirement": { "type": "string", "minLength": 1, "maxLength": 4000, "description": "完整的画面需求，可用中文" },
+          "character_id": { "type": "integer", "minimum": 1 },
+          "nonce": { "type": "string", "maxLength": 64, "description": "可选。相同画面需求想要重画一张时，换一个任意字符串" }
+        },
+        "required": ["requirement"],
+        "additionalProperties": false
+      },
+      "tags": ["act"],
+      "summary": { "zh": "按角色配置与需求生图，完成后带可发送图片。", "en": "Generates an image; returns the image when done." }
+    },
+    {
+      "name": "linshe_tts",
+      "description": "使用邻舍角色已绑定的音色朗读文字，工具会等待合成完成并返回可发送的语音。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "需要朗读的对白" },
+          "character_id": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      },
+      "tags": ["act"],
+      "summary": { "zh": "用角色绑定音色合成语音，完成后带可发送语音。", "en": "Synthesizes speech; returns audio when done." }
+    }
+  ],
+  "events": [
+    {
+      "type": "linshe.started",
+      "description": { "zh": "World 挂载完成。", "en": "The World was mounted." }
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.linshe.envPrompt",
+      "title": "Linshe · 环境提示词",
+      "role": "envPrompt",
+      "content": "## 邻舍（Linshe）\n\n你连接着「邻舍」世界观服务，当前角色与它的生活数据都来自邻舍（{{linshe.baseUrl}}）。\n\n- 查询类工具（linshe_characters / character / appearance / moments / moment / events / event / schedule / newspaper / diary / world）只读。转述时忠于返回结果，不要编造邻舍里不存在的人、事、帖；结果不存在就如实说。\n- linshe_generate_image、linshe_tts、linshe_moment_images 的回执带 `[blob …]` 句柄：图片用 qq_draft 的 image 参数发送；语音条独占一条消息，qq_draft 只传 voice 参数，不带文字。\n- 多张图片逐条发送：每次 qq_draft 只带一张图，qq_confirm 发送成功后再起草下一条。\n- 生图与语音任务默认等待 {{linshe.taskTimeoutSec}} 秒；超时回执会给任务 ID，之后用 linshe_task 查询。等待期间不要向用户描述任务进度或预计时间。\n- linshe_task 的任务命名空间是「cortico」开头，与邻舍界面里其他来源的任务互不干扰。\n- 奇遇（events）只能在邻舍界面上推进选项，你只做查询与转述，不要假装自己替用户做了选择。\n"
+    }
+  ]
+}

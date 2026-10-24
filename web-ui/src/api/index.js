@@ -1,10 +1,10 @@
 const BASE = '/api'
 
-export const astrbotGetSettings = () => request('/astrbot/admin/settings')
-export const astrbotSaveSettings = body => request('/astrbot/admin/settings', { method: 'PUT', body })
-export const astrbotGetPersona = id => request(`/astrbot/admin/persona/${encodeURIComponent(id)}`)
-export const astrbotRotateToken = () => request('/astrbot/admin/rotate-token', { method: 'POST' })
-export const astrbotTestConnection = token => request('/astrbot/health', { headers: { Authorization: `Bearer ${token}` } })
+export const corticoGetSettings = () => request('/cortico/admin/settings')
+export const corticoSaveSettings = body => request('/cortico/admin/settings', { method: 'PUT', body })
+export const corticoGetPersona = id => request(`/cortico/admin/persona/${encodeURIComponent(id)}`)
+export const corticoRotateToken = () => request('/cortico/admin/rotate-token', { method: 'POST' })
+export const corticoTestConnection = token => request('/cortico/health', { headers: { Authorization: `Bearer ${token}` } })
 
 export const getPromptPresets = () => request('/presets')
 export const createPromptPreset = body => request('/presets', { method: 'POST', body })

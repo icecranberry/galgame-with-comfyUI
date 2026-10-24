@@ -1,6 +1,0 @@
-{
-  "linshe_url": {"description":"邻舍服务地址","type":"string","default":"http://127.0.0.1:3099","hint":"AstrBot 能访问的邻舍根地址。Docker 中不能使用容器自身的 127.0.0.1；Windows Docker Desktop 可用 http://host.docker.internal:3099。"},
-  "token": {"description":"邻舍桥接 Token","type":"string","default":"","hint":"在邻舍「设置 → AstrBot 集成」复制。请勿分享。"},
-  "allowed_sessions": {"description":"允许的会话","type":"list","default":[],"hint":"填写 AstrBot /sid 返回的会话标识。空列表表示所有已接入 AstrBot 的会话。"},
-  "task_timeout": {"description":"生图 / 语音最长等待秒数","type":"int","default":600}
-}

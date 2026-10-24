@@ -21,8 +21,8 @@ DEFAULT_CONFIG = {
     "maibot_autostart": False,  # 点击一键启动邻舍时同时启动 MaiBot
     "maibot_browser_maibot": True,  # MaiBot 就绪后自动打开后台 (8001)
     "maibot_browser_snowluma": True,  # SnowLuma 就绪后自动打开后台 (5099)
-    "astrbot_autostart": False,
-    "astrbot_open_browser": True,
+    "cortico_autostart": False,
+    "cortico_open_browser": True,
 }
 
 

@@ -44,6 +44,7 @@ android-shell/app/src/main/res/drawable-nodpi/ic_launcher_image.*
 MaiBot/
 MaiBot-Container/
 AstrBot/
+Cortico/
 output/
 
 # 本地会话产物与分发二进制
@@ -54,8 +55,7 @@ krea2-posters/
 
 # Isolated M1 UI build (screenshots and verification report remain reviewable)
 agent-core/test/*
-!agent-core/test/astrbotBridge.test.js
-!agent-core/test/astrbotPlugin.test.js
+!agent-core/test/corticoBridge.test.js
 !agent-core/test/lorebook*.test.js
 !agent-core/test/dialogueTranscript.test.js
 !agent-core/test/characterBackgrounds.test.js

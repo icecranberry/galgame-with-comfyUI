@@ -158,7 +158,7 @@ router.post('/mark-read', (req, res) => {
 // ──────────────── 朋友圈帖子 ────────────────
 
 // GET /api/moments — keyset 分页返回帖子：默认最新 1000 条；?before_id=<id> 续拉比它更旧的一批
-// ?character_id=<id> 只返回该角色发的动态（不含镇民/用户），AstrBot 桥接用，web 端不传即全量
+// ?character_id=<id> 只返回该角色发的动态（不含镇民/用户），Cortico 桥接用，web 端不传即全量
 // hasMore 通过多取一条探测；列表不返回 prompt（feed 渲染用不到，重新生成配图走 POST /:id/regenerate-image 自行读库）
 router.get('/', (req, res) => {
   const db = getDb();

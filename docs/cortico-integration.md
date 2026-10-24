@@ -1,0 +1,76 @@
+# Cortico 集成
+
+邻舍提供独立的 Cortico 桥接 API、两个 Cortico 扩展包（`cortico-world-linshe` 与 `cortico-bot-linshe`），以及桌面启动器管理入口。原有 MaiBot 集成继续使用原路径。
+
+## 首次接入
+
+1. 打开邻舍启动器的 **Cortico** 页，点击 **安装环境**。安装器从 [Cortico 官方仓库](https://github.com/Pal-AI-Lab/Cortico)克隆源码到根目录 `Cortico/`，用 pnpm 准备依赖，把邻舍扩展包 link 进 `Cortico/extensions/`，并创建 `linshe` 部署。需要 Node.js 22+（自带 corepack）与 Git（优先使用邻舍捆绑 Git）。
+2. 点击 **启动 Cortico**，打开后台（默认 `http://127.0.0.1:7900/`）配置模型端点与 QQ World。启动时会自动把邻舍桥接 Token 与地址同步进部署 `.env` 与 `config.json`；可开启随邻舍启动、启动后打开后台，停止按钮和退出启动器会停止其管理的进程。端口冲突时不会接管或结束外部进程。
+3. QQ 连接：Cortico 的 QQ World 走 OneBot v11 正向 WebSocket 连接 SnowLuma（默认 `ws://127.0.0.1:3001`，Token 即 SnowLuma 的 access token）。在 QQ World 的监听名单里添加要接入的群与私聊。
+4. 邻舍 **设置 → Cortico 集成** 中选择初始角色、开放工具，启用集成并保存；「复制部署配置」可直接得到部署所需的 `config.json` 段与 `.env` 键。
+5. 模型端点使用 Responses API 兼容服务（内建 `openai-responses-compat`）。
+
+## 人格与工具
+
+两个扩展包都在 `agent-core/src/cortico-bridge/` 下，随邻舍仓库维护：
+
+- `cortico-bot-linshe`（bot 包）：人格前缀由 `persona/PREFIX.md` 渲染——角色人设从桥接 API `/bootstrap` 实时拉取（约半分钟缓存），外加 QQ 举止守则、MEMORY.md 记忆与各 World 环境段。人物卡更新最迟半分钟生效；关闭注入则以通用助手兜底。切换角色后建议新建对话。
+- `cortico-world-linshe`（world 包）：把下表工具暴露给模型。查询类直接转述桥接返回；生图、语音、朋友圈配图在工具内等待任务完成后以回执附件（`log:` 句柄）交付，由 QQ World 的 `qq_draft` 发送（图片走 `image` 参数，语音条独占一条消息只传 `voice`）。
+
+已选择的角色同时是生图、TTS、人物卡、外观、日程、日记工具的默认角色；也可显式传入 `character_id`。
+
+| 工具 | 能力 |
+| --- | --- |
+| `linshe_characters` | 列出角色和 ID |
+| `linshe_character` | 查询完整人物卡 |
+| `linshe_appearance` | 查询外观、生效衣装、限时服饰和可用形态 |
+| `linshe_generate_image` | 按角色配置和用户描述生图，完成后随回执返回图片 |
+| `linshe_tts` | 使用角色绑定音色朗读，完成后随回执返回语音 |
+| `linshe_task` | 查询生图任务状态（等待超时后继续查询） |
+| `linshe_moments` | 分页查询朋友圈，可按角色过滤 |
+| `linshe_moment` | 查询动态正文与评论 |
+| `linshe_moment_images` | 取回动态配图，由模型逐条发送到会话 |
+| `linshe_events` | 查询角色、镇民和建筑奇遇列表 |
+| `linshe_event` | 查询奇遇详情、选项与已有选择历史 |
+| `linshe_schedule` | 查询今日日程与当前活动 |
+| `linshe_newspaper` | 查询今日或指定日期的日报 |
+| `linshe_diary` | 查询角色已生成的日记 |
+| `linshe_world` | 查询当前世界观 |
+
+查询不会主动生成内容；奇遇选项仍在邻舍奇遇页推进。生图复用邻舍现有提示词与生成服务，需要配置 LLM 和生图服务；TTS 需要启用语音服务并绑定角色音色。相同参数的生图请求返回同一任务（可用 `nonce` 区分），避免模型重试重复生成。
+
+生图/语音等待上限由部署 `config.json` 的 `worlds.linshe.taskTimeoutSec` 控制（默认 240 秒）；超时回执给出任务 ID，模型可用 `linshe_task` 继续查询。桥接 Token 走部署 `.env` 的 `LINSHE_BRIDGE_TOKEN`；Token 重置立即撤销旧 Token，启动器会在下次启动时自动同步，也可在设置页复制后手动更新。
+
+## HTTP 接口
+
+前缀为 `/api/cortico`。除 `/admin/*` 外都要求集成已启用，并携带 `Authorization: Bearer <Token>`。查询和任务接口还会校验对应工具分组权限。
+
+| 方法与路径 | 参数或结果 |
+| --- | --- |
+| `GET /health` | 桥接服务状态，不代表 QQ 连接已建立 |
+| `GET /bootstrap` | 初始人格与当前允许的工具清单 |
+| `GET /characters` | 角色列表 |
+| `GET /character`、`/appearance`、`/schedule` | 可选 `character_id` |
+| `GET /moments` | 可选 `limit`（最多 50）、`before_id`、`character_id`（只看该角色） |
+| `GET /moments/:id` | 朋友圈详情 |
+| `GET /moments/:id/images` | 朋友圈配图地址列表 |
+| `GET /events` | 可选 `limit`，分别限制当前与历史列表 |
+| `GET /events/by-id/:id` | 保留列表返回的 ID，支持数字、`town:`、`bfeat:` |
+| `GET /newspaper` | 可选 `date`（YYYY-MM-DD） |
+| `GET /diary` | 可选 `character_id`、`date` |
+| `GET /world` | 世界观 |
+| `POST /generate` | JSON：`requirement`、`session_id`、`request_id`，可选 `character_id`；返回 `task_id` |
+| `GET /tasks/:id` | 仅查询 Cortico 生图任务，完成后含 `image.url` |
+| `POST /tts` | JSON：`text`，可选 `character_id`；返回语音任务 `id` |
+| `GET /speech/:id` | 语音任务，完成后含 `audio_url` |
+
+管理接口为 `GET/PUT /admin/settings`、`GET /admin/persona/:id` 和 `POST /admin/rotate-token`，供邻舍设置页与启动器使用，不接受桥接 Token 作为管理权限。
+
+## 维护与验证
+
+- 桥接实现：`agent-core/src/cortico-bridge/`（`router.js`、`settings.js`、`tools.json` 共用工具清单，`world/`、`bot/` 为 Cortico 扩展包）。
+- 扩展包改动后运行 `pnpm check:extension <包目录>`（在 Cortico 仓库根下）校验，并重启 Cortico 进程。
+- 配置保存于邻舍数据库的 `cortico_bridge` 与 `cortico_bridge_token`，不增加配置文件密钥。
+- 启动器安装目录为 `Cortico/`；此目录排除出 Git 和发布包。重新点击安装环境可修复依赖并刷新扩展链接，保留部署配置。
+- 前端按项目原有方式构建，启动器需重新打包才能将入口更新到现有 EXE。
+- 在 `agent-core` 下运行 `node --test test/corticoBridge.test.js`。桥接测试使用独立内存数据库，覆盖鉴权、权限、人物卡、现有内容查询、任务幂等与 Token 轮换，不调用生产模型或消息平台。

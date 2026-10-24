@@ -1,27 +1,26 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { unzipSync, strFromU8 } from 'fflate';
 
 process.env.DB_PATH = ':memory:';
 const localFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw new Error('External services must not be called in bridge tests'); };
 const { getDb } = await import('../src/db/index.js');
 const { getSetting } = await import('../src/db/settings.js');
-const { createAstrbotRouter, toolCatalog } = await import('../src/astrbot-bridge/router.js');
+const { createCorticoRouter, toolCatalog } = await import('../src/cortico-bridge/router.js');
 const { getLocalDateKey } = await import('../src/utils/localDate.js');
 const db = getDb();
 let imageCalls = 0, speechArguments;
 const app = express();
 app.use(express.json());
-app.use('/api/astrbot', createAstrbotRouter({
+app.use('/api/cortico', createCorticoRouter({
   imagePrompt: async () => { imageCalls++; await new Promise(resolve => setTimeout(resolve, 20)); return 'test scene'; },
   imageTask: ({ conversationId, prompt }) => Number(db.prepare("INSERT INTO image_tasks(conversation_id,prompt_original,status) VALUES(?,?,'running')").run(conversationId, prompt).lastInsertRowid),
   speech: args => { speechArguments = args; return { id: 'speech-fixture', status: 'queued' }; },
 }));
 const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
-const base = `http://127.0.0.1:${server.address().port}/api/astrbot`;
+const base = `http://127.0.0.1:${server.address().port}/api/cortico`;
 after(async () => { await new Promise(resolve => server.close(resolve)); db.close(); });
 let token, characterId;
 async function request(path, { method = 'GET', body, auth = true, headers = {} } = {}) {
@@ -32,7 +31,7 @@ async function request(path, { method = 'GET', body, auth = true, headers = {} }
 }
 
 test('setup defaults, validation, persistence and strict authentication', async () => {
-  characterId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('astrbot-test', '星星', '你是星星。\n## 你的外观\n银发蓝眼。', '星星性格温和。').lastInsertRowid);
+  characterId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-test', '星星', '你是星星。\n## 你的外观\n银发蓝眼。', '星星性格温和。').lastInsertRowid);
   const initial = await request('/admin/settings', { auth: false });
   token = initial.data.token;
   assert.match(token, /^[a-f0-9]{64}$/);
@@ -45,7 +44,7 @@ test('setup defaults, validation, persistence and strict authentication', async 
   assert.match((await request('/admin/settings', { auth: false, method: 'PUT', body: { public_url: 'invalid-url' } })).data.error, /服务根地址/);
   const saved = await request('/admin/settings', { auth: false, method: 'PUT', body: { enabled: true, character_id: characterId } });
   assert.equal(saved.status, 200);
-  assert.equal(JSON.parse(getSetting('astrbot_bridge')).character_id, characterId);
+  assert.equal(JSON.parse(getSetting('cortico_bridge')).character_id, characterId);
   assert.equal((await request('/admin/settings', { auth: false })).data.settings.character_id, characterId);
   assert.equal((await request('/health')).data.ok, true);
 });
@@ -86,7 +85,7 @@ test('moments pagination, event detail and saved schedule share application data
   assert.equal(post.content, '动态2');
   assert.ok(Array.isArray(post.comments));
   assert.equal((await request(`/moments?limit=2&before_id=${feed.posts[1].id}`)).data.posts.length, 1);
-  const otherId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('astrbot-other', '月亮', '你是月亮。', '月亮性格安静。').lastInsertRowid);
+  const otherId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-other', '月亮', '你是月亮。', '月亮性格安静。').lastInsertRowid);
   const otherPostId = Number(db.prepare("INSERT INTO moment_posts(character_id,content,status) VALUES(?,?,'done')").run(otherId, '别人的动态').lastInsertRowid);
   const mine = (await request(`/moments?character_id=${characterId}`)).data.posts;
   assert.equal(mine.length, 3);
@@ -142,12 +141,7 @@ test('TTS validates text and uses the selected character binding', async () => {
   assert.equal((await request('/tts', { method: 'POST', body: { text: 'x'.repeat(1001) } })).status, 400);
 });
 
-test('plugin archive is complete and has no credentials; token rotation revokes previous token', async () => {
-  const response = await localFetch(base + '/admin/plugin.zip');
-  const zip = unzipSync(new Uint8Array(await response.arrayBuffer()));
-  assert.equal(Object.keys(zip).length, 7);
-  assert.deepEqual(JSON.parse(strFromU8(zip['astrbot_plugin_linshe/tools.json'])), toolCatalog);
-  for (const data of Object.values(zip)) assert.ok(!strFromU8(data).includes(token));
+test('admin surface rejects cross-site access; token rotation revokes previous token', async () => {
   assert.equal((await request('/admin/settings')).status, 403);
   assert.equal((await request('/admin/settings', { auth: false, headers: { Origin: 'https://unrelated.example' } })).status, 403);
   const next = await request('/admin/rotate-token', { auth: false, method: 'POST' });

@@ -1,0 +1,32 @@
+{
+  "name": "cortico-world-linshe",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cortico World: Linshe character persona, content queries, image generation and TTS tools",
+  "license": "MIT",
+  "keywords": [
+    "cortico-world",
+    "cortico"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./src/index.ts",
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "tags": [],
+    "describe": "describe.json"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "describe.json"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.2.6",
+    "typescript": "^5.7.2"
+  }
+}

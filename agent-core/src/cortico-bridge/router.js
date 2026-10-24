@@ -1,8 +1,7 @@
-/** AstrBot 专用边界：配置沿用邻舍管理接口；插件请求使用独立 Bearer Token。 */
+/** Cortico 专用边界：配置沿用邻舍管理接口；Cortico World 请求使用独立 Bearer Token。 */
 import { Router } from 'express';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { zipSync } from 'fflate';
 import { getDb, getWorldSetting } from '../db/index.js';
 import { getBridgeSettings, ensureBridgeToken, rotateBridgeToken, validToken, saveBridgeSettings } from './settings.js';
 import { buildCharacterAppearanceSection } from '../services/characterPersona.js';
@@ -18,9 +17,8 @@ import momentsRouter from '../routes/moments.js';
 import eventsRouter from '../routes/events.js';
 import { listTownBuildingFeatureEvents } from '../services/town/townBuildingFeatureRuntime.js';
 
-const pluginRoot = new URL('./plugin/', import.meta.url);
-export const toolCatalog = JSON.parse(readFileSync(new URL('tools.json', pluginRoot), 'utf8'));
-export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTask = startImageTask, speech = requestSpeech } = {}) {
+export const toolCatalog = JSON.parse(readFileSync(new URL('./tools.json', import.meta.url), 'utf8'));
+export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTask = startImageTask, speech = requestSpeech } = {}) {
   const router = Router();
   const asyncRoute = fn => (req, res, next) => Promise.resolve().then(() => fn(req, res)).catch(next);
   const positiveId = value => {
@@ -74,24 +72,16 @@ export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTas
     const c = character(req.params.id);
     res.json({ character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '' });
   });
-  router.get('/admin/plugin.zip', (req, res) => {
-    const files = {};
-    for (const name of ['main.py', 'client.py', 'metadata.yaml', '_conf_schema.json', 'requirements.txt', 'tools.json', 'README.md']) {
-      files[`astrbot_plugin_linshe/${name}`] = new Uint8Array(readFileSync(new URL(name, pluginRoot)));
-    }
-    // 安装包不携带 Token；连接配置由用户复制，避免 ZIP 被转发时泄露。
-    res.type('application/zip').attachment('astrbot_plugin_linshe.zip').send(Buffer.from(zipSync(files)));
-  });
 
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
     const authorization = req.get('Authorization') || '';
     if (!/^Bearer /i.test(authorization) || !validToken(authorization.slice(7))) return res.status(401).json({ error: '邻舍桥接 Token 无效' });
-    if (!getBridgeSettings().enabled) return res.status(403).json({ error: 'AstrBot 集成尚未启用' });
+    if (!getBridgeSettings().enabled) return res.status(403).json({ error: 'Cortico 集成尚未启用' });
     next();
   });
   const allow = group => (req, res, next) => getBridgeSettings().tools.includes(group) ? next() : res.status(403).json({ error: `邻舍已关闭 ${group} 工具` });
-  router.get('/health', (req, res) => res.json({ ok: true, service: 'astrbot-bridge', version: 1 }));
+  router.get('/health', (req, res) => res.json({ ok: true, service: 'cortico-bridge', version: 1 }));
   router.get('/bootstrap', (req, res) => res.json({ persona: persona(), tools: toolCatalog.filter(t => getBridgeSettings().tools.includes(t.group)) }));
   router.get('/characters', allow('characters'), (req, res) => res.json({ characters: characterList() }));
   router.get('/character', allow('characters'), (req, res) => {
@@ -113,7 +103,7 @@ export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTas
   });
   router.get('/world', allow('world'), (req, res) => res.json({ world: getWorldSetting() || null }));
 
-  // GET /api/astrbot/moments/:id/images — 朋友圈配图地址列表；插件读取后以 base64 直接发送到会话
+  // GET /api/cortico/moments/:id/images — 朋友圈配图地址列表；World 取回后以回执附件交给 Persona 发送
   router.get('/moments/:id/images', allow('moments'), (req, res) => {
     const id = positiveId(req.params.id);
     const post = getDb().prepare("SELECT id, images FROM moment_posts WHERE id = ? AND status = 'done'").get(id);
@@ -151,7 +141,7 @@ export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTas
     if (typeof requirement !== 'string' || !requirement.trim() || requirement.length > 4000 || typeof session_id !== 'string' || !session_id || session_id.length > 500 || typeof request_id !== 'string' || !request_id || request_id.length > 200) return res.status(400).json({ error: 'requirement（1–4000 字）、session_id、request_id 必填' });
     const c = character(req.body.character_id);
     const key = createHash('sha256').update(JSON.stringify([session_id, request_id, c.id, requirement])).digest('hex');
-    const conversationId = `astrbot_${key}`;
+    const conversationId = `cortico_${key}`;
     const existing = getDb().prepare('SELECT id FROM image_tasks WHERE conversation_id=? ORDER BY id DESC LIMIT 1').get(conversationId);
     if (existing) return res.json({ task_id: existing.id, status: getTask(existing.id)?.status });
     if (!pendingImages.has(key)) {
@@ -166,8 +156,8 @@ export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTas
   }));
   router.get('/tasks/:id', allow('images'), (req, res) => {
     const id = positiveId(req.params.id);
-    const row = getDb().prepare("SELECT id FROM image_tasks WHERE id=? AND conversation_id GLOB 'astrbot_*'").get(id);
-    if (!row) return res.status(404).json({ error: 'AstrBot 生图任务不存在' });
+    const row = getDb().prepare("SELECT id FROM image_tasks WHERE id=? AND conversation_id GLOB 'cortico_*'").get(id);
+    if (!row) return res.status(404).json({ error: 'Cortico 生图任务不存在' });
     res.json(getTask(id));
   });
   router.post('/tts', allow('tts'), (req, res) => {
@@ -184,8 +174,8 @@ export function createAstrbotRouter({ imagePrompt = extractImagePrompt, imageTas
   });
   router.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
-    res.status(error.status || 400).json({ error: error.message || 'AstrBot 桥接请求失败' });
+    res.status(error.status || 400).json({ error: error.message || 'Cortico 桥接请求失败' });
   });
   return router;
 }
-export default createAstrbotRouter();
+export default createCorticoRouter();

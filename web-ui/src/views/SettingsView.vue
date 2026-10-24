@@ -1014,10 +1014,10 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
       </div>
 
       <div class="card memory-settings-card maibot-settings-card">
-        <div class="memory-settings-header"><div><h3>AstrBot 集成</h3><p>把邻舍角色、图片、声音与小镇生活接入 AstrBot 对话</p></div></div>
+        <div class="memory-settings-header"><div><h3>Cortico 集成</h3><p>把邻舍角色、图片、声音与小镇生活接入 Cortico 人格机器人</p></div></div>
         <div
-          role="button" tabindex="0" class="memory-settings-entry sheen" aria-label="管理 AstrBot 集成"
-          @click="router.push('/settings/astrbot')" @keydown.enter.prevent="router.push('/settings/astrbot')" @keydown.space.prevent="router.push('/settings/astrbot')"
+          role="button" tabindex="0" class="memory-settings-entry sheen" aria-label="管理 Cortico 集成"
+          @click="router.push('/settings/cortico')" @keydown.enter.prevent="router.push('/settings/cortico')" @keydown.space.prevent="router.push('/settings/cortico')"
         >
           <span class="memory-entry-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM9 3h6M10 3v3M14 3v3M7 11h2M7 14h4M15 11h2M15 14h2" /></svg></span>
           <span class="memory-entry-copy"><span class="memory-entry-title">角色与工具配置</span><span class="memory-entry-desc">初始人格 · 生图与语音 · 朋友圈 · 奇遇 · 日程 · 日报</span></span>
