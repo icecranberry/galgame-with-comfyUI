@@ -51,12 +51,12 @@
           </div>
         </section>
         <section class="card persona-card">
-          <div class="section-heading"><h3>初始角色人格</h3><linshe-switch v-model="draft.inject_persona" aria-label="注入邻舍人物卡" /></div>
+          <div class="section-heading"><h3>初始角色人格</h3></div>
           <label class="field-label" for="cortico-character">选择邻舍角色</label>
           <linshe-select id="cortico-character" v-model="draft.character_id" :options="characterOptions" searchable placeholder="选择初始角色" />
-          <p class="hint">选择即保存。人物卡随角色更新，Cortico 人格前缀实时拉取（约半分钟内生效）；切换角色后建议在 Cortico 后台重置会话，避免旧角色的对话记忆串味。</p>
+          <p class="hint">人物卡随角色更新，Cortico 人格前缀实时拉取（约半分钟内生效）；切换角色后建议在 Cortico 后台重置会话，避免旧角色的对话记忆串味。</p>
           <Transition name="bridge-fade" mode="out-in"><div :key="previewKey" class="persona-preview"><p v-if="personaLoading" class="description">正在读取人物卡…</p><p v-else-if="personaError" class="error-text">{{ personaError }}</p><pre v-else-if="personaText">{{ personaText }}</pre><p v-else class="description">{{ characters.length ? '选择一个角色，预览她的初始人格。' : '还没有邻舍角色，请先在角色管理中添加。' }}</p></div></Transition>
-          <p class="hint">关闭人格注入后仍可使用已开放的工具。省略角色 ID 的工具默认使用上方角色。</p>
+          <p class="hint">省略角色 ID 的工具默认使用上方角色。</p>
         </section>
         <section class="card tools-card">
           <div class="section-heading"><h3>预置工具</h3><span class="compact-stat">已开放 <b>{{ enabledToolCount }}</b> / {{ tools.length }}</span></div>
@@ -105,11 +105,11 @@ async function load() {
   try {
     const data = await corticoGetSettings()
     saved.value = data.settings; draft.value = structuredClone(data.settings)
+    draft.value.inject_persona = true
     characters.value = data.characters; tools.value = data.tools
   } catch (e) { loadError.value = e.message } finally { loading.value = false }
 }
 let previewRequest = 0
-watch(() => draft.value.inject_persona, () => { save() })
 watch(() => draft.value.character_id, async id => {
   const request = ++previewRequest
   personaText.value = ''; personaError.value = ''; personaLoading.value = !!id
@@ -121,10 +121,10 @@ watch(() => draft.value.character_id, async id => {
 })
 async function save() {
   try {
-    const data = await corticoSaveSettings(JSON.parse(JSON.stringify(draft.value)))
-    saved.value = data.settings; draft.value = structuredClone(data.settings)
+    const data = await corticoSaveSettings(JSON.parse(JSON.stringify({ ...draft.value, inject_persona: true })))
+    saved.value = data.settings; draft.value = structuredClone(data.settings); draft.value.inject_persona = true
   }
-  catch (e) { toast?.(e.message, 'error'); draft.value = structuredClone(saved.value) }
+  catch (e) { toast?.(e.message, 'error'); draft.value = structuredClone(saved.value); draft.value.inject_persona = true }
 }
 async function copy(text) {
   try { await navigator.clipboard.writeText(text); toast?.('已复制', 'success') }
