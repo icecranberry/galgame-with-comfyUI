@@ -7,7 +7,7 @@
 1. 打开邻舍启动器的 **Cortico** 页，点击 **安装环境**。安装器从 [Cortico 官方仓库](https://github.com/Pal-AI-Lab/Cortico)克隆源码到根目录 `Cortico/`，用 pnpm 准备依赖，把邻舍扩展包 link 进 `Cortico/extensions/`，并创建 `linshe` 部署。需要 Node.js 22+（自带 corepack）与 Git（优先使用邻舍捆绑 Git）。
 2. 点击 **启动 Cortico**，打开后台（默认 `http://127.0.0.1:7900/`）配置模型端点与 QQ World。启动时会自动把邻舍服务地址同步进部署 `config.json`；可开启随邻舍启动、启动后打开后台，停止按钮和退出启动器会停止其管理的进程。端口冲突时不会接管或结束外部进程。
 3. QQ 连接：Cortico 的 QQ World 走 OneBot v11 正向 WebSocket 连接 SnowLuma（默认 `ws://127.0.0.1:3001`，Token 即 SnowLuma 的 access token）。在 QQ World 的监听名单里添加要接入的群与私聊。
-4. 邻舍 **设置 → Cortico 集成** 中选择初始角色、开放工具，启用集成并保存；「复制部署配置」可直接得到部署所需的 `config.json` 段。
+4. 邻舍 **设置 → Cortico 集成** 中选择初始角色、开放工具并保存；集成本地恒为启用，页面只保留 Cortico 后台与 SnowLuma 后台两个入口。
 5. 模型端点使用 Responses API 兼容服务（内建 `openai-responses-compat`）。
 
 ## 人格与工具
@@ -43,7 +43,7 @@
 
 ## HTTP 接口
 
-前缀为 `/api/cortico`。邻舍是纯本地项目，桥接不做 Token 鉴权：除 `/admin/*` 外都只要求集成已启用，查询和任务接口还会校验对应工具分组权限。
+前缀为 `/api/cortico`。邻舍是纯本地项目，桥接不做 Token 鉴权且恒为启用，仅工具分组开关约束能力面。
 
 | 方法与路径 | 参数或结果 |
 | --- | --- |

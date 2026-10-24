@@ -72,10 +72,9 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     res.json({ character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '' });
   });
 
-  // 纯本地集成：桥接不做 Token 验证，只受启用开关与工具分组约束。
+  // 纯本地集成恒为启用：桥接不做 Token 验证，只受工具分组约束。
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    if (!getBridgeSettings().enabled) return res.status(403).json({ error: 'Cortico 集成尚未启用' });
     next();
   });
   const allow = group => (req, res, next) => getBridgeSettings().tools.includes(group) ? next() : res.status(403).json({ error: `邻舍已关闭 ${group} 工具` });

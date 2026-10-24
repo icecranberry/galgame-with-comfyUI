@@ -18,14 +18,8 @@
       </div>
       <div v-else class="settings-grid">
         <section class="card connection-card">
-          <div class="section-heading"><h3>连接与安装</h3><linshe-switch v-model="draft.enabled" aria-label="启用 Cortico 集成" on-text="启用" off-text="停用" /></div>
-          <p class="description">邻舍是纯本地服务：桥接 API 不做鉴权，部署里的邻舍 World 直连本机接口读取角色与工具、提交生图与语音。打开上方开关即可用。</p>
-          <div class="actions">
-            <linshe-button size="sm" :disabled="dirty" @click="copyConfig">复制部署配置</linshe-button>
-          </div>
-          <div class="admin-links">
-            <span class="admin-links-title">后台入口</span>
-            <div class="admin-links-grid">
+          <div class="section-heading"><h3>后台入口</h3></div>
+          <div class="admin-links-grid">
               <a class="admin-link" href="http://127.0.0.1:7900/" target="_blank" rel="noopener">
                 <span class="admin-link-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM9 3h6M10 3v3M14 3v3M7 11h2M7 14h4M15 11h2M15 14h2"/></svg>
@@ -54,12 +48,6 @@
                 </span>
                 <span class="admin-link-open">打开<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
               </a>
-            </div>
-          </div>
-          <div class="install-steps">
-            <h4>接入步骤</h4>
-            <ol><li>邻舍启动器的 Cortico 页一键安装并启动；启动时自动把邻舍服务地址同步进部署 config.json；桥接纯本地直连，无需凭据。</li><li>跨设备部署时，把「复制部署配置」里的地址改成邻舍的局域网 IP，再写进部署 config.json。</li><li>QQ 连接在 Cortico 后台的 QQ World 监听名单里配置（OneBot v11 连 SnowLuma，默认 ws://127.0.0.1:3001）。</li></ol>
-            <div class="actions"><a class="text-link" href="https://github.com/Pal-AI-Lab/Cortico" target="_blank" rel="noopener noreferrer">Cortico 项目 ↗</a></div>
           </div>
         </section>
         <section class="card persona-card">
@@ -76,7 +64,7 @@
           <div class="tool-grid"><div v-for="group in groups" :key="group.id" class="tool-row"><div><h4>{{ group.label }}</h4><p class="hint">{{ group.description }}</p></div><linshe-switch :model-value="draft.tools.includes(group.id)" :aria-label="`开放${group.label}工具`" @update:model-value="toggleTool(group.id, $event)" /></div></div>
           <p class="hint">生图需要已配置 LLM 与生图服务；TTS 需要启用语音服务并绑定角色音色。Cortico 侧接入范围由 QQ World 的监听名单决定。</p>
         </section>
-        <div class="save-bar"><span class="status-line" role="status">{{ dirty ? '有未保存的修改' : saved?.enabled ? '集成已启用' : '集成已停用' }}</span><div class="actions"><linshe-button :loading="testing" :disabled="dirty || !saved?.enabled" @click="testConnection">测试邻舍接口</linshe-button><linshe-button variant="primary" :loading="saving" @click="save">保存配置</linshe-button></div></div>
+        <div class="save-bar"><span class="status-line" role="status">{{ dirty ? '有未保存的修改' : '配置已保存' }}</span><div class="actions"><linshe-button :loading="testing" :disabled="dirty" @click="testConnection">测试邻舍接口</linshe-button><linshe-button variant="primary" :loading="saving" @click="save">保存配置</linshe-button></div></div>
       </div>
     </Transition>
   </div>
@@ -140,11 +128,6 @@ async function copy(text) {
   try { await navigator.clipboard.writeText(text); toast?.('已复制', 'success') }
   catch { toast?.('复制失败，请手动选择并复制', 'error') }
 }
-function copyConfig() {
-  copy(JSON.stringify({
-    'config.json': { worlds: { linshe: { enabled: true, baseUrl: saved.value.public_url } } },
-  }, null, 2))
-}
 async function testConnection() {
   testing.value = true
   try { await corticoTestConnection(); toast?.('邻舍桥接接口可用，Cortico 侧请发起一次对话验证', 'success') }
@@ -173,8 +156,6 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
 
 /* ── 后台入口链接（与 MaiBot 桥接页同一套皮肤） ── */
-.admin-links { margin: 18px 0 0; }
-.admin-links-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-bright); margin-bottom: 8px; }
 .admin-links-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .admin-link {
   display: flex; align-items: center; gap: 12px; min-width: 0;
@@ -223,9 +204,6 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .admin-link:hover .admin-link-open { transform: translateX(2px); box-shadow: 0 5px 14px rgba(var(--accent-rgb), 0.36); }
 .admin-link-open svg { width: 14px; height: 14px; }
 
-.install-steps { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
-.install-steps ol { margin: 10px 0; padding-left: 22px; font-size: 13px; color: var(--text-secondary); line-height: 1.9; }
-.text-link { color: var(--accent); font-size: var(--fs-sm); }
 .persona-preview { min-height: 180px; max-height: 380px; overflow: auto; margin-top: 18px; padding: 16px; border-radius: var(--radius-md); background: var(--bg-secondary); }
 .persona-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-sm); line-height: 1.8; margin: 0; }
 .tools-card .hint { margin: 0; }

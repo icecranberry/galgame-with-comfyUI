@@ -33,10 +33,10 @@ async function request(path, { method = 'GET', body, headers = {} } = {}) {
 test('setup defaults, validation and persistence', async () => {
   characterId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-test', '星星', '你是星星。\n## 你的外观\n银发蓝眼。', '星星性格温和。').lastInsertRowid);
   const initial = await request('/admin/settings');
-  assert.equal(initial.data.settings.enabled, false);
+  assert.equal(initial.data.settings.enabled, true);
   assert.equal(initial.data.token, undefined);
-  assert.equal((await request('/health')).status, 403);
-  assert.equal((await request('/admin/settings', { method: 'PUT', body: { enabled: true } })).status, 400);
+  assert.equal((await request('/health')).data.ok, true);
+  assert.equal((await request('/admin/settings', { method: 'PUT', body: { enabled: false, character_id: characterId } })).data.settings.enabled, true);
   assert.equal((await request('/admin/settings', { method: 'PUT', body: { public_url: 'javascript:alert(1)' } })).status, 400);
   assert.match((await request('/admin/settings', { method: 'PUT', body: { public_url: 'invalid-url' } })).data.error, /服务根地址/);
   const saved = await request('/admin/settings', { method: 'PUT', body: { enabled: true, character_id: characterId } });
@@ -107,9 +107,7 @@ test('permissions apply to discovery and execution, and disabled bridge rejects 
   assert.ok((await request('/bootstrap')).data.tools.every(t => t.group === 'characters'));
   for (const path of ['/moments', '/appearance', '/events', '/schedule', '/diary', '/newspaper', '/world']) assert.equal((await request(path)).status, 403);
   assert.equal((await request('/generate', { method: 'POST', body: {} })).status, 403);
-  await request('/admin/settings', { method: 'PUT', body: { enabled: false } });
-  assert.equal((await request('/bootstrap')).status, 403);
-  await request('/admin/settings', { method: 'PUT', body: { enabled: true, tools: [...new Set(toolCatalog.map(t => t.group))] } });
+  await request('/admin/settings', { method: 'PUT', body: { tools: [...new Set(toolCatalog.map(t => t.group))] } });
 });
 
 test('image requests coalesce retries, survive rereads and isolate MaiBot tasks', async () => {

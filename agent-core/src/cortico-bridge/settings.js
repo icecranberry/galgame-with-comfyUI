@@ -3,16 +3,15 @@ import { getSetting, setSetting } from '../db/settings.js';
 export const GROUPS = ['characters', 'images', 'tts', 'moments', 'appearance', 'events', 'schedule', 'newspaper', 'diary', 'world'];
 export function getBridgeSettings() {
   const saved = JSON.parse(getSetting('cortico_bridge') || '{}');
-  return { enabled: false, character_id: null, inject_persona: true, tools: GROUPS,
-    public_url: 'http://127.0.0.1:3099', ...saved };
+  // 纯本地集成恒为启用；enabled 仅保留在存储里以兼容旧数据。
+  return { character_id: null, inject_persona: true, tools: GROUPS,
+    public_url: 'http://127.0.0.1:3099', ...saved, enabled: true };
 }
 export function saveBridgeSettings(body, db) {
   const next = { ...getBridgeSettings() };
-  for (const key of ['enabled', 'inject_persona']) {
-    if (body[key] !== undefined) {
-      if (typeof body[key] !== 'boolean') throw new Error(`${key} 必须是布尔值`);
-      next[key] = body[key];
-    }
+  if (body.inject_persona !== undefined) {
+    if (typeof body.inject_persona !== 'boolean') throw new Error('inject_persona 必须是布尔值');
+    next.inject_persona = body.inject_persona;
   }
   if (body.character_id !== undefined) {
     const id = body.character_id;
@@ -30,7 +29,7 @@ export function saveBridgeSettings(body, db) {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('请填写邻舍服务根地址，如 http://127.0.0.1:3099');
     next.public_url = url.origin;
   }
-  if (next.enabled && next.inject_persona && !next.character_id) throw new Error('请先选择初始人格角色，或关闭人格注入');
+  if (next.inject_persona && !next.character_id) throw new Error('请先选择初始人格角色，或关闭人格注入');
   setSetting('cortico_bridge', JSON.stringify(next));
   return next;
 }
