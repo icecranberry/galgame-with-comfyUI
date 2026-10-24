@@ -163,6 +163,9 @@ class CorticoRunner(QObject):
             'name': 'cortico', 'display': 'Cortico', 'port': CORTICO_PORT,
             'health_path': '/', 'cwd': 'Cortico',
             'get_cmd': _resolve_node, 'get_args': lambda: ['bin/cortico.mjs', CORTICO_DEPLOYMENT],
+            # bin/cortico.mjs 的监管模式默认启动即暂停（等操作员后台确认）；
+            # 一键启动的语义是直接在线，显式关掉。
+            'env': {'CORTICO_START_PAUSED': '0'},
         }, project_path, self)
         self._worker.output.connect(lambda key, text: self.output.emit(key, sanitize_output(text)))
         self._worker.health_changed.connect(self.health_changed)
