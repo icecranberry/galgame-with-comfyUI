@@ -64,7 +64,18 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   });
   router.get('/admin/settings', (req, res) => res.json({ settings: getBridgeSettings(), characters: characterList(), tools: toolCatalog }));
   router.put('/admin/settings', (req, res) => {
-    try { res.json({ settings: saveBridgeSettings(req.body || {}, getDb()) }); }
+    try {
+      const previous = getBridgeSettings().character_id;
+      const settings = saveBridgeSettings(req.body || {}, getDb());
+      // 角色变了就让 Cortico 重载 session 前缀，新角色立即生效（保留对话记录）。
+      if (settings.character_id && settings.character_id !== previous) {
+        const url = `http://127.0.0.1:${settings.webui_port}/api/session/reload-prefix`;
+        fetch(url, { method: 'POST' })
+          .then(r => { if (!r.ok) console.warn(`[cortico-bridge] 前缀重载失败 (HTTP ${r.status})`); })
+          .catch(e => console.warn(`[cortico-bridge] 前缀重载请求未送达 (${e.message})，下次重启部署时生效`));
+      }
+      res.json({ settings });
+    }
     catch (error) { res.status(400).json({ error: error.message }); }
   });
   router.get('/admin/persona/:id', (req, res) => {

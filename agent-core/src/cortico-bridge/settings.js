@@ -5,7 +5,7 @@ export function getBridgeSettings() {
   const saved = JSON.parse(getSetting('cortico_bridge') || '{}');
   // 纯本地集成恒为启用；enabled 仅保留在存储里以兼容旧数据。
   return { character_id: null, inject_persona: true, tools: GROUPS,
-    public_url: 'http://127.0.0.1:3099', ...saved, enabled: true };
+    public_url: 'http://127.0.0.1:3099', webui_port: 7900, ...saved, enabled: true };
 }
 export function saveBridgeSettings(body, db) {
   const next = { ...getBridgeSettings() };
@@ -21,6 +21,11 @@ export function saveBridgeSettings(body, db) {
   if (body.tools !== undefined) {
     if (!Array.isArray(body.tools) || body.tools.some(v => !GROUPS.includes(v))) throw new Error('工具分组无效');
     next.tools = [...new Set(body.tools)];
+  }
+  if (body.webui_port !== undefined) {
+    const port = Number(body.webui_port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('webui_port 必须是 1–65535 的整数');
+    next.webui_port = port;
   }
   if (body.public_url !== undefined) {
     let url;

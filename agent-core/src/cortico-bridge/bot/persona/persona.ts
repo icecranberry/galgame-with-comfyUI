@@ -61,15 +61,13 @@ const END_TURN_DECL: Omit<ToolDef, 'handler'> = {
 /** 自有工具的声明;`index.ts` 的 describe 与 `ownToolNames()` 都取它。 */
 export const LINSHE_PERSONA_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [MEMORY_WRITE_DECL, END_TURN_DECL];
 
-/** 人设拉取的短缓存:同一次前缀渲染与其后半分钟内的请求不再打桥接。 */
-const PERSONA_TTL_MS = 30_000;
-
 export class LinshePersona implements Persona {
   readonly memoryDir: string;
   readonly blobs: BlobStore;
   private core: CoreApi | null = null;
-  private personaCache: { at: number; block: string } | null = null;
   private readonly heartbeat: Heartbeat;
+  /** 上一次渲染时的初始角色 ID；跨重启持久化，用于识别角色切换。 */
+  private lastSeenCharacter: string | null;
 
   constructor(private readonly opts: LinshePersonaOptions) {
     this.memoryDir = opts.memoryDir;
@@ -79,6 +77,11 @@ export class LinshePersona implements Persona {
       writeFileSync(memory, readFileSync(join(opts.packageDir, 'persona', 'MEMORY.seed.md'), 'utf8'), 'utf8');
     }
     this.blobs = new FileBlobStore(this.memoryDir);
+    const stateFile = join(this.memoryDir, 'persona-state.json');
+    let lastSeen: string | null = null;
+    try { lastSeen = JSON.parse(readFileSync(stateFile, 'utf8')).lastCharacterId ?? null; } catch { /* 首次运行 */ }
+    this.lastSeenCharacter = lastSeen;
+    this.stateFile = stateFile;
     this.heartbeat = new Heartbeat(
       opts.tickDelayMs ?? ((): null => null),
       // 心跳文本在投递时按当下安静时长生成,并以同一文本入库。
@@ -89,6 +92,8 @@ export class LinshePersona implements Persona {
   attach(core: CoreApi): void {
     this.core = core;
   }
+
+  private stateFile: string;
 
   /** 心跳节律由装配层在 bot 启停时拉起/停止。 */
   startRhythm(): void {
@@ -161,12 +166,13 @@ export class LinshePersona implements Persona {
 
   /**
    * 从邻舍桥接拉取初始角色人设,渲染成前缀段;失败时空串,由模板的占位符兜底。
-   * 人设块在同一部署配置下逐字节稳定,供应商前缀缓存可命中;人物卡更新最迟半分钟生效。
+   * 每次渲染现拉(本地回环开销可忽略):切换角色后经 /session/reload-prefix 重载
+   * 前缀即取到最新人设,不会撞缓存。
    */
   private async personaBlock(): Promise<string> {
-    const cached = this.personaCache;
-    if (cached && Date.now() - cached.at < PERSONA_TTL_MS) return cached.block;
     let block = '';
+    let personaId: string | null = null;
+    let personaName = '';
     try {
       const { baseUrl } = this.opts.bridge();
       const base = baseUrl.trim().replace(/\/+$/, '');
@@ -180,6 +186,8 @@ export class LinshePersona implements Persona {
       };
       const persona = data.persona;
       if (!persona?.system_prompt) throw new Error('邻舍未选择初始角色或已关闭人设注入');
+      personaId = String(persona.character_id ?? '');
+      personaName = persona.name || '';
       block = [
         '# 邻舍角色人格',
         '',
@@ -194,7 +202,18 @@ export class LinshePersona implements Persona {
     } catch {
       block = '';
     }
-    this.personaCache = { at: Date.now(), block };
+    // 角色变化：向会话注入身份同步通告（前缀重载 + 通告双保险锚定新身份）。
+    if (personaId && this.lastSeenCharacter !== null && personaId !== this.lastSeenCharacter) {
+      this.core?.injectInternal(
+        `【身份同步】初始角色已切换：你现在的角色是 ${personaName}(character_id=${personaId})。`
+        + '此前的对话记录属于上一个角色，不要再沿用旧身份、旧名字或旧口癖自称。',
+        'notice',
+      );
+    }
+    if (personaId) {
+      this.lastSeenCharacter = personaId;
+      try { writeFileSync(this.stateFile, JSON.stringify({ lastCharacterId: personaId }), 'utf8'); } catch { /* 状态文件写失败只影响下次对比 */ }
+    }
     return block;
   }
 }
