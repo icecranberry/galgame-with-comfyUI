@@ -134,11 +134,11 @@ onMounted(load)
 
 <style scoped>
 .cortico-page { flex: 1; height: 100dvh; overflow-y: auto; padding: 32px; color: var(--text-bright); }
-.page-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+.page-header { display: flex; align-items: center; gap: 16px; margin: 0 auto 24px; max-width: 1560px; }
 .page-header h2 { margin: 0 0 6px; font-size: var(--fs-2xl); }
 .page-header p, .description { margin: 0 0 14px; font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }
 .page-header p { margin: 0; }
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1280px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1560px; margin: 0 auto; }
 .card { padding: 24px; min-width: 0; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
 h3 { margin: 0; font-size: var(--fs-lg); } h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
