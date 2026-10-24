@@ -37,6 +37,8 @@ const DB_ONLY_KEYS = new Set([
   'workflow_mode_auto_detected',
   'maibot_webui_url',
   'maibot_webui_token',
+  'astrbot_bridge',
+  'astrbot_bridge_token',
   'emoji_fixed_tags',
   'emoji_style_mode',
   'standing_prompt_mode',

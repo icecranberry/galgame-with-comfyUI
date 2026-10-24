@@ -1,5 +1,11 @@
 const BASE = '/api'
 
+export const astrbotGetSettings = () => request('/astrbot/admin/settings')
+export const astrbotSaveSettings = body => request('/astrbot/admin/settings', { method: 'PUT', body })
+export const astrbotGetPersona = id => request(`/astrbot/admin/persona/${encodeURIComponent(id)}`)
+export const astrbotRotateToken = () => request('/astrbot/admin/rotate-token', { method: 'POST' })
+export const astrbotTestConnection = token => request('/astrbot/health', { headers: { Authorization: `Bearer ${token}` } })
+
 export const getPromptPresets = () => request('/presets')
 export const createPromptPreset = body => request('/presets', { method: 'POST', body })
 export const updatePromptPreset = (id, body) => request(`/presets/${id}`, { method: 'PUT', body })

@@ -27,6 +27,7 @@ import BackpackView from './views/BackpackView.vue'
 import SettingsView from './views/SettingsView.vue'
 import MemorySettingsView from './views/MemorySettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
+import AstrbotBridgeView from './views/AstrbotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
 
@@ -48,6 +49,7 @@ const routes = [
   { path: '/settings', component: SettingsView },
   { path: '/settings/memory', component: MemorySettingsView },
   { path: '/settings/maibot', component: MaibotBridgeView },
+  { path: '/settings/astrbot', component: AstrbotBridgeView },
 ]
 
 const router = createRouter({ history: createWebHashHistory(), routes })

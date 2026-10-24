@@ -158,6 +158,7 @@ router.post('/mark-read', (req, res) => {
 // ──────────────── 朋友圈帖子 ────────────────
 
 // GET /api/moments — keyset 分页返回帖子：默认最新 1000 条；?before_id=<id> 续拉比它更旧的一批
+// ?character_id=<id> 只返回该角色发的动态（不含镇民/用户），AstrBot 桥接用，web 端不传即全量
 // hasMore 通过多取一条探测；列表不返回 prompt（feed 渲染用不到，重新生成配图走 POST /:id/regenerate-image 自行读库）
 router.get('/', (req, res) => {
   const db = getDb();
@@ -165,12 +166,17 @@ router.get('/', (req, res) => {
 
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 1000);
   const beforeId = parseInt(req.query.before_id, 10);
+  const authorId = parseInt(req.query.character_id, 10);
 
   const params = [nickname];
   let where = `WHERE mp.status = 'done'`;
   if (Number.isFinite(beforeId) && beforeId > 0) {
     where += ' AND (mp.created_at, mp.id) < (SELECT created_at, id FROM moment_posts WHERE id = ?)';
     params.push(beforeId);
+  }
+  if (Number.isFinite(authorId) && authorId > 0) {
+    where += ' AND mp.character_id = ?';
+    params.push(authorId);
   }
   params.push(limit + 1);
 

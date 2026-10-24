@@ -41,6 +41,7 @@ import mediaRoutes from './src/routes/media.js';
 import townRoutes from './src/routes/town.js';
 import characterReactionsRoutes from './src/routes/characterReactions.js';
 import maibotBridgeRoutes from './src/maibot-bridge/router.js';
+import astrbotBridgeRoutes from './src/astrbot-bridge/router.js';
 import { autoRestoreMissing } from './src/services/workflowTemplates.js';
 import { startMomentScheduler } from './src/services/momentScheduler.js';
 import { startSpecialMomentScheduler } from './src/services/scheduleSpecialMoment.js';
@@ -158,6 +159,7 @@ app.use('/api/town', wrapRouterAsync(townRoutes));
 app.use('/api/character-reactions', wrapRouterAsync(characterReactionsRoutes));
 
 app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
+app.use('/api/astrbot', wrapRouterAsync(astrbotBridgeRoutes));
 
 // 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
 // 前端「有更新噢」拿它当本地版本去比 GitHub 上的 tag —— 这一步只读本地文件、不碰网络，

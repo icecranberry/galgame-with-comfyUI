@@ -1,0 +1,6 @@
+name: astrbot_plugin_linshe
+display_name: 邻舍集成
+desc: 邻舍角色初始人格、生图、语音及生活查询工具
+version: v1.0.0
+author: Linshe
+astrbot_version: '>=4.5.7'

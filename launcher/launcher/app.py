@@ -27,6 +27,8 @@ from .build_manager import BuildManager
 from .service_runner import ServiceRunner, ServiceWorker
 from .network import get_local_ip
 from .maibot_runner import MaiBotRunner
+from .astrbot_runner import AstrbotRunner, ASTRBOT_ADMIN_URL
+from .astrbot_page import AstrbotPage
 from .home_page import HomePage
 from .log_page import LogPage
 from .maibot_page import MaiBotPage, MAIBOT_ADMIN_URL, SNOWLUMA_ADMIN_URL
@@ -192,6 +194,7 @@ class MainWindow(QMainWindow):
     PAGE_VERSION = 3
     PAGE_SETTINGS = 4
     PAGE_QA = 5
+    PAGE_ASTRBOT = 6
 
     def __init__(self):
         super().__init__()
@@ -205,6 +208,7 @@ class MainWindow(QMainWindow):
         self._build = BuildManager(self._project_path)
         self._runner = ServiceRunner(self._project_path)
         self._maibot_runner = MaiBotRunner(self._project_path)
+        self._astrbot_runner = AstrbotRunner(self._project_path)
 
         self._is_built = False
         self._switching_version = False
@@ -227,6 +231,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self._lazy_git_init)
 
         self._load_maibot_settings()
+        self._astrbot_page.set_values(self._config.get('astrbot_autostart'), self._config.get('astrbot_open_browser'))
 
     # ==================================================================
     # 窗口
@@ -351,6 +356,9 @@ class MainWindow(QMainWindow):
         self._qa_page = QAPage()
         self._stack.addWidget(self._qa_page)
 
+        self._astrbot_page = AstrbotPage(self._exe_dir)
+        self._stack.addWidget(self._astrbot_page)
+
         self._stack.setCurrentIndex(self.PAGE_HOME)
 
         # 标题栏按钮浮在页面之上
@@ -394,7 +402,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()  # 把按钮推到底部
 
         self._nav_btns: list[QPushButton] = []
-        labels = ["首页", "日志", "MaiBot", "版本", "设置", "Q&A"]
+        labels = ["首页", "日志", "MaiBot", "版本", "设置", "Q&A", "AstrBot"]
 
         for i, label in enumerate(labels):
             btn = QPushButton(label, self._nav)
@@ -456,6 +464,14 @@ class MainWindow(QMainWindow):
         self._maibot_runner.status_changed.connect(self._on_maibot_status)
         self._maibot_runner.health_changed.connect(self._on_maibot_health)
 
+        self._astrbot_page.start_clicked.connect(self._astrbot_runner.start_all)
+        self._astrbot_page.stop_clicked.connect(self._astrbot_runner.stop_all)
+        self._astrbot_page.install_clicked.connect(self._astrbot_runner.install)
+        self._astrbot_page.setting_changed.connect(self._config.set)
+        self._astrbot_runner.output.connect(self._astrbot_page.append_log)
+        self._astrbot_runner.status_changed.connect(self._astrbot_page.update_status)
+        self._astrbot_runner.health_changed.connect(self._on_astrbot_health)
+
     # ==================================================================
     # 页面切换
     # ==================================================================
@@ -473,7 +489,7 @@ class MainWindow(QMainWindow):
 
         self._update_nav_highlight(index)
 
-        # 页面区域下移 20px → 切换 → 从下往上滑入 (20px → 0px, 200ms)
+        # 页面区域下移 20px → 切换 → 从下往上滑入 (20px → 0px, 300ms)
         self._stack.move(NAV_W, 20)
         self._stack.setCurrentIndex(index)
         self._min_btn.raise_()
@@ -481,7 +497,7 @@ class MainWindow(QMainWindow):
 
         self._animating = True
         self._slide_anim = QPropertyAnimation(self._stack, b"pos")
-        self._slide_anim.setDuration(200)
+        self._slide_anim.setDuration(300)
         self._slide_anim.setStartValue(QPoint(NAV_W, 20))
         self._slide_anim.setEndValue(QPoint(NAV_W, 0))
         self._slide_anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -536,6 +552,8 @@ class MainWindow(QMainWindow):
         self._log_page.append_log("[系统] 正在停止邻舍服务...")
         self._runner.stop_all()
 
+        self._astrbot_runner.stop_all()
+
     def _start_services(self):
         if self._config.get("check_comfyui_before_start"):
             toast = Toast(self._content, "⚠ 请确认已经启动 ComfyUI")
@@ -546,6 +564,7 @@ class MainWindow(QMainWindow):
         self._runner.start_all()
         # 先启动邻舍主服务，3 秒后再拉起 MaiBot/SnowLuma
         QTimer.singleShot(3000, self._maybe_start_maibot_with_core)
+        QTimer.singleShot(3000, self._maybe_start_astrbot_with_core)
 
     # ==================================================================
     # 版本管理
@@ -779,6 +798,14 @@ class MainWindow(QMainWindow):
             browser_maibot=self._config.get("maibot_browser_maibot"),
             browser_snowluma=self._config.get("maibot_browser_snowluma"),
         )
+
+    def _maybe_start_astrbot_with_core(self):
+        if not self._closing and self._runner.any_active() and self._config.get('astrbot_autostart'):
+            self._astrbot_runner.start_all()
+
+    def _on_astrbot_health(self, key, healthy):
+        if healthy and not self._closing and self._config.get('astrbot_open_browser'):
+            webbrowser.open(ASTRBOT_ADMIN_URL)
 
     def _maybe_start_maibot_with_core(self):
         """主服务启动 3 秒后，按勾选状态拉起 MaiBot/SnowLuma。"""
@@ -1061,6 +1088,7 @@ class MainWindow(QMainWindow):
         if (
             not self._runner.any_active()
             and not self._maibot_runner.any_active()
+            and not self._astrbot_runner.any_active()
         ):
             event.accept()
             return
@@ -1078,8 +1106,10 @@ class MainWindow(QMainWindow):
         self._runner.stop_all()
         self._maibot_runner.stop_all()
 
+        self._astrbot_runner.stop_all()
+
         def on_maybe_all_stopped(*_args):
-            if self._runner.any_active() or self._maibot_runner.any_active():
+            if self._runner.any_active() or self._maibot_runner.any_active() or self._astrbot_runner.any_active():
                 return
             try:
                 self._runner.status_summary.disconnect(on_maybe_all_stopped)
@@ -1089,10 +1119,15 @@ class MainWindow(QMainWindow):
                 self._maibot_runner.all_stopped.disconnect(on_maybe_all_stopped)
             except RuntimeError:
                 pass
+            try:
+                self._astrbot_runner.all_stopped.disconnect(on_maybe_all_stopped)
+            except RuntimeError:
+                pass
             self._final_quit()
 
         self._runner.status_summary.connect(on_maybe_all_stopped)
         self._maibot_runner.all_stopped.connect(on_maybe_all_stopped)
+        self._astrbot_runner.all_stopped.connect(on_maybe_all_stopped)
         # 立即检查一次（stop_all 时可能部分服务本就已停止）
         on_maybe_all_stopped()
 
@@ -1111,6 +1146,11 @@ class MainWindow(QMainWindow):
             pass
         self._runner._force_kill_all()
         self._maibot_runner.force_kill_all()
+        try:
+            self._astrbot_runner.all_stopped.disconnect()
+        except RuntimeError:
+            pass
+        self._astrbot_runner.force_kill_all()
         QApplication.quit()
 
 
