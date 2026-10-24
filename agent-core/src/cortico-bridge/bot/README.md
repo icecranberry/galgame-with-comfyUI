@@ -11,6 +11,7 @@
 | `displayName` | `邻舍` | WebUI 标题与控制台发送方名称 |
 | `web.port` | `7900` | WebUI 端口 |
 | `rounds` | `soft 8 / hard 16` | 一轮唤醒的工具调用上限（发图需 draft→confirm 往返） |
+| `tick` | `intervalMinutes: 45` | 心跳自醒基准间隔（连续空转指数退避至 8 倍）；`null` 关闭 |
 | `worlds.linshe.baseUrl` | `http://127.0.0.1:3099` | Persona 拉人设用的邻舍地址 |
 
 桥接 Token 走部署 `.env` 的 `LINSHE_BRIDGE_TOKEN`,与 `cortico-world-linshe` 共用。

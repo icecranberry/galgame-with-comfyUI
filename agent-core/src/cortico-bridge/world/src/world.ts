@@ -324,8 +324,8 @@ export class LinsheWorld implements World {
     return { bytes, mime };
   }
 
-  /** 轮询任务直到完成；超时返回 null，由调用方决定如何向模型交代。 */
-  private async waitTask(kind: 'image' | 'speech', id: number, ctx: ToolCallContext): Promise<{ url: string } | null> {
+  /** 轮询任务直到完成；超时返回 null，由调用方决定如何向模型交代。生图任务 ID 为数字，语音任务 ID 为 UUID 字符串。 */
+  private async waitTask(kind: 'image' | 'speech', id: number | string, ctx: ToolCallContext): Promise<{ url: string } | null> {
     const deadline = Date.now() + Math.max(30, Math.min(3600, this.cfg.taskTimeoutSec)) * 1000;
     while (Date.now() < deadline) {
       if (ctx.signal?.aborted) throw new Error('本轮已取消；邻舍任务仍在后台运行，稍后可用 linshe_task 查询');
@@ -447,7 +447,7 @@ export class LinsheWorld implements World {
         }) as { id?: number | string };
         const jobId = data.id;
         if (jobId === undefined || jobId === null || jobId === '') throw new Error('邻舍没有返回语音任务 ID');
-        const done = await this.waitTask('speech', Number(jobId), ctx);
+        const done = await this.waitTask('speech', String(jobId), ctx);
         if (!done) {
           return `语音任务 #${jobId} 已提交，等待超过 ${this.cfg.taskTimeoutSec} 秒仍未完成。不要向用户描述任务进度或预计时间。`;
         }
