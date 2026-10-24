@@ -23,17 +23,17 @@ interface LinsheWorldOptions {
 export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   {
     name: 'linshe_characters',
-    description: '列出邻舍角色及其 ID，指定其他角色前先查询。',
+    description: '列出角色及其 ID；要指定其他角色前先查询。',
     tags: ['read'],
     parameters: { type: 'object', properties: {}, additionalProperties: false, required: [] },
   },
   {
     name: 'linshe_character',
-    description: '查询邻舍角色人物卡。不传 character_id 使用初始角色。',
+    description: '查询角色人物卡。不传 character_id 即查询当前角色。',
     tags: ['read'],
     parameters: {
       type: 'object',
-      properties: { character_id: { type: 'integer', minimum: 1, description: '邻舍角色 ID，省略为初始角色' } },
+      properties: { character_id: { type: 'integer', minimum: 1, description: '角色 ID，省略为当前角色' } },
       additionalProperties: false,
       required: [],
     },
@@ -52,14 +52,14 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   {
     name: 'linshe_moments',
     description:
-      '查询邻舍朋友圈最新动态。默认返回全镇所有人（角色、镇民、用户）混排的动态；只要看某个人（包括自己）发的，传 character_id。before_id 用于继续向前翻页。',
+      '查询朋友圈最新动态。默认返回所有人混排的动态；只要看某个人（包括自己）发的，传 character_id。before_id 用于继续向前翻页。',
     tags: ['read'],
     parameters: {
       type: 'object',
       properties: {
         limit: { type: 'integer', minimum: 1, maximum: 50 },
         before_id: { type: 'integer', minimum: 1 },
-        character_id: { type: 'integer', minimum: 1, description: '邻舍角色 ID，只返回该角色发的动态；查询自己的最近动态时必传' },
+        character_id: { type: 'integer', minimum: 1, description: '角色 ID，只返回该角色发的动态；查询自己的最近动态时必传' },
       },
       additionalProperties: false,
       required: [],
@@ -78,7 +78,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_events',
-    description: '查询角色及镇民当前奇遇、近期奇遇历史；仅查询，推进选项请在邻舍奇遇页进行。',
+    description: '查询角色及镇民当前奇遇、近期奇遇历史；仅查询。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -100,7 +100,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_schedule',
-    description: '查询邻舍角色今日日程和当前活动，不生成或重置日程。',
+    description: '查询角色今日日程和当前活动。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -111,7 +111,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_newspaper',
-    description: '查询邻舍日报，省略日期查询今天；不存在时如实告知。',
+    description: '查询小镇日报，省略日期查询今天；不存在时如实告知。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -122,7 +122,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_diary',
-    description: '查询邻舍角色某日已生成的日记。',
+    description: '查询角色某日已生成的日记。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -136,14 +136,14 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_world',
-    description: '查询邻舍当前世界观。',
+    description: '查询你所处世界的设定。',
     tags: ['read'],
     parameters: { type: 'object', properties: {}, additionalProperties: false, required: [] },
   },
   {
     name: 'linshe_task',
     description:
-      '查询一个邻舍生图任务的最新状态；完成时回执带可发送的图片。linshe_generate_image 等待超时后用任务 ID 继续查询。',
+      '查询一个生图任务的最新状态；完成时回执带可发送的图片。linshe_generate_image 等待超时后用任务 ID 继续查询。',
     tags: ['read'],
     parameters: {
       type: 'object',
@@ -171,7 +171,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   {
     name: 'linshe_generate_image',
     description:
-      '按用户要求为邻舍角色生成图片，自动采用该角色外观、衣装与生图配置。工具会等待生成完成并返回可发送的图片；相同参数返回同一张图，想要不同的图请改变描述或传入不同 nonce。',
+      '按用户要求为角色生成图片，自动采用该角色外观、衣装与生图配置。工具会等待生成完成并返回可发送的图片；相同参数返回同一张图，想要不同的图请改变描述或传入不同 nonce。',
     tags: ['act'],
     barrierAfter: true,
     parameters: {
@@ -187,7 +187,7 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_tts',
-    description: '使用邻舍角色已绑定的音色朗读文字，工具会等待合成完成并返回可发送的语音。',
+    description: '使用角色已绑定的音色朗读文字，工具会等待合成完成并返回可发送的语音。',
     tags: ['act'],
     barrierAfter: true,
     parameters: {
@@ -203,7 +203,8 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
 ];
 
 function dump(data: unknown): string {
-  const text = JSON.stringify(data);
+  // 回执进模型上下文后可能被原话复读：内部系统名统一换成圈内说法。
+  const text = JSON.stringify(data).replaceAll('邻舍', '小镇');
   if (text.length <= MAX_TEXT_CHARS) return text;
   return text.slice(0, MAX_TEXT_CHARS) + '…（结果过长已截断，可用更具体的参数缩小查询范围）';
 }
@@ -236,7 +237,6 @@ export class LinsheWorld implements World {
   /** 只报值；前缀文本一律来自 ENV_PROMPT.md 模板。 */
   envPromptVars(): Record<string, string> {
     return {
-      'linshe.baseUrl': this.base(),
       'linshe.taskTimeoutSec': String(this.cfg.taskTimeoutSec),
     };
   }
@@ -259,7 +259,6 @@ export class LinsheWorld implements World {
           path: ENV_PROMPT_FILE,
           role: 'envPrompt',
           vars: [
-            { name: 'linshe.baseUrl', description: '配置里的邻舍服务地址,此刻的值。' },
             { name: 'linshe.taskTimeoutSec', description: '配置里的任务等待上限,此刻的值。' },
           ],
         },
@@ -275,7 +274,7 @@ export class LinsheWorld implements World {
       source: this.id,
       origin: 'internal',
       senderKey: this.id,
-      text: '邻舍 World 已挂载,linshe_* 工具可用。',
+      text: '你的生活数据已接通，查询与分享工具可用。',
     });
   }
 

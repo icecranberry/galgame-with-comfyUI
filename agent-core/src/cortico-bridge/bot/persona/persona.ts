@@ -151,13 +151,13 @@ export class LinshePersona implements Persona {
     return LINSHE_PERSONA_TOOL_DECLS.map((decl) => decl.name);
   }
 
-  /** 心跳自醒的话:提示翻翻邻舍生活,值得分享就主动开口,不值得就安静。 */
+  /** 心跳自醒的话:提示翻翻自己的生活,值得分享就主动开口,不值得就安静。 */
   private tickText(quietSeconds: number): string {
     const quiet = quietSeconds < 60
       ? `${quietSeconds} 秒`
       : `${Math.floor(quietSeconds / 60)} 分钟`;
     return [
-      `[自醒] 你已经安静了 ${quiet}。这是你自己的时间:翻翻邻舍的生活——今天的日程、奇遇、朋友圈、日记`,
+      `[自醒] 你已经安静了 ${quiet}。这是你自己的时间:翻翻自己的生活——今天的日程、奇遇、朋友圈、日记`,
       '(linshe_schedule / linshe_events / linshe_moments / linshe_diary),',
       '有值得主动分享的新鲜事就到群里说说;讲到有情绪、得意或动情的地方,优先用 linshe_tts 发语音。',
       '没有值得说的就安静等待,不要为了说话而说话,不要重复讲过的事,不要每次都打招呼问好。',
@@ -185,11 +185,11 @@ export class LinshePersona implements Persona {
         persona?: { character_id?: number; name?: string; system_prompt?: string } | null;
       };
       const persona = data.persona;
-      if (!persona?.system_prompt) throw new Error('邻舍未选择初始角色或已关闭人设注入');
+      if (!persona?.system_prompt) throw new Error('initial persona unavailable');
       personaId = String(persona.character_id ?? '');
       personaName = persona.name || '';
       block = [
-        '# 邻舍角色人格',
+        '# 角色人格',
         '',
         persona.system_prompt,
         '',

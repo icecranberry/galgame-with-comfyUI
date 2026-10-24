@@ -54,7 +54,7 @@
           <div class="section-heading"><h3>初始角色人格</h3></div>
           <label class="field-label" for="cortico-character">选择邻舍角色</label>
           <linshe-select id="cortico-character" v-model="draft.character_id" :options="characterOptions" searchable placeholder="选择初始角色" />
-          <p class="hint">人物卡随角色更新，Cortico 人格前缀实时拉取（约半分钟内生效）；切换角色后建议在 Cortico 后台重置会话，避免旧角色的对话记忆串味。</p>
+          <p class="hint">选择后自动生效：Cortico 会立即重载人格前缀并同步身份，对话记录保留。人物卡随角色更新，实时拉取。</p>
           <Transition name="bridge-fade" mode="out-in"><div :key="previewKey" class="persona-preview"><p v-if="personaLoading" class="description">正在读取人物卡…</p><p v-else-if="personaError" class="error-text">{{ personaError }}</p><pre v-else-if="personaText">{{ personaText }}</pre><p v-else class="description">{{ characters.length ? '选择一个角色，预览她的初始人格。' : '还没有邻舍角色，请先在角色管理中添加。' }}</p></div></Transition>
           <p class="hint">省略角色 ID 的工具默认使用上方角色。</p>
         </section>
