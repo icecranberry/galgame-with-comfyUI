@@ -1,10 +1,15 @@
 <template>
   <div class="cortico-page">
     <header class="page-header">
-      <linshe-button variant="icon" size="lg" aria-label="返回系统设置" @click="router.push('/settings')">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6" /></svg>
+      <linshe-button variant="icon" size="lg" class="back" aria-label="返回系统设置" @click="router.push('/settings')">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
       </linshe-button>
-      <div><h2>Cortico 集成</h2><p>让邻舍角色走进 Cortico 人格机器人，也带上她的声音与小镇生活。</p></div>
+      <div>
+        <h2>Cortico 集成</h2>
+        <p>让邻舍角色走进 Cortico 人格机器人，也带上她的声音与小镇生活。</p>
+      </div>
     </header>
     <Transition name="bridge-fade" mode="out-in">
       <p v-if="loading" class="status-line" role="status">正在读取集成配置…</p>
@@ -24,6 +29,39 @@
             <linshe-button size="sm" @click="copy(token)">复制 Token</linshe-button>
             <linshe-button size="sm" :disabled="dirty" @click="copyConfig">复制部署配置</linshe-button>
             <linshe-button variant="ghost" size="sm" @click="rotateVisible = true">重置 Token</linshe-button>
+          </div>
+          <div class="admin-links">
+            <span class="admin-links-title">后台入口</span>
+            <div class="admin-links-grid">
+              <a class="admin-link" href="http://127.0.0.1:7900/" target="_blank" rel="noopener">
+                <span class="admin-link-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM9 3h6M10 3v3M14 3v3M7 11h2M7 14h4M15 11h2M15 14h2"/></svg>
+                </span>
+                <span class="admin-link-copy">
+                  <span class="admin-link-name">Cortico 后台</span>
+                  <span class="admin-link-meta">
+                    <span class="admin-link-tag">人格机器人</span>
+                    <span class="admin-link-token">默认无密码，仅本机</span>
+                    <span class="admin-link-url">127.0.0.1:7900</span>
+                  </span>
+                </span>
+                <span class="admin-link-open">打开<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+              </a>
+              <a class="admin-link" href="http://127.0.0.1:5099/" target="_blank" rel="noopener">
+                <span class="admin-link-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M4 6h16v14H4zM9 3h6M10 3v3M14 3v3M7 11h2M7 14h4M15 11h2M15 14h2"/></svg>
+                </span>
+                <span class="admin-link-copy">
+                  <span class="admin-link-name">SnowLuma 后台</span>
+                  <span class="admin-link-meta">
+                    <span class="admin-link-tag">消息接收器</span>
+                    <span class="admin-link-token">默认密码：<b>SnowLuma.admin</b></span>
+                    <span class="admin-link-url">127.0.0.1:5099</span>
+                  </span>
+                </span>
+                <span class="admin-link-open">打开<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+              </a>
+            </div>
           </div>
           <div class="install-steps">
             <h4>接入步骤</h4>
@@ -133,32 +171,88 @@ onMounted(load)
 </script>
 
 <style scoped>
-.cortico-page { flex: 1; height: 100dvh; overflow-y: auto; padding: 32px; color: var(--text-bright); }
-.page-header { display: flex; align-items: center; gap: 16px; margin: 0 auto 24px; max-width: 1560px; }
-.page-header h2 { margin: 0 0 6px; font-size: var(--fs-2xl); }
-.page-header p, .description { margin: 0 0 14px; font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }
-.page-header p { margin: 0; }
-.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1560px; margin: 0 auto; }
-.card { padding: 24px; min-width: 0; }
+.cortico-page { flex: 1; height: 100vh; height: 100dvh; overflow-y: auto; padding: 32px; color: var(--text-bright); }
+
+.page-header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+.page-header h2 { margin: 0 0 4px; font-size: 24px; }
+.page-header p, .card p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.back { flex-shrink: 0; }
+
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; width: 100%; }
+.card { padding: 24px; display: flex; flex-direction: column; }
+.card h3 { font-size: 15px; color: var(--text-bright); margin: 0; font-weight: 600; }
+h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
-h3 { margin: 0; font-size: var(--fs-lg); } h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
-.field-label { display: block; font-size: var(--fs-sm); font-weight: 600; margin: 16px 0 8px; }
+.description { margin: 0 0 14px !important; }
+.field-label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 8px; }
 .field-row { display: flex; gap: 8px; align-items: center; }.field-row > :first-child { flex: 1; min-width: 0; }
 .hint { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
-.install-steps { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
-.install-steps ol { margin: 10px 0; padding-left: 22px; font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.9; }
+
+/* ── 后台入口链接（与 MaiBot 桥接页同一套皮肤） ── */
+.admin-links { margin: 18px 0 0; }
+.admin-links-title { display: block; font-size: 13px; font-weight: 600; color: var(--text-bright); margin-bottom: 8px; }
+.admin-links-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.admin-link {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 12px 14px;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1.5px solid rgba(var(--accent-rgb), 0.32); border-radius: 12px;
+  text-decoration: none; color: var(--text-primary);
+  box-shadow: 0 1px 4px rgba(var(--accent-rgb), 0.08);
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+.admin-link:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent); background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: 0 8px 20px rgba(var(--accent-rgb), 0.18);
+}
+.admin-link-icon {
+  width: 36px; height: 36px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; background: var(--accent); color: #fff;
+  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.28);
+}
+.admin-link-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.admin-link-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.admin-link-name { font-size: 14px; font-weight: 800; color: var(--text-bright); }
+.admin-link-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.admin-link-tag {
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.14);
+}
+.admin-link-url { font-size: 11px; color: var(--text-secondary); font-family: ui-monospace, monospace; white-space: nowrap; }
+.admin-link-token {
+  font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+}
+.admin-link-token b { color: var(--accent); font-family: ui-monospace, monospace; font-weight: 700; }
+.admin-link-open {
+  margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+  padding: 6px 10px; border-radius: 999px;
+  background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+  box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.admin-link:hover .admin-link-open { transform: translateX(2px); box-shadow: 0 5px 14px rgba(var(--accent-rgb), 0.36); }
+.admin-link-open svg { width: 14px; height: 14px; }
+
+.install-steps { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); }
+.install-steps ol { margin: 10px 0; padding-left: 22px; font-size: 13px; color: var(--text-secondary); line-height: 1.9; }
 .text-link { color: var(--accent); font-size: var(--fs-sm); }
-.persona-preview { min-height: 180px; max-height: 340px; overflow: auto; margin-top: 18px; padding: 16px; border-radius: var(--radius-md); background: var(--bg-secondary); }
+.persona-preview { min-height: 180px; max-height: 380px; overflow: auto; margin-top: 18px; padding: 16px; border-radius: var(--radius-md); background: var(--bg-secondary); }
 .persona-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-sm); line-height: 1.8; margin: 0; }
-.tools-card, .save-bar { grid-column: 1 / -1; }
+.tools-card .hint { margin: 0; }
 .tool-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; }
 .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border); }
-.tool-row .hint { margin: 0; }
+.tools-card > .hint { margin-top: 14px; }
 .compact-stat, .status-line { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }.compact-stat b { color: var(--accent); }
 .save-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 0 0 28px; }.save-bar .actions { margin: 0; }
 .error-text, .error-state p { color: var(--danger); font-size: var(--fs-sm); line-height: 1.7; }
 .bridge-fade-enter-active, .bridge-fade-leave-active { transition: opacity .3s var(--ease-standard); }.bridge-fade-enter-from, .bridge-fade-leave-to { opacity: 0; }
-@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .cortico-page { padding: 16px; }.card { padding: 18px; }.tool-grid { grid-template-columns: 1fr; }.page-header { align-items: flex-start; gap: 12px; }.save-bar .actions { width: 100%; } }
+@media (max-width: 767px) { .admin-links-grid { grid-template-columns: 1fr; } .tool-grid { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .cortico-page { padding: 16px; }.card { padding: 18px; }.page-header { align-items: flex-start; gap: 12px; }.save-bar .actions { width: 100%; } }
 </style>
