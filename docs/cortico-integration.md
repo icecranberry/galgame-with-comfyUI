@@ -5,9 +5,9 @@
 ## 首次接入
 
 1. 打开邻舍启动器的 **Cortico** 页，点击 **安装环境**。安装器从 [Cortico 官方仓库](https://github.com/Pal-AI-Lab/Cortico)克隆源码到根目录 `Cortico/`，用 pnpm 准备依赖，把邻舍扩展包 link 进 `Cortico/extensions/`，并创建 `linshe` 部署。需要 Node.js 22+（自带 corepack）与 Git（优先使用邻舍捆绑 Git）。
-2. 点击 **启动 Cortico**，打开后台（默认 `http://127.0.0.1:7900/`）配置模型端点与 QQ World。启动时会自动把邻舍桥接 Token 与地址同步进部署 `.env` 与 `config.json`；可开启随邻舍启动、启动后打开后台，停止按钮和退出启动器会停止其管理的进程。端口冲突时不会接管或结束外部进程。
+2. 点击 **启动 Cortico**，打开后台（默认 `http://127.0.0.1:7900/`）配置模型端点与 QQ World。启动时会自动把邻舍服务地址同步进部署 `config.json`；可开启随邻舍启动、启动后打开后台，停止按钮和退出启动器会停止其管理的进程。端口冲突时不会接管或结束外部进程。
 3. QQ 连接：Cortico 的 QQ World 走 OneBot v11 正向 WebSocket 连接 SnowLuma（默认 `ws://127.0.0.1:3001`，Token 即 SnowLuma 的 access token）。在 QQ World 的监听名单里添加要接入的群与私聊。
-4. 邻舍 **设置 → Cortico 集成** 中选择初始角色、开放工具，启用集成并保存；「复制部署配置」可直接得到部署所需的 `config.json` 段与 `.env` 键。
+4. 邻舍 **设置 → Cortico 集成** 中选择初始角色、开放工具，启用集成并保存；「复制部署配置」可直接得到部署所需的 `config.json` 段。
 5. 模型端点使用 Responses API 兼容服务（内建 `openai-responses-compat`）。
 
 ## 人格与工具
@@ -39,11 +39,11 @@
 
 查询不会主动生成内容；奇遇选项仍在邻舍奇遇页推进。生图复用邻舍现有提示词与生成服务，需要配置 LLM 和生图服务；TTS 需要启用语音服务并绑定角色音色。相同参数的生图请求返回同一任务（可用 `nonce` 区分），避免模型重试重复生成。
 
-生图/语音等待上限由部署 `config.json` 的 `worlds.linshe.taskTimeoutSec` 控制（默认 240 秒）；超时回执给出任务 ID，模型可用 `linshe_task` 继续查询。桥接 Token 走部署 `.env` 的 `LINSHE_BRIDGE_TOKEN`；Token 重置立即撤销旧 Token，启动器会在下次启动时自动同步，也可在设置页复制后手动更新。
+生图/语音等待上限由部署 `config.json` 的 `worlds.linshe.taskTimeoutSec` 控制（默认 240 秒）；超时回执给出任务 ID，模型可用 `linshe_task` 继续查询。
 
 ## HTTP 接口
 
-前缀为 `/api/cortico`。除 `/admin/*` 外都要求集成已启用，并携带 `Authorization: Bearer <Token>`。查询和任务接口还会校验对应工具分组权限。
+前缀为 `/api/cortico`。邻舍是纯本地项目，桥接不做 Token 鉴权：除 `/admin/*` 外都只要求集成已启用，查询和任务接口还会校验对应工具分组权限。
 
 | 方法与路径 | 参数或结果 |
 | --- | --- |
@@ -64,13 +64,13 @@
 | `POST /tts` | JSON：`text`，可选 `character_id`；返回语音任务 `id` |
 | `GET /speech/:id` | 语音任务，完成后含 `audio_url` |
 
-管理接口为 `GET/PUT /admin/settings`、`GET /admin/persona/:id` 和 `POST /admin/rotate-token`，供邻舍设置页与启动器使用，不接受桥接 Token 作为管理权限。
+管理接口为 `GET/PUT /admin/settings` 与 `GET /admin/persona/:id`，供邻舍设置页与启动器使用，不向跨站浏览器开放。
 
 ## 维护与验证
 
 - 桥接实现：`agent-core/src/cortico-bridge/`（`router.js`、`settings.js`、`tools.json` 共用工具清单，`world/`、`bot/` 为 Cortico 扩展包）。
 - 扩展包改动后运行 `pnpm check:extension <包目录>`（在 Cortico 仓库根下）校验，并重启 Cortico 进程。
-- 配置保存于邻舍数据库的 `cortico_bridge` 与 `cortico_bridge_token`，不增加配置文件密钥。
+- 配置保存于邻舍数据库的 `cortico_bridge`；桥接为纯本地直连，无鉴权凭据。
 - 启动器安装目录为 `Cortico/`；此目录排除出 Git 和发布包。重新点击安装环境可修复依赖并刷新扩展链接，保留部署配置。
 - 前端按项目原有方式构建，启动器需重新打包才能将入口更新到现有 EXE。
-- 在 `agent-core` 下运行 `node --test test/corticoBridge.test.js`。桥接测试使用独立内存数据库，覆盖鉴权、权限、人物卡、现有内容查询、任务幂等与 Token 轮换，不调用生产模型或消息平台。
+- 在 `agent-core` 下运行 `node --test test/corticoBridge.test.js`。桥接测试使用独立内存数据库，覆盖启用开关、工具分组权限、人物卡、现有内容查询与任务幂等，不调用生产模型或消息平台。

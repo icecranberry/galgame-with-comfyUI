@@ -142,7 +142,7 @@ def sync_bridge_settings(project_path, emit):
     worlds['linshe'] = linshe
     config['worlds'] = worlds
     config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    emit('cortico', '[Cortico] 已同步邻舍桥接 Token 与地址到 linshe 部署')
+    emit('cortico', '[Cortico] 已同步邻舍服务地址到 linshe 部署')
 
 
 class CorticoRunner(QObject):

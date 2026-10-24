@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { ToolCallContext, ToolDef, World, WorldHost, WorldWebUiDecl } from 'cortico/core/types.ts';
 import { nowIso } from 'cortico/core/util.ts';
-import { LINSHE_CONFIG_GROUP, LINSHE_SECRETS, type LinsheConfigSection } from './config.ts';
+import { LINSHE_CONFIG_GROUP, type LinsheConfigSection } from './config.ts';
 
 const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
@@ -16,8 +16,6 @@ type Query = Record<string, string | number | undefined | null>;
 interface LinsheWorldOptions {
   /** `worlds.linshe` 的活引用；热改的键现读即生效。 */
   cfg: LinsheConfigSection;
-  /** 桥接 Bearer Token；空串 = 未配置凭据（查询会被服务端拒绝）。 */
-  token: string;
   timezone: string;
 }
 
@@ -292,10 +290,7 @@ export class LinsheWorld implements World {
     }
     const response = await fetch(url, {
       method,
-      headers: {
-        ...(this.opts.token ? { Authorization: `Bearer ${this.opts.token}` } : {}),
-        ...(opts.json !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      },
+      headers: opts.json !== undefined ? { 'Content-Type': 'application/json' } : {},
       body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
       redirect: 'manual',
       signal: opts.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 30000),
@@ -463,4 +458,3 @@ export class LinsheWorld implements World {
   }
 }
 
-export { LINSHE_SECRETS };

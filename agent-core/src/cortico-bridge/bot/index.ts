@@ -28,10 +28,7 @@ function build(loaded: LoadedConfig<LinsheConfig>, worlds: World[]): BotParts<Li
     packageDir: HERE,
     worlds,
     rounds: () => cfg.rounds,
-    bridge: () => ({
-      baseUrl: cfg.worlds?.linshe?.baseUrl || 'http://127.0.0.1:3099',
-      token: loaded.secret('LINSHE_BRIDGE_TOKEN'),
-    }),
+    bridge: () => ({ baseUrl: cfg.worlds?.linshe?.baseUrl || 'http://127.0.0.1:3099' }),
     // 每次现读配置,WebUI 热改的间隔立即生效。
     tickDelayMs: () => (cfg.tick?.intervalMinutes ?? null) === null ? null : cfg.tick.intervalMinutes * 60_000,
   });

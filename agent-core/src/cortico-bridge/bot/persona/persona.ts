@@ -28,7 +28,7 @@ export interface LinshePersonaOptions {
   worlds: readonly World[];
   rounds: () => RoundCaps;
   /** 邻舍桥接连接参数;由 bot 装配代码从部署配置注入。 */
-  bridge: () => { baseUrl: string; token: string };
+  bridge: () => { baseUrl: string };
   /** 心跳基准间隔(毫秒);null=不自醒。每次求值现读,支持热改。 */
   tickDelayMs?: () => number | null;
 }
@@ -168,10 +168,9 @@ export class LinshePersona implements Persona {
     if (cached && Date.now() - cached.at < PERSONA_TTL_MS) return cached.block;
     let block = '';
     try {
-      const { baseUrl, token } = this.opts.bridge();
+      const { baseUrl } = this.opts.bridge();
       const base = baseUrl.trim().replace(/\/+$/, '');
       const response = await fetch(base + '/api/cortico/bootstrap', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         redirect: 'manual',
         signal: AbortSignal.timeout(5000),
       });

@@ -22,30 +22,27 @@ const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
 const base = `http://127.0.0.1:${server.address().port}/api/cortico`;
 after(async () => { await new Promise(resolve => server.close(resolve)); db.close(); });
-let token, characterId;
-async function request(path, { method = 'GET', body, auth = true, headers = {} } = {}) {
-  const response = await localFetch(base + path, { method, headers: { ...(auth && token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
+let characterId;
+async function request(path, { method = 'GET', body, headers = {} } = {}) {
+  const response = await localFetch(base + path, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await response.text();
   let data; try { data = JSON.parse(text); } catch { data = text; }
   return { status: response.status, data };
 }
 
-test('setup defaults, validation, persistence and strict authentication', async () => {
+test('setup defaults, validation and persistence', async () => {
   characterId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-test', '星星', '你是星星。\n## 你的外观\n银发蓝眼。', '星星性格温和。').lastInsertRowid);
-  const initial = await request('/admin/settings', { auth: false });
-  token = initial.data.token;
-  assert.match(token, /^[a-f0-9]{64}$/);
+  const initial = await request('/admin/settings');
   assert.equal(initial.data.settings.enabled, false);
-  assert.equal((await request('/health', { auth: false })).status, 401);
-  assert.equal((await request('/health', { headers: { Authorization: token } })).status, 401);
+  assert.equal(initial.data.token, undefined);
   assert.equal((await request('/health')).status, 403);
-  assert.equal((await request('/admin/settings', { auth: false, method: 'PUT', body: { enabled: true } })).status, 400);
-  assert.equal((await request('/admin/settings', { auth: false, method: 'PUT', body: { public_url: 'javascript:alert(1)' } })).status, 400);
-  assert.match((await request('/admin/settings', { auth: false, method: 'PUT', body: { public_url: 'invalid-url' } })).data.error, /服务根地址/);
-  const saved = await request('/admin/settings', { auth: false, method: 'PUT', body: { enabled: true, character_id: characterId } });
+  assert.equal((await request('/admin/settings', { method: 'PUT', body: { enabled: true } })).status, 400);
+  assert.equal((await request('/admin/settings', { method: 'PUT', body: { public_url: 'javascript:alert(1)' } })).status, 400);
+  assert.match((await request('/admin/settings', { method: 'PUT', body: { public_url: 'invalid-url' } })).data.error, /服务根地址/);
+  const saved = await request('/admin/settings', { method: 'PUT', body: { enabled: true, character_id: characterId } });
   assert.equal(saved.status, 200);
   assert.equal(JSON.parse(getSetting('cortico_bridge')).character_id, characterId);
-  assert.equal((await request('/admin/settings', { auth: false })).data.settings.character_id, characterId);
+  assert.equal((await request('/admin/settings')).data.settings.character_id, characterId);
   assert.equal((await request('/health')).data.ok, true);
 });
 
@@ -60,9 +57,9 @@ test('stable initial persona excludes dynamic outfits; appearance uses shared as
   assert.match(appearance.data.appearance, /red coat/);
   assert.equal((await request('/character?character_id=999999')).status, 404);
   assert.equal((await request('/character?character_id=nope')).status, 400);
-  await request('/admin/settings', { auth: false, method: 'PUT', body: { inject_persona: false } });
+  await request('/admin/settings', { method: 'PUT', body: { inject_persona: false } });
   assert.equal((await request('/bootstrap')).data.persona, null);
-  await request('/admin/settings', { auth: false, method: 'PUT', body: { inject_persona: true } });
+  await request('/admin/settings', { method: 'PUT', body: { inject_persona: true } });
 });
 
 test('every read tool works with empty state; invalid dates and write aliases are rejected', async () => {
@@ -106,13 +103,13 @@ test('moments pagination, event detail and saved schedule share application data
 });
 
 test('permissions apply to discovery and execution, and disabled bridge rejects tools', async () => {
-  await request('/admin/settings', { auth: false, method: 'PUT', body: { tools: ['characters'] } });
+  await request('/admin/settings', { method: 'PUT', body: { tools: ['characters'] } });
   assert.ok((await request('/bootstrap')).data.tools.every(t => t.group === 'characters'));
   for (const path of ['/moments', '/appearance', '/events', '/schedule', '/diary', '/newspaper', '/world']) assert.equal((await request(path)).status, 403);
   assert.equal((await request('/generate', { method: 'POST', body: {} })).status, 403);
-  await request('/admin/settings', { auth: false, method: 'PUT', body: { enabled: false } });
+  await request('/admin/settings', { method: 'PUT', body: { enabled: false } });
   assert.equal((await request('/bootstrap')).status, 403);
-  await request('/admin/settings', { auth: false, method: 'PUT', body: { enabled: true, tools: [...new Set(toolCatalog.map(t => t.group))] } });
+  await request('/admin/settings', { method: 'PUT', body: { enabled: true, tools: [...new Set(toolCatalog.map(t => t.group))] } });
 });
 
 test('image requests coalesce retries, survive rereads and isolate MaiBot tasks', async () => {
@@ -141,12 +138,8 @@ test('TTS validates text and uses the selected character binding', async () => {
   assert.equal((await request('/tts', { method: 'POST', body: { text: 'x'.repeat(1001) } })).status, 400);
 });
 
-test('admin surface rejects cross-site access; token rotation revokes previous token', async () => {
-  assert.equal((await request('/admin/settings')).status, 403);
-  assert.equal((await request('/admin/settings', { auth: false, headers: { Origin: 'https://unrelated.example' } })).status, 403);
-  const next = await request('/admin/rotate-token', { auth: false, method: 'POST' });
-  assert.notEqual(next.data.token, token);
-  assert.equal((await request('/health')).status, 401);
-  token = next.data.token;
-  assert.equal((await request('/health')).status, 200);
+test('admin surface rejects cross-site access', async () => {
+  assert.equal((await request('/admin/settings')).status, 200);
+  assert.equal((await request('/admin/settings', { headers: { Origin: 'https://unrelated.example' } })).status, 403);
+  assert.equal((await request('/admin/settings', { headers: { Origin: 'https://unrelated.example' } })).status, 403);
 });

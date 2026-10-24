@@ -1,4 +1,3 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { getSetting, setSetting } from '../db/settings.js';
 
 export const GROUPS = ['characters', 'images', 'tts', 'moments', 'appearance', 'events', 'schedule', 'newspaper', 'diary', 'world'];
@@ -6,20 +5,6 @@ export function getBridgeSettings() {
   const saved = JSON.parse(getSetting('cortico_bridge') || '{}');
   return { enabled: false, character_id: null, inject_persona: true, tools: GROUPS,
     public_url: 'http://127.0.0.1:3099', ...saved };
-}
-export function getBridgeToken() { return getSetting('cortico_bridge_token') || ''; }
-export function ensureBridgeToken() {
-  if (!getBridgeToken()) setSetting('cortico_bridge_token', randomBytes(32).toString('hex'));
-  return getBridgeToken();
-}
-export function rotateBridgeToken() {
-  setSetting('cortico_bridge_token', randomBytes(32).toString('hex'));
-  return getBridgeToken();
-}
-export function validToken(value) {
-  const token = getBridgeToken();
-  const a = Buffer.from(String(value || '')), b = Buffer.from(token);
-  return !!token && a.length === b.length && timingSafeEqual(a, b);
 }
 export function saveBridgeSettings(body, db) {
   const next = { ...getBridgeSettings() };
@@ -46,7 +31,6 @@ export function saveBridgeSettings(body, db) {
     next.public_url = url.origin;
   }
   if (next.enabled && next.inject_persona && !next.character_id) throw new Error('请先选择初始人格角色，或关闭人格注入');
-  ensureBridgeToken();
   setSetting('cortico_bridge', JSON.stringify(next));
   return next;
 }

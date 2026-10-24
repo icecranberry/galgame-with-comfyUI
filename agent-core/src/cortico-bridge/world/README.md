@@ -2,7 +2,7 @@
 
 把邻舍（Linshe）的角色人设资料、内容查询、生图与语音能力接入 Cortico 的 World 扩展。
 
-工具通过邻舍桥接 API（`<邻舍地址>/api/cortico`，Bearer Token）读写；生图、语音与朋友圈配图以工具回执附件（`log:` 句柄）交给 Persona，由 QQ World 的 `qq_draft` 发送。
+工具通过邻舍桥接 API（`<邻舍地址>/api/cortico`，纯本地无鉴权）读写；生图、语音与朋友圈配图以工具回执附件（`log:` 句柄）交给 Persona，由 QQ World 的 `qq_draft` 发送。
 
 ## 配置
 
@@ -14,4 +14,3 @@
 | `baseUrl` | `http://127.0.0.1:3099` | 邻舍服务根地址 |
 | `taskTimeoutSec` | `240` | 生图/语音任务在工具内等待的上限 |
 
-桥接 Token 走部署 `.env` 的 `LINSHE_BRIDGE_TOKEN`（见邻舍设置页「Cortico 集成」）。

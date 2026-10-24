@@ -19,13 +19,9 @@
       <div v-else class="settings-grid">
         <section class="card connection-card">
           <div class="section-heading"><h3>连接与安装</h3><linshe-switch v-model="draft.enabled" aria-label="启用 Cortico 集成" on-text="启用" off-text="停用" /></div>
-          <p class="description">桥接 Token 是 Cortico 与邻舍之间的配对凭据：部署里的邻舍 World 和人格前缀都带它调用邻舍桥接 API，读取角色与工具、提交生图与语音。</p>
-          <label class="field-label" for="cortico-token">桥接 Token</label>
-          <div class="field-row"><linshe-input id="cortico-token" :model-value="token" :type="showToken ? 'text' : 'password'" readonly /><linshe-button variant="ghost" size="sm" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</linshe-button></div>
+          <p class="description">邻舍是纯本地服务：桥接 API 不做鉴权，部署里的邻舍 World 直连本机接口读取角色与工具、提交生图与语音。打开上方开关即可用。</p>
           <div class="actions">
-            <linshe-button size="sm" @click="copy(token)">复制 Token</linshe-button>
             <linshe-button size="sm" :disabled="dirty" @click="copyConfig">复制部署配置</linshe-button>
-            <linshe-button variant="ghost" size="sm" @click="rotateVisible = true">重置 Token</linshe-button>
           </div>
           <div class="admin-links">
             <span class="admin-links-title">后台入口</span>
@@ -62,7 +58,7 @@
           </div>
           <div class="install-steps">
             <h4>接入步骤</h4>
-            <ol><li>邻舍启动器的 Cortico 页一键安装并启动；启动时自动把这里的 Token 同步进部署 .env。</li><li>跨设备部署时，把「复制部署配置」里的地址改成邻舍的局域网 IP，再写进部署 config.json。</li><li>QQ 连接在 Cortico 后台的 QQ World 监听名单里配置（OneBot v11 连 SnowLuma，默认 ws://127.0.0.1:3001）。</li></ol>
+            <ol><li>邻舍启动器的 Cortico 页一键安装并启动；启动时自动把邻舍服务地址同步进部署 config.json；桥接纯本地直连，无需凭据。</li><li>跨设备部署时，把「复制部署配置」里的地址改成邻舍的局域网 IP，再写进部署 config.json。</li><li>QQ 连接在 Cortico 后台的 QQ World 监听名单里配置（OneBot v11 连 SnowLuma，默认 ws://127.0.0.1:3001）。</li></ol>
             <div class="actions"><a class="text-link" href="https://github.com/Pal-AI-Lab/Cortico" target="_blank" rel="noopener noreferrer">Cortico 项目 ↗</a></div>
           </div>
         </section>
@@ -83,10 +79,6 @@
         <div class="save-bar"><span class="status-line" role="status">{{ dirty ? '有未保存的修改' : saved?.enabled ? '集成已启用' : '集成已停用' }}</span><div class="actions"><linshe-button :loading="testing" :disabled="dirty || !saved?.enabled" @click="testConnection">测试邻舍接口</linshe-button><linshe-button variant="primary" :loading="saving" @click="save">保存配置</linshe-button></div></div>
       </div>
     </Transition>
-    <linshe-modal v-model="rotateVisible" title="重置桥接 Token" :transition-ms="300">
-      <p class="description">重置后，Cortico 当前 Token 会立即失效。请将新 Token 更新到部署 .env 的 LINSHE_BRIDGE_TOKEN 并重启部署。</p>
-      <template #footer><linshe-button @click="rotateVisible = false">取消</linshe-button><linshe-button variant="danger" :loading="rotating" @click="rotate">重置 Token</linshe-button></template>
-    </linshe-modal>
   </div>
 </template>
 
@@ -98,12 +90,12 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
-import { corticoGetSettings, corticoSaveSettings, corticoGetPersona, corticoRotateToken, corticoTestConnection } from '../api/index.js'
+import { corticoGetSettings, corticoSaveSettings, corticoGetPersona, corticoTestConnection } from '../api/index.js'
 
 const router = useRouter(), toast = inject('toast', null)
-const loading = ref(true), loadError = ref(''), saving = ref(false), testing = ref(false), rotating = ref(false)
+const loading = ref(true), loadError = ref(''), saving = ref(false), testing = ref(false)
 const draft = ref({ enabled: false, inject_persona: true, character_id: null, public_url: '', tools: [] }), saved = ref(null)
-const characters = ref([]), tools = ref([]), token = ref(''), showToken = ref(false), rotateVisible = ref(false)
+const characters = ref([]), tools = ref([])
 const personaText = ref(''), personaError = ref(''), personaLoading = ref(false)
 const characterOptions = computed(() => characters.value.map(c => ({ value: c.id, label: c.display_name || c.name })))
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(saved.value))
@@ -127,7 +119,7 @@ async function load() {
   try {
     const data = await corticoGetSettings()
     saved.value = data.settings; draft.value = structuredClone(data.settings)
-    characters.value = data.characters; token.value = data.token; tools.value = data.tools
+    characters.value = data.characters; tools.value = data.tools
   } catch (e) { loadError.value = e.message } finally { loading.value = false }
 }
 let previewRequest = 0
@@ -151,17 +143,11 @@ async function copy(text) {
 function copyConfig() {
   copy(JSON.stringify({
     'config.json': { worlds: { linshe: { enabled: true, baseUrl: saved.value.public_url } } },
-    '.env': { LINSHE_BRIDGE_TOKEN: token.value },
   }, null, 2))
-}
-async function rotate() {
-  rotating.value = true
-  try { token.value = (await corticoRotateToken()).token; rotateVisible.value = false; toast?.('Token 已重置，请更新 Cortico 部署的 .env 并重启', 'success') }
-  catch (e) { toast?.(e.message, 'error') } finally { rotating.value = false }
 }
 async function testConnection() {
   testing.value = true
-  try { await corticoTestConnection(token.value); toast?.('邻舍桥接接口可用，Cortico 侧请发起一次对话验证', 'success') }
+  try { await corticoTestConnection(); toast?.('邻舍桥接接口可用，Cortico 侧请发起一次对话验证', 'success') }
   catch (e) { toast?.(e.message, 'error') } finally { testing.value = false }
 }
 onMounted(load)

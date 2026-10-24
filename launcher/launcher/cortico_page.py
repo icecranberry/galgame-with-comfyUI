@@ -52,7 +52,7 @@ class CorticoPage(QWidget):
         self.open_browser = Switch('就绪后打开 Cortico 后台')
         self.open_browser.toggled.connect(lambda value: self.setting_changed.emit('cortico_open_browser', value))
         layout.addWidget(self.open_browser)
-        hint = QLabel('启动时自动把邻舍桥接 Token 同步进部署 .env。模型端点与 QQ 监听名单在 Cortico 后台配置；QQ 走 OneBot v11 连接 SnowLuma（ws://127.0.0.1:3001）。')
+        hint = QLabel('启动时自动把邻舍服务地址同步进部署 config.json；桥接纯本地直连，无需凭据。模型端点与 QQ 监听名单在 Cortico 后台配置；QQ 走 OneBot v11 连接 SnowLuma（ws://127.0.0.1:3001）。')
         hint.setWordWrap(True)
         hint.setStyleSheet('color: #756B65; font-size: 12px;')
         layout.addWidget(hint)

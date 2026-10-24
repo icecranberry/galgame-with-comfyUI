@@ -14,4 +14,3 @@
 | `tick` | `intervalMinutes: 45` | 心跳自醒基准间隔（连续空转指数退避至 8 倍）；`null` 关闭 |
 | `worlds.linshe.baseUrl` | `http://127.0.0.1:3099` | Persona 拉人设用的邻舍地址 |
 
-桥接 Token 走部署 `.env` 的 `LINSHE_BRIDGE_TOKEN`,与 `cortico-world-linshe` 共用。

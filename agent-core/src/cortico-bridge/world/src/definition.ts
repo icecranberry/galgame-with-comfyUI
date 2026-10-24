@@ -1,5 +1,5 @@
 import { describeTools, type WorldDefinition } from 'cortico/world.ts';
-import { LINSHE_DEFAULTS, LINSHE_SECRETS, type LinsheConfigSection } from './config.ts';
+import { LINSHE_DEFAULTS, type LinsheConfigSection } from './config.ts';
 import { LINSHE_TOOL_DECLS, LinsheWorld } from './world.ts';
 
 export const LINSHE: WorldDefinition<LinsheConfigSection> = {
@@ -7,7 +7,7 @@ export const LINSHE: WorldDefinition<LinsheConfigSection> = {
   label: 'Linshe',
   defaults: () => ({ ...LINSHE_DEFAULTS }),
   // `ctx.cfg` 是 `worlds.linshe` 的活引用:热改的键现读即生效。
-  create: (ctx) => new LinsheWorld({ cfg: ctx.cfg, token: ctx.secret(LINSHE_SECRETS.bridge), timezone: ctx.timezone }),
+  create: (ctx) => new LinsheWorld({ cfg: ctx.cfg, timezone: ctx.timezone }),
   // 自描述:可能出现的全部工具与会推出的全部事件,不进提示词。
   describe: {
     tools: describeTools(LINSHE_TOOL_DECLS, {

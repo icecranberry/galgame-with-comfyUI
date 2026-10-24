@@ -1,9 +1,9 @@
-/** Cortico 专用边界：配置沿用邻舍管理接口；Cortico World 请求使用独立 Bearer Token。 */
+/** Cortico 专用边界：纯本地集成，无 Token 验证；配置沿用邻舍管理接口。 */
 import { Router } from 'express';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { getDb, getWorldSetting } from '../db/index.js';
-import { getBridgeSettings, ensureBridgeToken, rotateBridgeToken, validToken, saveBridgeSettings } from './settings.js';
+import { getBridgeSettings, saveBridgeSettings } from './settings.js';
 import { buildCharacterAppearanceSection } from '../services/characterPersona.js';
 import { getActiveOutfits, listCharacterOutfits } from '../services/outfitService.js';
 import { getTodaySchedule, getCurrentActivity } from '../services/scheduleManager.js';
@@ -48,10 +48,10 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   }
   const characterList = () => getDb().prepare('SELECT id,name,display_name,avatar_path FROM characters ORDER BY id').all();
 
-  // 管理接口不向跨站浏览器开放，也不接受插件 Token 代替管理入口。
+  // 管理接口不向跨站浏览器开放。
   router.use('/admin', (req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    if (req.get('Sec-Fetch-Site') === 'cross-site' || req.get('Authorization')) return res.status(403).json({ error: '请通过邻舍设置页管理集成' });
+    if (req.get('Sec-Fetch-Site') === 'cross-site') return res.status(403).json({ error: '请通过邻舍设置页管理集成' });
     const origin = req.get('Origin');
     if (origin) {
       try {
@@ -62,21 +62,19 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     }
     next();
   });
-  router.get('/admin/settings', (req, res) => res.json({ settings: getBridgeSettings(), token: ensureBridgeToken(), characters: characterList(), tools: toolCatalog }));
+  router.get('/admin/settings', (req, res) => res.json({ settings: getBridgeSettings(), characters: characterList(), tools: toolCatalog }));
   router.put('/admin/settings', (req, res) => {
     try { res.json({ settings: saveBridgeSettings(req.body || {}, getDb()) }); }
     catch (error) { res.status(400).json({ error: error.message }); }
   });
-  router.post('/admin/rotate-token', (req, res) => res.json({ token: rotateBridgeToken() }));
   router.get('/admin/persona/:id', (req, res) => {
     const c = character(req.params.id);
     res.json({ character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '' });
   });
 
+  // 纯本地集成：桥接不做 Token 验证，只受启用开关与工具分组约束。
   router.use((req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    const authorization = req.get('Authorization') || '';
-    if (!/^Bearer /i.test(authorization) || !validToken(authorization.slice(7))) return res.status(401).json({ error: '邻舍桥接 Token 无效' });
     if (!getBridgeSettings().enabled) return res.status(403).json({ error: 'Cortico 集成尚未启用' });
     next();
   });

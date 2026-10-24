@@ -15,9 +15,6 @@ export const LINSHE_DEFAULTS: LinsheConfigSection = {
   taskTimeoutSec: 240,
 };
 
-/** 桥接凭据的环境变量名；由部署 .env 提供，不写进 config.json。 */
-export const LINSHE_SECRETS = { bridge: 'LINSHE_BRIDGE_TOKEN' } as const;
-
 /** World 配置的 JSON Schema 声明。 */
 export const LINSHE_CONFIG_GROUP: ConfigGroup = {
   id: 'world:linshe',
