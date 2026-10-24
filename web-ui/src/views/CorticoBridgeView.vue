@@ -19,10 +19,7 @@
       <div v-else class="settings-grid">
         <section class="card connection-card">
           <div class="section-heading"><h3>连接与安装</h3><linshe-switch v-model="draft.enabled" aria-label="启用 Cortico 集成" on-text="启用" off-text="停用" /></div>
-          <p class="description">Cortico 的邻舍 World 通过桥接 API 读取角色与工具。角色和工具权限在这里管理。</p>
-          <label class="field-label" for="cortico-url">邻舍服务地址</label>
-          <linshe-input id="cortico-url" v-model.trim="draft.public_url" placeholder="http://127.0.0.1:3099" />
-          <p class="hint">填写 Cortico 能访问的地址。同机默认本机地址；跨设备用邻舍电脑的局域网 IP。</p>
+          <p class="description">桥接 Token 是 Cortico 与邻舍之间的配对凭据：部署里的邻舍 World 和人格前缀都带它调用邻舍桥接 API，读取角色与工具、提交生图与语音。</p>
           <label class="field-label" for="cortico-token">桥接 Token</label>
           <div class="field-row"><linshe-input id="cortico-token" :model-value="token" :type="showToken ? 'text' : 'password'" readonly /><linshe-button variant="ghost" size="sm" @click="showToken = !showToken">{{ showToken ? '隐藏' : '显示' }}</linshe-button></div>
           <div class="actions">
@@ -65,7 +62,7 @@
           </div>
           <div class="install-steps">
             <h4>接入步骤</h4>
-            <ol><li>在邻舍启动器的 Cortico 页完成安装并启动，linshe 部署与扩展包已随安装就绪。</li><li>自行部署时，把下面复制的配置写进部署的 config.json 与 .env，再启动部署。</li><li>QQ 连接由 Cortico 的 QQ World 走 OneBot v11 连接 SnowLuma（默认 ws://127.0.0.1:3001），群与私聊在 QQ World 的监听名单里配置。</li></ol>
+            <ol><li>邻舍启动器的 Cortico 页一键安装并启动；启动时自动把这里的 Token 同步进部署 .env。</li><li>跨设备部署时，把「复制部署配置」里的地址改成邻舍的局域网 IP，再写进部署 config.json。</li><li>QQ 连接在 Cortico 后台的 QQ World 监听名单里配置（OneBot v11 连 SnowLuma，默认 ws://127.0.0.1:3001）。</li></ol>
             <div class="actions"><a class="text-link" href="https://github.com/Pal-AI-Lab/Cortico" target="_blank" rel="noopener noreferrer">Cortico 项目 ↗</a></div>
           </div>
         </section>
