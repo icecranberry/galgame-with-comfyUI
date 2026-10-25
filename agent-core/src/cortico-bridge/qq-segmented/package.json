@@ -1,0 +1,38 @@
+{
+  "name": "cortico-world-qq-linshe",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "邻舍风格输出分句：内置 QQ World 的分句变体，把出站文字按邻舍风格的聊天节奏切成多条短消息依次发送，一句一条。句末标点、换行与长句停顿都是断点；图片与引用只附在第一条，语音条独占一条；某段发送失败时保留剩余段落，再次确认只补发未发出的部分。",
+  "author": "iceCranberry",
+  "license": "MIT",
+  "keywords": [
+    "cortico-world",
+    "cortico"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "./index.ts",
+  "cortico": {
+    "kind": "world",
+    "api": 6,
+    "displayName": "邻舍风格输出分句",
+    "tags": [
+      "im",
+      "qq"
+    ],
+    "describe": "describe.json"
+  },
+  "files": [
+    "index.ts",
+    "segmented-qq-world.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "describe.json"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "cortico": "^0.2.6",
+    "typescript": "^5.7.2"
+  }
+}

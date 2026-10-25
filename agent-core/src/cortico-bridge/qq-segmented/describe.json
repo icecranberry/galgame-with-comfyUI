@@ -1,0 +1,286 @@
+{
+  "tools": [
+    {
+      "name": "qq_draft",
+      "description": "Stage a QQ message without sending. This ends the current tool sequence so you can review the draft and any newly arrived user events once before calling confirm (send or cancel). An unconfirmed draft is discarded at end of turn.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "Target conversation: \"group:<id>\" or \"private:<id>\" (numeric QQ group/user id, not a name). Optional when reply_to is given (taken from the quoted message)."
+          },
+          "text": {
+            "type": "string",
+            "description": "Message text. Optional if image is given."
+          },
+          "image": {
+            "type": "string",
+            "description": "Optional. An image to send, given by handle: a log: handle from a [blob ...] line you saw, or a mem: handle of one kept in your workspace."
+          },
+          "voice": {
+            "type": "string",
+            "description": "Optional. Audio to send as a QQ voice bar, given by handle the same way as image. A voice bar is a message of its own: leave text, image and reply_to out. The protocol end converts the audio it accepts (wav, mp3) to what QQ plays."
+          },
+          "reply_to": {
+            "type": "string",
+            "description": "Optional. The QQ message id to quote-reply — the `#<id>` shown at the start of that message line."
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "speak"
+      ],
+      "summary": {
+        "zh": "起草一条 QQ 消息(文字、图片、语音或引用回复),先暂存不发。",
+        "en": "Drafts a QQ message (text, image, voice or quote reply) and holds it unsent."
+      }
+    },
+    {
+      "name": "qq_confirm",
+      "description": "Act on the last draft: decision=\"send\" sends it, decision=\"cancel\" discards it. Only the most recent draft can be confirmed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "send",
+              "cancel"
+            ],
+            "description": "\"send\" or \"cancel\"."
+          }
+        },
+        "required": [
+          "decision"
+        ]
+      },
+      "tags": [
+        "speak"
+      ],
+      "summary": {
+        "zh": "把最近一份草稿发出去,或者作废。",
+        "en": "Sends or discards the latest draft."
+      }
+    },
+    {
+      "name": "qq_read_history",
+      "description": "Read QQ history: the neighborhood of one message (around / around_time), or a time range. Optional conversation and sender filters.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "around": {
+            "type": "string",
+            "description": "A QQ message id — the `#<id>` at the start of a message line. Reads the messages around it."
+          },
+          "around_time": {
+            "type": "string",
+            "description": "ISO 8601 time: reads around the first message at or after it. Use when you have no message id."
+          },
+          "before": {
+            "type": "number",
+            "description": "With around/around_time: how many earlier messages (default 20)."
+          },
+          "after": {
+            "type": "number",
+            "description": "With around/around_time: how many later messages (default 20)."
+          },
+          "from_time": {
+            "type": "string",
+            "description": "Start time, ISO 8601."
+          },
+          "to_time": {
+            "type": "string",
+            "description": "End time, ISO 8601."
+          },
+          "sender": {
+            "type": "string",
+            "description": "Filter by QQ number."
+          },
+          "conversation": {
+            "type": "string",
+            "description": "Filter by conversation: \"group:<id>\" or \"private:<id>\" (numeric QQ group/user id, not a name)."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results, default 50."
+          }
+        },
+        "required": []
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "读监听会话的历史消息:某条消息前后,或一段时间内。",
+        "en": "Reads past messages in watched conversations, around one message or within a time range."
+      }
+    },
+    {
+      "name": "qq_grep_history",
+      "description": "Keyword search over QQ history; each hit includes 3 messages of context on each side. Optional conversation and sender filters.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Keyword (plain substring match)."
+          },
+          "sender": {
+            "type": "string",
+            "description": "Filter by QQ number."
+          },
+          "conversation": {
+            "type": "string",
+            "description": "Filter by conversation: \"group:<id>\" or \"private:<id>\" (numeric QQ group/user id, not a name)."
+          },
+          "from_time": {
+            "type": "string",
+            "description": "Start time, ISO 8601."
+          },
+          "to_time": {
+            "type": "string",
+            "description": "End time, ISO 8601."
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max hit groups, default 5."
+          }
+        },
+        "required": [
+          "keyword"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "按关键词搜监听会话的历史消息,每处命中带前后几条。",
+        "en": "Searches past messages in watched conversations by keyword, with a few messages around each hit."
+      }
+    },
+    {
+      "name": "qq_view_image",
+      "description": "Ask the auxiliary vision model a specific question about an image.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image_id": {
+            "type": "string",
+            "description": "Image id, e.g. IMG-3."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Your question about the image."
+          }
+        },
+        "required": [
+          "image_id",
+          "prompt"
+        ]
+      },
+      "tags": [
+        "read"
+      ],
+      "summary": {
+        "zh": "就一张图向辅助视觉模型追问;配好辅助视觉才有。",
+        "en": "Asks the auxiliary vision model a question about an image; present only when auxiliary vision is set up."
+      }
+    }
+  ],
+  "events": [
+    {
+      "type": "qq.message",
+      "description": {
+        "zh": "监听的群或私聊里来了消息;群里被@时立即投递。",
+        "en": "A message in a watched group or private chat; delivered at once when the bot is mentioned in a group."
+      }
+    },
+    {
+      "type": "qq.image",
+      "description": {
+        "zh": "消息里的图片下载完成后补发的附件。",
+        "en": "An image from an earlier message, sent once its download finishes."
+      }
+    },
+    {
+      "type": "qq.vision",
+      "description": {
+        "zh": "辅助视觉模型对一张图的描述。",
+        "en": "The auxiliary vision model's description of an image."
+      }
+    },
+    {
+      "type": "qq.transcript",
+      "description": {
+        "zh": "一条语音消息的转写结果,或转写失败的原因。",
+        "en": "The transcript of a voice message, or why transcription failed."
+      }
+    },
+    {
+      "type": "qq.reply.uncaptured",
+      "description": {
+        "zh": "被引用的消息不在记录里时,向协议端查到的原文或查询失败的原因。",
+        "en": "For a quoted message missing from the record: the original fetched from the protocol end, or why the fetch failed."
+      }
+    },
+    {
+      "type": "qq.forward",
+      "description": {
+        "zh": "转发的聊天记录展开后的内容。",
+        "en": "The contents of a forwarded chat record."
+      }
+    },
+    {
+      "type": "qq.recall",
+      "description": {
+        "zh": "群里有人撤回了一条消息。",
+        "en": "Someone in a group recalled a message."
+      }
+    },
+    {
+      "type": "qq.member",
+      "description": {
+        "zh": "有人加入或退出了群。",
+        "en": "Someone joined or left a group."
+      }
+    },
+    {
+      "type": "qq.emoji",
+      "description": {
+        "zh": "群里有人给一条消息贴了表情。",
+        "en": "Someone in a group reacted to a message with an emoji."
+      }
+    },
+    {
+      "type": "qq.poke",
+      "description": {
+        "zh": "群里有人戳了戳某人。",
+        "en": "Someone in a group poked someone."
+      }
+    },
+    {
+      "type": "qq.watch",
+      "description": {
+        "zh": "监听名单加入或移除了一个会话。",
+        "en": "A conversation was added to or removed from the watch list."
+      }
+    },
+    {
+      "type": "qq.self",
+      "description": {
+        "zh": "bot 自己发出的 QQ 消息,只记录,不唤醒。",
+        "en": "The bot's own sent QQ message; recorded without waking the bot."
+      }
+    }
+  ],
+  "prompts": [
+    {
+      "key": "worlds.qq.envPrompt",
+      "title": "QQ · 环境提示词",
+      "role": "envPrompt",
+      "content": "你在QQ上。\n\n下面是你正在参与的会话:\n{{qq.conversations | (还没有配置任何监听的群或私聊。)}}\n{{qq.identity | (与QQ的连接尚未建立,群名和你的账号信息暂时未知。)}}\n"
+    }
+  ]
+}

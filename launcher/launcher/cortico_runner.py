@@ -17,6 +17,7 @@ CORTICO_DEPLOYMENT = 'linshe'
 LINSHE_CORE_URL = 'http://127.0.0.1:3099'
 
 # 部署 config.json 首次创建时的骨架；不覆盖用户已改过的文件。
+# qq 与 qq-linshe 是同名工具的两个 World，内置 qq 必须保持停用。
 DEPLOYMENT_CONFIG = {
     'displayName': '邻舍',
     'timezone': 'Asia/Shanghai',
@@ -24,6 +25,13 @@ DEPLOYMENT_CONFIG = {
     'worlds': {
         'console': {'enabled': True},
         'qq': {
+            'enabled': False,
+            'wsUrl': 'ws://127.0.0.1:3001',
+            'token': '',
+            'groups': [],
+            'privates': [],
+        },
+        'qq-linshe': {
             'enabled': False,
             'wsUrl': 'ws://127.0.0.1:3001',
             'token': '',
@@ -41,6 +49,7 @@ DEPLOYMENT_CONFIG = {
 EXTENSION_LINKS = {
     'cortico-world-linshe': 'link:../../agent-core/src/cortico-bridge/world',
     'cortico-bot-linshe': 'link:../../agent-core/src/cortico-bridge/bot',
+    'cortico-world-qq-linshe': 'link:../../agent-core/src/cortico-bridge/qq-segmented',
 }
 
 
@@ -104,6 +113,33 @@ def ensure_deployment(project_path):
     config = deployment / 'config.json'
     if not config.is_file():
         config.write_text(json.dumps(DEPLOYMENT_CONFIG, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def migrate_qq_segmentation(project_path, emit):
+    """把 worlds.qq 部署配置迁移到分句扩展的 worlds.qq-linshe 段，并停用内置 qq。
+
+    分句出站由 cortico-world-qq-linshe 承载后，两个 World 同工具名不能同时挂载。
+    只在 qq-linshe 段尚不存在时执行一次；roster、连接信息原样搬过去。
+    """
+    config_path = cortico_root(project_path) / 'deployments' / CORTICO_DEPLOYMENT / 'config.json'
+    if not config_path.is_file():
+        return
+    try:
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+    except ValueError:
+        emit('cortico', '[Cortico] 部署 config.json 不是合法 JSON，跳过 QQ 分句迁移')
+        return
+    worlds = config.get('worlds') or {}
+    legacy = worlds.get('qq')
+    if not isinstance(legacy, dict) or 'qq-linshe' in worlds:
+        return
+    migrated = {key: value for key, value in legacy.items() if key != 'enabled'}
+    migrated['enabled'] = legacy.get('enabled', False)
+    worlds['qq-linshe'] = migrated
+    legacy['enabled'] = False
+    config['worlds'] = worlds
+    config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    emit('cortico', '[Cortico] QQ 渠道已切换到分句扩展（worlds.qq → worlds.qq-linshe，内置 qq 已停用）')
 
 
 def sync_bridge_settings(project_path, emit):
@@ -183,6 +219,11 @@ class CorticoRunner(QObject):
     def install(self):
         if self.any_active():
             return
+        with socket.socket() as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex(('127.0.0.1', CORTICO_PORT)) == 0:
+                self.output.emit('cortico', '[ERROR] 请先停止正在运行的 Cortico，再安装或更新环境')
+                return
         root = cortico_root(self.project_path)
         if not root.resolve().is_relative_to(Path(self.project_path).resolve()):
             self.output.emit('cortico', '[ERROR] Cortico 目录不能指向邻舍目录之外')
@@ -221,6 +262,13 @@ class CorticoRunner(QObject):
                 self._finish_install(False)
             return
         program, arguments, cwd = self._steps.pop(0)
+        if cortico_installed(self.project_path):
+            try:
+                self._prepare_source()
+            except Exception as error:
+                self.output.emit('cortico', '[ERROR] ' + str(error))
+                self._finish_install(False)
+                return
         proc = QProcess(self)
         self._setup = proc
         proc.setWorkingDirectory(cwd)
@@ -267,6 +315,11 @@ class CorticoRunner(QObject):
         if not self.any_active():
             self.all_stopped.emit()
 
+    def _prepare_source(self):
+        # 扩展清单须在首次 pnpm install extensions 之前存在。
+        ensure_extensions(self.project_path)
+        migrate_qq_segmentation(self.project_path, self.output.emit)
+
     def start_all(self):
         if self.any_active():
             return
@@ -279,9 +332,13 @@ class CorticoRunner(QObject):
             if sock.connect_ex(('127.0.0.1', CORTICO_PORT)) == 0:
                 self.output.emit('cortico', '[ERROR] 7900 端口已占用，请先停止外部 Cortico 或直接打开其后台')
                 return
-        ensure_extensions(self.project_path)
-        ensure_deployment(self.project_path)
-        sync_bridge_settings(self.project_path, self.output.emit)
+        try:
+            self._prepare_source()
+            ensure_deployment(self.project_path)
+            sync_bridge_settings(self.project_path, self.output.emit)
+        except Exception as error:
+            self.output.emit('cortico', '[ERROR] ' + str(error))
+            return
         self._worker.start()
 
     @staticmethod

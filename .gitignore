@@ -55,6 +55,9 @@ krea2-posters/
 
 # Isolated M1 UI build (screenshots and verification report remain reviewable)
 agent-core/test/*
+!agent-core/test/corticoSegmentedQQ.test.js
+!agent-core/test/corticoWorld.test.js
+!agent-core/test/corticoPersonaDelivery.test.js
 !agent-core/test/corticoBridge.test.js
 !agent-core/test/lorebook*.test.js
 !agent-core/test/dialogueTranscript.test.js
