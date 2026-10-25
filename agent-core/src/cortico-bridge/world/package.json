@@ -2,7 +2,8 @@
   "name": "cortico-world-linshe",
   "version": "0.1.0",
   "type": "module",
-  "description": "Cortico World: Linshe character persona, content queries, image generation and TTS tools",
+  "description": "邻舍工具包：把角色人设、外观、日程、朋友圈、奇遇、日报、日记与世界观查询，以及生图、语音合成作为工具提供给模型；生图与语音在完成后随回执附带可发送的媒体。",
+  "author": "iceCranberry",
   "license": "MIT",
   "keywords": [
     "cortico-world",
@@ -15,6 +16,7 @@
   "cortico": {
     "kind": "world",
     "api": 6,
+    "displayName": "邻舍工具包",
     "tags": [],
     "describe": "describe.json"
   },

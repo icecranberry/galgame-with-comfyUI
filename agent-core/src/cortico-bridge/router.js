@@ -27,6 +27,20 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     return n;
   };
   const limit = value => Math.min(50, Math.max(1, Number.parseInt(value, 10) || 10));
+  // 日程默认只回当前时间前后 windowMinutes 分钟内的条目；跨午夜时段（如 23:00~07:00）按平移一天对齐比较
+  const nearSchedule = (activities, now, windowMinutes) => {
+    const toMinutes = value => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || ''));
+      return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
+    };
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    return activities.filter(act => {
+      const start = toMinutes(act.startTime), end = toMinutes(act.endTime);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end === start) return false;
+      const [spanStart, spanEnd] = end > start ? [start, end] : [start, end + 1440];
+      return [-1440, 0, 1440].some(shift => spanStart + shift <= nowMin + windowMinutes && spanEnd + shift >= nowMin - windowMinutes);
+    });
+  };
   function character(value) {
     const id = value === undefined || value === '' ? getBridgeSettings().character_id : positiveId(value);
     const row = id && getDb().prepare('SELECT * FROM characters WHERE id=?').get(id);
@@ -102,7 +116,17 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   });
   router.get('/schedule', allow('schedule'), (req, res) => {
     const c = character(req.query.character_id);
-    res.json({ character_id: c.id, date: getLocalDateKey(), activities: getTodaySchedule(c.id) || [], current_activity: getCurrentActivity(c.id) });
+    const full = ['1', 'true'].includes(String(req.query.full).toLowerCase());
+    const activities = getTodaySchedule(c.id) || [];
+    const now = new Date();
+    res.json({
+      character_id: c.id,
+      date: getLocalDateKey(),
+      time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+      scope: full ? 'full' : 'nearby',
+      activities: full ? activities : nearSchedule(activities, now, 60),
+      current_activity: getCurrentActivity(c.id),
+    });
   });
   router.get('/newspaper', allow('newspaper'), (req, res) => res.json({ newspaper: req.query.date ? getNewspaperByDate(dateKey(req.query.date)) : getTodayNewspaperForFrontend() }));
   router.get('/diary', allow('diary'), (req, res) => {
@@ -138,7 +162,21 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   router.use('/events', allow('events'), (req, res, next) => {
     if (req.method !== 'GET' || !/^\/(?:by-id\/(?:town:)?[1-9]\d*)?$/.test(decodeURIComponent(req.path))) return res.sendStatus(404);
     const send = res.json.bind(res), count = limit(req.query.limit);
-    res.json = data => send(req.path === '/' ? { active: data.active?.slice(0, count) || [], history: data.history?.slice(0, count) || [], has_more: (data.active?.length || 0) > count || (data.history?.length || 0) > count } : data);
+    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+    if (!Number.isSafeInteger(offset) || offset < 0) return res.status(400).json({ error: 'offset 须为非负整数' });
+    const timestamp = (event, history) => {
+      const value = (history ? event.ended_at || event.updatedAt : null) || event.created_at || event.createdAt;
+      if (!value) return 0;
+      const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T') + 'Z';
+      return Date.parse(normalized) || 0;
+    };
+    const sortEvents = (events, history) => [...(events || [])].sort((a, b) => timestamp(b, history) - timestamp(a, history) || String(b.id).localeCompare(String(a.id), 'en', { numeric: true }));
+    res.json = data => {
+      if (req.path !== '/') return send(data);
+      const active = sortEvents(data.active, false), history = sortEvents(data.history, true);
+      const hasMore = active.length > offset + count || history.length > offset + count;
+      return send({ has_more: hasMore, next_offset: hasMore ? offset + count : null, active: active.slice(offset, offset + count), history: history.slice(offset, offset + count) });
+    };
     next();
   }, eventsRouter);
 

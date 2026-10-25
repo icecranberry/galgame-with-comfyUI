@@ -102,12 +102,68 @@ test('moments pagination, event detail and saved schedule share application data
   assert.equal((await request('/schedule')).data.activities[0].activity, '阅读');
 });
 
-test('permissions apply to discovery and execution, and disabled bridge rejects tools', async () => {
+test('schedule defaults to the surrounding hour and returns the day only on request', async () => {
+  const hhmm = min => `${String(Math.floor((min % 1440) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  db.prepare('INSERT OR REPLACE INTO daily_schedules(character_id,schedule_date,schedule_json) VALUES(?,?,?)').run(
+    characterId,
+    getLocalDateKey(),
+    JSON.stringify([
+      { startTime: hhmm(nowMin + 20), endTime: hhmm(nowMin + 40), activity: '手边的事', replyDelay: 0 },
+      { startTime: hhmm(nowMin + 300), endTime: hhmm(nowMin + 330), activity: '很久之后的事', replyDelay: 0 },
+    ])
+  );
+  const nearby = (await request('/schedule')).data;
+  assert.equal(nearby.scope, 'nearby');
+  assert.match(nearby.time, /^\d{2}:\d{2}$/);
+  assert.deepEqual(nearby.activities.map(a => a.activity), ['手边的事']);
+  for (const flag of ['full=1', 'full=true']) {
+    const full = (await request(`/schedule?${flag}`)).data;
+    assert.equal(full.scope, 'full');
+    assert.deepEqual(full.activities.map(a => a.activity), ['手边的事', '很久之后的事']);
+  }
+});
+
+test('permissions apply to discovery, content details and media task execution', async () => {
   await request('/admin/settings', { method: 'PUT', body: { tools: ['characters'] } });
   assert.ok((await request('/bootstrap')).data.tools.every(t => t.group === 'characters'));
   for (const path of ['/moments', '/appearance', '/events', '/schedule', '/diary', '/newspaper', '/world']) assert.equal((await request(path)).status, 403);
+  for (const path of ['/moments/1', '/moments/1/images', '/events/by-id/1', '/events/by-id/town%3A1', '/events/by-id/bfeat%3A1', '/tasks/1', '/speech/voice-fixture']) assert.equal((await request(path)).status, 403);
   assert.equal((await request('/generate', { method: 'POST', body: {} })).status, 403);
+  assert.equal((await request('/tts', { method: 'POST', body: { text: '你好' } })).status, 403);
   await request('/admin/settings', { method: 'PUT', body: { tools: [...new Set(toolCatalog.map(t => t.group))] } });
+});
+
+test('event pages interleave character and NPC history chronologically without losing later pages', async () => {
+  const npcId = Number(db.prepare("INSERT INTO town_npcs(display_name) VALUES('测试镇民')").run().lastInsertRowid);
+  const first = Number(db.prepare("INSERT INTO event_history(character_id,title,ended_at) VALUES(?,'角色较新','2026-10-25 03:00:00')").run(characterId).lastInsertRowid);
+  const third = Number(db.prepare("INSERT INTO event_history(character_id,title,ended_at) VALUES(?,'角色较早','2026-10-25 01:00:00')").run(characterId).lastInsertRowid);
+  db.prepare("INSERT INTO town_npc_event_history(id,npc_id,title,choice_history,ended_at) VALUES(9001,?,'镇民奇遇',?,'2026-10-25 02:00:00')").run(npcId, JSON.stringify([{ choice: 'A', label: '坐下来聊聊' }]));
+  const page1 = (await request('/events?limit=2')).data;
+  assert.deepEqual(page1.history.map(event => event.id), [first, 'town:9001']);
+  assert.equal(page1.has_more, true);
+  assert.equal(page1.next_offset, 2);
+  const page2 = (await request(`/events?limit=2&offset=${page1.next_offset}`)).data;
+  assert.deepEqual(page2.history.map(event => event.id), [third]);
+  assert.equal(page2.has_more, false);
+  assert.equal(page2.next_offset, null);
+  const detail = await request('/events/by-id/town%3A9001');
+  assert.equal(detail.data.title, '镇民奇遇');
+  assert.deepEqual(detail.data.choice_history, [{ choice: 'A', label: '坐下来聊聊' }]);
+  for (const offset of ['-1', '1.5', 'nope']) assert.equal((await request(`/events?offset=${offset}`)).status, 400);
+});
+
+test('newspaper and diary queries return saved dated content without generating it', async () => {
+  db.prepare('INSERT INTO town_newspapers(publish_date,name,items_json) VALUES(?,?,?)').run('2026-10-24', '镇上日报', JSON.stringify([{ title: '秋日集市', content: '大家在广场散步。' }]));
+  db.prepare("INSERT INTO character_diaries(character_id,diary_date,title,content,images,status) VALUES(?,?,?,?,?,'completed')").run(characterId, '2026-10-24', '晴天', '今天去花园散步。', JSON.stringify(['/images/diary/one.png']));
+  const paper = (await request('/newspaper?date=2026-10-24')).data.newspaper;
+  assert.equal(paper.items[0].title, '秋日集市');
+  const diary = (await request('/diary?date=2026-10-24')).data;
+  assert.equal(diary.diary.content, '今天去花园散步。');
+  assert.deepEqual(diary.diary.images, ['/images/diary/one.png']);
+  assert.equal(diary.generating, false);
+  assert.equal((await request('/diary?date=2026-10-23')).data.diary, null);
+  assert.equal((await request('/newspaper?date=2026-10-23')).data.newspaper, null);
 });
 
 test('image requests coalesce retries, survive rereads and isolate MaiBot tasks', async () => {

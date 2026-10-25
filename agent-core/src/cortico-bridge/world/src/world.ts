@@ -10,6 +10,8 @@ const ENV_PROMPT_FILE = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url
 const MAX_TEXT_CHARS = 12000;
 const MAX_MEDIA_BYTES = 32 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;
+const IMAGE_DELIVERY = '用当前会话支持的媒体发送工具交付 [blob …] 里的 log: 句柄；QQ 会话用 qq_draft 的 image 参数。当前会话不能发送图片时如实说明，未经用户指定不要改发其他会话。';
+const SPEECH_DELIVERY = '用当前会话支持的媒体发送工具交付 [blob …] 里的 log: 句柄；QQ 语音条独占一条消息，qq_draft 只传 voice，不带 text、image 或 reply_to。当前会话不能发送语音时如实说明，未经用户指定不要改发其他会话。';
 
 type Query = Record<string, string | number | undefined | null>;
 
@@ -78,11 +80,14 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_events',
-    description: '查询角色及镇民当前奇遇、近期奇遇历史；仅查询。',
+    description: '按时间倒序查询角色、镇民及建筑当前奇遇与历史；仅查询。has_more 为 true 时，将 next_offset 作为 offset 继续翻页。',
     tags: ['read'],
     parameters: {
       type: 'object',
-      properties: { limit: { type: 'integer', minimum: 1, maximum: 50 } },
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 50 },
+        offset: { type: 'integer', minimum: 0, description: '列表回执的 next_offset，省略从第一页开始' },
+      },
       additionalProperties: false,
       required: [],
     },
@@ -100,11 +105,14 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   },
   {
     name: 'linshe_schedule',
-    description: '查询角色今日日程和当前活动。',
+    description: '查询角色今日日程和当前活动；默认只返回当前时间前后一小时内的日程，要讲一整天的安排时传 full。',
     tags: ['read'],
     parameters: {
       type: 'object',
-      properties: { character_id: { type: 'integer', minimum: 1 } },
+      properties: {
+        character_id: { type: 'integer', minimum: 1 },
+        full: { type: 'boolean', description: '返回今日完整日程；省略只看当前前后一小时' },
+      },
       additionalProperties: false,
       required: [],
     },
@@ -143,11 +151,14 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
   {
     name: 'linshe_task',
     description:
-      '查询一个生图任务的最新状态；完成时回执带可发送的图片。linshe_generate_image 等待超时后用任务 ID 继续查询。',
+      '查询生图或语音任务的最新状态，完成时回执带可发送的媒体。生图传数字 task_id；语音传 kind="speech" 与 linshe_tts 返回的字符串 task_id。',
     tags: ['read'],
     parameters: {
       type: 'object',
-      properties: { task_id: { type: 'integer', minimum: 1, description: 'linshe_generate_image 回执给出的任务 ID' } },
+      properties: {
+        task_id: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'string', minLength: 1, maxLength: 200 }], description: '生图回执的数字 ID，或语音回执的字符串 ID' },
+        kind: { type: 'string', enum: ['image', 'speech'], description: '任务类型，省略为 image；查询语音须传 speech' },
+      },
       required: ['task_id'],
       additionalProperties: false,
     },
@@ -216,9 +227,16 @@ function optInt(value: unknown): number | undefined {
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('本轮已取消')); }, { once: true });
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const onAbort = () => { clearTimeout(timer); reject(signal?.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+function requestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 export class LinsheWorld implements World {
@@ -287,15 +305,16 @@ export class LinsheWorld implements World {
     for (const [key, value] of Object.entries(opts.query ?? {})) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
     }
+    const signal = requestSignal(opts.signal, opts.timeoutMs ?? 30000);
     const response = await fetch(url, {
       method,
       headers: opts.json !== undefined ? { 'Content-Type': 'application/json' } : {},
       body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
       redirect: 'manual',
-      signal: opts.signal ?? AbortSignal.timeout(opts.timeoutMs ?? 30000),
+      signal,
     });
     let data: unknown = null;
-    try { data = await response.json(); } catch { /* 非 JSON 响应按错误处理 */ }
+    try { data = await response.json(); } catch (error) { if (signal.aborted) throw error; }
     if (response.status >= 300) {
       const message = (data as { error?: string } | null)?.error || `邻舍请求失败 (HTTP ${response.status})`;
       throw new Error(message);
@@ -308,7 +327,7 @@ export class LinsheWorld implements World {
     const base = new URL(this.base());
     const url = new URL(path, base.origin + '/');
     if (url.origin !== base.origin) throw new Error('邻舍媒体地址不属于已配置的服务');
-    const response = await fetch(url, { redirect: 'manual', signal: signal ?? AbortSignal.timeout(60000) });
+    const response = await fetch(url, { redirect: 'manual', signal: requestSignal(signal, 60000) });
     if (response.status !== 200) throw new Error(`邻舍媒体读取失败 (HTTP ${response.status})`);
     const declared = Number(response.headers.get('content-length') || 0);
     if (declared > MAX_MEDIA_BYTES) throw new Error('邻舍媒体超过 32MB，请在邻舍查看');
@@ -320,20 +339,26 @@ export class LinsheWorld implements World {
 
   /** 轮询任务直到完成；超时返回 null，由调用方决定如何向模型交代。生图任务 ID 为数字，语音任务 ID 为 UUID 字符串。 */
   private async waitTask(kind: 'image' | 'speech', id: number | string, ctx: ToolCallContext): Promise<{ url: string } | null> {
-    const deadline = Date.now() + Math.max(30, Math.min(3600, this.cfg.taskTimeoutSec)) * 1000;
-    while (Date.now() < deadline) {
-      if (ctx.signal?.aborted) throw new Error('本轮已取消；邻舍任务仍在后台运行，稍后可用 linshe_task 查询');
-      const path = kind === 'image' ? `/tasks/${id}` : `/speech/${id}`;
-      const data = await this.api('GET', path, { signal: ctx.signal }) as { status?: string; error?: string; image?: { url?: string } | null; audio_url?: string | null };
-      const status = data.status;
-      if (status === 'done' || status === 'completed') {
-        const url = kind === 'image' ? data.image?.url : data.audio_url;
-        if (!url) throw new Error('邻舍任务已完成但没有返回媒体地址');
-        return { url };
+    const timeout = AbortSignal.timeout(Math.max(30, Math.min(3600, this.cfg.taskTimeoutSec)) * 1000);
+    const signal = ctx.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout;
+    try {
+      while (!signal.aborted) {
+        const path = kind === 'image' ? `/tasks/${id}` : `/speech/${encodeURIComponent(id)}`;
+        const data = await this.api('GET', path, { signal }) as { status?: string; error?: string; image?: { url?: string } | null; audio_url?: string | null };
+        const status = data.status;
+        if (status === 'done' || status === 'completed') {
+          const url = kind === 'image' ? data.image?.url : data.audio_url;
+          if (!url) throw new Error('邻舍任务已完成但没有返回媒体地址');
+          return { url };
+        }
+        if (status === 'failed' || status === 'cancelled') throw new Error(data.error || '邻舍任务失败或已取消');
+        await sleep(POLL_INTERVAL_MS, signal);
       }
-      if (status === 'failed' || status === 'cancelled') throw new Error(data.error || '邻舍任务失败或已取消');
-      try { await sleep(POLL_INTERVAL_MS, ctx.signal); } catch { throw new Error('本轮已取消；邻舍任务仍在后台运行，稍后可用 linshe_task 查询'); }
+    } catch (error) {
+      if (ctx.signal?.aborted) throw new Error(`本轮已取消；可用 linshe_task(kind="${kind}", task_id=${JSON.stringify(id)}) 查询已提交的任务`);
+      if (!timeout.aborted) throw error;
     }
+    if (ctx.signal?.aborted) throw new Error('本轮已取消');
     return null;
   }
 
@@ -341,6 +366,7 @@ export class LinsheWorld implements World {
 
   private async dispatch(name: string, args: Record<string, unknown>, ctx: ToolCallContext): Promise<string | { text: string; blobs: Array<{ bytes: Uint8Array; mime: string; name: string; fallbackText: string }> }> {
     try {
+      if (ctx.signal?.aborted) throw new Error('本轮已取消');
       return await this.handlers(name, args, ctx);
     } catch (error) {
       throw new Error(error instanceof Error ? error.message : String(error));
@@ -351,45 +377,55 @@ export class LinsheWorld implements World {
     const characterId = optInt(args.character_id);
     switch (name) {
       case 'linshe_characters':
-        return dump(await this.api('GET', '/characters'));
+        return dump(await this.api('GET', '/characters', { signal: ctx.signal }));
       case 'linshe_character':
-        return dump(await this.api('GET', '/character', { query: { character_id: characterId } }));
+        return dump(await this.api('GET', '/character', { query: { character_id: characterId }, signal: ctx.signal }));
       case 'linshe_appearance':
-        return dump(await this.api('GET', '/appearance', { query: { character_id: characterId } }));
+        return dump(await this.api('GET', '/appearance', { query: { character_id: characterId }, signal: ctx.signal }));
       case 'linshe_moments':
         return dump(await this.api('GET', '/moments', {
           query: { limit: optInt(args.limit), before_id: optInt(args.before_id), character_id: characterId },
+          signal: ctx.signal,
         }));
       case 'linshe_moment':
-        return dump(await this.api('GET', `/moments/${optInt(args.post_id)}`));
+        return dump(await this.api('GET', `/moments/${optInt(args.post_id)}`, { signal: ctx.signal }));
       case 'linshe_events':
-        return dump(await this.api('GET', '/events', { query: { limit: optInt(args.limit) } }));
+        return dump(await this.api('GET', '/events', { query: { limit: optInt(args.limit), offset: args.offset === undefined ? undefined : Number(args.offset) }, signal: ctx.signal }));
       case 'linshe_event': {
         const id = String(args.event_id ?? '').trim();
         if (!id || id.length > 80) throw new Error('event_id 必填（如 123 或 town:123）');
-        return dump(await this.api('GET', `/events/by-id/${encodeURIComponent(id)}`));
+        return dump(await this.api('GET', `/events/by-id/${encodeURIComponent(id)}`, { signal: ctx.signal }));
       }
-      case 'linshe_schedule':
-        return dump(await this.api('GET', '/schedule', { query: { character_id: characterId } }));
+      case 'linshe_schedule': {
+        const full = args.full === true || args.full === 'true' || args.full === 1;
+        return dump(await this.api('GET', '/schedule', { query: { character_id: characterId, full: full || undefined }, signal: ctx.signal }));
+      }
       case 'linshe_newspaper': {
         const date = typeof args.date === 'string' && args.date.trim() ? args.date.trim() : undefined;
-        return dump(await this.api('GET', '/newspaper', { query: { date } }));
+        return dump(await this.api('GET', '/newspaper', { query: { date }, signal: ctx.signal }));
       }
       case 'linshe_diary': {
         const date = typeof args.date === 'string' && args.date.trim() ? args.date.trim() : undefined;
-        return dump(await this.api('GET', '/diary', { query: { character_id: characterId, date } }));
+        return dump(await this.api('GET', '/diary', { query: { character_id: characterId, date }, signal: ctx.signal }));
       }
       case 'linshe_world':
-        return dump(await this.api('GET', '/world'));
+        return dump(await this.api('GET', '/world', { signal: ctx.signal }));
       case 'linshe_task': {
-        const id = optInt(args.task_id);
-        if (!id) throw new Error('task_id 必填');
-        const data = await this.api('GET', `/tasks/${id}`) as { status?: string; image?: { url?: string } | null; error?: string };
-        if ((data.status === 'done' || data.status === 'completed') && data.image?.url) {
-          const media = await this.media(data.image.url, ctx.signal);
+        const kind = args.kind ?? 'image';
+        if (kind !== 'image' && kind !== 'speech') throw new Error('kind 须为 image 或 speech');
+        const id = kind === 'image' ? optInt(args.task_id) : typeof args.task_id === 'string' ? args.task_id.trim() : undefined;
+        if (!id || String(id).length > 200) throw new Error('task_id 必填：生图使用数字 ID，语音使用字符串 ID');
+        const path = kind === 'image' ? `/tasks/${id}` : `/speech/${encodeURIComponent(id)}`;
+        const data = await this.api('GET', path, { signal: ctx.signal }) as { status?: string; image?: { url?: string } | null; audio_url?: string | null; error?: string };
+        if (data.status === 'done' || data.status === 'completed') {
+          const url = kind === 'image' ? data.image?.url : data.audio_url;
+          if (!url) throw new Error('邻舍任务已完成但没有返回媒体地址');
+          const media = await this.media(url, ctx.signal);
           return {
-            text: `生图任务 #${id} 已完成。把 [blob …] 里的 log: 句柄作为 qq_draft 的 image 参数发送给用户。`,
-            blobs: [{ ...media, name: `linshe-${id}.png`, fallbackText: '按用户要求生成的图片' }],
+            text: kind === 'image'
+              ? `生图任务 #${id} 已完成。${IMAGE_DELIVERY}`
+              : `语音任务 #${id} 已完成。${SPEECH_DELIVERY}`,
+            blobs: [{ ...media, name: `linshe-${id}.${kind === 'image' ? 'png' : 'wav'}`, fallbackText: kind === 'image' ? '按用户要求生成的图片' : '角色语音' }],
           };
         }
         return dump(data);
@@ -398,8 +434,12 @@ export class LinsheWorld implements World {
         let paths = (Array.isArray(args.paths) ? args.paths : []).filter((p): p is string => typeof p === 'string' && p.startsWith('/')).slice(0, 9);
         const postId = optInt(args.post_id);
         if (!paths.length && !postId) throw new Error('需要提供 post_id 或 paths');
+        if (paths.length) {
+          const bootstrap = await this.api('GET', '/bootstrap', { signal: ctx.signal }) as { tools?: Array<{ name: string }> };
+          if (!bootstrap.tools?.some(tool => tool.name === 'linshe_moment_images')) throw new Error('邻舍已关闭 moments 工具');
+        }
         if (!paths.length) {
-          const data = await this.api('GET', `/moments/${postId}/images`) as { images?: string[] };
+          const data = await this.api('GET', `/moments/${postId}/images`, { signal: ctx.signal }) as { images?: string[] };
           paths = (data.images || []).filter((p) => typeof p === 'string' && p).slice(0, 9);
           if (!paths.length) return '这条朋友圈没有配图。';
         }
@@ -409,7 +449,7 @@ export class LinsheWorld implements World {
           blobs.push({ ...media, name: `moment-${postId ?? index}-${index}.png`, fallbackText: '朋友圈配图' });
         }
         return {
-          text: `已取到 ${blobs.length} 张朋友圈配图。逐条发送：每次 qq_draft 只带一张图的句柄，qq_confirm 发送成功后再起草下一条；全部发完后不要复述发送过程。`,
+          text: `已取到 ${blobs.length} 张朋友圈配图。${IMAGE_DELIVERY} 多张图逐条发送；QQ 每次 qq_draft 只带一张图，qq_confirm 成功后再起草下一条。`,
           blobs,
         };
       }
@@ -420,6 +460,7 @@ export class LinsheWorld implements World {
         const requestId = createHash('sha256').update(JSON.stringify([requirement, characterId ?? null, nonce])).digest('hex');
         const data = await this.api('POST', '/generate', {
           json: { requirement, session_id: 'cortico-world-linshe', request_id: requestId, ...(characterId ? { character_id: characterId } : {}) },
+          signal: ctx.signal,
         }) as { task_id?: number };
         const taskId = optInt(data.task_id);
         if (!taskId) throw new Error('邻舍没有返回生图任务 ID');
@@ -429,7 +470,7 @@ export class LinsheWorld implements World {
         }
         const media = await this.media(done.url, ctx.signal);
         return {
-          text: `图片已生成（任务 #${taskId}）。把 [blob …] 里的 log: 句柄作为 qq_draft 的 image 参数发送给用户；发送成功前不要在正文里假定用户已看到图片。`,
+          text: `图片已生成（任务 #${taskId}）。${IMAGE_DELIVERY} 发送成功前不要假定用户已看到图片。`,
           blobs: [{ ...media, name: `linshe-${taskId}.png`, fallbackText: '按用户要求生成的图片' }],
         };
       }
@@ -438,16 +479,17 @@ export class LinsheWorld implements World {
         if (!text || text.length > 1000) throw new Error('朗读文字须为 1–1000 字');
         const data = await this.api('POST', '/tts', {
           json: { text, ...(characterId ? { character_id: characterId } : {}) },
+          signal: ctx.signal,
         }) as { id?: number | string };
         const jobId = data.id;
         if (jobId === undefined || jobId === null || jobId === '') throw new Error('邻舍没有返回语音任务 ID');
         const done = await this.waitTask('speech', String(jobId), ctx);
         if (!done) {
-          return `语音任务 #${jobId} 已提交，等待超过 ${this.cfg.taskTimeoutSec} 秒仍未完成。不要向用户描述任务进度或预计时间。`;
+          return `语音任务 #${jobId} 已提交，等待超过 ${this.cfg.taskTimeoutSec} 秒仍未完成。可用 linshe_task(kind="speech", task_id=${JSON.stringify(String(jobId))}) 继续查询；不要向用户描述任务进度或预计时间。`;
         }
         const media = await this.media(done.url, ctx.signal);
         return {
-          text: `语音已合成（任务 #${jobId}）。语音条独占一条消息：调用 qq_draft 时只传 voice 参数（[blob …] 里的 log: 句柄），不要带 text、image 或 reply_to。`,
+          text: `语音已合成（任务 #${jobId}）。${SPEECH_DELIVERY}`,
           blobs: [{ ...media, name: `linshe-${jobId}.wav`, fallbackText: '角色语音' }],
         };
       }

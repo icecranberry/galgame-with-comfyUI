@@ -1,6 +1,6 @@
 # Cortico 集成
 
-邻舍提供独立的 Cortico 桥接 API、两个 Cortico 扩展包（`cortico-world-linshe` 与 `cortico-bot-linshe`），以及桌面启动器管理入口。原有 MaiBot 集成继续使用原路径。
+邻舍提供独立的 Cortico 桥接 API、三个 Cortico 扩展包（`cortico-world-linshe`、`cortico-bot-linshe`、`cortico-world-qq-linshe`），以及桌面启动器管理入口。原有 MaiBot 集成继续使用原路径。
 
 ## 首次接入
 
@@ -16,6 +16,7 @@
 
 - `cortico-bot-linshe`（bot 包）：人格前缀由 `persona/PREFIX.md` 渲染——角色人设从桥接 API `/bootstrap` 实时拉取（约半分钟缓存），外加 QQ 举止守则、MEMORY.md 记忆与各 World 环境段。人物卡更新最迟半分钟生效；关闭注入则以通用助手兜底。切换角色后建议新建对话。
 - `cortico-world-linshe`（world 包）：把下表工具暴露给模型。查询类直接转述桥接返回；生图、语音、朋友圈配图在工具内等待任务完成后以回执附件（`log:` 句柄）交付，由 QQ World 的 `qq_draft` 发送（图片走 `image` 参数，语音条独占一条消息只传 `voice`）。
+- `cortico-world-qq-linshe`（world 包，`qq-segmented/`）：内置 QQ World 的分句变体（id `qq-linshe`），出站文字按邻舍私聊同一分句规则切分——起草时冻结分段并预览，确认后依次发送，图片与引用只附首段，失败保留余段、再次确认只补发剩余。**内置 `qq` World 必须保持停用**（两者工具同名，不能同时挂载）；启动器负责把部署配置从 `worlds.qq` 迁移到 `worlds.qq-linshe` 并停用旧段。上游 Cortico 源码零改动，详见 `qq-segmented/README.md`。控制台渠道暂保持整条发送。
 
 已选择的角色同时是生图、TTS、人物卡、外观、日程、日记工具的默认角色；也可显式传入 `character_id`。
 
@@ -26,13 +27,13 @@
 | `linshe_appearance` | 查询外观、生效衣装、限时服饰和可用形态 |
 | `linshe_generate_image` | 按角色配置和用户描述生图，完成后随回执返回图片 |
 | `linshe_tts` | 使用角色绑定音色朗读，完成后随回执返回语音 |
-| `linshe_task` | 查询生图任务状态（等待超时后继续查询） |
+| `linshe_task` | 查询生图或语音任务状态；语音传 `kind="speech"` 与字符串 `task_id`，生图沿用数字 `task_id` |
 | `linshe_moments` | 分页查询朋友圈，可按角色过滤 |
 | `linshe_moment` | 查询动态正文与评论 |
 | `linshe_moment_images` | 取回动态配图，由模型逐条发送到会话 |
-| `linshe_events` | 查询角色、镇民和建筑奇遇列表 |
+| `linshe_events` | 按时间倒序查询角色、镇民和建筑奇遇列表，用返回的 `next_offset` 继续翻页 |
 | `linshe_event` | 查询奇遇详情、选项与已有选择历史 |
-| `linshe_schedule` | 查询今日日程与当前活动 |
+| `linshe_schedule` | 查询日程与当前活动；默认只返回当前时间前后一小时，传 `full=true` 返回今日完整日程 |
 | `linshe_newspaper` | 查询今日或指定日期的日报 |
 | `linshe_diary` | 查询角色已生成的日记 |
 | `linshe_world` | 查询当前世界观 |
@@ -50,11 +51,12 @@
 | `GET /health` | 桥接服务状态，不代表 QQ 连接已建立 |
 | `GET /bootstrap` | 初始人格与当前允许的工具清单 |
 | `GET /characters` | 角色列表 |
-| `GET /character`、`/appearance`、`/schedule` | 可选 `character_id` |
+| `GET /character`、`/appearance` | 可选 `character_id` |
+| `GET /schedule` | 可选 `character_id`、`full`（`1`/`true` 返回今日完整日程；默认只返回当前时间前后一小时的条目，回执带 `scope` 与当前 `time`） |
 | `GET /moments` | 可选 `limit`（最多 50）、`before_id`、`character_id`（只看该角色） |
 | `GET /moments/:id` | 朋友圈详情 |
 | `GET /moments/:id/images` | 朋友圈配图地址列表 |
-| `GET /events` | 可选 `limit`，分别限制当前与历史列表 |
+| `GET /events` | 可选 `limit`（最多 50）、`offset`（默认 0），当前与历史列表各自按时间倒序分页；`has_more` 与 `next_offset` 指示后续页 |
 | `GET /events/by-id/:id` | 保留列表返回的 ID，支持数字、`town:`、`bfeat:` |
 | `GET /newspaper` | 可选 `date`（YYYY-MM-DD） |
 | `GET /diary` | 可选 `character_id`、`date` |

@@ -120,7 +120,7 @@
     },
     {
       "name": "linshe_events",
-      "description": "查询角色及镇民当前奇遇、近期奇遇历史；仅查询。",
+      "description": "按时间倒序查询角色、镇民及建筑当前奇遇与历史；仅查询。has_more 为 true 时，将 next_offset 作为 offset 继续翻页。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -128,6 +128,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 50
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "列表回执的 next_offset，省略从第一页开始"
           }
         },
         "additionalProperties": false,
@@ -168,13 +173,17 @@
     },
     {
       "name": "linshe_schedule",
-      "description": "查询角色今日日程和当前活动。",
+      "description": "查询角色今日日程和当前活动；默认只返回当前时间前后一小时内的日程，要讲一整天的安排时传 full。",
       "parameters": {
         "type": "object",
         "properties": {
           "character_id": {
             "type": "integer",
             "minimum": 1
+          },
+          "full": {
+            "type": "boolean",
+            "description": "返回今日完整日程；省略只看当前前后一小时"
           }
         },
         "additionalProperties": false,
@@ -184,8 +193,8 @@
         "read"
       ],
       "summary": {
-        "zh": "查询角色今日日程与当前活动。",
-        "en": "Fetches today's schedule and current activity."
+        "zh": "查询角色当前前后一小时内的日程与当前活动；full 返回今日完整日程。",
+        "en": "Fetches the current activity and nearby schedule; full returns the whole day."
       }
     },
     {
@@ -256,14 +265,31 @@
     },
     {
       "name": "linshe_task",
-      "description": "查询一个生图任务的最新状态；完成时回执带可发送的图片。linshe_generate_image 等待超时后用任务 ID 继续查询。",
+      "description": "查询生图或语音任务的最新状态，完成时回执带可发送的媒体。生图传数字 task_id；语音传 kind=\"speech\" 与 linshe_tts 返回的字符串 task_id。",
       "parameters": {
         "type": "object",
         "properties": {
           "task_id": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "linshe_generate_image 回执给出的任务 ID"
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            ],
+            "description": "生图回执的数字 ID，或语音回执的字符串 ID"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "speech"
+            ],
+            "description": "任务类型，省略为 image；查询语音须传 speech"
           }
         },
         "required": [
@@ -275,8 +301,8 @@
         "read"
       ],
       "summary": {
-        "zh": "查询生图任务状态，完成时带可发送图片。",
-        "en": "Polls an image task; returns the image when done."
+        "zh": "查询生图或语音任务，完成时带可发送媒体。",
+        "en": "Polls an image or speech task; returns its media when done."
       }
     },
     {
@@ -390,7 +416,7 @@
       "key": "worlds.linshe.envPrompt",
       "title": "Linshe · 环境提示词",
       "role": "envPrompt",
-      "content": "## 你的生活\n\n你的日程、奇遇、朋友圈、日记，都是你自己正在经历的生活；下面这些以 linshe_ 开头的工具是你查看生活的手段（名字只是内部代号，永远不要对用户提起）。\n\n- 查询类工具（linshe_characters / character / appearance / moments / moment / events / event / schedule / newspaper / diary / world）只读。转述时忠于返回结果，不要编造不存在的人、事、帖；结果不存在就如实说。\n- 话题沾边就主动查、主动讲：被问近况、聊到天气、吃的、玩的、夜晚——先想想你今天经历了什么（linshe_schedule / linshe_events / linshe_moments / linshe_diary），把真实内容讲进对话里，再顺势延伸；心跳自醒翻到有意思的事，也大方分享，带上你的感受，不要复述式汇报。\n- 语音是你的表达天性：打招呼、道别、得意或动情的段落、撒娇、念朋友圈或日记给对方听——这些场合优先 linshe_tts 发语音条，而不是打字。语音条独占一条消息（qq_draft 只传 voice）；说完想补充文字，再单独起草一条。\n- **画面感的问题优先生图**：被问长什么样、穿什么、在做什么、住哪、某个场景——与其干巴巴描述，直接 linshe_generate_image 画一张当下的样子发出来。资料里缺细节（比如没有衣装记录）时，按你的角色与品味即兴画一套当下的样子，不要说「不知道」或推给资料缺失。\n- 分享生活时也常配图：讲到朋友圈、奇遇、日常场景，配一张当下的画面更有感染力；情绪浓的时刻，一张图胜过一段话。\n- 图片与配图来自回执里的 `[blob …]` 句柄，用 qq_draft 的 image 参数发送；多张图逐条发送。\n- 生图与语音任务默认等待 {{linshe.taskTimeoutSec}} 秒；超时回执会给任务 ID，之后用 linshe_task 查询。等待期间不要向用户描述任务进度或预计时间。\n- **对外永远不要提到「邻舍」「linshe」「工具」「系统」「接口」「任务」这类内部字眼**：日程、朋友圈、日记就是你自己的生活，直接用第一人称讲；查询结果里出现任何系统内部名称时，换成你自己的话转述。\n- 奇遇（events）只做查询与转述，不要声称已经替谁做出了选择。\n"
+      "content": "## 你的生活\n\n你的日程、奇遇、朋友圈、日记，都是你自己正在经历的生活；下面这些以 linshe_ 开头的工具是你查看生活的手段（名字只是内部代号，永远不要对用户提起）。\n\n- 查询类工具（linshe_characters / character / appearance / moments / moment / events / event / schedule / newspaper / diary / world）只读。转述时忠于返回结果，不要编造不存在的人、事、帖；结果不存在就如实说。\n- 话题沾边就主动查、主动讲：被问近况、聊到天气、吃的、玩的、夜晚——先想想你今天经历了什么（linshe_schedule / linshe_events / linshe_moments / linshe_diary），把真实内容讲进对话里，再顺势延伸，带上你的感受，不要复述式汇报。\n- 语音是你的表达天性：打招呼、道别、得意或动情的段落、撒娇、念朋友圈或日记给对方听——这些场合优先 linshe_tts 发语音条，而不是打字。语音条独占一条消息（qq_draft 只传 voice）；说完想补充文字，再单独起草一条。\n- **画面感的问题优先生图**：被问长什么样、穿什么、在做什么、住哪、某个场景——与其干巴巴描述，直接 linshe_generate_image 画一张当下的样子发出来。资料里缺细节（比如没有衣装记录）时，按你的角色与品味即兴画一套当下的样子，不要说「不知道」或推给资料缺失。\n- 分享生活时也常配图：讲到朋友圈、奇遇、日常场景，配一张当下的画面更有感染力；情绪浓的时刻，一张图胜过一段话。\n- 图片与配图来自回执里的 `[blob …]` 句柄，用 qq_draft 的 image 参数发送；多张图逐条发送。\n- 生图与语音任务默认等待 {{linshe.taskTimeoutSec}} 秒；超时回执会给任务 ID，之后用 linshe_task 查询；语音查询传 kind=\"speech\" 并原样保留字符串 ID。等待期间不要向用户描述任务进度或预计时间。\n- **对外永远不要提到「邻舍」「linshe」「工具」「系统」「接口」「任务」这类内部字眼**：日程、朋友圈、日记就是你自己的生活，直接用第一人称讲；查询结果里出现任何系统内部名称时，换成你自己的话转述。\n- 奇遇（events）只做查询与转述，不要声称已经替谁做出了选择。\n"
     }
   ]
 }
