@@ -15,7 +15,6 @@ import type {
 } from 'cortico/core/types.ts';
 import { renderTemplate } from 'cortico/core/template.ts';
 import { FileBlobStore } from './blobs.ts';
-import { Heartbeat } from './heartbeat.ts';
 
 export const MEMORY_FILE = 'MEMORY.md';
 const MAIN = 'main';
@@ -29,8 +28,6 @@ export interface LinshePersonaOptions {
   rounds: () => RoundCaps;
   /** 邻舍桥接连接参数;由 bot 装配代码从部署配置注入。 */
   bridge: () => { baseUrl: string };
-  /** 心跳基准间隔(毫秒);null=不自醒。每次求值现读,支持热改。 */
-  tickDelayMs?: () => number | null;
 }
 
 const MEMORY_WRITE_DECL: Omit<ToolDef, 'handler'> = {
@@ -51,7 +48,7 @@ const END_TURN_DECL: Omit<ToolDef, 'handler'> = {
   name: 'end_turn',
   description:
     'End this turn: nothing more you want to say or do right now. '
-    + 'New events or the heartbeat will wake you again. This is the normal way to finish a turn.',
+    + 'New events will wake you again. This is the normal way to finish a turn.',
   tags: ['flow'],
   barrierAfter: true,
   endsTurn: true,
@@ -65,7 +62,6 @@ export class LinshePersona implements Persona {
   readonly memoryDir: string;
   readonly blobs: BlobStore;
   private core: CoreApi | null = null;
-  private readonly heartbeat: Heartbeat;
   /** 上一次渲染时的初始角色 ID；跨重启持久化，用于识别角色切换。 */
   private lastSeenCharacter: string | null;
 
@@ -82,11 +78,6 @@ export class LinshePersona implements Persona {
     try { lastSeen = JSON.parse(readFileSync(stateFile, 'utf8')).lastCharacterId ?? null; } catch { /* 首次运行 */ }
     this.lastSeenCharacter = lastSeen;
     this.stateFile = stateFile;
-    this.heartbeat = new Heartbeat(
-      opts.tickDelayMs ?? ((): null => null),
-      // 心跳文本在投递时按当下安静时长生成,并以同一文本入库。
-      () => { this.core?.injectDeferred('tick', () => this.tickText(this.heartbeat.quietSeconds())); },
-    );
   }
 
   attach(core: CoreApi): void {
@@ -94,15 +85,6 @@ export class LinshePersona implements Persona {
   }
 
   private stateFile: string;
-
-  /** 心跳节律由装配层在 bot 启停时拉起/停止。 */
-  startRhythm(): void {
-    this.heartbeat.start();
-  }
-
-  stopRhythm(): void {
-    this.heartbeat.stop();
-  }
 
   /** 前缀 = 一份模板渲染出的一段;角色人设实时取自邻舍,记忆整份进去,每个 World 的环境提示词各占一节。 */
   async systemSegments(ctx: SystemPrefixContext): Promise<PrefixSegment[]> {
@@ -127,9 +109,15 @@ export class LinshePersona implements Persona {
     this.core?.injectInternal(`[session ${reason}] 上面是你的角色人格、记忆与环境。按你的判断行动,没有想说的就 end_turn。`);
   }
 
-  /** 每批投递都会经过;有外部事件就复位心跳的静默计时。 */
-  onDelivery(ctx: { events: Array<{ origin?: string }> }): void {
-    if (ctx.events.some((e) => e.origin === 'external')) this.heartbeat.noteActivity();
+  /** 每批投递都会经过。 */
+  onDelivery(ctx: { events: Array<{ origin?: string; source?: string; type?: string }> }): void {
+    // 没有配置 PIN 的控制台正文只有时间和昵称，来源由事件元数据补充。
+    if (ctx.events.some((e) => e.source === 'console' && (e.type === 'console.message' || e.type === 'console.invite'))) {
+      this.core?.injectInternal(
+        '【当前来信渠道】本批含控制台来信。回复控制台使用 console_send；普通 assistant 文本不会显示在聊天窗口。除非来信明确指定转达对象，不要发送到历史 QQ 会话。',
+        'delivery-channel',
+      );
+    }
   }
 
   declareSessions(): SessionDecl[] {
@@ -149,19 +137,6 @@ export class LinshePersona implements Persona {
   /** 自有工具名;装配层据此拒绝与之撞名的 World。 */
   ownToolNames(): string[] {
     return LINSHE_PERSONA_TOOL_DECLS.map((decl) => decl.name);
-  }
-
-  /** 心跳自醒的话:提示翻翻自己的生活,值得分享就主动开口,不值得就安静。 */
-  private tickText(quietSeconds: number): string {
-    const quiet = quietSeconds < 60
-      ? `${quietSeconds} 秒`
-      : `${Math.floor(quietSeconds / 60)} 分钟`;
-    return [
-      `[自醒] 你已经安静了 ${quiet}。这是你自己的时间:翻翻自己的生活——今天的日程、奇遇、朋友圈、日记`,
-      '(linshe_schedule / linshe_events / linshe_moments / linshe_diary),',
-      '有值得主动分享的新鲜事就到群里说说;讲到有情绪、得意或动情的地方,优先用 linshe_tts 发语音。',
-      '没有值得说的就安静等待,不要为了说话而说话,不要重复讲过的事,不要每次都打招呼问好。',
-    ].join('');
   }
 
   /**
