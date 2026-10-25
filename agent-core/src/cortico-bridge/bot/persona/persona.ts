@@ -157,16 +157,22 @@ export class LinshePersona implements Persona {
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json() as {
-        persona?: { character_id?: number; name?: string; system_prompt?: string } | null;
+        persona?: { character_id?: number; name?: string; system_prompt?: string; behavior_style?: string; reply_style?: string } | null;
       };
       const persona = data.persona;
       if (!persona?.system_prompt) throw new Error('initial persona unavailable');
       personaId = String(persona.character_id ?? '');
       personaName = persona.name || '';
+      // 行为/表达风格两段随人物卡进前缀;空段整节不渲染。
+      const styleSections = [
+        persona.behavior_style?.trim() ? `## 行为风格\n${persona.behavior_style.trim()}` : '',
+        persona.reply_style?.trim() ? `## 表达风格\n${persona.reply_style.trim()}` : '',
+      ].filter(Boolean).join('\n\n');
       block = [
         '# 角色人格',
         '',
         persona.system_prompt,
+        ...(styleSections ? ['', styleSections] : []),
         '',
         '【角色人格结束】',
         '你以上述角色身份说话与行动,后续同类身份描述以此为准。',

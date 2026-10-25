@@ -56,16 +56,38 @@
           <linshe-select id="cortico-character" v-model="draft.character_id" :options="characterOptions" searchable placeholder="选择初始角色" />
           <p class="hint">选择后自动生效：Cortico 会立即重载人格前缀并同步身份，对话记录保留。人物卡随角色更新，实时拉取。</p>
           <Transition name="bridge-fade" mode="out-in"><div :key="previewKey" class="persona-preview"><p v-if="personaLoading" class="description">正在读取人物卡…</p><p v-else-if="personaError" class="error-text">{{ personaError }}</p><pre v-else-if="personaText">{{ personaText }}</pre><p v-else class="description">{{ characters.length ? '选择一个角色，预览她的初始人格。' : '还没有邻舍角色，请先在角色管理中添加。' }}</p></div></Transition>
+          <div class="style-grid">
+            <div>
+              <label class="field-label" for="cortico-behavior-style">行为风格</label>
+              <linshe-input id="cortico-behavior-style" type="textarea" v-model="styleDraft.behavior_style" class="style-textarea" rows="4" :disabled="!draft.character_id || deriving || autoDeriving" />
+            </div>
+            <div>
+              <label class="field-label" for="cortico-reply-style">表达风格</label>
+              <linshe-input id="cortico-reply-style" type="textarea" v-model="styleDraft.reply_style" class="style-textarea" rows="4" :disabled="!draft.character_id || deriving || autoDeriving" />
+            </div>
+          </div>
+          <div class="actions">
+            <linshe-button :disabled="!draft.character_id || deriving || autoDeriving" @click="deriveFor()">{{ deriving ? '提炼中…' : '重新提炼风格' }}</linshe-button>
+            <linshe-button variant="primary" :disabled="!draft.character_id || deriving || savingStyles" @click="saveStylesManual">{{ savingStyles ? '保存中…' : '保存风格' }}</linshe-button>
+            <linshe-button variant="danger" :disabled="clearingContext" @click="confirmClearVisible = true">清空上下文</linshe-button>
+          </div>
           <p class="hint">省略角色 ID 的工具默认使用上方角色。</p>
         </section>
         <section class="card tools-card">
           <div class="section-heading"><h3>预置工具</h3><span class="compact-stat">已开放 <b>{{ enabledToolCount }}</b> / {{ tools.length }}</span></div>
-          <p class="description">查询读取邻舍现有内容；生图与语音由模型在回执里拿到媒体后经 QQ 消息发送。奇遇选项继续在邻舍奇遇页推进。</p>
+          <p class="description">查询读取邻舍现有内容；生图与语音由模型在回执里拿到媒体后经 QQ 消息发送。</p>
           <div class="tool-grid"><div v-for="group in groups" :key="group.id" class="tool-row"><div><h4>{{ group.label }}</h4><p class="hint">{{ group.description }}</p></div><linshe-switch :model-value="draft.tools.includes(group.id)" :aria-label="`开放${group.label}工具`" @update:model-value="toggleTool(group.id, $event)" /></div></div>
           <p class="hint">生图需要已配置 LLM 与生图服务；TTS 需要启用语音服务并绑定角色音色。Cortico 侧接入范围由 QQ World 的监听名单决定。</p>
         </section>
       </div>
     </Transition>
+    <linshe-modal v-model="confirmClearVisible" title="清空 Cortico 上下文？" :transition-ms="300">
+      <p class="modal-text">这会删除 Cortico 当前会话的全部对话记录，并按最新人格前缀重新开场，无法撤销。邻舍角色数据不受影响。</p>
+      <template #footer>
+        <linshe-button :disabled="clearingContext" @click="confirmClearVisible = false">取消</linshe-button>
+        <linshe-button variant="danger" :loading="clearingContext" @click="clearContext">确认清空</linshe-button>
+      </template>
+    </linshe-modal>
   </div>
 </template>
 
@@ -77,23 +99,25 @@ import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
-import { corticoGetSettings, corticoSaveSettings, corticoGetPersona } from '../api/index.js'
+import { corticoGetSettings, corticoSaveSettings, corticoGetPersona, corticoDeriveStyle, corticoClearContext } from '../api/index.js'
 
 const router = useRouter(), toast = inject('toast', null)
 const loading = ref(true), loadError = ref('')
 const draft = ref({ enabled: false, inject_persona: true, character_id: null, public_url: '', tools: [] }), saved = ref(null)
 const characters = ref([]), tools = ref([])
 const personaText = ref(''), personaError = ref(''), personaLoading = ref(false)
+const styleDraft = ref({ behavior_style: '', reply_style: '' })
+const deriving = ref(false), savingStyles = ref(false), autoDeriving = ref(false)
+const confirmClearVisible = ref(false), clearingContext = ref(false)
 const characterOptions = computed(() => characters.value.map(c => ({ value: c.id, label: c.display_name || c.name })))
 const enabledToolCount = computed(() => tools.value.filter(t => draft.value.tools.includes(t.group)).length)
 const previewKey = computed(() => `${draft.value.character_id}:${personaLoading.value}`)
 const groups = [
   { id: 'characters', label: '人物卡', description: '角色列表与完整人格' },
-  { id: 'images', label: '角色生图', description: '沿用角色外观与生图配置' },
+  { id: 'images', label: '生图', description: '角色生图与泛用画图（图片实验室链路）' },
   { id: 'tts', label: '角色语音', description: '用绑定的音色朗读对白' },
   { id: 'moments', label: '朋友圈', description: '动态、图片与评论' },
   { id: 'appearance', label: '外观与衣装', description: '原本外观、形态与限时服饰' },
-  { id: 'events', label: '奇遇', description: '当前故事与历史选项' },
   { id: 'schedule', label: '日程', description: '今日安排与当前活动' },
   { id: 'newspaper', label: '邻舍日报', description: '今日报纸与往期内容' },
   { id: 'diary', label: '角色日记', description: '查询已写下的日记' },
@@ -113,12 +137,53 @@ let previewRequest = 0
 watch(() => draft.value.character_id, async id => {
   const request = ++previewRequest
   personaText.value = ''; personaError.value = ''; personaLoading.value = !!id
+  styleDraft.value = { behavior_style: '', reply_style: '' }
   save()
   if (!id) return
-  try { const data = await corticoGetPersona(id); if (request === previewRequest) personaText.value = data.system_prompt }
+  try {
+    const data = await corticoGetPersona(id)
+    if (request === previewRequest) {
+      personaText.value = data.system_prompt
+      styleDraft.value = { behavior_style: data.behavior_style || '', reply_style: data.reply_style || '' }
+      if (!styleDraft.value.behavior_style && !styleDraft.value.reply_style) deriveFor(true)
+    }
+  }
   catch (e) { if (request === previewRequest) personaError.value = e.message }
   finally { if (request === previewRequest) personaLoading.value = false }
 })
+// 提炼并保存当前角色的行为/表达风格；auto=切换角色时后台自动提炼，不弹成功提示。
+async function deriveFor(auto = false) {
+  if (auto) autoDeriving.value = true; else deriving.value = true
+  const request = previewRequest
+  try {
+    const data = await corticoDeriveStyle(draft.value.character_id)
+    if (request !== previewRequest) return
+    styleDraft.value = { behavior_style: data.behavior_style || '', reply_style: data.reply_style || '' }
+    const saved = await saveStyles()
+    if (!auto && saved) toast?.('已按人物卡提炼并保存风格', 'success')
+  } catch (e) { if (request === previewRequest) toast?.(e.message, 'error') }
+  finally { deriving.value = false; autoDeriving.value = false }
+}
+async function saveStyles() {
+  if (!draft.value.character_id) return false
+  savingStyles.value = true
+  try {
+    const data = await corticoSaveSettings({ behavior_style: styleDraft.value.behavior_style, reply_style: styleDraft.value.reply_style })
+    saved.value = data.settings
+    return true
+  } catch (e) { toast?.(e.message, 'error'); return false }
+  finally { savingStyles.value = false }
+}
+async function saveStylesManual() { if (await saveStyles()) toast?.('风格已保存', 'success') }
+async function clearContext() {
+  clearingContext.value = true
+  try {
+    await corticoClearContext()
+    confirmClearVisible.value = false
+    toast?.('Cortico 上下文已清空，对话将从头开始', 'success')
+  } catch (e) { toast?.(e.message, 'error') }
+  finally { clearingContext.value = false }
+}
 async function save() {
   try {
     const data = await corticoSaveSettings(JSON.parse(JSON.stringify({ ...draft.value, inject_persona: true })))
@@ -151,6 +216,7 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .field-row { display: flex; gap: 8px; align-items: center; }.field-row > :first-child { flex: 1; min-width: 0; }
 .hint { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.7; color: var(--text-secondary); overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+.modal-text { margin: 0; font-size: var(--fs-sm); line-height: 1.7; color: var(--text-secondary); }
 
 /* ── 后台入口链接（与 MaiBot 桥接页同一套皮肤） ── */
 .admin-links-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -203,6 +269,10 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 
 .persona-preview { min-height: 180px; max-height: 380px; overflow: auto; margin-top: 18px; padding: 16px; border-radius: var(--radius-md); background: var(--bg-secondary); }
 .persona-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: var(--fs-sm); line-height: 1.8; margin: 0; }
+.style-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; margin-top: 18px; }
+.style-grid .field-label { margin-top: 0; }
+.style-textarea { width: 100%; }
+.persona-card > .hint:last-of-type { margin-top: 14px; }
 .tools-card .hint { margin: 0; }
 .tool-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; }
 .tool-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border); }
@@ -210,6 +280,6 @@ h4 { margin: 0 0 4px; font-size: var(--fs-sm); }
 .compact-stat, .status-line { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }.compact-stat b { color: var(--accent); }
 .error-text, .error-state p { color: var(--danger); font-size: var(--fs-sm); line-height: 1.7; }
 .bridge-fade-enter-active, .bridge-fade-leave-active { transition: opacity .3s var(--ease-standard); }.bridge-fade-enter-from, .bridge-fade-leave-to { opacity: 0; }
-@media (max-width: 767px) { .admin-links-grid { grid-template-columns: 1fr; } .tool-grid { grid-template-columns: 1fr; } }
+@media (max-width: 767px) { .admin-links-grid { grid-template-columns: 1fr; } .tool-grid { grid-template-columns: 1fr; } .style-grid { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .cortico-page { padding: 16px; }.card { padding: 18px; }.page-header { align-items: flex-start; gap: 12px; } }
 </style>

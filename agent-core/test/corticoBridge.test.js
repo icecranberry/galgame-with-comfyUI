@@ -16,13 +16,15 @@ app.use(express.json());
 app.use('/api/cortico', createCorticoRouter({
   imagePrompt: async () => { imageCalls++; await new Promise(resolve => setTimeout(resolve, 20)); return 'test scene'; },
   imageTask: ({ conversationId, prompt }) => Number(db.prepare("INSERT INTO image_tasks(conversation_id,prompt_original,status) VALUES(?,?,'running')").run(conversationId, prompt).lastInsertRowid),
+  labImageTask: ({ conversationId, desc }) => { labDraws.push(desc); return Number(db.prepare("INSERT INTO image_tasks(conversation_id,prompt_original,status) VALUES(?,?,'running')").run(conversationId, desc).lastInsertRowid); },
   speech: args => { speechArguments = args; return { id: 'speech-fixture', status: 'queued' }; },
+  deriveStyle: async base => { derivedPrompts.push(base); return { behavior_style: `derived:${base.slice(0, 4)}`, reply_style: '温和**回复限制在30字内**' }; },
 }));
 const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
 const base = `http://127.0.0.1:${server.address().port}/api/cortico`;
 after(async () => { await new Promise(resolve => server.close(resolve)); db.close(); });
-let characterId;
+let characterId, derivedPrompts = [], labDraws = [];
 async function request(path, { method = 'GET', body, headers = {} } = {}) {
   const response = await localFetch(base + path, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
   const text = await response.text();
@@ -62,18 +64,80 @@ test('stable initial persona excludes dynamic outfits; appearance uses shared as
   await request('/admin/settings', { method: 'PUT', body: { inject_persona: true } });
 });
 
+test('persona styles derive per character and persist into bootstrap and admin persona', async () => {
+  // 提炼端点是纯预览：返回风格但不落库。
+  const preview = await request('/admin/derive-style', { method: 'POST', body: {} });
+  assert.equal(preview.status, 200);
+  assert.equal(preview.data.character_id, characterId);
+  assert.equal(preview.data.behavior_style, 'derived:你是星星');
+  assert.deepEqual(derivedPrompts, ['你是星星。\n## 你的外观\n银发蓝眼。']);
+  assert.equal((await request('/bootstrap')).data.persona.reply_style, '');
+  const blankId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-blank', '空白', '', '').lastInsertRowid);
+  assert.match((await request('/admin/derive-style', { method: 'POST', body: { character_id: blankId } })).data.error, /没有人格卡片/);
+  assert.equal((await request('/admin/derive-style', { method: 'POST', body: { character_id: 999999 } })).status, 404);
+  assert.match((await request('/admin/settings', { method: 'PUT', body: { behavior_style: 5 } })).data.error, /必须是字符串/);
+  await request('/admin/settings', { method: 'PUT', body: { behavior_style: '冷静行动', reply_style: '温和说话' } });
+  const styled = (await request('/bootstrap')).data.persona;
+  assert.equal(styled.behavior_style, '冷静行动');
+  assert.equal(styled.reply_style, '温和说话');
+  const adminPersona = (await request(`/admin/persona/${characterId}`)).data;
+  assert.equal(adminPersona.behavior_style, '冷静行动');
+  assert.equal(adminPersona.reply_style, '温和说话');
+  // 只提交一段时另一段保留原值。
+  await request('/admin/settings', { method: 'PUT', body: { reply_style: '简短说话' } });
+  assert.deepEqual((await request(`/admin/persona/${characterId}`)).data, { ...adminPersona, reply_style: '简短说话' });
+  // 风格按角色独立存储：切换角色各自取各自的。
+  const otherId = Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt) VALUES(?,?,?,?)').run('cortico-style-other', '月亮', '你是月亮。', '月亮安静。').lastInsertRowid);
+  await request('/admin/settings', { method: 'PUT', body: { character_id: otherId, behavior_style: '月夜行动', reply_style: '安静说话' } });
+  const switched = (await request('/bootstrap')).data.persona;
+  assert.equal(switched.name, '月亮');
+  assert.equal(switched.behavior_style, '月夜行动');
+  await request('/admin/settings', { method: 'PUT', body: { character_id: characterId } });
+  const restored = (await request('/bootstrap')).data.persona;
+  assert.equal(restored.behavior_style, '冷静行动');
+  assert.equal(restored.reply_style, '简短说话');
+});
+
+test('clear-context proxies Cortico session storage clear and reports failures', async () => {
+  const cleared = [];
+  let clearStatus = 200;
+  const webui = express();
+  webui.post('/api/storage/clear', (req, res) => { cleared.push(req.query); res.status(clearStatus).json(clearStatus === 200 ? { ok: true, result: '已清空' } : { error: 'boom' }); });
+  const webuiServer = webui.listen(0, '127.0.0.1');
+  await new Promise(resolve => webuiServer.once('listening', resolve));
+  const previousPort = (await request('/admin/settings')).data.settings.webui_port;
+  try {
+    await request('/admin/settings', { method: 'PUT', body: { webui_port: webuiServer.address().port } });
+    // 成功路径需要真实 fetch 访问本机 mock；结束后立即还原 stub。
+    globalThis.fetch = localFetch;
+    assert.equal((await request('/admin/clear-context', { method: 'POST' })).status, 200);
+    assert.deepEqual(cleared, [{ owner: 'core', key: 'session' }]);
+    clearStatus = 500;
+    const failing = await request('/admin/clear-context', { method: 'POST' });
+    assert.equal(failing.status, 502);
+    assert.match(failing.data.error, /HTTP 500：boom/);
+    globalThis.fetch = async () => { throw new Error('External services must not be called in bridge tests'); };
+    const unreachable = await request('/admin/clear-context', { method: 'POST' });
+    assert.equal(unreachable.status, 502);
+    assert.match(unreachable.data.error, /无法连接 Cortico/);
+  } finally {
+    await request('/admin/settings', { method: 'PUT', body: { webui_port: previousPort } });
+    await new Promise(resolve => webuiServer.close(resolve));
+  }
+});
+
 test('every read tool works with empty state; invalid dates and write aliases are rejected', async () => {
-  for (const path of ['/characters', '/character', '/appearance', '/moments', '/events', '/schedule', '/newspaper', '/diary', '/world']) {
+  for (const path of ['/characters', '/character', '/appearance', '/moments', '/schedule', '/newspaper', '/diary', '/world']) {
     const response = await request(path);
     assert.equal(response.status, 200, `${path}: ${JSON.stringify(response.data)}`);
   }
   assert.equal((await request('/newspaper?date=2026-02-30')).status, 400);
   assert.equal((await request('/diary?date=nope')).status, 400);
-  for (const path of ['/moments/stream', '/events/stream', '/moments/generate', '/events/generate']) assert.equal((await request(path)).status, 404);
-  for (const path of ['/moments/1/like', '/events/1/choose']) assert.equal((await request(path, { method: 'POST', body: {} })).status, 404);
+  for (const path of ['/moments/stream', '/moments/generate']) assert.equal((await request(path)).status, 404);
+  assert.equal((await request('/moments/1/like', { method: 'POST', body: {} })).status, 404);
 });
 
-test('moments pagination, event detail and saved schedule share application data', async () => {
+test('moments pagination and saved schedule share application data', async () => {
   for (let i = 0; i < 3; i++) db.prepare("INSERT INTO moment_posts(character_id,content,status) VALUES(?,?,'done')").run(characterId, `动态${i}`);
   const feed = (await request('/moments?limit=2')).data;
   assert.equal(feed.posts.length, 2);
@@ -94,10 +158,6 @@ test('moments pagination, event detail and saved schedule share application data
   db.prepare('UPDATE moment_posts SET images = ? WHERE id = ?').run(JSON.stringify(['/images/moments/a.png', '/images/moments/b.png']), otherPostId);
   assert.deepEqual((await request(`/moments/${otherPostId}/images`)).data, { id: otherPostId, images: ['/images/moments/a.png', '/images/moments/b.png'] });
   assert.equal((await request('/moments/999999/images')).status, 404);
-  const eventId = Number(db.prepare("INSERT INTO character_events(character_id,event_type_key,status,title,expires_at) VALUES(?,'test','open','偶遇',datetime('now','+1 day'))").run(characterId).lastInsertRowid);
-  assert.equal((await request(`/events/by-id/${eventId}`)).data.title, '偶遇');
-  assert.equal((await request('/events/by-id/town%3A999999')).data.error, 'event_not_found');
-  assert.equal((await request('/events/by-id/bfeat%3A999999')).data.error, 'event_not_found');
   db.prepare('INSERT INTO daily_schedules(character_id,schedule_date,schedule_json) VALUES(?,?,?)').run(characterId, getLocalDateKey(), JSON.stringify([{ startTime: '00:00', endTime: '23:59', activity: '阅读', replyDelay: 0 }]));
   assert.equal((await request('/schedule')).data.activities[0].activity, '阅读');
 });
@@ -127,30 +187,25 @@ test('schedule defaults to the surrounding hour and returns the day only on requ
 test('permissions apply to discovery, content details and media task execution', async () => {
   await request('/admin/settings', { method: 'PUT', body: { tools: ['characters'] } });
   assert.ok((await request('/bootstrap')).data.tools.every(t => t.group === 'characters'));
-  for (const path of ['/moments', '/appearance', '/events', '/schedule', '/diary', '/newspaper', '/world']) assert.equal((await request(path)).status, 403);
-  for (const path of ['/moments/1', '/moments/1/images', '/events/by-id/1', '/events/by-id/town%3A1', '/events/by-id/bfeat%3A1', '/tasks/1', '/speech/voice-fixture']) assert.equal((await request(path)).status, 403);
+  for (const path of ['/moments', '/appearance', '/schedule', '/diary', '/newspaper', '/world']) assert.equal((await request(path)).status, 403);
+  for (const path of ['/moments/1', '/moments/1/images', '/tasks/1', '/speech/voice-fixture']) assert.equal((await request(path)).status, 403);
   assert.equal((await request('/generate', { method: 'POST', body: {} })).status, 403);
+  assert.equal((await request('/draw', { method: 'POST', body: { requirement: '猫' } })).status, 403);
   assert.equal((await request('/tts', { method: 'POST', body: { text: '你好' } })).status, 403);
   await request('/admin/settings', { method: 'PUT', body: { tools: [...new Set(toolCatalog.map(t => t.group))] } });
 });
 
-test('event pages interleave character and NPC history chronologically without losing later pages', async () => {
-  const npcId = Number(db.prepare("INSERT INTO town_npcs(display_name) VALUES('测试镇民')").run().lastInsertRowid);
-  const first = Number(db.prepare("INSERT INTO event_history(character_id,title,ended_at) VALUES(?,'角色较新','2026-10-25 03:00:00')").run(characterId).lastInsertRowid);
-  const third = Number(db.prepare("INSERT INTO event_history(character_id,title,ended_at) VALUES(?,'角色较早','2026-10-25 01:00:00')").run(characterId).lastInsertRowid);
-  db.prepare("INSERT INTO town_npc_event_history(id,npc_id,title,choice_history,ended_at) VALUES(9001,?,'镇民奇遇',?,'2026-10-25 02:00:00')").run(npcId, JSON.stringify([{ choice: 'A', label: '坐下来聊聊' }]));
-  const page1 = (await request('/events?limit=2')).data;
-  assert.deepEqual(page1.history.map(event => event.id), [first, 'town:9001']);
-  assert.equal(page1.has_more, true);
-  assert.equal(page1.next_offset, 2);
-  const page2 = (await request(`/events?limit=2&offset=${page1.next_offset}`)).data;
-  assert.deepEqual(page2.history.map(event => event.id), [third]);
-  assert.equal(page2.has_more, false);
-  assert.equal(page2.next_offset, null);
-  const detail = await request('/events/by-id/town%3A9001');
-  assert.equal(detail.data.title, '镇民奇遇');
-  assert.deepEqual(detail.data.choice_history, [{ choice: 'A', label: '坐下来聊聊' }]);
-  for (const offset of ['-1', '1.5', 'nope']) assert.equal((await request(`/events?offset=${offset}`)).status, 400);
+test('retired events endpoints respond 404 and the events group is dropped from settings', async () => {
+  for (const path of ['/events', '/events?limit=2&offset=0', '/events/by-id/123', '/events/by-id/town%3A1', '/events/by-id/bfeat%3A1']) {
+    assert.equal((await request(path)).status, 404, path);
+  }
+  assert.ok(toolCatalog.every(t => t.group !== 'events'));
+  // 旧配置/旧客户端里遗留的 events 分组静默剔除，其余分组照常生效。
+  const saved = await request('/admin/settings', { method: 'PUT', body: { tools: ['characters', 'events'] } });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.data.settings.tools, ['characters']);
+  assert.equal((await request('/newspaper')).status, 403);
+  await request('/admin/settings', { method: 'PUT', body: { tools: [...new Set(toolCatalog.map(t => t.group))] } });
 });
 
 test('newspaper and diary queries return saved dated content without generating it', async () => {
@@ -178,6 +233,23 @@ test('image requests coalesce retries, survive rereads and isolate MaiBot tasks'
   const other = Number(db.prepare("INSERT INTO image_tasks(conversation_id,prompt_original,status) VALUES('maibot_x','other','running')").run().lastInsertRowid);
   assert.equal((await request(`/tasks/${other}`)).status, 404);
   assert.equal((await request('/generate', { method: 'POST', body: { ...body, request_id: '' } })).status, 400);
+});
+
+test('draw routes free-form descriptions through the image lab chain', async () => {
+  const body = { requirement: '画一只戴帽子的橘猫', session_id: 'qq:GroupMessage:1', request_id: 'draw-1' };
+  const [a, b] = await Promise.all([request('/draw', { method: 'POST', body }), request('/draw', { method: 'POST', body })]);
+  assert.equal(a.status, 202);
+  assert.ok(b.status === 202 || b.status === 200, `b.status=${b.status}`); // 任务落库快的重放走幂等路径
+  assert.equal(a.data.task_id, b.data.task_id);
+  assert.deepEqual(labDraws, ['画一只戴帽子的橘猫']);
+  assert.equal((await request('/draw', { method: 'POST', body })).data.task_id, a.data.task_id);
+  // 相同描述换 request_id（world 侧由 nonce 派生）得到新任务；与 /generate 命名空间隔离。
+  const redrawn = await request('/draw', { method: 'POST', body: { ...body, request_id: 'draw-2' } });
+  assert.notEqual(redrawn.data.task_id, a.data.task_id);
+  db.prepare("UPDATE image_tasks SET status='done',output_paths=? WHERE id=?").run(JSON.stringify(['/images/lab.png']), a.data.task_id);
+  assert.equal((await request(`/tasks/${a.data.task_id}`)).data.image.url, '/images/lab.png');
+  assert.equal((await request('/draw', { method: 'POST', body: { requirement: 'x'.repeat(4001), session_id: 's', request_id: 'r' } })).status, 400);
+  assert.equal((await request('/draw', { method: 'POST', body: { session_id: 's', request_id: 'r' } })).status, 400);
 });
 
 test('TTS validates text and uses the selected character binding', async () => {

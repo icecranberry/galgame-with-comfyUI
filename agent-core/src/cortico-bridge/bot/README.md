@@ -1,6 +1,6 @@
 # cortico-bot-linshe
 
-邻舍角色人格的 Cortico bot 代码包。Persona 的系统前缀由 `persona/PREFIX.md` 渲染:每次构建前缀时从邻舍桥接 API（`/api/cortico/bootstrap`）实时拉取角色人设，记忆是一份 MEMORY.md，各 World 的环境提示词各占一节。
+邻舍角色人格的 Cortico bot 代码包。Persona 的系统前缀由 `persona/PREFIX.md` 渲染:每次构建前缀时从邻舍桥接 API（`/api/cortico/bootstrap`）实时拉取角色人设（含按角色存储的行为 / 表达风格两节，紧跟人物卡之后），记忆是一份 MEMORY.md，各 World 的环境提示词各占一节。
 
 声明渠道:`console`、`qq`、`linshe`。deployment.json 以 `{"bot": "cortico-bot-linshe"}` 引用本包。
 

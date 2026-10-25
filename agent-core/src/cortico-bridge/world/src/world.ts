@@ -79,31 +79,6 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
     },
   },
   {
-    name: 'linshe_events',
-    description: '按时间倒序查询角色、镇民及建筑当前奇遇与历史；仅查询。has_more 为 true 时，将 next_offset 作为 offset 继续翻页。',
-    tags: ['read'],
-    parameters: {
-      type: 'object',
-      properties: {
-        limit: { type: 'integer', minimum: 1, maximum: 50 },
-        offset: { type: 'integer', minimum: 0, description: '列表回执的 next_offset，省略从第一页开始' },
-      },
-      additionalProperties: false,
-      required: [],
-    },
-  },
-  {
-    name: 'linshe_event',
-    description: '按奇遇列表返回的 ID 查询内容、选项和选择历史。',
-    tags: ['read'],
-    parameters: {
-      type: 'object',
-      properties: { event_id: { type: 'string', maxLength: 80, description: '奇遇 ID，如 123 或 town:123' } },
-      required: ['event_id'],
-      additionalProperties: false,
-    },
-  },
-  {
     name: 'linshe_schedule',
     description: '查询角色今日日程和当前活动；默认只返回当前时间前后一小时内的日程，要讲一整天的安排时传 full。',
     tags: ['read'],
@@ -191,6 +166,22 @@ export const LINSHE_TOOL_DECLS: ReadonlyArray<Omit<ToolDef, 'handler'>> = [
         requirement: { type: 'string', minLength: 1, maxLength: 4000, description: '完整的画面需求，可用中文' },
         character_id: { type: 'integer', minimum: 1 },
         nonce: { type: 'string', maxLength: 64, description: '可选。相同画面需求想要重画一张时，换一个任意字符串' },
+      },
+      required: ['requirement'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'linshe_draw',
+    description:
+      '泛用画图：用中文描述想画的画面——人、物品、场景皆可，不限于角色，画其他角色、角色以外的人或任何东西时用本工具；画面里提到的角色会自动带上其外观。工具会等待生成完成并返回可发送的图片；相同描述返回同一张图，想重画请改变描述或传入不同 nonce。',
+    tags: ['act'],
+    barrierAfter: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        requirement: { type: 'string', minLength: 1, maxLength: 4000, description: '想画什么的画面描述，可用中文；提到角色名会自动带上其外观' },
+        nonce: { type: 'string', maxLength: 64, description: '可选。相同画面想要重画一张时，换一个任意字符串' },
       },
       required: ['requirement'],
       additionalProperties: false,
@@ -389,13 +380,6 @@ export class LinsheWorld implements World {
         }));
       case 'linshe_moment':
         return dump(await this.api('GET', `/moments/${optInt(args.post_id)}`, { signal: ctx.signal }));
-      case 'linshe_events':
-        return dump(await this.api('GET', '/events', { query: { limit: optInt(args.limit), offset: args.offset === undefined ? undefined : Number(args.offset) }, signal: ctx.signal }));
-      case 'linshe_event': {
-        const id = String(args.event_id ?? '').trim();
-        if (!id || id.length > 80) throw new Error('event_id 必填（如 123 或 town:123）');
-        return dump(await this.api('GET', `/events/by-id/${encodeURIComponent(id)}`, { signal: ctx.signal }));
-      }
       case 'linshe_schedule': {
         const full = args.full === true || args.full === 'true' || args.full === 1;
         return dump(await this.api('GET', '/schedule', { query: { character_id: characterId, full: full || undefined }, signal: ctx.signal }));
@@ -472,6 +456,27 @@ export class LinsheWorld implements World {
         return {
           text: `图片已生成（任务 #${taskId}）。${IMAGE_DELIVERY} 发送成功前不要假定用户已看到图片。`,
           blobs: [{ ...media, name: `linshe-${taskId}.png`, fallbackText: '按用户要求生成的图片' }],
+        };
+      }
+      case 'linshe_draw': {
+        const requirement = String(args.requirement ?? '').trim();
+        if (!requirement) throw new Error('requirement 必填');
+        const nonce = typeof args.nonce === 'string' ? args.nonce : '';
+        const requestId = createHash('sha256').update(JSON.stringify([requirement, nonce])).digest('hex');
+        const data = await this.api('POST', '/draw', {
+          json: { requirement, session_id: 'cortico-world-linshe', request_id: requestId },
+          signal: ctx.signal,
+        }) as { task_id?: number };
+        const taskId = optInt(data.task_id);
+        if (!taskId) throw new Error('邻舍没有返回画图任务 ID');
+        const done = await this.waitTask('image', taskId, ctx);
+        if (!done) {
+          return `生图任务 #${taskId} 已提交，等待超过 ${this.cfg.taskTimeoutSec} 秒仍未完成。可用 linshe_task(task_id=${taskId}) 继续查询；不要向用户描述任务进度或预计时间。`;
+        }
+        const media = await this.media(done.url, ctx.signal);
+        return {
+          text: `图片已生成（任务 #${taskId}）。${IMAGE_DELIVERY} 发送成功前不要假定用户已看到图片。`,
+          blobs: [{ ...media, name: `linshe-${taskId}.png`, fallbackText: '按描述生成的图片' }],
         };
       }
       case 'linshe_tts': {

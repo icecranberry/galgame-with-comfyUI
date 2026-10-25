@@ -105,9 +105,7 @@ for (const success of [true, false]) {
       end() { this.writableEnded = true; close(); },
     };
     const handler = loadHandler('/test-style', {
-      getSystemRulesWithWorld: () => '', getWorldSetting: () => null,
-      IMAGE_PROMPT_RULE: { rule_content: 'image rules' }, matchAll: () => [], matchUser: () => false,
-      chatSync: async () => 'initial prompt', extractImagePromptResponse: text => text,
+      generateScenePrompt: async () => ({ prompt: 'initial prompt', loras: [] }),
       generateImageRaw: async (prompt, opts) => {
         assert.equal(prompt, 'initial prompt');
         assert.match(frames[0], /initial prompt/);

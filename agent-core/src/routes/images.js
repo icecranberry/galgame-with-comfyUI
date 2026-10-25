@@ -1,24 +1,18 @@
 import { Router } from 'express';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
+import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
-import { buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 import { config, getNovelaiApiKey } from '../config.js';
 import { checkNovelaiConnection } from '../services/novelaiClient.js';
 import { getState, updateServiceConfig, startFullCompression, cancelCompression } from '../services/imageCompressor.js';
 import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, getImageDir } from '../services/imagePaths.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
-import { chatSync } from '../services/lorebook/runtime.js';
-import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
-import { matchAll } from '../services/characterSearch.js';
-import { getUserName, matchUser } from '../services/userSearch.js';
-import { parseLoras } from '../maibot-bridge/generate.js';
-import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
+import { generateScenePrompt } from '../services/imageLabScene.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -220,52 +214,6 @@ router.post('/test-style', async (req, res) => {
     res.on('close', () => clearInterval(heartbeat));
   }
   const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras, alreadyPrepared } = req.body;
-
-  /**
-   * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
-   *   system0 = 破甲 + 世界观 / system1 = 世界观强化 / system2 = 生图规则
-   *   system3 = 画面描述中匹配到的角色（注入外观描述，返回值附带其 loras）
-   *             以及画面描述中提到的用户本人（只注入其自述资料，不参与 loras）
-   */
-  const generateScenePrompt = async (desc) => {
-    const msgs = [{ role: 'system', content: getSystemRulesWithWorld() || '你是一个角色扮演 AI。' }];
-    try {
-      if (getWorldSetting()) msgs.push({ role: 'system', content: getWorldIntegrationRule('photo') });
-    } catch { /* 规则缺失非致命 */ }
-    msgs.push({ role: 'system', content: `【生图规则】\n${IMAGE_PROMPT_RULE.rule_content}` });
-
-    const loras = [];
-    const crossBlocks = [];
-    const matched = matchAll(desc);
-    if (matched.length > 0) {
-      const db = getDb();
-      const chars = matched.map(m =>
-        db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
-      ).filter(Boolean);
-      crossBlocks.push(...chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
-      loras.push(...chars.flatMap(c => parseLoras(c)));
-    }
-    // 画面描述里提到用户本人时同样注入其资料（用户不是角色：没有 id、没有 LoRA）
-    if (matchUser(desc)) {
-      crossBlocks.push(`[${getUserName()}]\n${buildUserImageCrossRefInfo()}`);
-    }
-    if (crossBlocks.length > 0) {
-      msgs.push({
-        role: 'system',
-        content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`,
-      });
-    }
-
-    msgs.push({
-      role: 'user',
-      content: `【画面描述】\n${desc}\n\n【当前任务】\n根据上面的画面描述，直接输出对应的英文生图 prompt（严格遵循【生图规则】）。不要任何格式包装或额外文字。`,
-    });
-
-    const raw = await chatSync(msgs, { temperature: 0.7, label: '画风测试' });
-    const prompt = extractImagePromptResponse(raw);
-    if (!prompt) throw new Error('模型未返回有效的提示词');
-    return { prompt, loras };
-  };
 
   const CHAT_PROMPT_DEFAULT = `1girl, solo, kiana kaslana(honkai impact 3rd), herrscher of finality, voluminous white hair, gradient hair, blue eyes with purple cross-shaped pupils, side ahoge, ponytail, floating hair, white cat ears, cat tail, soft breasts, hair ornament, sailor uniform, one hand on hip, other hand making peace sign near face, classroom, open window, cherry blossoms, cherry blossom petals drifting indoors, direct eye contact, facing viewer, kiana kaslana (honkai impact 3rd) as the herrscher of finality, with voluminous, glossy white hair and blue eyes featuring purple cross-shaped pupils like a starry sky, side ahoge, gradient hair, nekomusume, white cat ears, cat tail, ponytail, floating hair, soft breasts, hair ornament, background is a classroom with an open window, cherry blossom tree outside, petals drifting into the classroom, kiana standing with one hand on her hip and the other making a peace sign near her face, wearing a sailor uniform`;
 

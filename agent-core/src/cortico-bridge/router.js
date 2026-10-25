@@ -13,12 +13,12 @@ import { getLocalDateKey } from '../utils/localDate.js';
 import { requestSpeech, getSpeechJob, publicJob } from '../services/speechService.js';
 import { extractImagePrompt } from '../maibot-bridge/prompt.js';
 import { startImageTask, getTask } from '../maibot-bridge/generate.js';
+import { startLabImageTask } from '../services/imageLabScene.js';
+import { deriveStyles } from '../maibot-bridge/style.js';
 import momentsRouter from '../routes/moments.js';
-import eventsRouter from '../routes/events.js';
-import { listTownBuildingFeatureEvents } from '../services/town/townBuildingFeatureRuntime.js';
 
 export const toolCatalog = JSON.parse(readFileSync(new URL('./tools.json', import.meta.url), 'utf8'));
-export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTask = startImageTask, speech = requestSpeech } = {}) {
+export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTask = startImageTask, speech = requestSpeech, deriveStyle = deriveStyles, labImageTask = startLabImageTask } = {}) {
   const router = Router();
   const asyncRoute = fn => (req, res, next) => Promise.resolve().then(() => fn(req, res)).catch(next);
   const positiveId = value => {
@@ -58,7 +58,10 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     const c = getDb().prepare('SELECT * FROM characters WHERE id=?').get(settings.character_id);
     if (!c) return null;
     // 初始聊天人格仅使用人物卡；动态衣装通过工具按需查询，不写入稳定前缀。
-    return { character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '' };
+    // 行为/表达风格按角色提炼存储，随人物卡一起进前缀。
+    const styles = settings.persona_styles[settings.character_id] || {};
+    return { character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '',
+      behavior_style: String(styles.behavior_style || ''), reply_style: String(styles.reply_style || '') };
   }
   const characterList = () => getDb().prepare('SELECT id,name,display_name,avatar_path FROM characters ORDER BY id').all();
 
@@ -79,10 +82,17 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   router.get('/admin/settings', (req, res) => res.json({ settings: getBridgeSettings(), characters: characterList(), tools: toolCatalog }));
   router.put('/admin/settings', (req, res) => {
     try {
-      const previous = getBridgeSettings().character_id;
+      const previous = getBridgeSettings();
       const settings = saveBridgeSettings(req.body || {}, getDb());
-      // 角色变了就让 Cortico 重载 session 前缀，新角色立即生效（保留对话记录）。
-      if (settings.character_id && settings.character_id !== previous) {
+      // 角色或其行为/表达风格变化就让 Cortico 重载 session 前缀，新人格立即生效（保留对话记录）。
+      const reload = (() => {
+        if (!settings.character_id) return false;
+        if (settings.character_id !== previous.character_id) return true;
+        const before = previous.persona_styles[settings.character_id] || {};
+        const after = settings.persona_styles[settings.character_id] || {};
+        return (before.behavior_style || '') !== (after.behavior_style || '') || (before.reply_style || '') !== (after.reply_style || '');
+      })();
+      if (reload) {
         const url = `http://127.0.0.1:${settings.webui_port}/api/session/reload-prefix`;
         fetch(url, { method: 'POST' })
           .then(r => { if (!r.ok) console.warn(`[cortico-bridge] 前缀重载失败 (HTTP ${r.status})`); })
@@ -94,8 +104,32 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
   });
   router.get('/admin/persona/:id', (req, res) => {
     const c = character(req.params.id);
-    res.json({ character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '' });
+    const styles = getBridgeSettings().persona_styles[c.id] || {};
+    res.json({ character_id: c.id, name: c.display_name || c.name, system_prompt: c.base_prompt || c.short_prompt || '',
+      behavior_style: String(styles.behavior_style || ''), reply_style: String(styles.reply_style || '') });
   });
+  // POST /admin/derive-style — 从所选角色的 base_prompt 提炼行为/表达风格（纯预览，不保存）
+  router.post('/admin/derive-style', asyncRoute(async (req, res) => {
+    try {
+      const c = character(req.body?.character_id);
+      const base = c.base_prompt || c.short_prompt || '';
+      if (!base.trim()) return res.status(400).json({ error: '该角色没有人格卡片，无法提炼风格' });
+      const styles = await deriveStyle(base);
+      res.json({ character_id: c.id, ...styles });
+    } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+  }));
+  // POST /admin/clear-context — 清空 Cortico 当前会话的对话记录（清空后按最新人格前缀重开）
+  router.post('/admin/clear-context', asyncRoute(async (_req, res) => {
+    const port = getBridgeSettings().webui_port;
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/storage/clear?owner=core&key=session`, { method: 'POST', signal: AbortSignal.timeout(15000) });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) return res.status(502).json({ error: `Cortico 清空会话失败 (HTTP ${response.status}${data?.error ? `：${data.error}` : ''})` });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(502).json({ error: `无法连接 Cortico（${e.message}），请确认它正在运行` });
+    }
+  }));
 
   // 纯本地集成恒为启用：桥接不做 Token 验证，只受工具分组约束。
   router.use((req, res, next) => {
@@ -143,7 +177,7 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     res.json({ id: post.id, images: JSON.parse(post.images || '[]') });
   });
 
-  // 复用主界面序列化（含 NPC 奇遇、朋友圈评论）；严格白名单阻止写入与 SSE。
+  // 复用主界面序列化（含朋友圈评论）；严格白名单阻止写入与 SSE。
   router.use('/moments', allow('moments'), (req, res, next) => {
     if (req.method !== 'GET' || !/^\/(?:[1-9]\d*)?$/.test(req.path)) return res.sendStatus(404);
     req.query.limit = limit(req.query.limit);
@@ -153,32 +187,6 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     }
     next();
   }, momentsRouter);
-  router.get('/events/by-id/:id', allow('events'), (req, res, next) => {
-    if (!/^bfeat:[1-9]\d*$/.test(req.params.id)) return next();
-    const event = listTownBuildingFeatureEvents().find(item => item.id === req.params.id);
-    if (!event) return res.status(404).json({ error: 'event_not_found' });
-    res.json(event);
-  });
-  router.use('/events', allow('events'), (req, res, next) => {
-    if (req.method !== 'GET' || !/^\/(?:by-id\/(?:town:)?[1-9]\d*)?$/.test(decodeURIComponent(req.path))) return res.sendStatus(404);
-    const send = res.json.bind(res), count = limit(req.query.limit);
-    const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
-    if (!Number.isSafeInteger(offset) || offset < 0) return res.status(400).json({ error: 'offset 须为非负整数' });
-    const timestamp = (event, history) => {
-      const value = (history ? event.ended_at || event.updatedAt : null) || event.created_at || event.createdAt;
-      if (!value) return 0;
-      const normalized = String(value).includes('T') ? String(value) : String(value).replace(' ', 'T') + 'Z';
-      return Date.parse(normalized) || 0;
-    };
-    const sortEvents = (events, history) => [...(events || [])].sort((a, b) => timestamp(b, history) - timestamp(a, history) || String(b.id).localeCompare(String(a.id), 'en', { numeric: true }));
-    res.json = data => {
-      if (req.path !== '/') return send(data);
-      const active = sortEvents(data.active, false), history = sortEvents(data.history, true);
-      const hasMore = active.length > offset + count || history.length > offset + count;
-      return send({ has_more: hasMore, next_offset: hasMore ? offset + count : null, active: active.slice(offset, offset + count), history: history.slice(offset, offset + count) });
-    };
-    next();
-  }, eventsRouter);
 
   // 请求幂等：同一插件消息重试不重复消耗生图额度，独立命名空间隔离 MaiBot 任务。
   const pendingImages = new Map();
@@ -206,6 +214,20 @@ export function createCorticoRouter({ imagePrompt = extractImagePrompt, imageTas
     if (!row) return res.status(404).json({ error: 'Cortico 生图任务不存在' });
     res.json(getTask(id));
   });
+  // 泛用画图：复用图片实验室「自由画面描述」链路（画面里提到的角色/用户自动注入外观）。
+  router.post('/draw', allow('images'), asyncRoute(async (req, res) => {
+    const { requirement, session_id, request_id } = req.body || {};
+    if (typeof requirement !== 'string' || !requirement.trim() || requirement.length > 4000 || typeof session_id !== 'string' || !session_id || session_id.length > 500 || typeof request_id !== 'string' || !request_id || request_id.length > 200) return res.status(400).json({ error: 'requirement（1–4000 字）、session_id、request_id 必填' });
+    const key = createHash('sha256').update(JSON.stringify([session_id, request_id, requirement])).digest('hex');
+    const conversationId = `cortico_lab_${key}`;
+    const existing = getDb().prepare('SELECT id FROM image_tasks WHERE conversation_id=? ORDER BY id DESC LIMIT 1').get(conversationId);
+    if (existing) return res.json({ task_id: existing.id, status: getTask(existing.id)?.status });
+    if (!pendingImages.has(key)) {
+      if (pendingImages.size >= 4) return res.status(429).json({ error: '生图请求较多，请稍等重试' });
+      pendingImages.set(key, Promise.resolve(labImageTask({ conversationId, desc: requirement })).finally(() => pendingImages.delete(key)));
+    }
+    res.status(202).json({ task_id: await pendingImages.get(key), status: 'running' });
+  }));
   router.post('/tts', allow('tts'), (req, res) => {
     const c = character(req.body?.character_id), text = req.body?.text;
     if (typeof text !== 'string' || !text.trim() || text.length > 1000) return res.status(400).json({ error: '朗读文字须为 1–1000 字' });

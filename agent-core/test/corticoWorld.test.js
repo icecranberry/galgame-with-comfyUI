@@ -63,9 +63,6 @@ worldTest('all read tools preserve selected characters, paging, dates and event 
     ['appearance', { character_id: 7 }, '/appearance', { character_id: '7' }],
     ['moments', { character_id: 7, before_id: 22, limit: 2 }, '/moments', { character_id: '7', before_id: '22', limit: '2' }],
     ['moment', { post_id: 23 }, '/moments/23', {}],
-    ['events', { limit: 2, offset: 4 }, '/events', { limit: '2', offset: '4' }],
-    ['event', { event_id: 'town:9' }, '/events/by-id/town%3A9', {}],
-    ['event', { event_id: 'bfeat:10' }, '/events/by-id/bfeat%3A10', {}],
     ['schedule', { character_id: 7 }, '/schedule', { character_id: '7' }],
     ['schedule', { character_id: 7, full: true }, '/schedule', { character_id: '7', full: 'true' }],
     ['newspaper', { date: '2026-10-25' }, '/newspaper', { date: '2026-10-25' }],
@@ -82,6 +79,7 @@ worldTest('all read tools preserve selected characters, paging, dates and event 
 worldTest('image generation, image recovery and TTS return sendable media bytes', async () => {
   const { run, calls } = await harness(({ url }, req, res) => {
     if (url.pathname === '/api/cortico/generate') return { task_id: 21 };
+    if (url.pathname === '/api/cortico/draw') return { task_id: 21 };
     if (url.pathname === '/api/cortico/tts') return { id: 'speech-test' };
     if (url.pathname === '/api/cortico/tasks/21') return { status: 'done', image: { url: '/images/a.png' } };
     if (url.pathname === '/api/cortico/speech/speech-test') return { status: 'completed', audio_url: '/speech/a.wav' };
@@ -90,6 +88,7 @@ worldTest('image generation, image recovery and TTS return sendable media bytes'
   });
   for (const [name, args, mime] of [
     ['linshe_generate_image', { requirement: '在花园拍照', character_id: 7 }, 'image/png'],
+    ['linshe_draw', { requirement: '画一只戴帽子的橘猫' }, 'image/png'],
     ['linshe_task', { task_id: 21 }, 'image/png'],
     ['linshe_tts', { text: '晚安', character_id: 7 }, 'audio/wav'],
   ]) {

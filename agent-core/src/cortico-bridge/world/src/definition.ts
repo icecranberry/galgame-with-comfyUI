@@ -16,8 +16,6 @@ export const LINSHE: WorldDefinition<LinsheConfigSection> = {
       linshe_appearance: { zh: '查询角色外观、生效衣装与可用形态。', en: 'Fetches appearance, active outfits and forms.' },
       linshe_moments: { zh: '分页查询朋友圈动态，可按角色过滤。', en: 'Lists moments with paging and character filter.' },
       linshe_moment: { zh: '查询一条朋友圈及其评论。', en: 'Fetches one moment with comments.' },
-      linshe_events: { zh: '查询角色与镇民的奇遇列表。', en: 'Lists active and recent events.' },
-      linshe_event: { zh: '按 ID 查询奇遇详情与选项。', en: 'Fetches one event with options.' },
       linshe_schedule: { zh: '查询角色当前前后一小时内的日程与当前活动；full 返回今日完整日程。', en: "Fetches the current activity and nearby schedule; full returns the whole day." },
       linshe_newspaper: { zh: '查询邻舍日报。', en: "Fetches the Linshe newspaper." },
       linshe_diary: { zh: '查询角色某日已生成的日记。', en: 'Fetches a generated diary entry.' },
@@ -25,6 +23,7 @@ export const LINSHE: WorldDefinition<LinsheConfigSection> = {
       linshe_task: { zh: '查询生图或语音任务，完成时带可发送媒体。', en: 'Polls an image or speech task; returns its media when done.' },
       linshe_moment_images: { zh: '取回朋友圈配图供发送。', en: 'Retrieves moment images for sending.' },
       linshe_generate_image: { zh: '按角色配置与需求生图，完成后带可发送图片。', en: 'Generates an image; returns the image when done.' },
+      linshe_draw: { zh: '按自由画面描述泛用生图（人物、物品、场景皆可），完成后带可发送图片。', en: 'Draws any described scene; returns the image when done.' },
       linshe_tts: { zh: '用角色绑定音色合成语音，完成后带可发送语音。', en: 'Synthesizes speech; returns audio when done.' },
     }),
     events: [
