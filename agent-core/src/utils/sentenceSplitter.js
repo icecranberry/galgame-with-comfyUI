@@ -9,6 +9,8 @@
  *    4. \n 作为段落分隔，触发分句并丢弃（上游已将 \n\n+ 归一化为单 \n）
  *    5. flushAll() 时去掉末尾句号
  *    6. 成对符号保护: 《》【】「」（ ）"" '' 等，遇到开符号后直到闭符号才允许分句
+ *    7. maxSegments（可选）: 已产出 maxSegments-1 段后不再分句，后续字符（含句号、
+ *       换行）全部并入缓冲，flushAll 时作为最后一段释放；接缝处的句号/换行原样保留
  *   返回值: { segments: string[], stopped: boolean }
  *
  * 使用方式（非流式场景，完整文本）:
@@ -41,13 +43,18 @@ export class SentenceSplitter {
   static TOGGLE_PAIRS = new Set(['"', '\'']);  // ASCII 引号，开=闭，遇同类切换
   static COMMA_SPACE_RE = /[， ]/;  // 空格与逗号同类，队列超过 20 字后触发分句
 
-  constructor() {
+  constructor(opts = {}) {
+    this.maxSegments = Number.isFinite(opts.maxSegments) ? Math.max(1, Math.floor(opts.maxSegments)) : Infinity;
+    this.emitted = 0;        // 已产出段数（跨 feed 累计），用于 maxSegments 饱和判断
     this.gate = '';          // {" 检测窗口（最多 3 字）
     this.buffer = '';        // 分句累积队列
     this.pendingSplit = -1;  // 规则 2 的延迟断句位置
     this.stopped = false;
     this.pairStack = [];     // 成对符号栈（未闭合的开符号）
   }
+
+  /** 已产出 maxSegments-1 段：后续不再分句，一切字符并入最后一段。 */
+  _saturated() { return this.emitted >= this.maxSegments - 1; }
 
   _canSplit() { return this.pairStack.length === 0; }
 
@@ -71,7 +78,7 @@ export class SentenceSplitter {
   // 喂入 chunk，返回已完成的安全段落
   feed(text) {
     const segments = [];
-    const emit = (s) => { if (s) segments.push(s); };
+    const emit = (s) => { if (s) { segments.push(s); this.emitted += 1; } };
 
     for (const ch of text) {
       if (this.stopped) break;
@@ -89,9 +96,9 @@ export class SentenceSplitter {
       const safe = this.gate[0];            // 确认安全，释放一字
       this.gate = this.gate.slice(1);
 
-      // ── 规则 3: 。始终触发分句，去掉句号，重置计数器 ──
+      // ── 规则 3: 。始终触发分句，去掉句号，重置计数器（饱和后并入缓冲，句号保留） ──
       if (safe === '。') {
-        if (this._canSplit()) {
+        if (this._canSplit() && !this._saturated()) {
           emit(this.buffer);
           this.buffer = '';
           this.pendingSplit = -1;
@@ -101,12 +108,14 @@ export class SentenceSplitter {
         continue;
       }
 
-      // ── 规则 4: \\n 作为段落分隔，触发分句并丢弃 ──
+      // ── 规则 4: \\n 作为段落分隔，触发分句并丢弃（饱和后并入缓冲，换行保留） ──
       if (safe === '\n') {
-        if (this._canSplit()) {
+        if (this._canSplit() && !this._saturated()) {
           emit(this.buffer);
           this.buffer = '';
           this.pendingSplit = -1;
+        } else if (this._saturated()) {
+          this.buffer += safe;
         }
         continue;
       }
@@ -115,6 +124,8 @@ export class SentenceSplitter {
       this.buffer += safe;
       this._trackPair(safe);
       const n = this.buffer.length;
+
+      if (this._saturated()) continue;  // 已产出上限-1 段：不再断句，余字全并入最后一段
 
       if (n > 20) {
         // ── 规则 1 ──
@@ -208,10 +219,10 @@ export class SentenceSplitter {
       text = text.replace(/。$/, '');
       return { segments: text ? [text] : [], stopped: true };
     }
-    // 闸门中剩下的字全放（已确认不含 <pr），。仍触发分句
+    // 闸门中剩下的字全放（已确认不含 <pr），。仍触发分句（饱和后并入缓冲）
     for (const safe of this.gate) {
       if (safe === '。') {
-        if (this._canSplit()) {
+        if (this._canSplit() && !this._saturated()) {
           // 压出当前 buffer 为一个 segment，丢弃句号
           if (this.buffer) {
             const seg = this.buffer.replace(/。$/, '');
@@ -226,7 +237,7 @@ export class SentenceSplitter {
       this.buffer += safe;
       this._trackPair(safe);
       const n = this.buffer.length;
-      if (n > 20) {
+      if (n > 20 && !this._saturated()) {
         if (/[，。 ]/.test(safe)) {
           this.buffer = this.buffer.slice(0, -1);
         }
@@ -246,10 +257,11 @@ export class SentenceSplitter {
 /**
  * 对完整文本进行分句（非流式便捷函数）
  * @param {string} text - 完整文本
+ * @param {{ maxSegments?: number }} [opts] - maxSegments 限制产出段数上限（默认不限）
  * @returns {string[]} 分句后的段落数组
  */
-export function splitText(text) {
-  const splitter = new SentenceSplitter();
+export function splitText(text, opts) {
+  const splitter = new SentenceSplitter(opts);
   const { segments: feedSegs } = splitter.feed(text);
   const { segments: flushSegs } = splitter.flushAll();
   return [...feedSegs, ...flushSegs].filter(Boolean);

@@ -19,10 +19,11 @@ import type { WorldWebUiDecl } from 'cortico/core/types.ts';
 import { QQWorld } from 'cortico/worlds/qq/world.ts';
 import { splitText } from '../../utils/sentenceSplitter.js';
 
-/** 与聊天流出站共用同一套清洗（去 <br>、合并空行）与分句实现。 */
+/** 与聊天流出站共用同一套清洗（去 <br>、合并空行）与分句实现；QQ 出站最多拆 2 条消息。 */
 export function splitLinsheChatText(text: string): string[] {
-  return splitText(text.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n'))
-    .filter((segment) => segment.trim());
+  return splitText(text.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n'), { maxSegments: 2 })
+    .map((segment) => segment.trim())
+    .filter(Boolean);
 }
 
 /** 打字节奏：按刚发出分句的长度随机 300~900ms（短句快、长句慢、带随机抖动）。 */
@@ -35,6 +36,9 @@ export function chatTypingDelayMs(text: string): number {
 
 /** next＝已发出的段数；发送循环从 segments[next] 继续补发。 */
 type SplitState = { target: unknown; segments: string[]; next: number };
+
+/** QQ 出站单次发言总字数上限（两小句以内）。超出先拒绝一次，给模型重写机会。 */
+export const MAX_QQ_DRAFT_CHARS = 44;
 
 type InternalAccess = {
   sendToTarget?: (this: QQWorld, target: unknown, opts: { text: string }) => Promise<string>;
@@ -64,6 +68,9 @@ export class SegmentedQQWorld extends QQWorld {
 
   private splitState: SplitState | null = null;
 
+  /** 本轮内是否已因超长拒绝过一次：第二次起放行，避免模型改不出来陷入死循环。 */
+  private draftRejectedOnce = false;
+
   constructor(...args: ConstructorParameters<typeof QQWorld>) {
     super(...args);
     const access = this as unknown as Record<string, unknown>;
@@ -89,6 +96,7 @@ export class SegmentedQQWorld extends QQWorld {
   /** 分段进行中到达轮末：连同余段一起作废（上游只作废自己的单槽草稿）。 */
   onTurnEnded(): void {
     this.splitState = null;
+    this.draftRejectedOnce = false;
     super.onTurnEnded();
   }
 
@@ -106,6 +114,15 @@ export class SegmentedQQWorld extends QQWorld {
   private wrapDraft(handler: ToolDef['handler']): ToolDef['handler'] {
     return async (args: Record<string, unknown>, ctx: ToolCallContext) => {
       const raw = typeof args.text === 'string' ? args.text : '';
+      // 长度守卫：单次发言超两小句时先拒绝一次，让模型压缩重写；同轮再超长就放行交由分句兜底。
+      if (raw.length > MAX_QQ_DRAFT_CHARS && !this.draftRejectedOnce) {
+        this.draftRejectedOnce = true;
+        return [
+          `[draft rejected: text too long] ${raw.length} 字远超 QQ 聊天习惯。`,
+          `一次发言最多两小句、总共 ${MAX_QQ_DRAFT_CHARS} 字以内：只挑最想说的一两句重新 qq_draft，宁短勿长，不要复述理由。`,
+        ].join('\n');
+      }
+      if (raw.length > MAX_QQ_DRAFT_CHARS) this.draftRejectedOnce = false;
       const segments = raw.trim() ? splitLinsheChatText(raw) : [];
       if (segments.length <= 1) {
         this.splitState = null;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { registerHooks, stripTypeScriptTypes } from 'node:module';
+import { SentenceSplitter } from '../src/utils/sentenceSplitter.js';
 
 const framework = new URL('../../Cortico/src/', import.meta.url);
 const available = existsSync(new URL('worlds/qq/world.ts', framework));
@@ -95,10 +96,37 @@ test('qq-linshe definition inherits the builtin qq shape and remaps its own sect
 });
 
 test('splitter cleans HTML breaks and blank lines like the private chat stream', { skip }, () => {
-  assert.deepEqual(splitLinsheChatText('早上好。<br>今天也要好好吃饭。晚上见。'), ['早上好', '今天也要好好吃饭', '晚上见']);
+  // QQ 出站上限 2 条：第 2 段起不再分句，接缝的句号/换行原样保留在段内。
+  assert.deepEqual(splitLinsheChatText('早上好。<br>今天也要好好吃饭。晚上见。'), ['早上好', '今天也要好好吃饭。晚上见']);
   assert.deepEqual(splitLinsheChatText('第一段。\n\n\n第二段。'), ['第一段', '第二段']);
   assert.deepEqual(splitLinsheChatText('只有一句'), ['只有一句']);
   assert.deepEqual(splitLinsheChatText('<br><br>'), []);
+});
+
+test('QQ outbound text never splits into more than two messages', { skip }, () => {
+  // 现实场景：30 字以内被四个句号切碎的四句回复，现在最多两条消息。
+  const fourSentences = '嗯嗯。好呀。那我先去啦。拜拜~';
+  const segments = splitLinsheChatText(fourSentences);
+  assert.ok(segments.length <= 2, JSON.stringify(segments));
+  assert.deepEqual(segments, ['嗯嗯', '好呀。那我先去啦。拜拜~']);
+  // 单句、两句、极多句的边界。
+  assert.deepEqual(splitLinsheChatText('一句话。'), ['一句话']);
+  assert.deepEqual(splitLinsheChatText('两句话。好的。'), ['两句话', '好的']);
+  assert.equal(splitLinsheChatText('一。二。三。四。五。六。').length, 2);
+});
+
+test('sentenceSplitter maxSegments is opt-in and unlimited by default', () => {
+  const plain = new SentenceSplitter();
+  assert.deepEqual(plain.feed('a。b。c。d。').segments, ['a', 'b', 'c']);
+  assert.deepEqual(plain.flushAll().segments, ['d']);
+  const capped = new SentenceSplitter({ maxSegments: 2 });
+  assert.deepEqual([...capped.feed('a。b。c。d。').segments, ...capped.flushAll().segments], ['a', 'b。c。d']);
+  const single = new SentenceSplitter({ maxSegments: 1 });
+  assert.deepEqual([...single.feed('a。b。c。').segments, ...single.flushAll().segments], ['a。b。c']);
+  // 流式多次 feed 下上限依然成立。
+  const streamed = new SentenceSplitter({ maxSegments: 2 });
+  const out = [...streamed.feed('第一句。第二句。').segments, ...streamed.feed('第三句。').segments, ...streamed.flushAll().segments];
+  assert.deepEqual(out, ['第一句', '第二句。第三句']);
 });
 
 test('long drafts freeze segments at draft time and confirm sends them in order', { skip }, async () => {
@@ -106,13 +134,12 @@ test('long drafts freeze segments at draft time and confirm sends them in order'
   const { calls } = attach(world);
   const receipt = await draft(world, { to: 'private:12345', text: '今天天气不错。要不要出去走走。顺便拍几张照片。' });
   assert.match(receipt, /\[draft staged/);
-  assert.match(receipt, /Will send 3 text segments in order/);
-  assert.match(receipt, /Segment 2: 要不要出去走走/);
-  assert.match(receipt, /Segment 3: 顺便拍几张照片/);
+  assert.match(receipt, /Will send 2 text segments in order/);
+  assert.match(receipt, /Segment 2: 要不要出去走走。顺便拍几张照片/);
   const confirmReceipt = await confirm(world, 'send');
-  assert.equal(calls.length, 3);
-  assert.deepEqual(calls.map((call) => textOf(call)), ['今天天气不错', '要不要出去走走', '顺便拍几张照片']);
-  assert.match(confirmReceipt, /\[sent 3 text segments\]/);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => textOf(call)), ['今天天气不错', '要不要出去走走。顺便拍几张照片']);
+  assert.match(confirmReceipt, /\[sent 2 text segments\]/);
   assert.ok(!confirmReceipt.includes('[send failed]'));
   assert.equal(await confirm(world, 'send'), '[no draft to confirm; draft one first]');
 });
@@ -154,16 +181,16 @@ test('a failed segment keeps the rest and re-confirm only resends the remainder'
   const { calls, driver } = attach(world, { failOn: 1 });
   await draft(world, { to: 'private:12345', text: '一段。两段。三段。' });
   const failed = await confirm(world, 'send');
-  assert.match(failed, /\[sent 1\/3 text segments\]/);
+  assert.match(failed, /\[sent 1\/2 text segments\]/);
   assert.match(failed, /\[send failed\] connection lost/);
-  assert.match(failed, /remaining 2 segments kept/);
-  // 换上不再失败的协议端，再确认一次：只补发剩余两段。
+  assert.match(failed, /remaining 1 segments kept/);
+  // 换上不再失败的协议端，再确认一次：只补发剩余一段。
   let messageId = 9100;
   world.driver = { identity: driver.identity, callApi: async (action, params) => { calls.push({ action, params }); return { message_id: ++messageId }; } };
   const retried = await confirm(world, 'send');
-  assert.match(retried, /\[sent 3 text segments\]/);
-  assert.equal(calls.length, 3);
-  assert.deepEqual(calls.slice(1).map((call) => textOf(call)), ['两段', '三段']);
+  assert.match(retried, /\[sent 2 text segments\]/);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.slice(1).map((call) => textOf(call)), ['两段。三段']);
 });
 
 test('cancelling mid-batch drops the remaining segments and clears the state', { skip }, async () => {
@@ -172,7 +199,7 @@ test('cancelling mid-batch drops the remaining segments and clears the state', {
   await draft(world, { to: 'private:12345', text: '一段。两段。三段。' });
   await confirm(world, 'send');
   const cancelled = await confirm(world, 'cancel');
-  assert.match(cancelled, /discarded; 1\/3 segments were already sent/);
+  assert.match(cancelled, /discarded; 1\/2 segments were already sent/);
   assert.equal(calls.length, 1);
   assert.equal(await confirm(world, 'send'), '[no draft to confirm; draft one first]');
 });
@@ -211,9 +238,8 @@ test('segments arrive with a pacing gap scaled to the previous segment', { skip 
   };
   await draft(world, { to: 'private:12345', text: '一段。两段。三段。' });
   await confirm(world, 'send');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 2);
   assert.ok(stamps[1] - stamps[0] >= 50, `${stamps[1] - stamps[0]}`);
-  assert.ok(stamps[2] - stamps[1] >= 50, `${stamps[2] - stamps[1]}`);
 });
 
 test('turn cancellation during the pacing gap stops further sends', { skip }, async () => {
@@ -223,7 +249,36 @@ test('turn cancellation during the pacing gap stops further sends', { skip }, as
   await draft(world, { to: 'private:12345', text: '一段。两段。三段。' });
   const ctx = { signal: AbortSignal.abort() };
   const receipt = await tool(world, 'qq_confirm').handler({ decision: 'send' }, ctx);
-  assert.match(receipt, /\[sent 1\/3 text segments\]/);
+  assert.match(receipt, /\[sent 1\/2 text segments\]/);
   assert.match(receipt, /cancelled while typing/);
   assert.equal(calls.length, 1);
+});
+
+test('overlong drafts get one rejection per turn, then pass through segmented', { skip }, async () => {
+  const world = buildWorld();
+  const { calls } = attach(world);
+  const essay = '本小姐今天在街上吃了一碗超级好吃的拉面，然后又去买了草莓蛋糕，最后还去游戏厅赢了一堆奖品，简直是完美的一天呢。';
+  // 第一次超长：拒绝且不进入上游起草。
+  const rejected = await draft(world, { to: 'private:12345', text: essay });
+  assert.match(rejected, /\[draft rejected: text too long\]/);
+  assert.match(rejected, /宁短勿长/);
+  assert.equal(calls.length, 0);
+  assert.equal(await confirm(world, 'send'), '[no draft to confirm; draft one first]');
+  // 重写合格：正常起草发送。
+  await draft(world, { to: 'private:12345', text: '拉面超好吃。下次一起。' });
+  await confirm(world, 'send');
+  assert.equal(calls.length, 2);
+  // 同轮再次超长：放行，交给分句兜底（不超过两条消息）。
+  const passed = await draft(world, { to: 'private:12345', text: essay });
+  assert.match(passed, /\[draft staged/);
+  await confirm(world, 'send');
+  const segmentTexts = calls.slice(2).map((call) => textOf(call));
+  assert.ok(segmentTexts.length <= 2, JSON.stringify(segmentTexts));
+  // 接缝标点会被分句器吞掉，比较时忽略全部标点。
+  const strip = (s) => s.replace(/[。，！？、～~\s]/g, '');
+  assert.equal(strip(segmentTexts.join('')), strip(essay));
+  // 轮末重置后，下轮的第一次超长重新获得拒绝机会。
+  world.onTurnEnded();
+  const rejectedAgain = await draft(world, { to: 'private:12345', text: essay });
+  assert.match(rejectedAgain, /\[draft rejected: text too long\]/);
 });
