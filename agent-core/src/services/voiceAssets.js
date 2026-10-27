@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
@@ -13,10 +14,15 @@ export function audioPath(relative) {
   return result;
 }
 export const audioUrl = relative => `/api/tts/audio/${relative.split(path.sep).join('/')}`;
-const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
-const ffprobe = process.env.FFPROBE_PATH || 'ffprobe';
+function audioTool(name, override) {
+  const bundled = fileURLToPath(new URL(`../../../tts-service/runtime/tools/ffmpeg/bin/${name}.exe`, import.meta.url));
+  return override || (existsSync(bundled) ? bundled : name);
+}
+// Resolve per call: users may extract an offline bundle while Node is running.
+const ffmpeg = () => audioTool('ffmpeg', process.env.FFMPEG_PATH);
+const ffprobe = () => audioTool('ffprobe', process.env.FFPROBE_PATH);
 async function convert(args) {
-  await exec(ffmpeg, ['-nostdin', '-y', '-v', 'error', '-protocol_whitelist', 'file,pipe', ...args], { timeout: 60000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
+  await exec(ffmpeg(), ['-nostdin', '-y', '-v', 'error', '-protocol_whitelist', 'file,pipe', ...args], { timeout: 60000, maxBuffer: 2 * 1024 * 1024, windowsHide: true });
 }
 export async function importAudio(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > 25 * 1024 * 1024) throw new Error('请选择 25MB 以内的音频文件');
@@ -26,13 +32,13 @@ export async function importAudio(buffer) {
   for (const dir of ['originals', 'previews', 'references', 'generated']) await fs.mkdir(audioPath(dir), { recursive: true });
   try {
     await fs.writeFile(audioPath(original_path), buffer, { flag: 'wx' });
-    const { stdout } = await exec(ffprobe, ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-show_entries', 'format=duration', '-of', 'json', audioPath(original_path)], { timeout: 10000, windowsHide: true });
+    const { stdout } = await exec(ffprobe(), ['-v', 'error', '-protocol_whitelist', 'file,pipe', '-show_entries', 'format=duration', '-of', 'json', audioPath(original_path)], { timeout: 10000, windowsHide: true });
     const declaredDuration = Number(JSON.parse(stdout).format?.duration);
     if (Number.isFinite(declaredDuration) && (declaredDuration <= 0 || declaredDuration > 120)) throw new Error('音频长度必须在 0～120 秒以内');
     // Browser MediaRecorder WebM often has no duration header. Decode at most
     // 121 seconds, then measure the bounded PCM output instead of rejecting it.
     await convert(['-i', audioPath(original_path), '-t', '121', '-vn', '-ac', '1', '-ar', '24000', '-c:a', 'pcm_s16le', audioPath(preview_path)]);
-    const decoded = await exec(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', audioPath(preview_path)], { timeout: 10000, windowsHide: true });
+    const decoded = await exec(ffprobe(), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', audioPath(preview_path)], { timeout: 10000, windowsHide: true });
     const duration = Number(JSON.parse(decoded.stdout).format?.duration);
     if (!Number.isFinite(duration) || duration <= 0 || duration > 120) throw new Error('音频长度必须在 0～120 秒以内');
     const peaks = await waveform(audioPath(preview_path));
@@ -43,7 +49,7 @@ export async function importAudio(buffer) {
   }
 }
 export async function waveform(file) {
-  const { stdout } = await exec(ffmpeg, ['-nostdin', '-v', 'error', '-i', file, '-t', '120', '-f', 'f32le', '-ac', '1', '-ar', '8000', 'pipe:1'], { encoding: 'buffer', timeout: 30000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+  const { stdout } = await exec(ffmpeg(), ['-nostdin', '-v', 'error', '-i', file, '-t', '120', '-f', 'f32le', '-ac', '1', '-ar', '8000', 'pipe:1'], { encoding: 'buffer', timeout: 30000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
   const count = Math.floor(stdout.length / 4);
   const peaks = [];
   for (let bin = 0; bin < 240; bin++) {
@@ -65,7 +71,7 @@ export async function cropAudio(sample, start, end, denoise = false) {
     const peaks = await waveform(audioPath(reference_path));
     const max = Math.max(...peaks);
     if (max < 0.002) throw new Error('所选片段没有有效声音，请重新选择');
-    const { stdout } = await exec(ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', audioPath(reference_path)], { timeout: 10000, windowsHide: true });
+    const { stdout } = await exec(ffprobe(), ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', audioPath(reference_path)], { timeout: 10000, windowsHide: true });
     const duration = Number(JSON.parse(stdout).format?.duration);
     if (!Number.isFinite(duration) || duration < 1) throw new Error('去除首尾静音后不足 1 秒，请重新选段');
     const warnings = [];

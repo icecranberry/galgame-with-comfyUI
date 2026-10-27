@@ -22,11 +22,10 @@ export function createSpeechServiceRestarter({ run = execute, health = ttsHealth
         || url.pathname !== '/' || url.username || url.password || url.search || url.hash) {
         throw new Error('一键重启仅支持本机声音服务，请在远程服务所在主机重启');
       }
-      const runtimeDir = path.resolve(env.TTS_RUNTIME_DIR || path.join(serviceDir, 'runtime'));
       return exclusive(async () => {
         try {
           await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-            '-File', path.join(serviceDir, 'restart.ps1'), '-RuntimeDir', runtimeDir,
+            '-File', path.join(serviceDir, 'restart.ps1'),
             '-Port', url.port || '80'], { windowsHide: true, timeout: 45000, env });
         } catch (error) {
           throw new Error(`声音服务启动失败：${String(error.stderr || error.message).trim().slice(0, 1200)}`);
@@ -36,7 +35,7 @@ export function createSpeechServiceRestarter({ run = execute, health = ttsHealth
           if (status.online) return status;
           await sleep(500);
         }
-        throw new Error('声音服务启动后仍无法连接，请检查运行环境及 runtime 中的 tts-stderr.log');
+        throw new Error('声音服务启动后仍无法连接，请检查 tts-service/logs/tts-stderr.log');
       });
     }).finally(() => { pending = null; });
     return pending;

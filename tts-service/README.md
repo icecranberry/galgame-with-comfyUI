@@ -2,29 +2,70 @@
 
 首版实现上传 → 裁剪 → 试听 → 角色绑定 → 私聊已保存气泡朗读。默认关闭，不改变聊天 LLM 协议。Node 与 Python 必须使用同一个音频目录。
 
-## 部署
+## 部署：一个压缩包，解压即可使用
 
-依赖 Git、uv、FFmpeg / FFprobe、支持 CUDA 的 GPU。模型与依赖需要额外磁盘空间；安装脚本不修改现有 ComfyUI Python 环境。
+所有可分发的模型和依赖统一放在 **`tts-service/runtime/`**。服务脚本随邻舍主程序提供；你只需要分发一个 `linshe-tts-runtime.zip`，用户无需选择零散文件或安装 Python、Git、FFmpeg。
 
-在仓库根目录的 PowerShell 中执行：
-
-```powershell
-.\tts-service\setup.ps1
+```text
+邻舍/
+└─ tts-service/
+   ├─ runtime/       ← 解压后新增的唯一文件夹，包含全部模型和运行依赖
+   ├─ cache/         # 自动下载缓存，不需要分发
+   ├─ logs/          # 运行日志，不需要分发
+   └─ …             # 邻舍自带的启动、下载与服务脚本
 ```
 
-脚本使用独立的 `tts-service/runtime/index-tts`，固定 Python 3.11（上游要求 `<3.12`）、上游代码提交与模型快照（见 `versions.json`），通过上游 `uv.lock` 安装核心依赖，不启用 DeepSpeed、CUDA 扩展编译或 QwenEmotion。需要自定义存放位置时传 `-RuntimeDir D:\models\linshe-tts`；启动时传同一参数。脚本保留有本地改动的上游 checkout，并报告错误，不覆盖它。
+### 用户安装
 
-将 **`tts-service/comfy_guard` 整个目录**复制到实际使用的 ComfyUI 的 `custom_nodes/linshe_tts_guard`，然后重启 ComfyUI。目录内的 `__init__.py` 必须直接位于 `linshe_tts_guard` 下。保护插件覆盖标准 `/prompt` 与 `/api/prompt` 提交，包括异步校验期间的请求；绕过标准提交接口的第三方扩展不在此保护范围。
+1. 将配套版本的 `linshe-tts-runtime.zip` **解压到邻舍的 `tts-service` 文件夹**。
+2. 确认出现 `tts-service/runtime/`（不要解压到 `runtime` 内，也不要额外套一个压缩包同名目录）。
+3. 在邻舍点击「重启声音服务」，即可使用。
 
-启动 TTS：
+无需执行安装命令、下载依赖或配置路径。启动时自动修复换电脑后的 Python 路径并检查完整性。仍需保留已有的 ComfyUI 显存保护插件；它随主程序的 `comfy_guard/` 提供，不属于 Python 运行依赖。
+
+### 制作分发压缩包
+
+在已部署完成的机器上执行：
 
 ```powershell
-.\tts-service\start.ps1
+.\tts-service\package.ps1
 ```
 
-随后重启邻舍 Node 后端，在「酒馆 → 音色管理」或「角色详情 → 声音设置」检查服务并启用语音朗读。上传或录制清晰对白，选段、处理、生成试听，最后保存并绑定；显存调度恢复也在这两个入口的「服务维护」中。
+输出：`tts-service/dist/linshe-tts-runtime.zip`，旁边生成 SHA-256 校验文件。压缩包内部只有一个 `runtime/` 文件夹，自动包含隐藏目录 `.venv`、模型、辅助模型、源码、Python、FFmpeg、版本清单与许可证；自动排除 `.git`、Python 缓存和上游生成输出。使用 ZIP64，支持超过 4 GiB 的文件和压缩包。
 
-Windows 可直接点击「重启声音服务」：等待当前生图/语音任务结束，重启本仓库的声音服务及其推理进程；离线时直接启动，随后自动检查连接。使用自定义安装目录时，在 Node 的 `agent-core/.env` 配置 `TTS_RUNTIME_DIR`（其下应有 `index-tts/.venv`），重启 Node 后生效。按钮不会下载安装模型；启动日志位于该运行目录的 `tts-stdout.log` / `tts-stderr.log`。远程地址不支持由本机按钮重启。
+若已有同名包，脚本会拒绝覆盖。可指定新名称：
+
+```powershell
+.\tts-service\package.ps1 -OutputPath 'D:\release\linshe-tts-runtime-v2.zip'
+```
+
+也可以直接把整个 `runtime` 文件夹压缩；不再需要挑选多个目录或单独拷贝清单。包必须与主程序版本匹配，不能手动改版本号冒充兼容。
+
+### 自动下载与检查
+
+```powershell
+.\tts-service\setup.ps1             # 自动下载和安装
+.\tts-service\setup.ps1 -CheckOnly  # 仅离线检查
+.\tts-service\start.ps1             # 前台启动
+.\tts-service\restart.ps1           # 后台启动或重启
+```
+
+自动安装同样写入 `tts-service/runtime/`，包括 Python、源码、依赖、模型、FFmpeg 及清单。下载失败时可重试，也可解压完整离线包补齐。完整包存在时，普通 `setup.ps1` 也只检查并返回，不访问网络。运行时禁止 Hugging Face / Transformers 联网，缺失文件直接提示补齐。
+
+`runtime/` 内部由程序维护，分发者和用户无需操作：
+
+```text
+runtime/
+├─ python/              # 完整 Python 3.11
+├─ index-tts/           # 固定源码，含 .venv 与源码校验清单
+├─ checkpoints/         # 主模型、分词器、hf_cache 辅助模型及模型清单
+├─ tools/               # FFmpeg 与自动安装工具
+└─ runtime.json         # 随包 Python 的相对位置
+```
+
+安装不修改 ComfyUI 的 Python 环境。`TTS_RUNTIME_DIR` / `TTS_MODEL_DIR` 不再改变部署位置；启动日志位于 `tts-service/logs/`。用户音频仍保存在 `agent-core/data/audio`，不进入分发包。音频操作默认优先使用 `runtime/tools/ffmpeg/bin`；显式 `FFMPEG_PATH` / `FFPROBE_PATH` 仍可覆盖。
+
+首次接入时，将 `tts-service/comfy_guard` 整个目录复制到实际 ComfyUI 的 `custom_nodes/linshe_tts_guard` 并重启 ComfyUI；插件中的 `__init__.py` 必须直接位于该目录下。插件负责显存互斥，语音由独立 TTS 服务合成。
 
 如果上游生成到 `max_mel_tokens` 上限仍没有结束标记，适配器会在解码异常尾音前中止，并使用更短的文本分段和确定性解码重试一次；再次异常则返回失败并删除临时结果，不截断后冒充完整语音。合成策略版本参与缓存键，升级后不会复用旧策略生成的音频；更新适配器后需要重启声音服务，更新缓存策略后需要重启 Node。此检查针对缺失结束标记，不能替代听感验收或识别所有错读。
 
@@ -42,15 +83,19 @@ Windows 可直接点击「重启声音服务」：等待当前生图/语音任�
 | --- | --- |
 | `TTS_SERVICE_URL` | Node 调用地址，`http://127.0.0.1:7861` |
 | `TTS_PORT` | Python 监听端口，`7861`，仅绑定本机回环 |
-| `TTS_RUNTIME_DIR` | 默认 `tts-service/runtime`；自定义安装目录，同时供启动脚本和一键重启使用 |
+| `TTS_RUNTIME_DIR` | 已停用；统一使用项目内 `tts-service` |
 | `TTS_SERVICE_TOKEN` | 两端一致的可选令牌；Python 不接受带 Origin 的浏览器跨域请求 |
 | `TTS_AUDIO_DIR` | 默认仓库 `agent-core/data/audio`；自定义时两端配置相同绝对路径 |
-| `TTS_MODEL_DIR` | 启动脚本默认指定上游 checkout 的 `checkpoints` |
-| `FFMPEG_PATH` / `FFPROBE_PATH` | Node 使用的可执行文件路径，默认从 PATH 查找 |
+| `TTS_MODEL_DIR` | 已停用；统一使用 `tts-service/runtime/checkpoints` |
+| `FFMPEG_PATH` / `FFPROBE_PATH` | 显式覆盖；否则优先使用 `tts-service/runtime/tools/ffmpeg/bin`，最后回退 PATH |
 
 Node 的变量可放入 `agent-core/.env`。Python 从启动进程环境读取，不会读取 Node 的 `.env`。
 
 ## 数据与调度
+
+离线布局回归：`python -m unittest discover -s tts-service/test`。真实运行包检查设置 `RUN_TTS_BUNDLE_TEST=1` 后运行 `python -m unittest discover -s tts-service/test -p test_bundle_integration.py`；同时设置 `RUN_TTS_BUNDLE_GPU_TEST=1` 才执行真实合成（要求本机 ComfyUI 保护插件在线且生产 TTS 工作进程已卸载）。设置 `TTS_BUNDLE_ARCHIVE` 为生成的 ZIP 绝对路径可追加真实解压验证；测试禁止外网连接、使用临时音频目录，结束时卸载模型并释放自己的显存锁。
+
+2026-10-26：本机运行环境与模型已整理至 runtime 布局；离线 Python 导入、文本归一化、启动检查和中文 GPU 合成通过，runtime 布局下冷请求 94.359 秒（打包同时进行）。服务已切换为使用项目内 Python。旧的 `D:/AI/IndexTTS-2.5` 保留，不参与新启动流程。
 
 - `voice_samples` 保存原文件、统一格式预览和不可变的裁剪片段；`voices` 保存版本、语言、语速与素材引用；`character_voices` 负责复用绑定。修改参考或默认参数会递增音色版本，旧任务保留自己的素材与参数快照。
 - `speech_jobs` 保存清洗后的对白、参考哈希参与的缓存键、模型版本、状态和输出；`message_speech` 关联真正保存的气泡 ID。消息与角色删除按外键处理引用，删除音色必须先解除所有角色绑定。原素材暂保留，不做自动磁盘回收。

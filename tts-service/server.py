@@ -8,7 +8,6 @@ import math
 import multiprocessing as mp
 import os
 from pathlib import Path
-import subprocess
 import sys
 import threading
 import time
@@ -16,10 +15,17 @@ import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = Path(__file__).resolve().parent
+# Direct launches and multiprocessing children use the same local source tree.
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE / "runtime/index-tts"))
+from deployment import installation_error
+
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 VERSIONS = json.loads((HERE / "versions.json").read_text(encoding="utf-8"))
 MODEL_VERSION = f"IndexTTS-2.5:{VERSIONS['model_revision']}:{VERSIONS['code_revision']}"
 AUDIO_ROOT = Path(os.environ.get("TTS_AUDIO_DIR", HERE.parent / "agent-core/data/audio")).resolve()
-MODEL_DIR = Path(os.environ.get("TTS_MODEL_DIR", HERE / "checkpoints")).resolve()
+MODEL_DIR = HERE / "runtime/checkpoints"
 TOKEN = os.environ.get("TTS_SERVICE_TOKEN", "")
 DEFAULT_GENERATION_OPTIONS = {"num_beams": 3, "temperature": 0.8, "top_p": 0.9, "top_k": 30}
 
@@ -55,24 +61,6 @@ def controlled_path(relative, kind):
     if relative.is_absolute() or not path.is_relative_to(AUDIO_ROOT / kind) or path.suffix != ".wav":
         raise ValueError("Invalid controlled audio path")
     return path
-
-
-def installation_error():
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec("indextts")
-        if not spec or not spec.origin:
-            return "IndexTTS 尚未安装，请按 tts-service/README.md 部署"
-        root = Path(spec.origin).parent.parent
-        revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=10).strip()
-        if revision != VERSIONS["code_revision"]:
-            return "IndexTTS 代码版本不匹配"
-        manifest = json.loads((MODEL_DIR / "linshe-model-version.json").read_text(encoding="utf-8"))
-        if manifest != VERSIONS or not (MODEL_DIR / "config.yaml").is_file():
-            return "模型版本不匹配或文件不完整"
-    except Exception as error:
-        return str(error)
-    return None
 
 
 def synthesize_to_file(model, args, temporary, *, generation_options=None):

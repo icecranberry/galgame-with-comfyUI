@@ -15,7 +15,8 @@ test('offline restart waits for the GPU slot, deduplicates requests and checks t
       calls++;
       assert.equal(file, 'powershell.exe');
       assert.equal(args.at(-1), '7862');
-      assert.match(args[args.indexOf('-RuntimeDir') + 1], /custom tts/);
+      assert.equal(args.includes('-RuntimeDir'), false, 'legacy external paths must not redirect deployment');
+      assert.match(args[args.indexOf('-File') + 1], /tts-service[\\/]restart.ps1$/);
       assert.equal(config.windowsHide, true);
     }, health: async () => ++checks === 1 ? { online: false } : ready });
   const first = restart(), second = restart();

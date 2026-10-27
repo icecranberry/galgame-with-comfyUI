@@ -16,7 +16,10 @@ __pycache__/
 venv/
 vector-service/models/
 vector-service/chroma_data/
-tts-service/checkpoints/
+tts-service/runtime/
+tts-service/dist/
+tts-service/cache/
+tts-service/logs/
 
 # 邻舍启动器
 launcher/dist/
