@@ -7,6 +7,9 @@ import { ttsHealth } from '../services/indexTtsClient.js';
 import { restartSpeechService } from '../services/speechServiceProcess.js';
 import { recoverSpeechGpu } from '../services/speechGpu.js';
 import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech } from '../services/speechService.js';
+import { getApiVoice, saveApiVoice } from '../services/speechConfig.js';
+import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, reuseLocalApiVoice } from '../services/speechApiAssets.js';
+import { localSpeechModels } from '../services/speechLocalModels.js';
 
 const router = express.Router();
 const route = fn => async (req, res) => { try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); } };
@@ -21,11 +24,14 @@ const voiceView = voiceId => {
 
 router.get('/settings', route((req, res) => res.json(getSpeechSettings())));
 router.put('/settings', route((req, res) => {
-  if (typeof req.body.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
-  res.json(setSpeechSettings(req.body.enabled));
+  res.json(setSpeechSettings(req.body));
 }));
 router.get('/health', route(async (req, res) => res.json(await ttsHealth())));
+router.get('/local-models', route(async (req, res) => res.json(await localSpeechModels.status())));
+router.post('/local-models/install', route((req, res) => res.status(202).json(localSpeechModels.install(req.body.model))));
+router.post('/local-models/use', route(async (req, res) => res.json(await localSpeechModels.use(req.body.model))));
 router.get('/bindings', route((req, res) => {
+  if (getSpeechSettings().mode === 'api') return res.json(getDb().prepare('SELECT character_id FROM character_api_voices').all().map(row => ({ ...getApiVoice(row.character_id), enabled: 1, mode: 'api' })));
   res.json(getDb().prepare('SELECT c.character_id,c.voice_id,c.enabled,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id').all());
 }));
 router.post('/recover', route(async (req, res) => res.json(await recoverSpeechGpu())));
@@ -106,9 +112,21 @@ router.delete('/voices/:id', route((req, res) => {
   res.json({ ok: true, current_voice: currentVoice || null });
 }));
 router.get('/characters/:id', route((req, res) => {
+  if (req.query.mode !== 'local' && getSpeechSettings().mode === 'api') return res.json(getApiVoice(id(req.params.id)));
   const binding = getDb().prepare('SELECT c.*,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id WHERE c.character_id=? AND v.character_id=c.character_id').get(id(req.params.id));
   res.json(binding || null);
 }));
+router.get('/characters/:id/api-voice', route((req, res) => res.json(getApiVoice(id(req.params.id)))));
+router.get('/characters/:id/api-samples', route((req, res) => res.json(listApiSamples(id(req.params.id)))));
+router.get('/characters/:id/api-local-voices', route((req, res) => res.json(listLocalApiVoices(id(req.params.id)))));
+router.post('/characters/:id/api-samples/from-local', route(async (req, res) => res.status(201).json(await reuseLocalApiVoice(id(req.params.id), req.body.voice_id))));
+router.post('/characters/:id/api-samples', express.raw({ type: 'application/octet-stream', limit: '25mb' }), route(async (req, res) => {
+  res.status(201).json(await importApiSample(id(req.params.id), req.body, req.query.name));
+}));
+router.post('/characters/:id/api-clones', route(async (req, res) => {
+  res.status(201).json(await createApiClone(id(req.params.id), req.body, getSpeechSettings()));
+}));
+router.put('/characters/:id/api-voice', route((req, res) => res.json(saveApiVoice(id(req.params.id), req.body))));
 router.put('/characters/:id', route((req, res) => {
   const characterId = id(req.params.id), db = getDb();
   if (!db.prepare('SELECT 1 FROM characters WHERE id=?').get(characterId)) throw new Error('角色不存在');
@@ -130,7 +148,7 @@ router.get('/jobs/:id', route((req, res) => {
 }));
 router.post('/jobs/:id/cancel', route((req, res) => res.json(cancelSpeech(req.params.id))));
 router.get('/audio/:kind/:file', (req, res) => {
-  if (!['previews', 'references', 'generated'].includes(req.params.kind) || !/^[a-f0-9-]+\.wav$/.test(req.params.file)) return res.sendStatus(404);
+  if (!['previews', 'references', 'generated'].includes(req.params.kind) || !/^[a-f0-9-]+\.(wav|mp3)$/.test(req.params.file)) return res.sendStatus(404);
   res.sendFile(audioPath(`${req.params.kind}/${req.params.file}`));
 });
 router.use((error, req, res, next) => {

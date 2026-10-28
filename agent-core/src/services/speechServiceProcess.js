@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { ttsHealth } from './indexTtsClient.js';
 import { restartSpeechGpu } from './speechGpu.js';
+import { selectedLocalTtsModel } from './localTtsModels.js';
 
 const execute = promisify(execFile);
 const serviceDir = fileURLToPath(new URL('../../../tts-service/', import.meta.url));
@@ -11,7 +12,7 @@ const serviceDir = fileURLToPath(new URL('../../../tts-service/', import.meta.ur
 // Share one restart across windows/clients; keep it in the image/speech FIFO.
 export function createSpeechServiceRestarter({ run = execute, health = ttsHealth,
   exclusive = restartSpeechGpu, env = process.env, platform = process.platform,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), model = () => '2.0' } = {}) {
   let pending = null;
   return function restart() {
     if (pending) return pending;
@@ -26,7 +27,7 @@ export function createSpeechServiceRestarter({ run = execute, health = ttsHealth
         try {
           await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-File', path.join(serviceDir, 'restart.ps1'),
-            '-Port', url.port || '80'], { windowsHide: true, timeout: 45000, env });
+            '-ModelVersion', model(), '-Port', url.port || '80'], { windowsHide: true, timeout: 45000, env });
         } catch (error) {
           throw new Error(`声音服务启动失败：${String(error.stderr || error.message).trim().slice(0, 1200)}`);
         }
@@ -42,4 +43,4 @@ export function createSpeechServiceRestarter({ run = execute, health = ttsHealth
   };
 }
 
-export const restartSpeechService = createSpeechServiceRestarter();
+export const restartSpeechService = createSpeechServiceRestarter({ model: () => selectedLocalTtsModel().id });

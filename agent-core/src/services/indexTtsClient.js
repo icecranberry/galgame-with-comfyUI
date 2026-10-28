@@ -1,4 +1,4 @@
-import { MODEL_VERSION } from './speechText.js';
+import { selectedLocalTtsModel } from './localTtsModels.js';
 
 const base = () => (process.env.TTS_SERVICE_URL || 'http://127.0.0.1:7861').replace(/\/+$/, '');
 export async function ttsRequest(route, body, timeout = 10000) {
@@ -22,7 +22,7 @@ export async function ttsRequest(route, body, timeout = 10000) {
 export async function ttsHealth(timeout = 10000) {
   try {
     const status = await ttsRequest('/health', undefined, timeout);
-    return { ...status, online: true, compatible: status.model_version === MODEL_VERSION };
+    return { ...status, online: true, compatible: status.model_version === selectedLocalTtsModel().version };
   } catch (e) { return { online: false, compatible: false, error: e.message }; }
 }
 export const unloadTts = () => ttsRequest('/unload', {}, 30000);

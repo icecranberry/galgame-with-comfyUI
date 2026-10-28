@@ -18,7 +18,8 @@ test('offline restart waits for the GPU slot, deduplicates requests and checks t
       assert.equal(args.includes('-RuntimeDir'), false, 'legacy external paths must not redirect deployment');
       assert.match(args[args.indexOf('-File') + 1], /tts-service[\\/]restart.ps1$/);
       assert.equal(config.windowsHide, true);
-    }, health: async () => ++checks === 1 ? { online: false } : ready });
+      assert.equal(args[args.indexOf('-ModelVersion') + 1], '2.0');
+    }, model: () => '2.0', health: async () => ++checks === 1 ? { online: false } : ready });
   const first = restart(), second = restart();
   assert.equal(first, second);
   await Promise.resolve(); assert.equal(calls, 0);

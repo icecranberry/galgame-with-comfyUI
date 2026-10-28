@@ -27,6 +27,10 @@ export function getSetting(key) {
 const DB_ONLY_KEYS = new Set([
   'moment_interval_schedule',
   'tts_enabled',
+  'tts_mode',
+  'tts_local_model',
+  'tts_api_config',
+  'tts_api_key',
   'last_moments_seen_at',
   'last_events_seen_at',
   'llm_profiles',

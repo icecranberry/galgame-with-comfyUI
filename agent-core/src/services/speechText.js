@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const TEXT_VERSION = 'dialogue-v1';
 // Invalidate older audio when stop-token checks or the server sampling profile change.
 export const SYNTHESIS_VERSION = 'checked-eos-p90-v3';
-export const MODEL_VERSION = 'IndexTTS-2.5:c39ce5ba981572cb187443877ff559dfb246ce63:d9e41aac89fd00b3d71497fddb287b7f24613712';
+export const MODEL_VERSION = 'IndexTTS-2.0:740dcaff396282ffb241903d150ac011cd4b1ede:d9e41aac89fd00b3d71497fddb287b7f24613712';
 export const GENERATION_DEFAULTS = Object.freeze({ temperature: 0.8, top_k: 30, top_p: 0.9, num_beams: 3 });
 export function speechGenerationParams(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('高级参数必须是对象');
