@@ -1,15 +1,17 @@
 """Produce one ZIP64 archive containing just runtime/, including hidden .venv."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
-from deployment import ROOT, child, installation_error, read_json
+from deployment import ROOT, CATALOG, child, installation_error, read_json, model_id
 
 EXCLUDED = {".git", ".cache", "__pycache__", "outputs"}
 
 
-def pack_runtime(root, output):
-    error = installation_error(root)
+def pack_runtime(root, output, version=None, *, model_only=False):
+    version = model_id(version)
+    error = installation_error(root, version)
     if error:
         raise ValueError(error)
     bundle = root / "runtime"
@@ -17,7 +19,7 @@ def pack_runtime(root, output):
     if output.is_relative_to(bundle.resolve()):
         raise ValueError("压缩包不能写入 runtime 内部")
     # A model-only bundle must not be mistaken for a complete installation.
-    for relative in ("runtime.json", "index-tts/.venv/Scripts/python.exe",
+    for relative in ("runtime.json", f"{CATALOG[version]['directory']}/source/.venv/Scripts/python.exe",
                      "tools/ffmpeg/bin/ffmpeg.exe", "tools/ffmpeg/bin/ffprobe.exe"):
         if not (bundle / relative).is_file():
             raise ValueError(f"运行包缺少 {relative}")
@@ -36,8 +38,16 @@ def pack_runtime(root, output):
             packed_bytes = 0
             next_report = 1024 ** 3
             with ZipFile(staging, "w", compression=ZIP_DEFLATED, compresslevel=1, allowZip64=True) as archive:
-                for path in sorted(bundle.rglob("*")):
+                allowed = {CATALOG[version]['directory']} if model_only else {CATALOG[version]['directory'], 'python', 'tools', 'runtime.json'}
+                paths = (path for name in sorted(allowed) for path in
+                         ([bundle / name] if (bundle / name).is_file() else sorted((bundle / name).rglob('*'))))
+                if not model_only:
+                    archive.writestr('runtime/selected-model.json', json.dumps({'model': version}))
+                for path in paths:
                     relative = path.relative_to(bundle)
+                    # Include exactly one engine, even if many are installed.
+                    if relative.parts[0] not in allowed:
+                        continue
                     if EXCLUDED.intersection(relative.parts) or path.suffix == ".pyc" or not path.is_file():
                         continue
                     if not path.resolve().is_relative_to(bundle.resolve()):
@@ -62,5 +72,7 @@ def pack_runtime(root, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=ROOT / "dist/linshe-tts-runtime.zip")
+    parser.add_argument("--model", choices=tuple(CATALOG))
+    parser.add_argument("--model-only", action="store_true", help="Only the selected engine, for a PC with shared Python/tools installed")
     args = parser.parse_args()
-    pack_runtime(ROOT, args.output)
+    pack_runtime(ROOT, args.output, args.model, model_only=args.model_only)

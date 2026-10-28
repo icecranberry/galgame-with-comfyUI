@@ -2,6 +2,7 @@ param(
     # Older running Node backends still pass this argument. Accept but ignore it:
     # deployment always belongs to this checkout's tts-service directory.
     [string]$RuntimeDir,
+    [ValidateSet('2.0')][string]$ModelVersion,
     [ValidateRange(1, 65535)][int]$Port = 7861
 )
 $ErrorActionPreference = 'Stop'
@@ -38,3 +39,4 @@ Start-Process -FilePath $python -ArgumentList @('-X', 'utf8', ('"' + $serverFile
     -WorkingDirectory $upstream -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $ttsRoot 'logs\tts-stdout.log') `
     -RedirectStandardError (Join-Path $ttsRoot 'logs\tts-stderr.log') | Out-Null
+[IO.File]::WriteAllText((Join-Path $bundleRoot 'selected-model.json'), (@{ model = $ModelVersion } | ConvertTo-Json), [Text.UTF8Encoding]::new($false))

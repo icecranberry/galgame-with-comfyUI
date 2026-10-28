@@ -1,3 +1,4 @@
+param([ValidateSet('2.0')][string]$ModelVersion)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'runtime.ps1')
 Initialize-TtsRuntime

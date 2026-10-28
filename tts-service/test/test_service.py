@@ -22,6 +22,74 @@ adapter = load("tts_adapter", ROOT / "server.py")
 
 
 class ServiceTests(unittest.TestCase):
+    def setUp(self):
+        selected = patch.object(adapter, 'MODEL_ID', '2.0')
+        selected.start()
+        self.addCleanup(selected.stop)
+        normalizer = patch.object(adapter, 'prepare_index_text_normalizer')
+        normalizer.start()
+        self.addCleanup(normalizer.stop)
+
+    def test_native_fst_unicode_path_uses_a_relative_filename_and_restores_cwd(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory(prefix='语音 with spaces ') as directory:
+            file = Path(directory) / 'test.fst'
+            file.write_bytes(b'fst')
+            def factory(name):
+                self.assertEqual(name, 'test.fst')
+                self.assertEqual(Path.cwd(), file.parent)
+                return Path(name).read_bytes()
+            self.assertEqual(adapter.load_native_fst(factory, file), b'fst')
+            self.assertEqual(Path.cwd(), previous)
+            with self.assertRaisesRegex(RuntimeError, 'bad fst'):
+                adapter.load_native_fst(lambda name: (_ for _ in ()).throw(RuntimeError('bad fst')), file)
+            self.assertEqual(Path.cwd(), previous)
+
+    @unittest.skipUnless(importlib.util.find_spec('kaldifst'), 'requires IndexTTS native normalizer')
+    def test_real_kaldi_fst_loads_from_chinese_installation_directory(self):
+        import shutil
+        import kaldifst
+        package = Path(importlib.util.find_spec('wetext').origin).parent
+        with tempfile.TemporaryDirectory(prefix='中文离线包 ') as directory:
+            file = Path(directory) / 'traditional.fst'
+            shutil.copyfile(package / 'fsts/traditional_to_simple.fst', file)
+            normalizer = adapter.load_native_fst(kaldifst.TextNormalizer, file)
+            self.assertEqual(normalizer('測試'), '测试')
+
+    @unittest.skipUnless(importlib.util.find_spec('sentencepiece'), 'requires native tokenizer')
+    def test_real_sentencepiece_loads_from_chinese_installation_directory(self):
+        import sentencepiece
+        buffer = io.BytesIO()
+        sentencepiece.SentencePieceTrainer.train(sentence_iterator=iter(['hello world', 'hello voice']),
+            model_writer=buffer, vocab_size=32, hard_vocab_limit=False, minloglevel=2)
+        adapter.prepare_sentencepiece_paths()
+        with tempfile.TemporaryDirectory(prefix='中文分词验证 ') as directory:
+            file = Path(directory) / 'bpe.model'
+            file.write_bytes(buffer.getvalue())
+            tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(file))
+            self.assertGreater(len(tokenizer.encode('hello world')), 0)
+
+    def test_20_loads_the_correct_entry_and_uses_only_offline_auxiliary_paths(self):
+        calls = []
+        class Model:
+            def __init__(self, **kwargs): calls.append(kwargs)
+        module = types.ModuleType('indextts.infer_v2'); module.IndexTTS2 = Model
+        with patch.object(adapter, 'MODEL_ID', '2.0'), patch.dict(sys.modules, {'indextts': types.ModuleType('indextts'), 'indextts.infer_v2': module}):
+            adapter.load_model()
+        self.assertTrue(calls[0]['use_fp16']); self.assertFalse(calls[0]['use_qwen_emo'])
+        self.assertNotIn('use_bf16', calls[0])
+        self.assertIn('semantic_codec_model.safetensors', calls[0]['aux_paths']['semantic_codec'])
+
+    def test_20_does_not_forward_25_generation_parameters_and_applies_speed_after_inference(self):
+        calls = []
+        class Model:
+            def infer(self, **kwargs): calls.append(kwargs); Path(kwargs['output_path']).write_bytes(b'wave')
+        with tempfile.TemporaryDirectory() as directory, patch.object(adapter, 'MODEL_ID', '2.0'), patch.object(adapter, 'adjust_audio_speed') as speed:
+            temporary = Path(directory) / 'result.wav'
+            adapter.synthesize_to_file(Model(), {'reference': 'references/test.wav', 'text': '你好', 'language': 'zh', 'duration_factor': 0.8}, temporary, generation_options=adapter.DEFAULT_GENERATION_OPTIONS)
+            speed.assert_called_once_with(temporary, 1.25)
+        self.assertNotIn('lang', calls[0]); self.assertNotIn('duration_factor', calls[0]); self.assertEqual(calls[0]['top_p'], 0.9)
+
     def test_generation_options_validate_and_preserve_defaults(self):
         self.assertEqual(adapter.generation_options({}), adapter.DEFAULT_GENERATION_OPTIONS)
         self.assertEqual(adapter.generation_options({"top_p": 0.95}), adapter.DEFAULT_GENERATION_OPTIONS | {"top_p": 0.95})
@@ -139,14 +207,14 @@ class ServiceTests(unittest.TestCase):
                         "text": text, "language": "zh", "duration_factor": 1, "generation_params": {"top_p": 0.95, "num_beams": 2}}
             def close(self): self.closed = True
 
-        module = types.ModuleType("indextts.infer_v2_5")
+        module = types.ModuleType("indextts.infer_v2")
         module.IndexTTS2 = Model
         pipe = Pipe()
         with tempfile.TemporaryDirectory() as directory, \
                 io.TextIOWrapper(io.BytesIO(), encoding="gbk") as stdout, \
                 io.TextIOWrapper(io.BytesIO(), encoding="gbk") as stderr, \
                 patch.object(adapter, "AUDIO_ROOT", Path(directory)), \
-                patch.dict(sys.modules, {"indextts": types.ModuleType("indextts"), "indextts.infer_v2_5": module}), \
+                patch.dict(sys.modules, {"indextts": types.ModuleType("indextts"), "indextts.infer_v2": module}), \
                 patch.object(sys, "stdout", stdout), patch.object(sys, "stderr", stderr):
             adapter.worker(pipe)
             self.assertEqual(pipe.messages[:2], [{"loaded": True}, {"ok": True}])

@@ -1,31 +1,36 @@
 """Loopback HTTP adapter. GPU state lives in one killable, reusable worker.
 
-Run in the pinned IndexTTS environment; see README.md. No web framework needed.
+Run in the selected model's independent environment; see README.md.
 """
 import hmac
+import importlib
 import json
 import math
 import multiprocessing as mp
 import os
+import subprocess
 from pathlib import Path
 import sys
 import threading
 import time
+import traceback
 import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = Path(__file__).resolve().parent
 # Direct launches and multiprocessing children use the same local source tree.
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE / "runtime/index-tts"))
-from deployment import installation_error
+from deployment import CATALOG, installation_error, model_id, model_versions, model_directory, source_directory
 
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
-VERSIONS = json.loads((HERE / "versions.json").read_text(encoding="utf-8"))
-MODEL_VERSION = f"IndexTTS-2.5:{VERSIONS['model_revision']}:{VERSIONS['code_revision']}"
+MODEL_ID = model_id()
+VERSIONS = model_versions(HERE, MODEL_ID)
+MODEL_VERSION = f"{CATALOG[MODEL_ID]['label'].replace(' ', '-')}:{VERSIONS['model_revision']}:{VERSIONS['code_revision']}"
+SOURCE_DIR = source_directory(HERE, MODEL_ID)
+sys.path.insert(0, str(SOURCE_DIR))
 AUDIO_ROOT = Path(os.environ.get("TTS_AUDIO_DIR", HERE.parent / "agent-core/data/audio")).resolve()
-MODEL_DIR = HERE / "runtime/checkpoints"
+MODEL_DIR = model_directory(HERE, MODEL_ID)
 TOKEN = os.environ.get("TTS_SERVICE_TOKEN", "")
 DEFAULT_GENERATION_OPTIONS = {"num_beams": 3, "temperature": 0.8, "top_p": 0.9, "top_k": 30}
 
@@ -78,8 +83,9 @@ def synthesize_to_file(model, args, temporary, *, generation_options=None):
             with warnings.catch_warnings():
                 warnings.filterwarnings("error", message=r"WARN: generation stopped due to exceeding `max_mel_tokens`", category=RuntimeWarning)
                 model.infer(spk_audio_prompt=str(controlled_path(args["reference"], "references")),
-                            text=args["text"], lang=args["language"], output_path=str(temporary),
-                            duration_factor=args["duration_factor"], use_emo_text=False, **options)
+                            text=args["text"], output_path=str(temporary), use_emo_text=False, **options)
+            if MODEL_ID == "2.0" and args["duration_factor"] != 1:
+                adjust_audio_speed(temporary, 1 / args["duration_factor"])
             return
         except RuntimeWarning as error:
             if not str(error).startswith("WARN: generation stopped due to exceeding `max_mel_tokens`"):
@@ -90,15 +96,80 @@ def synthesize_to_file(model, args, temporary, *, generation_options=None):
                 raise RuntimeError("语音未正常结束，自动重试后仍异常，已丢弃结果。请换一段清晰、无背景音乐的参考音频后重试。") from error
 
 
+def adjust_audio_speed(file, speed):
+    adjusted = file.with_name(file.stem + ".speed.wav")
+    try:
+        tool = HERE / "runtime/tools/ffmpeg/bin/ffmpeg.exe"
+        subprocess.run([str(tool), "-nostdin", "-y", "-v", "error", "-i", str(file), "-af", f"atempo={speed}", str(adjusted)],
+                       check=True, timeout=60, capture_output=True,
+                       **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}))
+        adjusted.replace(file)
+    finally:
+        adjusted.unlink(missing_ok=True)
+
+
+def load_model():
+    prepare_index_text_normalizer()
+    cls = importlib.import_module("indextts.infer_v2").IndexTTS2
+    precision = {"use_fp16": True, "use_deepspeed": False,
+        "aux_paths": {"w2v_bert": str(MODEL_DIR / "hf_cache/w2v-bert-2.0"),
+                      "campplus": str(MODEL_DIR / "hf_cache/campplus_cn_common.bin"),
+                      "semantic_codec": str(MODEL_DIR / "hf_cache/semantic_codec_model.safetensors"),
+                      "bigvgan": str(MODEL_DIR / "hf_cache/bigvgan")}}
+    return cls(cfg_path=str(MODEL_DIR / "config.yaml"), model_dir=str(MODEL_DIR),
+               use_cuda_kernel=False, use_qwen_emo=False, **precision)
+
+
+def load_native_fst(factory, file):
+    """Kaldi's narrow Windows fopen cannot open a Unicode absolute path."""
+    file = Path(file)
+    if file.is_absolute() and not str(file).isascii():
+        previous = Path.cwd()
+        try:
+            os.chdir(file.parent)
+            return factory(file.name)
+        finally:
+            os.chdir(previous)
+    return factory(str(file))
+
+
+def prepare_index_text_normalizer():
+    if os.name != 'nt':
+        return
+    prepare_sentencepiece_paths()
+    # All FSTs are read eagerly during wetext import. This runs only in the
+    # dedicated single-inference worker, before other model imports. Preserve
+    # upstream sources and restore both cwd and the native API after loading.
+    native = importlib.import_module('kaldifst')
+    factory = native.TextNormalizer
+    native.TextNormalizer = lambda file: load_native_fst(factory, file)
+    try:
+        importlib.import_module('wetext')
+    finally:
+        native.TextNormalizer = factory
+
+
+def prepare_sentencepiece_paths():
+    cls = importlib.import_module('sentencepiece').SentencePieceProcessor
+    if getattr(cls, '_linshe_unicode_paths', False):
+        return
+    original = cls.LoadFromFile
+    def load_file(processor, file):
+        filename = os.fsdecode(file)
+        if not filename.isascii():
+            return processor.LoadFromSerializedProto(Path(filename).read_bytes())
+        return original(processor, file)
+    cls.LoadFromFile = load_file
+    cls._linshe_unicode_paths = True
+
+
 def worker(pipe):
     # CUDA libraries are imported in the child only; terminating it releases the
     # complete CUDA context, including hidden/global caches in upstream code.
     try:
         # Windows uses spawn: configuring only the HTTP parent is insufficient.
         configure_stdio()
-        from indextts.infer_v2_5 import IndexTTS2
-        model = IndexTTS2(cfg_path=str(MODEL_DIR / "config.yaml"), model_dir=str(MODEL_DIR),
-                          use_bf16=True, use_cuda_kernel=False, use_qwen_emo=False)
+        model = load_model()
         pipe.send({"loaded": True})
         while True:
             args = pipe.recv()
@@ -113,6 +184,8 @@ def worker(pipe):
             finally:
                 temporary.unlink(missing_ok=True)
     except BaseException as error:
+        if not isinstance(error, (EOFError, BrokenPipeError)):
+            traceback.print_exc(file=sys.stderr)
         try:
             pipe.send({"error": str(error)})
         except (BrokenPipeError, EOFError):
@@ -211,7 +284,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         error = installation_error()
-        self.respond(200, {"model_version": MODEL_VERSION, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
+        self.respond(200, {"local_model": MODEL_ID, "model_version": MODEL_VERSION, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
                            "loaded": ENGINE.loaded, "worker_alive": bool(ENGINE.process and ENGINE.process.is_alive()),
                            "busy": ENGINE.inference.locked()})
 
@@ -233,6 +306,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid text length")
             if body.get("language") not in ("zh", "en", "ja") or not 0.5 <= float(body.get("duration_factor", 0)) <= 2:
                 raise ValueError("Invalid synthesis parameters")
+            if MODEL_ID == "2.0" and body["language"] == "ja":
+                raise ValueError("IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文")
             body["generation_params"] = generation_options(body.get("generation_params"))
             if not controlled_path(body["reference"], "references").is_file():
                 raise ValueError("Reference file missing")
