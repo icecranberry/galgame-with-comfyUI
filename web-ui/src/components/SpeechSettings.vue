@@ -2,26 +2,42 @@
   <section class="speech-settings" aria-label="语音设置">
     <div class="speech-heading">
       <div class="speech-title">
-        <h4>让角色开口说话</h4>
-        <p>保存音色后，点击聊天气泡下方的「朗读」</p>
+        <h4>全局语音设置</h4>
+        <p>所有角色统一使用当前模式。本地与 API 二选一，切换后保留另一套已存配置。</p>
       </div>
       <linshe-switch :model-value="speechEnabled" :disabled="busy" size="sm" aria-label="启用语音朗读" on-text="已开启" off-text="未开启" @update:model-value="toggle" />
     </div>
+    <linshe-tabs class="speech-mode" :model-value="mode" :options="modes" :disabled="busy || disabled || localModelBusy || checking || restarting || recovering" aria-label="语音接入方式" @update:model-value="switchMode" />
+    <Transition name="speech-maintenance" mode="out-in">
+    <div v-if="mode === 'api'" key="api" class="speech-api">
+      <p class="speech-feedback">使用 OpenAI 兼容的语音合成协议。连接信息由所有角色共用，每个角色独立设置音色和参数；本地录音与参数会保留。</p>
+      <label class="speech-field">完整 API 地址<linshe-input v-model="api.endpoint" :disabled="busy || disabled" placeholder="https://example.com/v1/audio/speech" /></label>
+      <div class="speech-api-grid">
+        <label class="speech-field">模型<linshe-input v-model="api.model" :disabled="busy || disabled" placeholder="tts-1" /></label>
+        <label class="speech-field">API Key<linshe-input v-model="apiKey" type="password" autocomplete="new-password" :disabled="busy || disabled" :placeholder="api.has_key ? '已保存，留空保留原 Key' : '填写 Key；无鉴权接口可留空'" /></label>
+      </div>
+      <label class="speech-field">音色上传地址（创建克隆音色 ID 时填写）<linshe-input v-model="api.upload_endpoint" :disabled="busy || disabled" placeholder="https://api.siliconflow.cn/v1/uploads/audio/voice" /><span class="speech-feedback">克隆按硅基流动兼容协议接入，共用上方模型与 Key。直接传 references 无需填写上传地址；服务商和模型须支持对应功能，普通 OpenAI 兼容接口不一定支持。</span></label>
+      <div class="speech-api-actions">
+        <linshe-button size="sm" :loading="busy" :disabled="busy || disabled || !api.endpoint.trim() || !api.model.trim()" @click="saveApi">保存 API 连接</linshe-button>
+        <linshe-button v-if="api.has_key" variant="ghost" size="sm" :disabled="busy || disabled" @click="clearKey = !clearKey">{{ clearKey ? '取消清除 Key' : '清除已存 Key' }}</linshe-button>
+        <span class="speech-feedback">{{ clearKey ? '保存后清除 Key' : '保存后在角色声音中生成试听，验证连接' }}</span>
+      </div>
+    </div>
+    <div v-else key="local">
+    <LocalSpeechModels :disabled="busy || disabled || checking || restarting || recovering" @changed="applySettings" @busy="localModelBusy = $event" />
     <div class="speech-service-row">
       <span class="speech-status" :class="{ 'is-ready': ready, 'is-error': !!error }" role="status">
         <i aria-hidden="true" />{{ restarting ? '正在重启声音服务…' : checking ? '正在检查服务…' : ready ? '本地服务已就绪' : error ? '服务需要检查' : '本地服务待检查' }}
       </span>
       <div class="speech-actions">
-        <linshe-button variant="link" size="sm" :loading="checking" :disabled="recovering || restarting" @click="check">检查连接</linshe-button>
-        <linshe-button variant="secondary" size="sm" :loading="restarting" :disabled="checking || recovering" @click="restart">重启声音服务</linshe-button>
+        <linshe-button variant="link" size="sm" :loading="checking" :disabled="recovering || restarting || localModelBusy" @click="check">检查连接</linshe-button>
+        <linshe-button variant="secondary" size="sm" :loading="restarting" :disabled="checking || recovering || localModelBusy" @click="restart">重启声音服务</linshe-button>
         <linshe-button variant="ghost" size="sm" :aria-expanded="maintenanceOpen" @click="maintenanceOpen = !maintenanceOpen">
           服务维护
           <svg class="speech-chevron" :class="{ 'is-open': maintenanceOpen }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
         </linshe-button>
       </div>
     </div>
-    <p v-if="error" class="speech-feedback is-error" role="alert">{{ error }}</p>
-    <p v-else-if="notice" class="speech-feedback" role="status">{{ notice }}</p>
     <Transition name="speech-maintenance">
       <div v-if="maintenanceOpen" class="speech-maintenance">
         <div>
@@ -32,14 +48,53 @@
         <linshe-button size="sm" :loading="recovering" :disabled="checking || restarting" @click="recover">恢复显存调度</linshe-button>
       </div>
     </Transition>
+    </div>
+    </Transition>
+    <p v-if="error" class="speech-feedback is-error" role="alert">{{ error }}</p>
+    <p v-else-if="notice" class="speech-feedback" role="status">{{ notice }}</p>
   </section>
 </template>
 <script setup>
 import { ref, onMounted } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
+import LinsheInput from './ui/LinsheInput.vue'
+import LocalSpeechModels from './LocalSpeechModels.vue'
 import { ttsApi } from '../api/tts.js'
 import { speechEnabled, stopSpeech } from '../stores/speech.js'
+defineProps({ disabled: Boolean })
+const emit = defineEmits(['changed'])
+const mode = ref('local'), api = ref({ endpoint: '', model: '', has_key: false }), apiKey = ref(''), clearKey = ref(false)
+const localModelBusy = ref(false)
+const modes = [{ label: '本地模型', value: 'local' }, { label: 'API 接入', value: 'api' }]
+function applySettings(settings) {
+  speechEnabled.value = settings.enabled
+  mode.value = settings.mode || 'local'
+  if (settings.api) api.value = { ...settings.api }
+  apiKey.value = ''; clearKey.value = false
+  emit('changed', settings)
+}
+async function switchMode(value) {
+  if (busy.value) return
+  busy.value = true; error.value = ''; notice.value = ''; stopSpeech()
+  try {
+    const settings = await ttsApi('/settings', { mode: value }, 'PUT')
+    // Switching modes must not erase an unsaved connection draft either.
+    mode.value = settings.mode; emit('changed', settings)
+    notice.value = value === 'api' ? '已切换 API，本地音色与参数仍保留' : '已切回本地，继续使用原来的音色与参数'
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+async function saveApi() {
+  if (busy.value) return
+  busy.value = true; error.value = ''; notice.value = ''
+  try {
+    applySettings(await ttsApi('/settings', { api: { endpoint: api.value.endpoint, model: api.value.model, upload_endpoint: api.value.upload_endpoint || '', key: apiKey.value, clear_key: clearKey.value } }, 'PUT'))
+    stopSpeech(); notice.value = 'API 连接已保存，可在角色声音中生成试听'
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
 const busy = ref(true), checking = ref(false), recovering = ref(false), restarting = ref(false), ready = ref(false)
 const maintenanceOpen = ref(false), error = ref(''), notice = ref('')
 async function toggle(enabled) {
@@ -78,13 +133,19 @@ async function restart() {
   finally { restarting.value = false }
 }
 onMounted(async () => {
-  try { speechEnabled.value = (await ttsApi('/settings')).enabled }
+  try { applySettings(await ttsApi('/settings')) }
   catch (e) { error.value = e.message }
   finally { busy.value = false }
 })
 </script>
 <style scoped>
 .speech-settings { padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--bg-sunken); }
+.speech-mode { margin-top:14px; }
+.speech-api { display:grid; gap:12px; margin-top:14px; }
+.speech-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
+.speech-api-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.speech-api-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.speech-api-actions .speech-feedback { margin:0; }
 .speech-heading,.speech-service-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .speech-title { min-width:0; }
 .speech-title h4 { margin:0 0 5px; color:var(--text-primary); font-size:var(--fs-md); font-weight:700; }
@@ -106,6 +167,7 @@ onMounted(async () => {
 .speech-maintenance-enter-active,.speech-maintenance-leave-active { transition:opacity .3s ease,transform .3s ease; }
 .speech-maintenance-enter-from,.speech-maintenance-leave-to { opacity:0; transform:translateY(-5px); }
 @media(max-width:480px) {
+  .speech-api-grid { grid-template-columns:minmax(0,1fr); }
   .speech-settings { padding:14px; }
   .speech-heading { align-items:flex-start; gap:12px; }
   .speech-title h4 { font-size:var(--fs-sm); }

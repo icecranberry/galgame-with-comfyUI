@@ -18,9 +18,9 @@ function fixture(t, api = async route => route === '/voices?character_id=1' ? []
   let stops = 0, state
   const speechPlayer = createSpeechPlayback()
   const deps = { Vue, speechEnabled, speechJobs, createSpeechTask, stopSpeech: () => { stops++; speechPlayer.stop() },
-    speechPlayer, ttsApi: async (...args) => { calls.push(args); return api(...args) }, uploadVoice: options.upload || (async () => null),
+    speechPlayer, ttsApi: async (...args) => { calls.push(args); if (args[0] === '/settings') return options.settings ? options.settings() : { mode: 'local', enabled: false }; return api(args[0].replace('?mode=local', ''), ...args.slice(1)) }, uploadVoice: options.upload || (async () => null),
     waitSpeech: options.wait || (async job => { const ready = { ...job, status: 'completed', audio_url: '/preview.wav' }; speechJobs[job.id] = ready; return ready }),
-    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSlider: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, SpeechSettings: {}, VoiceAudioPlayer: {} }
+    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSlider: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, VoiceAudioPlayer: {}, VoiceApiEditor: {} }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() {
@@ -42,6 +42,27 @@ function readyPreview(f, play = async () => {}) {
   f.state.previewAudio.value = { media: audio }
   return { actions, audio }
 }
+
+test('character editor reads the global mode and only loads local assets in local mode', async t => {
+  let mode = 'api'
+  const f = fixture(t, async route => route.startsWith('/voices?') ? [{ id: 'local', character_id: 1, generation_params: { top_p: 0.7 } }] : { voice_id: 'local' },
+    { settings: () => ({ mode, enabled: true }) })
+  await flush()
+  assert.equal(f.state.mode.value, 'api'); assert.equal(f.speechEnabled.value, true)
+  assert.deepEqual(f.calls.map(([route]) => route), ['/settings'])
+  f.props.modelValue = false; await flush(); mode = 'local'; f.props.modelValue = true; await flush()
+  assert.equal(f.state.mode.value, 'local'); assert.equal(f.state.selected.value, 'local')
+  assert.equal(f.state.generationParams.value.top_p, 0.7)
+  assert.equal(f.calls.some(([, body]) => body !== undefined), false, 'character editor never writes global settings')
+})
+
+test('failed global settings load stays out of both modes and can be retried', async t => {
+  let fail = true
+  const f = fixture(t, undefined, { settings: () => { if (fail) throw new Error('读取失败'); return { mode: 'api', enabled: false } } })
+  await flush(); assert.equal(f.state.mode.value, null); assert.equal(f.state.error.value, '读取失败')
+  fail = false; await f.state.loadVoice([true, 1])
+  assert.equal(f.state.mode.value, 'api'); assert.equal(f.state.error.value, '')
+})
 
 test('advanced draft previews separately, saves to its voice, restores defaults and reloads on reopen', async t => {
   const defaults = { temperature: 0.8, top_k: 30, top_p: 0.9, num_beams: 3 }

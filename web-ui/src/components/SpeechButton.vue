@@ -1,7 +1,7 @@
 <template>
   <div v-if="speechEnabled" class="speech-control" @click.stop @pointerdown.stop>
     <linshe-button variant="link" size="sm" :disabled="pending" @click="play">
-      {{ playingSpeech && playingSpeech === job?.id ? '停止朗读' : pending ? '正在请求…' : job?.status === 'queued' ? '等待生图 / 排队中…' : job?.status === 'generating' ? '语音生成中…' : job?.status === 'failed' ? '重试朗读' : '朗读' }}
+      {{ playingSpeech && playingSpeech === job?.id ? '停止朗读' : pending ? '正在请求…' : job?.status === 'queued' ? '语音排队中…' : job?.status === 'generating' ? '语音生成中…' : job?.status === 'failed' ? '重试朗读' : '朗读' }}
     </linshe-button>
     <linshe-button v-if="waiting" variant="link" size="sm" @click="cancel">取消</linshe-button>
     <span v-if="error || (!pending && job?.status === 'failed' && job?.error)" class="speech-error" role="status">{{ error || job?.error }}</span>

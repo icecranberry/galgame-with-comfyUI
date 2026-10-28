@@ -9,14 +9,14 @@ const code = compileScript(parse(source).descriptor, { id: 'speech-settings-test
   .replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g, (_, names) => `const { ${names} } = Vue`)
   .replace(/^import .* from .*$/gm, '').replace('export default', 'return')
 
-function fixture(t, api) {
+function fixture(t, api, settingsApi = async () => ({ enabled: true })) {
   let state, stops = 0
   const calls = [], speechEnabled = Vue.ref(true)
-  const deps = { Vue, speechEnabled, stopSpeech: () => stops++, LinsheButton: {}, LinsheSwitch: {},
-    ttsApi: async (...args) => { calls.push(args); return args[0] === '/settings' ? { enabled: true } : api(...args) } }
+  const deps = { Vue, speechEnabled, stopSpeech: () => stops++, LocalSpeechModels: {}, LinsheButton: {}, LinsheSwitch: {}, LinsheTabs: {}, LinsheInput: {},
+    ttsApi: async (...args) => { calls.push(args); return args[0] === '/settings' ? settingsApi(...args) : api(...args) } }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
-  const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
+  const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {}, emit() {} }); return () => null } })
   app.mount({}); t.after(() => app.unmount())
   return { state, calls, stops: () => stops }
 }
@@ -34,6 +34,25 @@ test('restart stops playback, blocks overlapping maintenance and displays verifi
   assert.equal(f.state.ready.value, true)
   assert.equal(f.state.restarting.value, false)
   assert.match(f.state.notice.value, /已重启/)
+})
+
+test('mode switches preserve connection drafts and failed saves retain secrets for retry', async t => {
+  let settings = { enabled: true, mode: 'local', api: { endpoint: 'http://localhost/tts', model: 'tts', has_key: true } }, fail = false
+  const f = fixture(t, async () => {}, async (route, body) => {
+    if (fail) throw new Error('保存失败')
+    if (body?.mode) settings.mode = body.mode
+    if (body?.api) settings.api = { endpoint: body.api.endpoint, model: body.api.model, upload_endpoint: body.api.upload_endpoint, has_key: !body.api.clear_key }
+    return structuredClone(settings)
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  f.state.apiKey.value = 'draft-key'; f.state.api.value.model = 'draft-model'; f.state.api.value.upload_endpoint = 'https://provider.example/v1/uploads/audio/voice'
+  await f.state.switchMode('api'); await f.state.switchMode('local')
+  assert.equal(f.state.mode.value, 'local'); assert.equal(f.state.api.value.model, 'draft-model'); assert.equal(f.state.apiKey.value, 'draft-key')
+  fail = true; await f.state.switchMode('api'); assert.equal(f.state.mode.value, 'local')
+  await f.state.saveApi(); assert.equal(f.state.apiKey.value, 'draft-key'); assert.equal(f.state.error.value, '保存失败')
+  fail = false; await f.state.saveApi(); assert.equal(f.state.apiKey.value, ''); assert.equal(settings.api.model, 'draft-model')
+  assert.equal(settings.api.upload_endpoint, 'https://provider.example/v1/uploads/audio/voice')
+  f.state.clearKey.value = true; await f.state.saveApi(); assert.equal(settings.api.has_key, false)
 })
 
 test('restart failure and missing models remain retryable errors, never success notices', async t => {

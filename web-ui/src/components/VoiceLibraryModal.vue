@@ -1,12 +1,12 @@
 <template>
   <linshe-modal :model-value="modelValue && !detailOpen" title="音色管理" full :transition-ms="300" @update:model-value="$emit('update:modelValue', $event)">
     <div class="voice-library">
-      <SpeechSettings />
-      <linshe-tabs v-model="tab" :options="tabs" aria-label="音色管理内容" />
+      <SpeechSettings @changed="onSettingsChanged" />
+      <linshe-tabs v-if="mode === 'local'" v-model="tab" :options="tabs" aria-label="音色管理内容" />
       <Transition name="voice-library-content" mode="out-in">
-      <section v-if="tab === 'characters'" key="characters" class="voice-library-section">
+      <section v-if="mode === 'api' || tab === 'characters'" :key="`characters-${mode}`" class="voice-library-section">
       <div class="voice-library-heading">
-        <div><h4>角色音色</h4><p>上传或录制 6～12 秒清晰对白，无需填写参考台词。</p></div>
+        <div><h4>角色音色</h4><p>{{ mode === 'api' ? '使用 API 音色 ID，或上传参考音频克隆角色声音。' : '上传或录制 6～12 秒清晰对白，无需填写参考台词。' }}</p></div>
         <span class="voice-library-count">已有声音 {{ boundCount }} / {{ characters.length }}</span>
       </div>
       <div class="voice-library-tools">
@@ -29,7 +29,7 @@
       </div>
       </section>
       <section v-else key="voices" class="voice-library-section">
-        <div class="voice-library-heading"><div><h4>已存音色</h4><p>每个角色独立保存自己的音色。</p></div><span class="voice-library-count">{{ voices.length }} 个音色</span></div>
+        <div class="voice-library-heading"><div><h4>已存本地音色</h4><p>每个角色独立保存自己的音色。</p></div><span class="voice-library-count">{{ voices.length }} 个音色</span></div>
         <linshe-input v-model="voiceQuery" placeholder="搜索音色名称" aria-label="搜索已存音色" />
         <p v-if="loading" role="status">正在读取已存音色…</p>
         <div v-else class="voice-library-grid">
@@ -66,6 +66,8 @@ const query = ref(''), filter = ref('all'), bindings = ref({}), loading = ref(fa
 const selectedCharacter = ref(null), detailOpen = ref(false)
 const confirm = inject('confirm')
 const tab = ref('characters'), voiceQuery = ref(''), voices = ref([]), deleting = ref(''), notice = ref('')
+const mode = ref('local')
+function onSettingsChanged(settings) { mode.value = settings.mode || 'local'; if (mode.value === 'api') tab.value = 'characters'; refresh() }
 const tabs = [{ label: '角色声音', value: 'characters' }, { label: '已存音色', value: 'voices' }]
 const savedRows = computed(() => voices.value.filter(voice => voice.name.toLowerCase().includes(voiceQuery.value.trim().toLowerCase())))
 function ownerName(voice) {
@@ -85,7 +87,7 @@ async function refresh() {
   const current = ++sequence
   loading.value = true; error.value = ''
   try {
-    const [rows, saved] = await Promise.all([ttsApi('/bindings'), ttsApi('/voices')])
+    const [rows, saved] = await Promise.all([ttsApi('/bindings'), mode.value === 'local' ? ttsApi('/voices') : Promise.resolve([])])
     if (current === sequence) { bindings.value = Object.fromEntries(rows.map(row => [row.character_id, row])); voices.value = saved }
   } catch (e) { if (current === sequence) error.value = e.message }
   finally { if (current === sequence) loading.value = false }
@@ -99,7 +101,7 @@ async function deleteVoice(voice) {
     if (!await confirm({ title: '删除音色', message: `删除「${voice.name}」？已生成的聊天语音会保留。`, okText: '删除', danger: true }) || current !== sequence) return
     const result = await ttsApi(`/voices/${voice.id}`, {}, 'DELETE')
     if (current !== sequence) return
-    if (voice.character_id) {
+    if (voice.character_id && mode.value === 'local') {
       if (result.current_voice) bindings.value[voice.character_id] = result.current_voice
       else delete bindings.value[voice.character_id]
     }

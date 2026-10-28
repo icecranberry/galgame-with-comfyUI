@@ -1,7 +1,13 @@
 <template>
   <linshe-modal :model-value="modelValue && !recorderOpen" :title="`${character?.display_name || '角色'}的声音`" wide :transition-ms="300" @update:model-value="$emit('update:modelValue', $event)">
     <div class="voice-manager">
-      <SpeechSettings />
+      <Transition name="voice-content" mode="out-in">
+      <div v-if="!mode" key="loading" class="voice-manager">
+        <p class="voice-hint" :role="error ? 'alert' : 'status'">{{ error || '正在读取全局语音模式…' }}</p>
+        <linshe-button v-if="error" variant="link" @click="loadVoice([modelValue, character?.id])">重新读取</linshe-button>
+      </div>
+      <VoiceApiEditor v-else-if="mode === 'api' && character" :key="`api-${character.id}`" :character-id="character.id" :connection-key="connectionKey" @saved="$emit('saved')" />
+      <div v-else key="local" class="voice-manager">
       <div class="voice-intro"><div><span>角色当前使用</span><strong>{{ voicesLoading ? '正在读取…' : binding?.name || '尚未设置声音' }}</strong></div><span>{{ binding ? '新声音保存后自动使用' : '试听满意后，保存给这个角色' }}</span></div>
       <div class="voice-section-heading"><h4>选择声音素材</h4><span>参考对白建议 6～12 秒</span></div>
       <linshe-tabs v-if="voices.length" v-model="sourceMode" :options="sourceModes" :disabled="busy" aria-label="声音素材来源" />
@@ -87,8 +93,10 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
         <p v-if="error" key="error" class="voice-feedback voice-error" role="alert">{{ error }}</p>
         <p v-else-if="notice" key="notice" class="voice-feedback" role="status">{{ notice }}</p>
       </Transition>
+      </div>
+      </Transition>
     </div>
-    <template #footer>
+    <template v-if="mode === 'local'" #footer>
       <div class="voice-footer">
 <span class="voice-hint">{{ selected ? '选择音色后立即用于聊天朗读' : '先生成试听，保存后自动使用' }}</span><div class="voice-footer-actions">
       <linshe-button v-if="selected" :disabled="busy" @click="$emit('update:modelValue', false)">完成</linshe-button>
@@ -109,13 +117,15 @@ import LinsheSlider from './ui/LinsheSlider.vue'
 import LinsheSelect from './ui/LinsheSelect.vue'
 import LinsheTabs from './ui/LinsheTabs.vue'
 import SystemAudioRecorder from './SystemAudioRecorder.vue'
-import SpeechSettings from './SpeechSettings.vue'
 import VoiceAudioPlayer from './VoiceAudioPlayer.vue'
+import VoiceApiEditor from './VoiceApiEditor.vue'
 import { ttsApi, uploadVoice } from '../api/tts.js'
 import { speechEnabled, speechJobs, speechPlayer, stopSpeech, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
 const props = defineProps({ modelValue: Boolean, character: { type: Object, default: null } })
 const emit = defineEmits(['update:modelValue', 'saved'])
+const mode = ref(null)
+const connectionKey = ref('')
 const confirm = inject('confirm')
 const voices = ref([]), binding = ref(null), selected = ref(''), original = ref(null), sample = ref(null)
 const sourceName = ref(''), voicesLoading = ref(true)
@@ -164,17 +174,18 @@ watch(previewId, () => { playbackHint.value = '' })
 const validRange = computed(() => original.value && Number.isFinite(start.value) && Number.isFinite(end.value) && start.value >= 0 && end.value <= original.value.duration && end.value - start.value >= 1 && end.value - start.value <= 15)
 const canPreview = computed(() => parametersValid.value && speechEnabled.value && !!text.value.trim() && (!!selectedVoice.value || (!selected.value && !!validRange.value)))
 const canSave = computed(() => parametersValid.value && !selected.value && !!name.value.trim() && !!sample.value && previewJob.value?.status === 'completed')
-const previewHint = computed(() => !speechEnabled.value ? '请先开启上方的语音朗读开关' : !selected.value && !original.value ? '先上传或录制一段声音' : !selected.value && !validRange.value ? '请先选取 1～15 秒参考片段' : !text.value.trim() ? '请输入试听台词' : '首次生成需要加载模型，请稍候；试听不会更换当前声音')
+const previewHint = computed(() => !speechEnabled.value ? '请先在音色管理的全局设置中开启语音朗读' : !selected.value && !original.value ? '先上传或录制一段声音' : !selected.value && !validRange.value ? '请先选取 1～15 秒参考片段' : !text.value.trim() ? '请输入试听台词' : '首次生成需要加载模型，请稍候；试听不会更换当前声音')
 
 watch([start, end], () => { sample.value = null; previewId.value = null; stopSpeech() })
 watch([selected, text], () => { previewId.value = null; stopSpeech() })
 watch(selected, () => { notice.value = ''; generationParams.value = { ...generationDefaults, ...selectedVoice.value?.generation_params } }, { flush: 'sync' })
 watch(generationParams, () => { previewId.value = null; stopSpeech() }, { deep: true, flush: 'sync' })
-watch([() => props.modelValue, () => props.character?.id], async ([open, characterId]) => {
+async function loadVoice([open, characterId]) {
   const current = ++session
   previewTask?.cancel().catch(() => {}); previewTask = null; stopSpeech(); busy.value = false; operation.value = ''
   recorderOpen.value = false
   if (!open || !characterId) return
+  mode.value = null
   voicesLoading.value = true
   advancedOpen.value = false; resetParameters()
   text.value = testLines[0].value
@@ -182,7 +193,13 @@ watch([() => props.modelValue, () => props.character?.id], async ([open, charact
   voices.value = []; binding.value = null; selected.value = ''; sourceName.value = ''
   busy.value = true
   try {
-    const [list, bound] = await Promise.all([ttsApi(`/voices?character_id=${characterId}`), ttsApi(`/characters/${characterId}`)])
+    const settings = await ttsApi('/settings')
+    if (current !== session) return
+    mode.value = settings.mode || 'local'
+    speechEnabled.value = settings.enabled
+    connectionKey.value = JSON.stringify(settings.api || {})
+    if (mode.value === 'api') return
+    const [list, bound] = await Promise.all([ttsApi(`/voices?character_id=${characterId}`), ttsApi(`/characters/${characterId}?mode=local`)])
     if (current !== session) return
     voices.value = list.filter(voice => voice.character_id === characterId)
     binding.value = voices.value.some(voice => voice.id === bound?.voice_id) ? bound : null
@@ -190,7 +207,8 @@ watch([() => props.modelValue, () => props.character?.id], async ([open, charact
     name.value = nextVoiceName()
   } catch (e) { if (current === session) error.value = e.message }
   finally { if (current === session) { busy.value = false; voicesLoading.value = false } }
-}, { immediate: true })
+}
+watch([() => props.modelValue, () => props.character?.id], loadVoice, { immediate: true })
 async function perform(action, fn) {
   const current = session
   busy.value = true; operation.value = action; error.value = ''; notice.value = ''
