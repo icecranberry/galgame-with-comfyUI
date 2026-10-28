@@ -17,7 +17,7 @@ function char(id, pinned, lastMessageAt) {
 }
 
 let nextPayload = []
-globalThis.fetch = async () => ({ ok: true, json: async () => ({ characters: nextPayload }) })
+globalThis.fetch = async () => Response.json({ characters: nextPayload })
 
 const { useChatStore } = await import('../src/stores/chat.js')
 setActivePinia(createPinia())

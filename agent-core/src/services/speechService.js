@@ -81,13 +81,22 @@ export function requestSpeech({ characterId, voiceId, sampleId, text, params, me
   if (created) { broadcast('speech_update', publicJob(job)); enqueue(job); }
   return publicJob(job);
 }
-export function speakMessage(characterId, messageId) {
+export function speakMessage(characterId, messageId, { groupId } = {}) {
   const db = getDb();
-  const message = db.prepare("SELECT * FROM messages WHERE id=? AND conversation_id=? AND role='assistant'").get(messageId, `char_${characterId}`);
-  if (!message || message.event_id || (message.speaker_character_id && message.speaker_character_id !== characterId)) throw new Error('消息不存在、不是对白或不属于这个角色');
-  if (getSpeechSettings().mode === 'api') return requestSpeech({ characterId, text: message.content, messageId: message.id });
-  const binding = db.prepare('SELECT * FROM character_voices WHERE character_id=? AND enabled=1').get(characterId);
-  if (!binding) throw new Error('角色尚未设置声音，请在角色详情中添加');
+  const message = db.prepare("SELECT * FROM messages WHERE id=? AND conversation_id=? AND role='assistant'").get(messageId, groupId ? `group_${groupId}` : `char_${characterId}`);
+  // 奇遇附带的文字对白也有 event_id；只有没有 raw_id 的消息才是分享卡片。
+  const isEventCard = message?.raw_id == null && message?.event_id != null;
+  if (!message || isEventCard || ((groupId || message.speaker_character_id) && message.speaker_character_id !== characterId)) throw new Error('消息不存在、不是对白或不属于这个角色');
+  const missingVoice = () => Object.assign(new Error('角色尚未配置声音，请前往角色详情的「声音设置」配置'), { code: 'VOICE_NOT_CONFIGURED' });
+  if (getSpeechSettings().mode === 'api') {
+    if (!getApiVoice(characterId)) throw missingVoice();
+    return requestSpeech({ characterId, text: message.content, messageId: message.id });
+  }
+  const binding = db.prepare(`SELECT c.voice_id FROM character_voices c
+    JOIN voices v ON v.id=c.voice_id AND v.character_id=c.character_id
+    JOIN voice_samples s ON s.id=v.sample_id
+    WHERE c.character_id=? AND c.enabled=1 AND s.reference_path IS NOT NULL`).get(characterId);
+  if (!binding) throw missingVoice();
   return requestSpeech({ characterId, voiceId: binding.voice_id, text: message.content, messageId: message.id });
 }
 export function cancelSpeech(id) {

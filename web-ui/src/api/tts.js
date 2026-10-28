@@ -5,7 +5,7 @@ export async function ttsApi(path, body, method = 'POST', signal) {
     body: body === undefined ? undefined : JSON.stringify(body), signal,
   })
   const value = await res.json()
-  if (!res.ok) throw new Error(value.error || '语音请求失败')
+  if (!res.ok) throw Object.assign(new Error(value.error || '语音请求失败'), { code: value.code })
   return value
 }
 export async function uploadVoice(file) {

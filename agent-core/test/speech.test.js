@@ -242,6 +242,63 @@ test('saved bubble identity, dedup, history, cache invalidation, retry and offli
   assert.equal(service.getSpeechJob(cancelled.id).status, 'cancelled');
 });
 
+test('group speech uses the saved speaker, rejects cross-conversation access and checks local voice configuration', async () => {
+  const db = getDb();
+  service.setSpeechSettings({ enabled: true, mode: 'local' });
+  const speaker = Number(db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('tts-group','群成员','persona')").run().lastInsertRowid);
+  const other = Number(db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('tts-other','其他成员','persona')").run().lastInsertRowid);
+  const insertMessage = db.prepare('INSERT INTO messages(conversation_id,role,content,speaker_character_id) VALUES(?,?,?,?)');
+  const groupMsg = Number(insertMessage.run('group_8123', 'assistant', '群聊语音测试', speaker).lastInsertRowid);
+  const privateMsg = Number(insertMessage.run(`char_${speaker}`, 'assistant', '私聊语音测试', null).lastInsertRowid);
+  const missing = { code: 'VOICE_NOT_CONFIGURED' };
+  const jobsBefore = db.prepare('SELECT count(*) FROM speech_jobs').pluck().get();
+  assert.throws(() => service.speakMessage(speaker, privateMsg), missing);
+  assert.throws(() => service.speakMessage(speaker, groupMsg, { groupId: 8123 }), missing);
+  assert.equal(db.prepare('SELECT count(*) FROM speech_jobs').pluck().get(), jobsBefore);
+  assert.throws(() => service.speakMessage(other, groupMsg, { groupId: 8123 }), /不属于/);
+  assert.throws(() => service.speakMessage(speaker, groupMsg, { groupId: 8124 }), /不属于/);
+  assert.throws(() => service.speakMessage(speaker, groupMsg), /不属于/);
+  assert.throws(() => service.speakMessage(speaker, privateMsg, { groupId: 8123 }), /不属于/);
+  for (const [role, owner] of [['user', speaker], ['assistant', null]]) {
+    const invalid = Number(insertMessage.run('group_8123', role, '不要朗读', owner).lastInsertRowid);
+    assert.throws(() => service.speakMessage(speaker, invalid, { groupId: 8123 }), /不属于/);
+  }
+  db.prepare("INSERT INTO voice_samples(id,original_path,preview_path,reference_path,content_hash,duration) VALUES('group-s','a','b','references/group.wav','group-hash',10)").run();
+  db.prepare("INSERT INTO voices(id,name,sample_id,character_id) VALUES('group-v','群成员声音','group-s',?)").run(speaker);
+  db.prepare("INSERT INTO character_voices(character_id,voice_id,enabled) VALUES(?,'group-v',0)").run(speaker);
+  assert.throws(() => service.speakMessage(speaker, groupMsg, { groupId: 8123 }), missing);
+  db.prepare('UPDATE character_voices SET enabled=1 WHERE character_id=?').run(speaker);
+  const job = service.speakMessage(speaker, groupMsg, { groupId: 8123 });
+  assert.equal(job.voice_id, 'group-v');
+  assert.equal((await terminal(job.id)).status, 'completed');
+  assert.equal(db.prepare('SELECT job_id FROM message_speech WHERE message_id=?').pluck().get(groupMsg), job.id);
+});
+
+test('event-linked dialogue remains speakable while event cards and foreign speakers are rejected', async () => {
+  const db = getDb();
+  service.setSpeechSettings({ enabled: true, mode: 'local' });
+  const characterId = Number(db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('tts-event','奇遇角色','persona')").run().lastInsertRowid);
+  const conversation = `char_${characterId}`;
+  const text = '伸手拿炸豆腐结果碰到芽衣的手，吓我一跳！';
+  const rawId = Number(db.prepare("INSERT INTO raw_messages(conversation_id,role,content) VALUES(?,'assistant',?)").run(conversation, text).lastInsertRowid);
+  const insert = db.prepare("INSERT INTO messages(conversation_id,raw_id,role,content,event_id,is_proactive) VALUES(?,?,'assistant',?,1472,1)");
+  const dialogueId = Number(insert.run(conversation, rawId, text).lastInsertRowid);
+  const cardId = Number(insert.run(conversation, null, JSON.stringify({ title: '奇遇', description: '不应朗读卡片 JSON' })).lastInsertRowid);
+  db.prepare("INSERT INTO voice_samples(id,original_path,preview_path,reference_path,content_hash,duration) VALUES('event-s','a','b','references/event.wav','event-hash',10)").run();
+  db.prepare("INSERT INTO voices(id,name,sample_id,character_id) VALUES('event-v','奇遇角色声音','event-s',?)").run(characterId);
+  db.prepare("INSERT INTO character_voices(character_id,voice_id,enabled) VALUES(?,'event-v',1)").run(characterId);
+  await fs.mkdir(path.join(root, 'generated'), { recursive: true });
+
+  assert.throws(() => service.speakMessage(characterId, cardId), /不是对白/);
+  assert.throws(() => service.speakMessage(characterId + 1, dialogueId), /不属于/);
+  const job = service.speakMessage(characterId, dialogueId);
+  assert.equal(job.voice_id, 'event-v');
+  assert.equal((await terminal(job.id)).status, 'completed');
+  assert.equal(service.getSpeechJob(job.id).text, text);
+  assert.equal(db.prepare('SELECT job_id FROM message_speech WHERE message_id=?').pluck().get(dialogueId), job.id);
+  assert.equal(db.prepare('SELECT job_id FROM message_speech WHERE message_id=?').get(cardId), undefined);
+});
+
 test('audio import/crop uses bounded decoding, preserves original, and rejects invalid clips', async () => {
   // Two seconds of PCM, no external fixture or model required.
   const frames = 48000, wav = Buffer.alloc(44 + frames * 2);

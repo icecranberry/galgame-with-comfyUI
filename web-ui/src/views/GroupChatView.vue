@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view">
+  <div class="chat-view" @pointerdown.capture="onSpeechPointerDown" @pointermove.capture="onSpeechPointerMove" @pointercancel="clearSpeechBubble">
     <!-- 头部（与私聊 chat-header 同款） -->
     <div class="chat-header">
       <linshe-button v-if="isMobile" variant="icon" class="btn-mobile-back" @click="toggleMobileSidebar" title="角色列表">
@@ -49,7 +49,7 @@
       <div
         ref="scrollEl"
         class="message-list"
-        @scroll="onMessageScroll"
+        @scroll="onMessageScroll(); clearSpeechBubble()"
         @wheel="onUserScrollIntent"
         @touchstart="onUserScrollIntent"
         @pointerdown="onUserScrollIntent"
@@ -76,10 +76,20 @@
             <img v-if="msgAvatarSrc(msg)" :src="msgAvatarSrc(msg)" class="avatar-img" loading="lazy" decoding="async" alt="" />
             <span v-else class="avatar-fallback">{{ avatarFallback(msg) }}</span>
           </div>
-          <div class="msg-col">
+          <div class="msg-col" :class="{ 'has-speech': canSpeak(msg) }">
             <div v-if="msg.role !== 'user' && !isSameSpeaker(idx)" class="speaker-name">{{ msg.speaker_name || '?' }}</div>
-            <div v-if="msg.content" class="msg-bubble">
+            <div
+              v-if="msg.content" class="msg-bubble"
+              :class="{ 'has-speech': canSpeak(msg), 'speech-revealed': touchedSpeechBubble === msg.id }"
+              @pointerup="revealSpeechBubble($event, msg.id)"
+            >
               <div class="msg-text">{{ msg.content }}</div>
+              <SpeechButton
+                v-if="canSpeak(msg)"
+                :key="`${store.activeGroupId}-${msg.id}`"
+                :character-id="msg.speaker_character_id" :character-name="msg.speaker_name || memberOf(msg)?.display_name"
+                :message-id="msg.id" :group-id="store.activeGroupId" :touch-target="isMobile"
+              />
             </div>
             <!-- 本次会话内的生图任务：与私聊同款遮罩/进度/错误气泡；历史图片直接展示 -->
             <ImageGenBubble
@@ -421,6 +431,10 @@ import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import { collectGroupImages } from '../utils/groupAlbum.js'
 import { applyMention, useMentionPicker } from '../composables/useMentionPicker.js'
+import SpeechButton from '../components/SpeechButton.vue'
+import { loadSpeech, stopSpeech, speechEnabled } from '../stores/speech.js'
+import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
+import '../styles/speechBubble.css'
 
 const route = useRoute()
 const router = useRouter()
@@ -429,6 +443,10 @@ const chat = useChatStore()
 const momentsStore = useMomentsStore()
 const confirmFn = inject('confirm', null)
 const toast = inject('toast', null)
+const { touchedSpeechBubble, clearSpeechBubble, onSpeechPointerDown, onSpeechPointerMove, revealSpeechBubble } = useSpeechBubbleControls(() => route.params.id)
+function canSpeak(msg) {
+  return speechEnabled.value && msg.role === 'assistant' && !!msg.content && Number.isSafeInteger(msg.id) && msg.id > 0 && !!msg.speaker_character_id
+}
 
 const scrollEl = ref(null)
 const msgListInner = ref(null)
@@ -622,6 +640,8 @@ function timeLabel(iso) {
 
 async function enterGroup(id) {
   if (!id) return
+  stopSpeech()
+  loadSpeech(null, { groupId: Number(id) }).catch(() => {})
   isFollowingLatest.value = true
   hasNewMessages.value = false
   await loadGroupActivity()
@@ -1258,6 +1278,7 @@ async function clearGroupAvatar() {
 
 
 .msg-col { display:flex; flex-direction:column; max-width:75%; }
+.msg-col.has-speech { max-width:min(75%, calc(100% - 102px)); margin-right:52px; }
 .message.user .msg-col { align-items:flex-end; }
 .speaker-name { font-size:11px; color:var(--text-secondary); margin:0 4px 3px; user-select:none; }
 

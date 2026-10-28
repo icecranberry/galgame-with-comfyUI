@@ -8,13 +8,22 @@ export const messageSpeech = reactive({})
 export const speechEnabled = ref(false)
 export const playingSpeech = ref(null)
 export const speechPlayer = createSpeechPlayback(undefined, () => { playingSpeech.value = null })
+let loadSequence = 0
 onEvent('speech_update', job => { if (job?.id) speechJobs[job.id] = job })
 export function stopSpeech() { speechPlayer.stop(); playingSpeech.value = null }
-export async function loadSpeech(characterId) {
+export async function loadSpeech(characterId, { groupId } = {}) {
+  const sequence = ++loadSequence
+  const knownJobs = { ...speechJobs }, knownMessages = { ...messageSpeech }
   const settings = await ttsApi('/settings')
+  if (sequence !== loadSequence) return
   speechEnabled.value = settings.enabled
-  const history = await ttsApi(`/characters/${characterId}/messages`)
-  for (const job of history) { speechJobs[job.id] = job; messageSpeech[job.message_id] = job.id }
+  const history = await ttsApi(groupId ? `/groups/${groupId}/messages` : `/characters/${characterId}/messages`)
+  if (sequence !== loadSequence) return
+  // 历史快照不得覆盖加载期间收到的 SSE 更新或新一次朗读的消息绑定。
+  for (const job of history) {
+    if (speechJobs[job.id] === knownJobs[job.id]) speechJobs[job.id] = job
+    if (messageSpeech[job.message_id] === knownMessages[job.message_id]) messageSpeech[job.message_id] = job.id
+  }
 }
 export async function waitSpeech(job, signal) {
   speechJobs[job.id] = job
@@ -38,7 +47,7 @@ export async function playSpeechJob(job, ticket) {
   playingSpeech.value = job.id
   try {
     const played = await speechPlayer.play(job.audio_url, ticket, () => { playingSpeech.value = null })
-    if (!played && playingSpeech.value === job.id) playingSpeech.value = null
+    if (!played && playingSpeech.value === job.id && speechPlayer.current(ticket)) playingSpeech.value = null
   } catch {
     if (playingSpeech.value === job.id && speechPlayer.current(ticket)) playingSpeech.value = null
     throw new Error('浏览器未允许播放，请再次点击播放')

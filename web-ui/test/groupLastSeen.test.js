@@ -12,13 +12,13 @@ function setup(t, lastSeenAt) {
   setActivePinia(createPinia())
   const group = { id: 1, last_seen_at: lastSeenAt, members: [], unread: 79 }
   t.mock.method(globalThis, 'fetch', async url => {
-    if (url === '/api/groups') return { ok: true, json: async () => ({ groups: [{ ...group }] }) }
+    if (url === '/api/groups') return Response.json({ groups: [{ ...group }] })
     if (url === '/api/groups/1/messages') {
-      return { ok: true, json: async () => ({ group: { ...group }, messages }) }
+      return Response.json({ group: { ...group }, messages })
     }
     assert.equal(url, '/api/groups/1/seen')
     group.last_seen_at = at(100)
-    return { ok: true, json: async () => ({ ok: true }) }
+    return Response.json({ ok: true })
   })
   return useGroupsStore()
 }

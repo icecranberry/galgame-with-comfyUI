@@ -12,7 +12,7 @@ import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, re
 import { localSpeechModels } from '../services/speechLocalModels.js';
 
 const router = express.Router();
-const route = fn => async (req, res) => { try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message }); } };
+const route = fn => async (req, res) => { try { await fn(req, res); } catch (e) { res.status(400).json({ error: e.message, ...(e.code === 'VOICE_NOT_CONFIGURED' ? { code: e.code } : {}) }); } };
 const id = value => { const n = Number(value); if (!Number.isSafeInteger(n) || n <= 0) throw new Error('无效的 ID'); return n; };
 const sampleView = s => ({ id: s.id, duration: s.duration, peaks: s.peaks,
   preview_url: audioUrl(s.preview_path), reference_url: s.reference_path ? audioUrl(s.reference_path) : null,
@@ -136,6 +136,12 @@ router.put('/characters/:id', route((req, res) => {
 }));
 router.post('/preview', route((req, res) => res.status(202).json(requestSpeech({ characterId: id(req.body.character_id), voiceId: req.body.voice_id, sampleId: req.body.sample_id, text: req.body.text, params: req.body }))));
 router.post('/characters/:id/messages/:messageId', route((req, res) => res.status(202).json(speakMessage(id(req.params.id), id(req.params.messageId)))));
+router.post('/groups/:groupId/characters/:id/messages/:messageId', route((req, res) => res.status(202).json(speakMessage(id(req.params.id), id(req.params.messageId), { groupId: id(req.params.groupId) }))));
+router.get('/groups/:groupId/messages', route((req, res) => {
+  const jobs = getDb().prepare(`SELECT j.*, m.id AS message_id FROM message_speech ms JOIN messages m ON m.id=ms.message_id
+    JOIN speech_jobs j ON j.id=ms.job_id WHERE m.conversation_id=? ORDER BY m.id DESC LIMIT 500`).all(`group_${id(req.params.groupId)}`);
+  res.json(jobs.map(j => ({ ...publicJob(j), message_id: j.message_id })));
+}));
 router.get('/characters/:id/messages', route((req, res) => {
   const jobs = getDb().prepare(`SELECT j.*, m.id AS message_id FROM message_speech ms JOIN messages m ON m.id=ms.message_id
     JOIN speech_jobs j ON j.id=ms.job_id WHERE m.conversation_id=? ORDER BY m.id DESC LIMIT 500`).all(`char_${id(req.params.id)}`);

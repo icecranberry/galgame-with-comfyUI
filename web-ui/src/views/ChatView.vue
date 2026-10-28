@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view">
+  <div class="chat-view" @pointerdown.capture="onSpeechPointerDown" @pointermove.capture="onSpeechPointerMove" @pointercancel="clearSpeechBubble">
     <div v-if="!chat.activeCharId" class="empty-state">
     </div>
 
@@ -63,7 +63,7 @@
         正常 column 布局：最旧消息在顶部，最新消息在底部
         新消息到达时 JS 平滑滚底，与列表高度变化同步
       -->
-      <div ref="msgList" class="message-list" @scroll="onScroll">
+      <div ref="msgList" class="message-list" @scroll="onScroll(); clearSpeechBubble()">
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
         <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
@@ -121,10 +121,16 @@
                   loading="lazy"
                 />
               </div>
-              <div v-else-if="item.msg.content" class="msg-bubble">
+              <div
+                v-else-if="item.msg.content" class="msg-bubble"
+                :class="{ 'has-speech': speechEnabled && item.msg.role === 'assistant' && item.msg.speech_message_id, 'speech-revealed': touchedSpeechBubble === item.id }"
+                @pointerup="revealSpeechBubble($event, item.id)"
+              >
                 <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
-                <SpeechButton v-if="item.msg.role === 'assistant' && item.msg.speech_message_id"
-                  :key="`${chat.activeCharId}-${item.msg.speech_message_id}`" :character-id="chat.activeCharId" :message-id="item.msg.speech_message_id" />
+                <SpeechButton
+                  v-if="item.msg.role === 'assistant' && item.msg.speech_message_id"
+                  :key="`${chat.activeCharId}-${item.msg.speech_message_id}`" :character-id="chat.activeCharId" :character-name="chat.activeChar?.display_name" :message-id="item.msg.speech_message_id" :touch-target="isMobile"
+                />
               </div>
             </div>
 
@@ -603,7 +609,9 @@
 
 <script setup>
 import SpeechButton from '../components/SpeechButton.vue'
-import { loadSpeech, stopSpeech } from '../stores/speech.js'
+import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
+import '../styles/speechBubble.css'
+import { loadSpeech, stopSpeech, speechEnabled } from '../stores/speech.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
@@ -640,6 +648,7 @@ import { useScheduleStore } from '../stores/schedule.js'
 
 const route = useRoute()
 const router = useRouter()
+const { touchedSpeechBubble, clearSpeechBubble, onSpeechPointerDown, onSpeechPointerMove, revealSpeechBubble } = useSpeechBubbleControls(() => route.params.id)
 const immersive = computed(() => route.query.mode === 'galgame')
 const galgameVisited = ref(immersive.value)
 const galgameEntering = ref(false)
@@ -1643,7 +1652,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopSpeech()
   teardownMobileKeyboard()
   teardownResizeObserver()
   window.removeEventListener('click', dismissUndoBubble)
@@ -1925,6 +1933,10 @@ function renderContent(text) {
 .msg-bubble {
   max-width:75%; padding:10px 14px; border-radius:8px;
   font-size:14px; line-height:1.6; word-break:break-word;
+}
+.msg-bubble.has-speech {
+  max-width:min(75%, calc(100% - 102px));
+  margin-right:52px;
 }
 /* 赛璐璐漫画格气泡：尖角朝向说话方 + 描边 + 微硬阴影 */
 .message.user .msg-bubble {

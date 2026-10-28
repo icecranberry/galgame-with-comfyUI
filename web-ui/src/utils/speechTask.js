@@ -16,7 +16,8 @@ export function createSpeechTask({ request, wait, cancel, onJob = () => {} }) {
       await cancelJob()
     },
     async run() {
-      job = await request(controller.signal)
+      try { job = await request(controller.signal) }
+      catch (error) { if (cancelled) throw abortError(); throw error }
       onJob(job)
       if (cancelled) { await cancelJob(); throw abortError() }
       const result = await wait(job, controller.signal)

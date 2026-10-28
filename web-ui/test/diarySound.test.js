@@ -26,10 +26,10 @@ test('打开日记只为本次加载的非空正文发声；空白、失败、�
   t.mock.method(Date, 'now', () => now += 500)
   t.mock.method(console, 'error', () => {})
   t.mock.method(globalThis, 'fetch', async url => {
-    if (String(url).includes('/history')) return { ok: true, json: async () => ({ diaries: [] }) }
-    if (delayed) return new Promise(resolve => { resolveDiary = data => resolve({ ok: true, json: async () => data }) })
+    if (String(url).includes('/history')) return Response.json({ diaries: [] })
+    if (delayed) return new Promise(resolve => { resolveDiary = data => resolve(Response.json(data)) })
     if (failed) throw new Error('离线')
-    return { ok: true, json: async () => response }
+    return Response.json(response)
   })
   setActivePinia(createPinia())
   const store = useDiaryStore()
