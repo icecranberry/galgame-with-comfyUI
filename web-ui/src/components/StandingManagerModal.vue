@@ -6,7 +6,9 @@
         <linshe-button variant="primary" :disabled="!canRegenerate" :loading="submitting === 'all'" @click="generate('all')">全部重新生成</linshe-button>
         <linshe-button :disabled="!canFill" :loading="submitting === 'missing'" @click="generate('missing')">补齐缺失立绘</linshe-button>
         <linshe-button :disabled="!available || !rows.some(row => !row.hasTouchLines && row.touchStatus !== 'generating')" :loading="submitting === 'touch'" @click="fillTouchLines">补齐触摸台词</linshe-button>
+        <linshe-button :disabled="!canFillSpeech" :loading="submitting === 'speech'" @click="fillTouchSpeech">一键生成反馈语音</linshe-button>
       </div>
+      <p class="standing-hint">反馈语音仅为已配置声音的角色补齐已保存的台词，无声音配置自动跳过；在角色的触摸台词管理中可逐句试听或重新生成。</p>
       <Transition name="standing-task">
         <section v-if="taskRunning || message" class="standing-task-notice" aria-label="后台任务状态" role="status">
           <div v-if="taskRunning" class="standing-task-running">
@@ -15,6 +17,7 @@
             <span v-if="activity.standing">{{ activity.standing }} 位角色立绘排队或生成中</span>
             <span v-if="activity.stopping">{{ activity.stopping }} 位角色立绘正在停止</span>
             <span v-if="activity.touch">{{ activity.touch }} 位角色台词生成中</span>
+            <span v-if="speechCounts.pending">{{ speechCounts.pending }} 句反馈语音排队或生成中</span>
             <span class="standing-hint">关闭窗口后仍会继续</span>
           </div>
           <p v-if="message" class="standing-feedback">{{ message }}</p>
@@ -44,6 +47,7 @@
             <span v-else class="standing-pending">— / —</span>
             <div class="standing-progress" aria-hidden="true"><i :style="{ transform: `scaleX(${completion(overview[character.id])})` }"></i></div>
             <span v-if="statusText(overview[character.id])" class="standing-status" :class="{ 'is-error': !overview[character.id]?.busy }" :title="overview[character.id]?.error || ''">{{ statusText(overview[character.id]) }}</span>
+            <span v-if="overview[character.id]?.touchSpeech" class="standing-voice-status" :class="{ 'is-error': overview[character.id].touchSpeech.failed }">{{ speechStatusText(overview[character.id].touchSpeech) }}</span>
           </div>
         </div>
       </div>
@@ -61,7 +65,7 @@ import StandingGenerationDirection from './standing/StandingGenerationDirection.
 import StandingOutfitConfirmation from './standing/StandingOutfitConfirmation.vue'
 import { useStandingOutfitConfirmation } from '../composables/useStandingOutfitConfirmation.js'
 import ExpressionStandingManager from './ExpressionStandingManager.vue'
-import { getStandingOverview, generateAllExpressionStandings, fillAllStandingTouchLines, preflightAllExpressionStandings } from '../api/index.js'
+import { getStandingOverview, generateAllExpressionStandings, fillAllStandingTouchLines, fillAllStandingTouchSpeech, preflightAllExpressionStandings } from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import { standingTaskActivity, standingTaskEndMessage } from '../utils/standingTaskStatus.js'
 
@@ -75,10 +79,12 @@ const selectedCharacter = ref(null), detailOpen = ref(false)
 const rows = computed(() => props.characters.map(c => overview.value[c.id]).filter(Boolean))
 
 const activity = computed(() => standingTaskActivity(rows.value))
-const taskRunning = computed(() => activity.value.standing + activity.value.stopping + activity.value.touch > 0)
+const speechCounts = computed(() => rows.value.reduce((sum,row) => ({pending:sum.pending+(row.touchSpeech?.pending||0),failed:sum.failed+(row.touchSpeech?.failed||0)}), {pending:0,failed:0}))
+const taskRunning = computed(() => activity.value.standing + activity.value.stopping + activity.value.touch + speechCounts.value.pending > 0)
 const available = computed(() => loaded.value && !submitting.value && !error.value)
 const canRegenerate = computed(() => available.value && rows.value.some(row => !row.busy))
 const canFill = computed(() => available.value && rows.value.some(row => !row.busy && row.count < row.total))
+const canFillSpeech = computed(() => available.value && rows.value.some(row => row.touchStatus !== 'generating' && row.touchSpeech?.enabled && row.touchSpeech.configured && row.touchSpeech.total > row.touchSpeech.ready + row.touchSpeech.pending))
 let timer, eventTimer, messageTimer, requestSeq = 0
 watch([message, () => props.open && !detailOpen.value], ([text, visible]) => {
   clearTimeout(messageTimer)
@@ -91,6 +97,24 @@ async function fillTouchLines() {
   catch(e) { error.value=e.message }
   finally { submitting.value='' }
 }
+async function fillTouchSpeech() {
+  if(!canFillSpeech.value)return
+  submitting.value='speech';error.value=''
+  try {
+    const result=await fillAllStandingTouchSpeech()
+    const failures=Array.isArray(result.failed)?result.failed.length:Number(result.failed)||0
+    message.value=`已安排 ${result.started} 句反馈语音，跳过 ${result.skipped} 位无需生成或未配置声音的角色。${failures?` ${failures} 项未能提交，请进入角色详情查看并重试。`:''}`
+    await refresh()
+  } catch(e) { error.value=e.message }
+  finally { submitting.value='' }
+}
+function speechStatusText(speech) {
+  if(!speech.enabled||!speech.configured)return speech.reason||'未配置声音，已跳过'
+  const parts=[`语音 ${speech.ready} / ${speech.total}`]
+  if(speech.pending)parts.push(`${speech.pending} 句生成中`)
+  if(speech.failed)parts.push(`${speech.failed} 句失败，可重试`)
+  return parts.join(' · ')
+}
 
 async function refresh() {
   if (!props.open) return
@@ -98,7 +122,10 @@ async function refresh() {
   try {
     const data = await getStandingOverview()
     if (seq !== requestSeq || !props.open) return
-    const ended = standingTaskEndMessage(overview.value, data.characters)
+    const speechWasRunning = speechCounts.value.pending > 0
+    const speechNowRunning = data.characters.some(row => row.touchSpeech?.pending > 0)
+    const speechFailed = data.characters.reduce((sum,row) => sum+(row.touchSpeech?.failed||0),0)
+    const ended = standingTaskEndMessage(overview.value, data.characters) || (speechWasRunning&&!speechNowRunning ? speechFailed ? `反馈语音生成结束，${speechFailed} 句失败，可在角色详情中重试。` : '反馈语音已生成，可在角色详情中试听。' : '')
     if (ended) message.value = ended
     overview.value = Object.fromEntries(data.characters.map(row => [row.id, row]))
     loaded.value = true
@@ -128,7 +155,12 @@ const unsubscribe = onEvent('expression_standings_updated', () => {
   clearTimeout(eventTimer)
   eventTimer = setTimeout(refresh, 150)
 })
-onBeforeUnmount(() => { requestSeq++; clearInterval(timer); clearTimeout(eventTimer); clearTimeout(messageTimer); unsubscribe() })
+const unsubscribeSpeech = onEvent('speech_update', () => {
+  if(!props.open)return
+  clearTimeout(eventTimer)
+  eventTimer=setTimeout(refresh,150)
+})
+onBeforeUnmount(() => { requestSeq++; clearInterval(timer); clearTimeout(eventTimer); clearTimeout(messageTimer); unsubscribe(); unsubscribeSpeech() })
 
 function openDetail(character) { if (submitting.value) return; selectedCharacter.value = character; detailOpen.value = true }
 function closeDetail() { detailOpen.value = false; refresh() }
@@ -200,6 +232,8 @@ async function generate(mode) {
 .standing-pending { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .standing-status { align-self: flex-start; padding: 3px 7px; border-radius: var(--radius-full); background: rgba(var(--accent-rgb), .1); color: var(--accent); font-size: var(--fs-xs); line-height: 1.3; }
 .standing-status.is-error { color: var(--danger); background: var(--bg-sunken); }
+.standing-voice-status { color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.standing-voice-status.is-error { color: var(--danger); }
 @keyframes standing-progress-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 @media (max-width: 600px) {
   .standing-characters { grid-template-columns: 1fr; }

@@ -7,7 +7,7 @@ import { ttsHealth } from '../services/indexTtsClient.js';
 import { restartSpeechService } from '../services/speechServiceProcess.js';
 import { recoverSpeechGpu } from '../services/speechGpu.js';
 import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech } from '../services/speechService.js';
-import { getApiVoice, saveApiVoice } from '../services/speechConfig.js';
+import { getApiVoice, saveApiVoice, notifyStandingVoiceChanged } from '../services/speechConfig.js';
 import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, reuseLocalApiVoice } from '../services/speechApiAssets.js';
 import { localSpeechModels } from '../services/speechLocalModels.js';
 
@@ -76,6 +76,7 @@ router.post('/voices', route((req, res) => {
     db.prepare('INSERT INTO voices(id,character_id,name,sample_id,language,speed,notes,transcript,generation_params) VALUES(@id,@character_id,@name,@sample_id,@language,@speed,@notes,@transcript,@generation_params)').run(voice);
     db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, voice.id);
   })();
+  notifyStandingVoiceChanged(characterId);
   res.status(201).json(voiceView(voice.id));
 }));
 router.put('/voices/:id', route((req, res) => {
@@ -84,6 +85,7 @@ router.put('/voices/:id', route((req, res) => {
   const voice = { id: req.params.id, ...voiceFields({ ...existing, ...req.body }) };
   const result = getDb().prepare('UPDATE voices SET name=@name,sample_id=@sample_id,language=@language,speed=@speed,notes=@notes,transcript=@transcript,generation_params=@generation_params,version=version+1 WHERE id=@id').run(voice);
   if (!result.changes) throw new Error('音色不存在');
+  notifyStandingVoiceChanged(existing.character_id);
   res.json(voiceView(voice.id));
 }));
 router.put('/voices/:id/parameters', route((req, res) => {
@@ -92,6 +94,7 @@ router.put('/voices/:id/parameters', route((req, res) => {
   const params = speechGenerationParams(req.body.generation_params);
   getDb().prepare('UPDATE voices SET generation_params=?,version=version+1 WHERE id=? AND character_id=?')
     .run(JSON.stringify(params), req.params.id, characterId);
+  notifyStandingVoiceChanged(characterId);
   res.json(voiceView(req.params.id));
 }));
 router.delete('/voices/:id', route((req, res) => {
@@ -109,6 +112,7 @@ router.delete('/voices/:id', route((req, res) => {
   })();
   // Immutable samples and synthesis records remain retained, including shared originals.
   const currentVoice = db.prepare('SELECT c.voice_id,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id WHERE c.character_id=?').get(voice.character_id);
+  notifyStandingVoiceChanged(voice.character_id);
   res.json({ ok: true, current_voice: currentVoice || null });
 }));
 router.get('/characters/:id', route((req, res) => {
@@ -132,6 +136,7 @@ router.put('/characters/:id', route((req, res) => {
   if (!db.prepare('SELECT 1 FROM characters WHERE id=?').get(characterId)) throw new Error('角色不存在');
   if (!db.prepare('SELECT 1 FROM voices WHERE id=? AND character_id=?').get(req.body.voice_id || '', characterId)) throw new Error('请选择该角色自己的音色');
   db.prepare('INSERT OR REPLACE INTO character_voices(character_id,voice_id,enabled) VALUES(?,?,1)').run(characterId, req.body.voice_id);
+  notifyStandingVoiceChanged(characterId);
   res.json({ ok: true });
 }));
 router.post('/preview', route((req, res) => res.status(202).json(requestSpeech({ characterId: id(req.body.character_id), voiceId: req.body.voice_id, sampleId: req.body.sample_id, text: req.body.text, params: req.body }))));

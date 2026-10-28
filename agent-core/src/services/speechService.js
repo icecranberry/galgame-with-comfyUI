@@ -22,6 +22,25 @@ export function setSpeechSettings(input) {
   return settings;
 }
 const apiControllers = new Map();
+// Bulk portrait lines must not open hundreds of upstream requests at once.
+// Interactive chat/preview requests retain their existing immediate behavior.
+const backgroundApiQueue = [];
+let backgroundApiActive = 0;
+function scheduleBackgroundApi(work) {
+  return new Promise((resolve, reject) => {
+    backgroundApiQueue.push({ work, resolve, reject });
+    drainBackgroundApi();
+  });
+}
+function drainBackgroundApi() {
+  while (backgroundApiActive < 2 && backgroundApiQueue.length) {
+    const next = backgroundApiQueue.shift();
+    backgroundApiActive++;
+    Promise.resolve().then(next.work).then(next.resolve, next.reject).finally(() => {
+      backgroundApiActive--; drainBackgroundApi();
+    });
+  }
+}
 export function publicJob(job) {
   if (!job) return null;
   return { id: job.id, status: job.status, error: job.error, voice_id: job.voice_id,
@@ -33,6 +52,12 @@ function updateJob(id, status, error = null, output = null) {
   // Cancellation always wins over a late inference response.
   db.prepare("UPDATE speech_jobs SET status=?, error=?, output_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status != 'cancelled'").run(status, error, output, id);
   broadcast('speech_update', publicJob(getSpeechJob(id)));
+  notifyStandingSpeech(id);
+}
+function notifyStandingSpeech(id) {
+  for (const row of getDb().prepare('SELECT DISTINCT character_id FROM standing_touch_speech WHERE job_id=?').all(id)) {
+    broadcast('expression_standings_updated', { characterId: row.character_id, scope: 'touch-lines-speech' });
+  }
 }
 function enqueue(job) {
   const cancelled = () => getSpeechJob(job.id)?.status === 'cancelled' || !getSpeechSettings().enabled || getSpeechSettings().mode !== 'local';
@@ -50,10 +75,10 @@ function enqueue(job) {
   }, cancelled).then(output => updateJob(job.id, 'completed', null, output))
     .catch(error => updateJob(job.id, 'failed', error.message));
 }
-export function requestSpeech({ characterId, voiceId, sampleId, text, params, messageId }) {
+export function requestSpeech({ characterId, voiceId, sampleId, text, params, messageId, force = false, background = false }) {
   const db = getDb();
   if (!getSpeechSettings().enabled) throw new Error('请先在声音设置或酒馆的音色管理中启用语音朗读');
-  if (getSpeechSettings().mode === 'api') return requestApiSpeech({ characterId, text, params, messageId });
+  if (getSpeechSettings().mode === 'api') return requestApiSpeech({ characterId, text, params, messageId, force, background });
   const voice = voiceId ? db.prepare('SELECT * FROM voices WHERE id=?').get(voiceId) : null;
   if (voiceId && !voice) throw new Error('音色不存在');
   if (voice && (!characterId || voice.character_id !== characterId)) throw new Error('音色不属于当前角色，请为该角色创建声音');
@@ -67,7 +92,9 @@ export function requestSpeech({ characterId, voiceId, sampleId, text, params, me
   const actualParams = speechParams(voice ? { ...voice, ...(!messageId && params?.generation_params !== undefined ? { generation_params: params.generation_params } : {}) } : params);
   const modelVersion = selectedLocalTtsModel().version;
   if (actualParams.language === 'ja') throw new Error('IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文');
-  const key = speechCacheKey(cleaned, sample.content_hash, actualParams, modelVersion);
+  // A regeneration has its own cache namespace. Existing chat associations and
+  // their completed files remain playable even when this new attempt fails.
+  const key = speechCacheKey(cleaned, sample.content_hash, actualParams, modelVersion) + (force ? `:fresh:${randomUUID()}` : '');
   let job = db.prepare("SELECT * FROM speech_jobs WHERE cache_key=? AND status IN ('queued','generating','completed')").get(key);
   if (job?.status === 'completed' && !fs.existsSync(audioPath(job.output_path))) { updateJob(job.id, 'failed', '缓存文件已丢失'); job = null; }
   let created = false;
@@ -97,10 +124,11 @@ export function cancelSpeech(id) {
   const result = publicJob(getSpeechJob(id));
   // Running work keeps the GPU lease until inference exits, even after cancellation.
   broadcast('speech_update', result);
+  notifyStandingSpeech(id);
   return result;
 }
 
-function requestApiSpeech({ characterId, text, params, messageId }) {
+function requestApiSpeech({ characterId, text, params, messageId, force = false, background = false }) {
   const db = getDb();
   if (!db.prepare('SELECT 1 FROM characters WHERE id=?').get(characterId)) throw new Error('角色不存在');
   const saved = getApiVoice(characterId);
@@ -112,7 +140,7 @@ function requestApiSpeech({ characterId, text, params, messageId }) {
   if (!/[\p{L}\p{N}]/u.test(cleaned)) throw new Error('这条消息没有可朗读的对白');
   if (cleaned.length > 1000) throw new Error('单次朗读最多 1000 字，请选择较短的气泡');
   const references = profile.source === 'references' ? resolveApiReferences(characterId, profile) : [];
-  const key = apiSpeechCacheKey(characterId, cleaned, connection, profile, references.map(ref => ({ audio: `sha256:${ref.content_hash}`, text: ref.text })));
+  const key = apiSpeechCacheKey(characterId, cleaned, connection, profile, references.map(ref => ({ audio: `sha256:${ref.content_hash}`, text: ref.text }))) + (force ? `:fresh:${randomUUID()}` : '');
   let job = db.prepare("SELECT * FROM speech_jobs WHERE cache_key=? AND status IN ('queued','generating','completed')").get(key);
   if (job?.status === 'completed' && !fs.existsSync(audioPath(job.output_path))) { updateJob(job.id, 'failed', '缓存文件已丢失'); job = null; }
   let created = false;
@@ -128,9 +156,15 @@ function requestApiSpeech({ characterId, text, params, messageId }) {
     const controller = new AbortController();
     apiControllers.set(job.id, controller);
     broadcast('speech_update', publicJob(job));
-    updateJob(job.id, 'generating');
     const apiKey = getSetting('tts_api_key');
-    encodeApiReferences(references).then(encoded => fetchApiSpeech(cleaned, connection, profile, apiKey, controller.signal, encoded)).then(async ({ buffer, extension }) => {
+    const work = async () => {
+      if (controller.signal.aborted || !getSpeechSettings().enabled || getSpeechSettings().mode !== 'api') throw new Error('语音已关闭或任务已取消');
+      if (background && !db.prepare('SELECT id FROM characters WHERE id=?').get(characterId)) throw new Error('角色已删除');
+      updateJob(job.id, 'generating');
+      const encoded = await encodeApiReferences(references);
+      return fetchApiSpeech(cleaned, connection, profile, apiKey, controller.signal, encoded);
+    };
+    (background ? scheduleBackgroundApi(work) : work()).then(async ({ buffer, extension }) => {
       if (controller.signal.aborted || !getSpeechSettings().enabled) throw new Error('语音已关闭或任务已取消');
       const output = `generated/${job.id}.${extension}`;
       await fs.promises.mkdir(audioPath('generated'), { recursive: true });

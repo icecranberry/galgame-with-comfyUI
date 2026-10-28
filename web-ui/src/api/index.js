@@ -2061,6 +2061,8 @@ export const getStandingInteraction = (id, { signal } = {}) => request(`/charact
 export const getStandingTouchLines = id => request(`/characters/${id}/expression-standings/touch-lines`)
 export const saveStandingTouchLines = (id, body) => request(`/characters/${id}/expression-standings/touch-lines`, {method:'PUT',body})
 export const generateStandingTouchLines = (id, expectedVersion) => request(`/characters/${id}/expression-standings/touch-lines/generate`, {method:'POST',body:{expectedVersion}})
+export const generateStandingTouchSpeech = (id, body) => request(`/characters/${id}/expression-standings/touch-lines/speech`, {method:'POST',body})
+export const fillAllStandingTouchSpeech = () => request('/expression-standings/touch-lines/speech/fill', {method:'POST'})
 export const setStandingDisplayCharacter = body => request('/standing-display/active', { method: 'PUT', body })
 
 export const fillAllStandingTouchLines = () => request('/expression-standings/touch-lines/fill', { method:'POST' })
