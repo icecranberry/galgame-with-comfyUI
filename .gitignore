@@ -80,6 +80,7 @@ agent-core/test/*
 !agent-core/test/speechGpu.test.js
 !agent-core/test/speechApi.test.js
 !agent-core/test/speechConfig.test.js
+!agent-core/test/speechCache.test.js
 !agent-core/test/speechLocalModels.test.js
 !agent-core/test/promptPresets.test.js
 !agent-core/test/townMapCapabilities.test.js

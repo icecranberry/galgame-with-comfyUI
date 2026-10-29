@@ -7,12 +7,12 @@ import { createSpeechQueue } from '../src/utils/speechQueue.js'
 
 const code = readFileSync(new URL('../src/stores/speech.js', import.meta.url), 'utf8')
   .replace(/^import .*$/gm, '').replace(/\bexport /g, '')
-  + '\nreturn { loadSpeech, speechJobs, messageSpeech, speechEnabled, speechQueue, speechPlayer, playingSpeech, stopSpeech }'
+  + '\nreturn { loadSpeech, speechJobs, messageSpeech, speechEnabled, speechQueue, speechPlayer, playingSpeech, stopSpeech, invalidateSpeechCache, waitSpeech }'
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
 function fixture(api, playerFactory = createSpeechPlayback) {
-  let event
-  const store = new Function('reactive', 'ref', 'onEvent', 'ttsApi', 'createSpeechPlayback', 'createSpeechQueue', code)(Vue.reactive, Vue.ref, (name, fn) => { event = fn }, api, playerFactory, createSpeechQueue)
-  return { ...store, update: job => event(job) }
+  const events = {}
+  const store = new Function('reactive', 'ref', 'onEvent', 'ttsApi', 'createSpeechPlayback', 'createSpeechQueue', code)(Vue.reactive, Vue.ref, (name, fn) => { events[name] = fn }, api, playerFactory, createSpeechQueue)
+  return { ...store, update: job => events.speech_update(job), clear: result => events.speech_cache_cleared(result) }
 }
 
 test('late settings from a previous conversation cannot overwrite the current speech toggle', async () => {
@@ -54,4 +54,34 @@ test('global stop clears queued chat audio before late synthesis can start it', 
   assert.equal(first.active, false)
   assert.equal(second.active, false)
   assert.equal(store.playingSpeech.value, null)
+})
+
+
+test('cleanup invalidates old history and late job updates without cancelling active synthesis', async () => {
+  const history = deferred()
+  const store = fixture(path => path === '/settings' ? { enabled:true } : history.promise)
+  store.speechJobs.old = { id:'old', status:'completed' }
+  store.messageSpeech[1] = 'old'
+  store.messageSpeech[2] = 'running'
+  const current = store.speechQueue.reserve()
+  current.job = { id:'running', status:'generating' }
+  const cached = store.speechQueue.reserve()
+  cached.ready({id:'old',audio_url:'/old.wav'})
+  const loading = store.loadSpeech(1)
+  await Promise.resolve()
+  store.clear({ids:['old']})
+  assert.equal(current.active, true)
+  assert.equal(cached.active, false)
+  store.invalidateSpeechCache({ids:['old']})
+  assert.equal(current.active, true)
+  store.update({id:'old',status:'completed'})
+  history.resolve([{id:'old',message_id:1,status:'completed'}]); await loading
+  assert.equal(store.speechJobs.old, undefined)
+  assert.equal(store.messageSpeech[1], undefined)
+  assert.equal(store.messageSpeech[2], 'running')
+  store.speechJobs.old = {id:'old',status:'completed'}
+  store.messageSpeech[1] = 'old'
+  await assert.rejects(store.waitSpeech({id:'old',status:'completed'}), /缓存已清理/)
+  assert.equal(store.speechJobs.old, undefined)
+  assert.equal(store.messageSpeech[1], undefined)
 })

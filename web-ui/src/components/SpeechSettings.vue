@@ -58,6 +58,10 @@
     </Transition>
     </div>
     </Transition>
+    <div class="speech-cache-row">
+      <linshe-button variant="ghost" size="sm" :loading="clearingCache" :disabled="busy || disabled" @click="clearCache">清理历史声音缓存</linshe-button>
+      <span class="speech-feedback">清理本地及 API 生成的语音，保留音色和参考录音。</span>
+    </div>
     <p v-if="error" class="speech-feedback is-error" role="alert">{{ error }}</p>
     <p v-else-if="notice" class="speech-feedback" role="status">{{ notice }}</p>
   </section>
@@ -70,11 +74,11 @@ import LinsheTabs from './ui/LinsheTabs.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LocalSpeechModels from './LocalSpeechModels.vue'
 import { ttsApi } from '../api/tts.js'
-import { speechEnabled, speechAutoPlay, stopSpeech } from '../stores/speech.js'
+import { speechEnabled, speechAutoPlay, stopSpeech, invalidateSpeechCache } from '../stores/speech.js'
 defineProps({ disabled: Boolean })
 const emit = defineEmits(['changed'])
 const mode = ref('local'), api = ref({ endpoint: '', model: '', has_key: false }), apiKey = ref(''), clearKey = ref(false)
-const localModelBusy = ref(false)
+const localModelBusy = ref(false), clearingCache = ref(false)
 const modes = [{ label: '本地模型', value: 'local' }, { label: 'API 接入', value: 'api' }]
 function applySettings(settings) {
   speechEnabled.value = settings.enabled
@@ -106,6 +110,17 @@ async function saveApi() {
 }
 const busy = ref(true), checking = ref(false), recovering = ref(false), restarting = ref(false), ready = ref(false)
 const maintenanceOpen = ref(false), error = ref(''), notice = ref('')
+async function clearCache() {
+  if (busy.value || clearingCache.value) return
+  clearingCache.value = true; error.value = ''; notice.value = ''
+  try {
+    const result = await ttsApi('/cache', {}, 'DELETE')
+    invalidateSpeechCache(result)
+    notice.value = `已清理 ${result.files} 个语音文件，释放 ${(result.bytes / 1024 / 1024).toFixed(1)} MB`
+    if (result.failed) error.value = `${notice.value}；${result.failed} 个文件暂未清理，请稍后重试`
+  } catch (e) { error.value = e.message }
+  finally { clearingCache.value = false }
+}
 async function toggle(enabled) {
   busy.value = true; error.value = ''; notice.value = ''
   try { speechEnabled.value = (await ttsApi('/settings', { enabled }, 'PUT')).enabled; if (!enabled) stopSpeech() }
@@ -164,6 +179,8 @@ onMounted(async () => {
 .speech-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
 .speech-api-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .speech-api-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.speech-cache-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+.speech-cache-row .speech-feedback { margin:0; }
 .speech-api-actions .speech-feedback { margin:0; }
 .speech-heading,.speech-service-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .speech-title { min-width:0; }

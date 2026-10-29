@@ -55,11 +55,18 @@ export function readDialogueTranscript(db, characterId, { before, after, limit =
   const refreshed = ids.length ? db.prepare(`SELECT id, role, content, created_at FROM raw_messages
     WHERE conversation_id = ? AND role IN ('user','assistant') AND id IN (${ids.map(() => '?').join(',')}) ORDER BY id`).all(conversationId, ...ids) : [];
   const attachmentIds = [...new Set([...page, ...refreshed].map(row => row.id))];
-  const images = new Map();
+  const images = new Map(), speechSegments = new Map();
+  const emojiKeys = db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key);
   if (attachmentIds.length) {
-    const attachments = db.prepare(`SELECT raw_id, images FROM messages WHERE conversation_id = ?
-      AND raw_id IN (${attachmentIds.map(() => '?').join(',')}) AND images IS NOT NULL ORDER BY seq, id`).all(conversationId, ...attachmentIds);
+    const attachments = db.prepare(`SELECT id, raw_id, role, content, images FROM messages WHERE conversation_id = ?
+      AND raw_id IN (${attachmentIds.map(() => '?').join(',')}) ORDER BY seq, id`).all(conversationId, ...attachmentIds);
     for (const row of attachments) {
+      const content = cleanDialogueText(row.content, { role: row.role, emojiKeys });
+      if (row.role === 'assistant' && /[\p{L}\p{N}]/u.test(content)) {
+        const segments = speechSegments.get(row.raw_id) || [];
+        segments.push({ id: row.id, content });
+        speechSegments.set(row.raw_id, segments);
+      }
       let urls;
       try { urls = JSON.parse(row.images); } catch { continue; }
       if (!Array.isArray(urls)) continue;
@@ -74,9 +81,8 @@ export function readDialogueTranscript(db, characterId, { before, after, limit =
       images.set(row.raw_id, existing);
     }
   }
-  const emojiKeys = db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key);
   const latest = db.prepare("SELECT id, role FROM raw_messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY id DESC LIMIT 1").get(conversationId);
-  const present = row => ({ ...row, content: cleanDialogueText(row.content, { role: row.role, emojiKeys }), images: [...(images.get(row.id) || [])] });
+  const present = row => ({ ...row, content: cleanDialogueText(row.content, { role: row.role, emojiKeys }), images: [...(images.get(row.id) || [])], speech_segments: row.role === 'assistant' ? speechSegments.get(row.id) || [] : [] });
   return {
     messages: page.map(present),
     refreshed: refreshed.map(present),

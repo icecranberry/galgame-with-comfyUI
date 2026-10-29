@@ -37,7 +37,10 @@
               <time :datetime="message.created_at">{{ historyTime(message.created_at) }}</time>
             </header>
             <div class="backlog-lines">
-              <p v-if="message.content || !message.images?.length">{{ message.content || '（图片或表情消息）' }}</p>
+              <div v-if="message.content" class="backlog-text">
+                <template v-for="(line, index) in historySpeechLines(message)" :key="line.messageId || `text-${index}`"><span>{{ line.messageId ? Array.from(line.text).slice(0, -2).join('') : line.text }}</span><div v-if="line.messageId" class="backlog-speech-tail"><span>{{ Array.from(line.text).slice(-2).join('') }}</span><SpeechButton appearance="dialogue" :character-id="characterId" :character-name="characterName" :message-id="line.messageId" notify-errors /></div></template>
+              </div>
+              <p v-else-if="!message.images?.length">（图片或表情消息）</p>
               <div v-if="message.images?.length" class="backlog-images">
                 <div v-for="(url, index) in message.images" :key="url" class="backlog-photo" role="button" tabindex="0" :aria-label="`查看历史图片 ${index + 1}`" @click="previewImages($event, message.images, index)" @keydown.enter.prevent="previewImages($event, message.images, index)" @keydown.space.prevent="previewImages($event, message.images, index)">
                   <img :src="url" alt="对话图片" loading="lazy">
@@ -66,9 +69,12 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
+import SpeechButton from '../SpeechButton.vue'
+import { historySpeechLines } from '../../utils/historySpeech.js'
 
 const props = defineProps({
   open: Boolean,
+  characterId: { type: Number, required: true },
   characterName: { type: String, default: '' },
   messages: { type: Array, default: () => [] },
   hasOlder: Boolean,
@@ -184,7 +190,8 @@ function historyTime(value) {
 .backlog-speaker time { display: block; padding-left: 21px; margin-top: 4px; font-size: 11px; letter-spacing: .04em; color: var(--dialogue-muted); }
 .is-user .backlog-speaker { color: var(--dialogue-muted); }
 .backlog-lines { min-width: 0; font-size: 17px; line-height: 1.9; }
-.backlog-lines p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.backlog-speech-tail { display:inline-block; white-space:nowrap; }
+.backlog-text > span, .backlog-lines p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .backlog-images { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .backlog-images:first-child { margin-top: 0; }
 .backlog-photo { padding: 6px 6px 0; border: 0; border-radius: 0; background: var(--dialogue-photo-paper); box-shadow: var(--dialogue-photo-shadow); cursor: zoom-in; text-align: right; }

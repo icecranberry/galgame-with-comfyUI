@@ -48,6 +48,13 @@ export function createSpeechQueue({ player, onPlaying = () => {}, onBlocked = ()
   }
   return {
     clear,
+    discardJobs(ids) {
+      for (const entry of [...entries]) {
+        if (!ids.has(entry.job?.id)) continue
+        if (playing === entry) control(() => player.stop())
+        remove(entry)
+      }
+    },
     // Called synchronously inside a trusted click/key event; no await before play().
     resume() {
       const entry = entries[0]

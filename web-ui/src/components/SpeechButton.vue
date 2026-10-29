@@ -1,6 +1,6 @@
 <template>
-  <div v-if="speechEnabled" class="speech-control" :class="{ 'is-active': waiting || isPlaying }" @click.stop @pointerdown.stop @pointerup.stop>
-    <linshe-button variant="icon" tone="paper" size="md" :hover-motion="false" :touch-target="touchTarget" :title="label" :aria-label="label" @click="waiting ? cancel() : play()">
+  <div v-if="speechEnabled" class="speech-control" :class="{ 'is-active': waiting || isPlaying, 'speech-dialogue': appearance === 'dialogue' }" @click.stop @pointerdown.stop @pointerup.stop>
+    <component :is="appearance === 'dialogue' ? 'div' : LinsheButton" :class="{ 'speech-dialogue-action': appearance === 'dialogue' }" :role="appearance === 'dialogue' ? 'button' : undefined" :tabindex="appearance === 'dialogue' ? 0 : undefined" @keydown="onKeydown" variant="icon" tone="paper" size="md" :hover-motion="false" :touch-target="touchTarget" :title="label" :aria-label="label" @click="waiting ? cancel() : play()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <template v-if="waiting">
           <circle class="speech-spinner" cx="12" cy="12" r="9" stroke-dasharray="42 15" />
@@ -13,7 +13,7 @@
           <path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14" />
         </template>
       </svg>
-    </linshe-button>
+    </component>
     <span v-if="failure" class="speech-error" role="status">{{ failure }}</span>
   </div>
 </template>
@@ -24,7 +24,7 @@ import { ttsApi } from '../api/tts.js'
 import { speechEnabled, speechJobs, messageSpeech, speechQueue, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
-const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, touchTarget: Boolean, autoToken: Number, notifyErrors: Boolean })
+const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, appearance: { type: String, default: 'default' }, touchTarget: Boolean, autoToken: Number, notifyErrors: Boolean })
 const toast = inject('toast', null)
 const error = ref(''), pending = ref(false), phase = ref('idle')
 const waiting = computed(() => ['preparing', 'ready', 'blocked'].includes(phase.value))
@@ -35,6 +35,11 @@ const label = computed(() => isPlaying.value ? '停止朗读' : waiting.value
   ? `${phase.value === 'blocked' ? '轻触页面继续播放' : phase.value === 'ready' ? '等待播放' : pending.value ? '正在请求' : job.value?.status === 'queued' ? '语音排队中' : '语音生成中'}，点击取消`
   : failure.value ? '重试朗读' : '朗读')
 let entry, disposed = false
+function onKeydown(event) {
+  if (props.appearance !== 'dialogue' || !['Enter', ' '].includes(event.key) || event.repeat) return
+  event.preventDefault(); event.stopPropagation()
+  if (waiting.value) cancel(); else play()
+}
 function showError(e) {
   if (disposed || e.name === 'AbortError') return
   if (e.code === 'VOICE_NOT_CONFIGURED' && toast) {
@@ -83,6 +88,10 @@ onBeforeUnmount(() => { disposed = true; cancel() })
 </script>
 <style scoped>
 .speech-control { display:flex; align-items:center; padding-left:8px; }
+.speech-dialogue { display:inline-flex; position:relative; vertical-align:middle; padding:0 2px; }
+.speech-dialogue-action { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; cursor:pointer; text-align:center; color:var(--dialogue-ink); background:var(--dialogue-paper); border-radius:50%; transition:color .3s ease; }
+.speech-dialogue-action:focus-visible { color:var(--dialogue-menu-hover); outline:2px solid currentColor; outline-offset:2px; }
+@media (hover:hover) { .speech-dialogue-action:hover { color:var(--dialogue-menu-hover); } }
 .speech-spinner { transform-origin:12px 12px; animation:cel-spin 1s linear infinite; }
 .speech-error {
   position:absolute; right:0; top:100%; z-index:1;

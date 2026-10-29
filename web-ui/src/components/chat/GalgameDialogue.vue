@@ -105,7 +105,7 @@
       </div>
     </Transition>
 
-    <GalgameHistory v-model:open="historyOpen" :character-name="character.display_name" :messages="messages" :has-older="hasOlder" :loading="loading" :loading-older="loadingOlder" :load-older="loadOlder" :error="error" :suspended="lightboxOpen" @present-change="historyPresent = $event" @preview-images="openImages" @retry="refresh" />
+    <GalgameHistory v-model:open="historyOpen" :character-id="character.id" :character-name="character.display_name" :messages="messages" :has-older="hasOlder" :loading="loading" :loading-older="loadingOlder" :load-older="loadOlder" :error="error" :suspended="lightboxOpen" @present-change="historyPresent = $event" @preview-images="openImages" @retry="refresh" />
     <EmojiManagerModal v-if="emojiManagerOpen" :key="character.id" :characters="[character]" @close="closeEmojiManager" />
     <ExpressionStandingManager :open="managerOpen" :character="character" @close="closeManager" />
     <Teleport to="body">

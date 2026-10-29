@@ -11,14 +11,15 @@ const code = compileScript(parse(source).descriptor, { id: 'speech-settings-test
 
 function fixture(t, api, settingsApi = async () => ({ enabled: true })) {
   let state, stops = 0
+  const invalidated = []
   const calls = [], speechEnabled = Vue.ref(true)
-  const deps = { Vue, speechEnabled, speechAutoPlay: Vue.ref(false), stopSpeech: () => stops++, LocalSpeechModels: {}, LinsheButton: {}, LinsheSwitch: {}, LinsheTabs: {}, LinsheInput: {},
+  const deps = { invalidateSpeechCache: result => invalidated.push(result), Vue, speechEnabled, speechAutoPlay: Vue.ref(false), stopSpeech: () => stops++, LocalSpeechModels: {}, LinsheButton: {}, LinsheSwitch: {}, LinsheTabs: {}, LinsheInput: {},
     ttsApi: async (...args) => { calls.push(args); return args[0] === '/settings' ? settingsApi(...args) : api(...args) } }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {}, emit() {} }); return () => null } })
   app.mount({}); t.after(() => app.unmount())
-  return { state, calls, stops: () => stops }
+  return { state, calls, invalidated, stops: () => stops }
 }
 
 test('restart stops playback, blocks overlapping maintenance and displays verified readiness', async t => {
@@ -87,4 +88,29 @@ test('auto playback defaults off, saves independently and preserves state on fai
   assert.equal(f.state.speechAutoPlay.value, false)
   assert.equal(f.stops(), 1)
   assert.equal(settings.enabled, true)
+})
+
+
+test('cache cleanup works in both modes, blocks duplicate clicks, and reports failures', async t => {
+  for (const mode of ['local', 'api']) {
+    let finish
+    const f = fixture(t, () => new Promise(resolve => { finish = resolve }))
+    await new Promise(resolve => setImmediate(resolve))
+    f.state.mode.value = mode
+    const pending = f.state.clearCache()
+    await f.state.clearCache()
+    assert.equal(f.state.clearingCache.value, true)
+    assert.deepEqual(f.calls.filter(([route]) => route !== '/settings'), [['/cache', {}, 'DELETE']])
+    const result = { ids:['old'], files:2, bytes:1048576, failed:0 }
+    finish(result); await pending
+    assert.deepEqual(f.invalidated, [result])
+    assert.match(f.state.notice.value, /2.*1.0 MB/)
+    assert.equal(f.state.clearingCache.value, false)
+  }
+  const f = fixture(t, async () => { throw new Error('文件正在使用') })
+  await new Promise(resolve => setImmediate(resolve))
+  await f.state.clearCache()
+  assert.equal(f.state.error.value, '文件正在使用')
+  assert.equal(f.state.clearingCache.value, false)
+  assert.deepEqual(f.invalidated, [])
 })

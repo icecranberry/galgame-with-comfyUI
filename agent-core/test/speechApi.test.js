@@ -304,4 +304,25 @@ test('HTTP API voices synthesize without samples, retain local profiles and supp
   closeDb(); assert.equal((await request('/settings')).local_model, '2.0');
   await request('/settings', { local_model: '2.0', mode: 'local' }, 'PUT');
   assert.equal((await request(`/characters/${characterId}`)).voice_id, 'local-voice');
+  // The cleanup endpoint works in either mode and never removes voice assets.
+  const clearedLocal = await request('/cache', {}, 'DELETE');
+  assert.ok(clearedLocal.ids.includes(groupDone.id));
+  assert.ok(clearedLocal.files > 0);
+  assert.equal((await fetch(base + groupDone.audio_url)).status, 404);
+  assert.equal((await request('/groups/921/messages')).length, 0);
+  assert.deepEqual(getDb().prepare("SELECT * FROM voices WHERE id='local-voice'").get(), local);
+  assert.deepEqual(getDb().prepare("SELECT * FROM voice_samples WHERE id='local-sample'").get(), originalSample);
+  assert.equal((await fetch(base + sample.preview_url)).status, 200);
+  await request('/settings', {mode:'api'}, 'PUT');
+  upstream = 'delay'; release = undefined;
+  const fresh = await request(groupRoute, {}, 'POST', 202);
+  assert.notEqual(fresh.id, groupDone.id);
+  for (let n=0; n<100 && !release; n++) await new Promise(resolve=>setTimeout(resolve,5));
+  const clearedApi = await request('/cache', {}, 'DELETE');
+  assert.ok(!clearedApi.ids.includes(fresh.id));
+  assert.equal((await request(`/jobs/${fresh.id}`)).status, 'generating');
+  release();
+  assert.equal((await terminal(fresh)).status, 'completed');
+  assert.deepEqual(getDb().pragma('foreign_key_check'), []);
+
 });

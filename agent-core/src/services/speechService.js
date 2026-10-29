@@ -4,13 +4,15 @@ import { getDb } from '../db/index.js';
 import { getSetting } from '../db/settings.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { speechText, speechParams, speechCacheKey } from './speechText.js';
-import { audioPath, audioUrl } from './voiceAssets.js';
+import { AUDIO_ROOT, audioPath, audioUrl } from './voiceAssets.js';
 import { ttsRequest, ttsHealth } from './indexTtsClient.js';
 import { withSpeechGpu } from './speechGpu.js';
 import { getSpeechSettings, setSpeechSettings as configureSpeechSettings, getApiVoice } from './speechConfig.js';
 import { apiConnection, apiVoiceParams, apiSpeechCacheKey, fetchApiSpeech } from './speechApiClient.js';
 import { resolveApiReferences, encodeApiReferences } from './speechApiAssets.js';
 import { selectedLocalTtsModel } from './localTtsModels.js';
+
+import { clearGeneratedSpeech } from './speechCache.js';
 
 export { getSpeechSettings };
 export function setSpeechSettings(input) {
@@ -21,7 +23,12 @@ export function setSpeechSettings(input) {
   }
   return settings;
 }
-const apiControllers = new Map();
+const apiControllers = new Map(), localJobs = new Set();
+export function clearSpeechCache() {
+  const result = clearGeneratedSpeech(getDb(), AUDIO_ROOT, new Set([...localJobs, ...apiControllers.keys()]));
+  broadcast('speech_cache_cleared', result);
+  return result;
+}
 export function publicJob(job) {
   if (!job) return null;
   return { id: job.id, status: job.status, error: job.error, voice_id: job.voice_id,
@@ -35,6 +42,7 @@ function updateJob(id, status, error = null, output = null) {
   broadcast('speech_update', publicJob(getSpeechJob(id)));
 }
 function enqueue(job) {
+  localJobs.add(job.id);
   const cancelled = () => getSpeechJob(job.id)?.status === 'cancelled' || !getSpeechSettings().enabled || getSpeechSettings().mode !== 'local';
   withSpeechGpu(async () => {
     if (cancelled()) throw new Error('语音已关闭或任务已取消');
@@ -51,7 +59,8 @@ function enqueue(job) {
     if (!fs.existsSync(audioPath(output))) throw new Error('TTS 没有生成音频，请检查两端音频目录配置');
     return output;
   }, cancelled).then(output => updateJob(job.id, 'completed', null, output))
-    .catch(error => updateJob(job.id, 'failed', error.message));
+    .catch(error => updateJob(job.id, 'failed', error.message))
+    .finally(() => localJobs.delete(job.id));
 }
 export function requestSpeech({ characterId, voiceId, sampleId, text, params, messageId }) {
   const db = getDb();

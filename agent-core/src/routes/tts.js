@@ -6,7 +6,7 @@ import { speechParams, speechGenerationParams } from '../services/speechText.js'
 import { ttsHealth } from '../services/indexTtsClient.js';
 import { restartSpeechService } from '../services/speechServiceProcess.js';
 import { recoverSpeechGpu } from '../services/speechGpu.js';
-import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech } from '../services/speechService.js';
+import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech, clearSpeechCache } from '../services/speechService.js';
 import { getApiVoice, saveApiVoice } from '../services/speechConfig.js';
 import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, reuseLocalApiVoice } from '../services/speechApiAssets.js';
 import { localSpeechModels } from '../services/speechLocalModels.js';
@@ -26,6 +26,7 @@ router.get('/settings', route((req, res) => res.json(getSpeechSettings())));
 router.put('/settings', route((req, res) => {
   res.json(setSpeechSettings(req.body));
 }));
+router.delete('/cache', route((req, res) => res.json(clearSpeechCache())));
 router.get('/health', route(async (req, res) => res.json(await ttsHealth())));
 router.get('/local-models', route(async (req, res) => res.json(await localSpeechModels.status())));
 router.post('/local-models/install', route((req, res) => res.status(202).json(localSpeechModels.install(req.body.model))));

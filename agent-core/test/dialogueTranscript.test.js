@@ -20,7 +20,7 @@ test('complete dialogue keeps paragraphs/actions and removes prompt protocols an
 test('raw transcript paginates without truncating paragraphs, crossing characters, or exposing private columns', () => {
   const db = new Database(':memory:');
   try {
-    db.exec('CREATE TABLE raw_messages(id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, prompt TEXT, thinking TEXT, created_at TEXT); CREATE TABLE emoji_categories(emoji_key TEXT); CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER);');
+    db.exec('CREATE TABLE raw_messages(id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, prompt TEXT, thinking TEXT, created_at TEXT); CREATE TABLE emoji_categories(emoji_key TEXT); CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER, role TEXT, content TEXT);');
     db.prepare('INSERT INTO emoji_categories VALUES (?)').run('开心');
     const insert = db.prepare('INSERT INTO raw_messages VALUES (?, ?, ?, ?, ?, ?, ?)');
     for (let id = 1; id <= 5; id++) insert.run(id, 'char_1', id % 2 ? 'assistant' : 'user', `完整${id}\n第二段[开心]`, 'secret', 'private', '2026-10-12 10:00:00');
@@ -44,10 +44,10 @@ test('dialogue joins all image bubbles, refreshes late attachments, and isolates
   const db = new Database(':memory:');
   try {
     db.exec(`CREATE TABLE raw_messages(id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, created_at TEXT);
-      CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER);
+      CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER, role TEXT, content TEXT);
       CREATE TABLE emoji_categories(emoji_key TEXT);
       INSERT INTO raw_messages VALUES (1, 'char_1', 'assistant', '给你看', 'now'), (2, 'char_1', 'assistant', '', 'now'), (3, 'char_2', 'assistant', 'private', 'now');`);
-    const insert = db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages(id,conversation_id,raw_id,images,seq) VALUES (?, ?, ?, ?, ?)');
     insert.run(1, 'char_1', 1, JSON.stringify(['/images/chat/one.png']), 0);
     insert.run(2, 'char_1', 1, JSON.stringify(['/images/chat/one.png', '/images/chat/two.png']), 1);
     insert.run(3, 'char_1', 2, 'broken JSON', 0);
@@ -69,11 +69,11 @@ test('dialogue excludes stickers from mixed, sticker-only, and late-refreshed at
   const db = new Database(':memory:');
   try {
     db.exec(`CREATE TABLE raw_messages(id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, created_at TEXT);
-      CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER);
+      CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER, role TEXT, content TEXT);
       CREATE TABLE emoji_categories(emoji_key TEXT);
       INSERT INTO emoji_categories VALUES ('开心');
       INSERT INTO raw_messages VALUES (1, 'char_1', 'assistant', '给你看[开心]', 'now'), (2, 'char_1', 'assistant', '[开心]', 'now');`);
-    const insert = db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?)');
+    const insert = db.prepare('INSERT INTO messages(id,conversation_id,raw_id,images,seq) VALUES (?, ?, ?, ?, ?)');
     const photo = '/images/chat/photo.png?reference=/images/emoji/example.png';
     insert.run(1, 'char_1', 1, JSON.stringify(['/images/emoji/happy.png', photo, 'https://example.test/images/emoji/shy.png?v=1', '/images/chat/small-square.png']), 0);
     insert.run(2, 'char_1', 2, JSON.stringify(['/images/emoji/happy.png']), 0);
@@ -108,4 +108,23 @@ test('per-character expression survives global selection changes and quiet turns
   display.expression(fresh, 'emoji:8'); display.expression(stale, 'emoji:9'); display.complete(stale);
   assert.equal(display.characterSnapshot(1).slotId, 'emoji:8');
   assert.equal(display.characterSnapshot(2).slotId, 'normal');
+});
+
+
+test('history exposes real ordered speech message IDs and keeps raw text intact', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(`CREATE TABLE raw_messages(id INTEGER PRIMARY KEY, conversation_id TEXT, role TEXT, content TEXT, created_at TEXT);
+      CREATE TABLE messages(id INTEGER PRIMARY KEY, conversation_id TEXT, raw_id INTEGER, images TEXT, seq INTEGER, role TEXT, content TEXT);
+      CREATE TABLE emoji_categories(emoji_key TEXT);
+      INSERT INTO emoji_categories VALUES ('开心');
+      INSERT INTO raw_messages VALUES (1,'char_1','assistant','（挥手）你好。再见。[开心]','now'),(2,'char_1','user','你好','now');
+      INSERT INTO messages VALUES (101,'char_1',1,NULL,1,'assistant','你好。'),(100,'char_1',1,NULL,2,'assistant','再见。[开心]'),
+        (102,'char_1',1,NULL,3,'assistant','[开心]'),(103,'char_2',1,NULL,0,'assistant','private'),(104,'char_1',2,NULL,0,'user','你好');`);
+    const result = readDialogueTranscript(db, 1);
+    assert.equal(result.messages[0].content, '（挥手）你好。再见。');
+    assert.deepEqual(result.messages[0].speech_segments, [{id:101,content:'你好。'},{id:100,content:'再见。'}]);
+    assert.deepEqual(result.messages[1].speech_segments, []);
+    assert.deepEqual(readDialogueTranscript(db, 1, { after:2, refreshIds:'1' }).refreshed[0].speech_segments, result.messages[0].speech_segments);
+  } finally { db.close(); }
 });
