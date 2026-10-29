@@ -25,7 +25,7 @@ test('standing speech: real desktop/touch playback, detail actions and responsiv
   const state = id => ({ status: 'ready', version: 'test-v1', lines: dialogue, speech: {
     enabled: true, configured: id !== 2, reason: id === 2 ? '角色尚未设置声音' : '',
     lines: Object.fromEntries(parts.map(part => [part, [{ text: dialogue[part][0], status: id === 2 ? 'empty' : 'completed',
-      audio_url: id === 2 ? null : `/api/tts/audio/test.wav?v=${generation}`, error: null, job_id: `job-${part}-${generation}` }]])),
+      audio_url: id === 2 ? null : `/api/tts/audio/test.wav?v=${generation}&part=${part}`, error: null, job_id: `job-${part}-${generation}` }]])),
   } })
   const harness = `
     import {createApp,h,ref} from 'vue';
@@ -86,6 +86,9 @@ test('standing speech: real desktop/touch playback, detail actions and responsiv
     await click(head)
     await page.waitForFunction(() => window.mediaPlays.some(audio => !audio.paused && audio.currentTime > .05))
     assert.match(await page.locator('.interaction-note').innerText(), /你好/)
+    await click(page.getByRole('button', {name:'轻触脸',exact:true}))
+    await click(page.getByRole('button', {name:'轻触肩颈',exact:true}))
+    await page.waitForFunction(() => window.mediaPlays.length === 3 && window.mediaPlays.at(-1).src.includes('part=shoulder') && !window.mediaPlays.at(-1).paused)
     await page.evaluate(() => window.fixture.character(2))
     await page.waitForFunction(() => window.mediaPlays.every(audio => audio.paused))
     await page.waitForFunction(() => document.querySelector('[data-standing-region="head"]')?.getAttribute('aria-disabled') === 'false')

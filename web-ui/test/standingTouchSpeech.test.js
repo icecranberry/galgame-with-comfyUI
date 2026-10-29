@@ -6,6 +6,32 @@ import { createSpeechPlayback } from '../src/utils/speechPlayback.js'
 const metadata = (lines, overrides = {}) => ({ enabled: true, configured: true, lines, ...overrides })
 const saved = metadata({ head: [{ text: '摸摸头', audio_url: '/head.wav', status: 'completed' }] })
 
+test('rapid replies interrupt immediately and discard unfinished playback instead of replaying it', async () => {
+  const pending = [], started = []
+  let audio
+  const player = createSpeechPlayback(() => (audio = {
+    currentTime: 0, paused: true,
+    pause() { this.paused = true },
+    play() { this.paused = false; started.push(this.src); return new Promise(resolve => pending.push(resolve)) },
+  }))
+  const speech = createStandingTouchSpeech(player)
+  const lines = metadata({ head: ['a','b','c'].map(text => ({text,audio_url:`/${text}.wav`})) })
+  const first = speech.play('head','a',lines)
+  const firstEnded = audio.onended
+  audio.currentTime = 1
+  const second = speech.play('head','b',lines)
+  assert.equal(audio.currentTime,0)
+  const third = speech.play('head','c',lines)
+  assert.deepEqual(started,['/a.wav','/b.wav','/c.wav'])
+  pending[2](); assert.equal(await third,true)
+  pending[0](); pending[1]()
+  assert.equal(await first,false); assert.equal(await second,false)
+  firstEnded()
+  assert.equal(audio.src,'/c.wav'); assert.equal(audio.paused,false)
+  audio.onended(); await Promise.resolve()
+  assert.deepEqual(started,['/a.wav','/b.wav','/c.wav'],'discarded replies never resume')
+})
+
 function fixture(play = async () => {}) {
   const audios = []
   const player = createSpeechPlayback(() => {

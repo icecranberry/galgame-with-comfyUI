@@ -13,11 +13,11 @@ test('all ten parts match the generated schema; default zones survive large padd
   assert.equal(touchPartAt(p(-.01,.5),b),null);assert.equal(touchPartAt(p(.5,1.01),b),null)
  }
 })
-test('touch selects saved lines locally, avoids adjacent repeats and throttles',()=>{
+test('every valid touch immediately selects the latest line without waiting for the previous reply',()=>{
  let time=0;const e=createTouchReplyEngine({now:()=>time,random:()=>0})
  const lines={head:['第一句专属台词','第二句专属台词','第三句专属台词']}
- assert.equal(e.act('head',lines).text,lines.head[0]);assert.equal(e.act('head',lines),null)
- time+=650;assert.equal(e.act('head',lines).text,lines.head[1]);time+=650;assert.equal(e.act('head',lines).text,lines.head[0])
+ assert.equal(e.act('head',lines).text,lines.head[0]);assert.equal(e.act('head',lines).text,lines.head[1])
+ time+=10;assert.equal(e.act('head',lines).text,lines.head[0]);time+=10;assert.equal(e.act('head',lines).text,lines.head[1])
  time+=650;assert.match(e.act('foot',null).text,/脚/);assert.equal(e.act('invalid',lines),null)
  e.reset();assert.equal(e.act('head',lines).text,lines.head[0])
 })

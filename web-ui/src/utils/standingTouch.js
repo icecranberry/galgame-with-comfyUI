@@ -16,13 +16,14 @@ export function touchPartAt(point,bounds){
   return TOUCH_ZONES.find(z=>x>=z.x&&x<=z.x+z.w&&y>=z.y&&y<=z.y+z.h)?.part||null
 }
 export function createTouchReplyEngine({now=()=>performance.now(),random=Math.random}={}){
-  let lastAt=-Infinity
   const previous={}
   return {
-    reset(){lastAt=-Infinity;Object.keys(previous).forEach(k=>delete previous[k])},
+    reset(){Object.keys(previous).forEach(k=>delete previous[k])},
     act(part,lines){
-      if(!TOUCH_LABELS[part]||now()-lastAt<650)return null
-      lastAt=now()
+      // Each completed gesture replaces the previous reply, even during speech.
+      // The hit layer already rejects cancelled/invalid gestures; never queue or
+      // throttle a newer valid touch behind the previous line.
+      if(!TOUCH_LABELS[part])return null
       const all=Array.isArray(lines?.[part])?lines[part].filter(s=>typeof s==='string'&&s.trim()):[]
       const alternatives=all.filter(s=>s!==previous[part])
       const pool=alternatives.length?alternatives:all

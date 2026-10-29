@@ -1,5 +1,5 @@
 <template>
-  <Transition name="interaction-fade"><div v-if="message" class="interaction-note" :style="bubbleBottom == null ? {} : { top: 'auto', bottom: `${bubbleBottom}px` }" role="status" aria-live="polite">{{ message }}</div></Transition>
+  <Transition name="interaction-fade"><div v-if="message" class="interaction-note" :style="bubbleBottom == null ? {} : { top: 'auto', bottom: `${bubbleBottom}px` }" role="status" aria-live="polite"><span class="interaction-text">{{ message }}</span></div></Transition>
 </template>
 <script setup>
 import {ref,computed,watch,onBeforeUnmount} from 'vue'
@@ -85,7 +85,8 @@ onBeforeUnmount(()=>{stopLoading();requests.dispose();lifetime.dispose();clear()
 defineExpose({act,clear})
 </script>
 <style scoped>
-.interaction-note{position:absolute;z-index:4;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;background:linear-gradient(var(--modal-bg),var(--modal-bg)),var(--bg-primary);color:var(--text-primary);border:2px solid var(--cel-outline);border-radius:var(--radius-lg);box-shadow:var(--shadow-hard-sm);padding:10px 16px;font-size:var(--fs-sm);line-height:1.6;text-align:center;overflow-wrap:anywhere;pointer-events:none}
+.interaction-note{position:absolute;z-index:4;top:max(16px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);box-sizing:border-box;background:linear-gradient(var(--modal-bg),var(--modal-bg)),var(--bg-primary);color:var(--text-primary);border:2px solid var(--cel-outline);border-radius:var(--radius-lg);box-shadow:var(--shadow-hard-sm);padding:10px 16px;font-size:var(--fs-sm);line-height:1.6;text-align:center;overflow-wrap:anywhere}
+.interaction-text{display:block;max-height:3.2em;overflow:auto}
 /* Opaque, identically composited surfaces hide the body's border beneath the tail.
    A plain 45deg diamond joins both edges at the same height (skew caused a notch). */
 .interaction-note::after{content:"";position:absolute;box-sizing:border-box;width:16px;height:16px;left:60%;bottom:-10px;background:linear-gradient(var(--modal-bg),var(--modal-bg)),var(--bg-primary);border-right:2px solid var(--cel-outline);border-bottom:2px solid var(--cel-outline);transform:rotate(45deg);border-bottom-right-radius:3px}
