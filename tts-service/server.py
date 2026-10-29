@@ -202,7 +202,14 @@ class Engine:
         self.pipe = None
         self.loaded = False
 
-    def unload(self):
+    def unload(self, idle_only=False):
+        if idle_only:
+            if not self.inference.acquire(blocking=False):
+                raise RuntimeError("TTS 正在合成，请等待当前任务完成后重试")
+            try:
+                return self.unload()
+            finally:
+                self.inference.release()
         with self.lock:
             if self.process:
                 self.process.terminate()
@@ -297,7 +304,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Invalid body length")
             body = json.loads(self.rfile.read(length))
             if self.path == "/unload":
-                return self.respond(200, ENGINE.unload())
+                return self.respond(200, ENGINE.unload(idle_only=body.get("idle_only") is True))
             if self.path != "/synthesize":
                 return self.respond(404, {"error": "Not found"})
             if body.get("model_version") != MODEL_VERSION:

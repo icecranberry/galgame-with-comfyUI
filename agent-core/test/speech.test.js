@@ -230,11 +230,20 @@ test('saved bubble identity, dedup, history, cache invalidation, retry and offli
   assert.notEqual(retry.id, failed.id); assert.equal((await terminal(retry.id)).status, 'completed');
   offline = true;
   const before = acquireCount;
-  const unavailable = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '服务离线测试' });
-  assert.equal((await terminal(unavailable.id)).status, 'failed');
-  assert.match(service.getSpeechJob(unavailable.id).error, /无法连接本地语音服务/);
-  assert.equal(acquireCount, before, 'offline service must not lock ComfyUI');
-  offline = false;
+  const previousUrl = process.env.TTS_SERVICE_URL;
+  // Offline local startup is covered with an injected launcher in
+  // speechServiceProcess.test.js; this integration test must never spawn one.
+  process.env.TTS_SERVICE_URL = 'http://tts-test.invalid:7861';
+  try {
+    const unavailable = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '服务离线测试' });
+    assert.equal((await terminal(unavailable.id)).status, 'failed');
+    assert.match(service.getSpeechJob(unavailable.id).error, /仅支持本机/);
+    assert.equal(acquireCount, before, 'offline service must not lock ComfyUI');
+  } finally {
+    offline = false;
+    if (previousUrl === undefined) delete process.env.TTS_SERVICE_URL;
+    else process.env.TTS_SERVICE_URL = previousUrl;
+  }
   const cancelled = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '取消测试' });
   service.cancelSpeech(cancelled.id);
   assert.equal((await terminal(cancelled.id)).status, 'cancelled');

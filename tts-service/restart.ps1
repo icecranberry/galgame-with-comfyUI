@@ -3,7 +3,8 @@ param(
     # deployment always belongs to this checkout's tts-service directory.
     [string]$RuntimeDir,
     [ValidateSet('2.0')][string]$ModelVersion,
-    [ValidateRange(1, 65535)][int]$Port = 7861
+    [ValidateRange(1, 65535)][int]$Port = 7861,
+    [switch]$StartOnly
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -17,6 +18,9 @@ $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Nam
     Where-Object { $_.CommandLine -match $serverPattern })
 $processIds = @($processes | ForEach-Object { $_.ProcessId })
 $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+if ($StartOnly -and ($processes.Count -or $listeners.Count)) {
+    throw 'TTS is already starting or not responding; automatic startup will not stop a running service.'
+}
 if (@($listeners | Where-Object { $_.OwningProcess -notin $processIds }).Count) {
     throw "Port $Port is occupied by another process; no process was stopped."
 }

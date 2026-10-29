@@ -1,9 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSpeechServiceRestarter } from '../src/services/speechServiceProcess.js';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { createSpeechServiceRestarter, executeSpeechLauncher } from '../src/services/speechServiceProcess.js';
 
 const ready = { online: true, compatible: true, ready: true };
 const options = { platform: 'win32', env: {}, exclusive: work => work(), sleep: async () => {} };
+
+test('launcher resolves on process exit even when Python retains its pipes; failures keep diagnostics', async () => {
+  for (const code of [0, 1]) {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough(); child.stderr = new PassThrough();
+    const result = executeSpeechLauncher('powershell.exe', [], { windowsHide: true, timeout: 45000 }, (_, __, opts) => {
+      assert.deepEqual(opts.stdio, ['ignore', 'pipe', 'pipe']);
+      assert.equal(opts.timeout, 45000);
+      return child;
+    });
+    child.stderr.write('runtime missing');
+    child.emit('exit', code, null); // no close event: a descendant still owns the handles
+    if (code === 0) await result;
+    else await assert.rejects(result, { stderr: 'runtime missing' });
+    assert.ok(child.stdout.destroyed && child.stderr.destroyed);
+  }
+});
+
+test('on-demand startup reuses online services and launches offline services once without killing processes', async () => {
+  let checks = 0, launches = 0;
+  const ensure = createSpeechServiceRestarter({ ...options, onlyIfOffline: true,
+    health: async () => ++checks === 1 ? { online: false } : ready,
+    run: async (_, args) => { launches++; assert.ok(args.includes('-StartOnly')); },
+  });
+  const first = ensure();
+  assert.equal(first, ensure());
+  assert.deepEqual(await first, { ...ready, started: true });
+  assert.deepEqual(await ensure(), ready);
+  assert.equal(launches, 1);
+});
+
+test('on-demand startup does not restart online incompatible or remote services', async () => {
+  const status = { online: true, compatible: false, ready: false };
+  const ensure = createSpeechServiceRestarter({ ...options, onlyIfOffline: true,
+    env: { TTS_SERVICE_URL: 'https://remote.example/tts' }, platform: 'linux',
+    health: async () => status, run: () => assert.fail('must not execute'),
+  });
+  assert.deepEqual(await ensure(), status);
+});
 
 test('offline restart waits for the GPU slot, deduplicates requests and checks the new service', async () => {
   let release, calls = 0, checks = 0;

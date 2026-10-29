@@ -64,7 +64,9 @@ tts-service/
 
 `GET /health` 返回固定版本、就绪状态和工作进程状态；`POST /synthesize` 接收受控相对 WAV 路径；`POST /unload` 等待推理进程退出，释放完整 CUDA 上下文。合成先写临时文件，再原子发布。缺少停止 token 会缩短分段重试，仍异常则丢弃，不发布不完整音频。
 
-邻舍 GPU FIFO 与 `comfy_guard` 协调生图和语音：语音等待生图退出后获取 lease，语音期间阻止外部标准 prompt 提交。取消任务不会提前释放仍在推理的 GPU；确认卸载后才释放 lease。工作进程空闲时自动卸载。独立官方 WebUI 不参与调度。
+邻舍 GPU FIFO 与 `comfy_guard` 协调生图和语音：语音等待生图退出后获取 lease，语音期间阻止外部标准 prompt 提交。取消任务不会提前释放仍在推理的 GPU；确认卸载后才释放 lease。工作进程空闲时自动卸载。后端进程重启后的首次本地合成，会先检查服务空闲、确认旧工作进程已卸载，再恢复 ComfyUI 中遗留的 lease，避免空队列仍一直等待显存。忙碌或无法确认退出时保留锁并报错。独立官方 WebUI 不参与调度。
+
+本地合成请求发现服务离线时，在 GPU FIFO 内自动启动本项目已安装的服务并等待健康检查，然后继续合成；多个请求不会重复启动。启动采用 `restart.ps1 -StartOnly`，不会杀死正在启动或无响应的现有进程。在线但缺模型或版本不匹配时明确报错，不自动下载、不重启。远程地址及非 Windows 主机需在服务所在主机启动。
 
 `TTS_AUDIO_DIR` 可用于隔离验证；后端音频工具默认优先 `runtime/tools/ffmpeg/bin`，`FFMPEG_PATH` / `FFPROBE_PATH` 可覆盖。旧 `TTS_RUNTIME_DIR` / `TTS_MODEL_DIR` 不改变部署布局。
 

@@ -25,4 +25,4 @@ export async function ttsHealth(timeout = 10000) {
     return { ...status, online: true, compatible: status.model_version === selectedLocalTtsModel().version };
   } catch (e) { return { online: false, compatible: false, error: e.message }; }
 }
-export const unloadTts = () => ttsRequest('/unload', {}, 30000);
+export const unloadTts = (options = {}) => ttsRequest('/unload', options, 30000);

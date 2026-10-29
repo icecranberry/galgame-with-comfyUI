@@ -22,6 +22,21 @@ adapter = load("tts_adapter", ROOT / "server.py")
 
 
 class ServiceTests(unittest.TestCase):
+    def test_idle_only_unload_refuses_active_inference_and_releases_gate_after_failure(self):
+        engine = adapter.Engine()
+        engine.inference.acquire()
+        with self.assertRaisesRegex(RuntimeError, '正在合成'):
+            engine.unload(idle_only=True)
+        self.assertTrue(engine.inference.locked())
+        engine.inference.release()
+        self.assertEqual(engine.unload(idle_only=True), {'unloaded': True})
+        self.assertFalse(engine.inference.locked())
+        with patch.object(engine, 'process') as worker:
+            worker.join.side_effect = RuntimeError('exit failed')
+            with self.assertRaisesRegex(RuntimeError, 'exit failed'):
+                engine.unload(idle_only=True)
+        self.assertFalse(engine.inference.locked())
+
     def setUp(self):
         selected = patch.object(adapter, 'MODEL_ID', '2.0')
         selected.start()

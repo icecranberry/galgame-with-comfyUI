@@ -14,6 +14,9 @@
   /* ── 底色与文字（对应 v3.2 原始暖纸配色）── */
   --bg-primary: #f0ece8;
   --bg-secondary: #ffffff;
+  --button-paper-bg: #ffffff;
+  --button-paper-ink: #70645c;
+  --button-paper-hover: #b64f41;
   --audio-track: #ddd1c6;
   --audio-track-border: #a79687;
   --audio-progress: #b64f41;
