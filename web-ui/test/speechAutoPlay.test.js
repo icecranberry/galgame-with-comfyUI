@@ -4,9 +4,9 @@ import { createSpeechAutoPlay, chatSpeechAutoPlay } from '../src/utils/speechAut
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '../src/stores/chat.js'
 import { useGroupsStore } from '../src/stores/groups.js'
-import { ref, createRenderer } from 'vue'
+import { ref, createRenderer, nextTick } from 'vue'
 import { useSpeechAutoPlay } from '../src/composables/useSpeechAutoPlay.js'
-import { speechEnabled, speechAutoPlay, speechQueue } from '../src/stores/speech.js'
+import { speechEnabled, speechAutoPlay, speechPlaybackBlocked, speechQueue } from '../src/stores/speech.js'
 
 test('only the active, enabled and visible conversation can mark live sentences, once', () => {
   const auto = createSpeechAutoPlay()
@@ -101,7 +101,7 @@ test('group history is silent; new sentences are marked only when displayed and 
 
 test('page lifecycle clears pending playback on switch, disable and leave; hidden tabs do not enqueue', t => {
   const previous = globalThis.document
-  globalThis.document = { hidden: false }
+  globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {} }
   t.after(() => { globalThis.document = previous; speechEnabled.value = false; speechAutoPlay.value = false })
   speechEnabled.value = true; speechAutoPlay.value = true
   const scope = ref('chat:12')
@@ -127,4 +127,30 @@ test('page lifecycle clears pending playback on switch, disable and leave; hidde
     assert.equal(leaving.active, false)
     assert.equal(chatSpeechAutoPlay.mark('group:56', 2), undefined)
   } finally { app.unmount() }
+})
+
+test('blocked playback is visible in a toast and trusted desktop/mobile gestures resume it', async t => {
+  const previous = globalThis.document, handlers = new Map(), notices = []
+  globalThis.document = { hidden: false,
+    addEventListener(type, fn) { handlers.set(type, fn) },
+    removeEventListener(type) { handlers.delete(type) } }
+  t.after(() => { globalThis.document = previous })
+  let resumes = 0
+  t.mock.method(speechQueue, 'resume', () => resumes++)
+  const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+  const app = renderer.createApp({ setup() { useSpeechAutoPlay(() => 'chat:12'); return () => null } })
+  app.provide('toast', (...args) => notices.push(args)); app.mount({})
+  try {
+    speechPlaybackBlocked.value = true; await nextTick()
+    assert.match(notices[0][0], /点击或轻触页面/)
+    handlers.get('click')({ type: 'click', isTrusted: false })
+    assert.equal(resumes, 0)
+    handlers.get('click')({ type: 'click', isTrusted: true }) // mouse click or touch-generated click
+    handlers.get('keydown')({ type: 'keydown', key: 'Enter', isTrusted: true })
+    assert.equal(resumes, 2)
+    document.hidden = true
+    handlers.get('click')({ type: 'click', isTrusted: true })
+    assert.equal(resumes, 2)
+  } finally { app.unmount() }
+  assert.equal(handlers.size, 0)
 })

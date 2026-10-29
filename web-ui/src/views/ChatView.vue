@@ -130,6 +130,7 @@
                 <SpeechButton
                   v-if="item.msg.role === 'assistant' && item.msg.speech_message_id"
                   :auto-token="item.msg.speech_auto_token"
+                  :notify-errors="immersive"
                   :key="`${chat.activeCharId}-${item.msg.speech_message_id}`" :character-id="chat.activeCharId" :character-name="chat.activeChar?.display_name" :message-id="item.msg.speech_message_id" :touch-target="isMobile"
                 />
               </div>

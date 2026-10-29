@@ -17,8 +17,8 @@ const code = compileScript(parse(source).descriptor, { id: 'speech-button-test' 
 function sharedPlayback() {
   const playingSpeech = Vue.ref(null), played = []
   const speechPlayer = createSpeechPlayback(() => {
-    const audio = { play: async () => {}, pause() {}, currentTime: 0 }
-    played.push(audio); return audio
+    const audio = { play: async () => { played.push({ src: audio.src, onended: audio.onended }) }, pause() {}, currentTime: 0 }
+    return audio
   }, () => { playingSpeech.value = null; speechQueue.interrupt() })
   const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null } })
   return { playingSpeech, speechPlayer, speechQueue, played, stopSpeech: () => speechPlayer.stop(),
@@ -26,14 +26,14 @@ function sharedPlayback() {
 }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
-function fixture(t, groupId, api, overrides = {}, messageId = 34, autoToken) {
+function fixture(t, groupId, api, overrides = {}, messageId = 34, autoToken, notifyErrors = false) {
   let state
   const notifications = [], calls = []
   const deps = { Vue, LinsheButton: {}, createSpeechTask, chatSpeechAutoPlay, speechEnabled: Vue.ref(true), ...sharedPlayback(),
     ttsApi: async (...args) => { calls.push(args); return api(...args) }, waitSpeech: async job => job, ...overrides }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
-  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId, autoToken }, { expose() {} }); return () => null } })
+  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId, autoToken, notifyErrors }, { expose() {} }); return () => null } })
   app.provide('toast', (...args) => notifications.push(args))
   app.mount({}); t.after(() => app.unmount())
   return { state, notifications, calls, played: deps.played, unmount: () => app.unmount() }
@@ -114,6 +114,12 @@ test('connection failures are not mislabeled as missing voice configuration', as
   assert.equal(f.notifications.length, 0)
   assert.equal(f.state.error.value, '无法连接语音服务')
   assert.equal(f.played.length, 0)
+})
+
+test('Galgame surfaces synthesis failures even when standard chat bubbles are hidden', async t => {
+  const f = fixture(t, null, async () => { throw new Error('无法连接语音服务') }, {}, 34, undefined, true)
+  await f.state.play()
+  assert.deepEqual(f.notifications, [['无法连接语音服务', 'error']])
 })
 
 test('cancelling an old request cannot stop a newer private/group playback or cancel its shared job', async t => {

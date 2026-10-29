@@ -14,8 +14,9 @@ test('one audio at a time; switching pages invalidates pending synthesis playbac
   assert.equal(audios[0].paused, true)
   assert.equal(await player.play('/late.wav', first), false)
   await player.play('/two.wav', second)
+  assert.equal(audios.length, 1, 'reuse the permitted element for consecutive playback')
   player.stop()
-  assert.equal(audios[1].paused, true)
+  assert.equal(audios[0].paused, true)
   assert.equal(await player.play('/late2.wav', second), false)
 })
 test('original audio joins the same player; blocked autoplay can be retried', async () => {

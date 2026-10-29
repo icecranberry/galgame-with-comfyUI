@@ -9,8 +9,9 @@ export const messageSpeech = reactive({})
 export const speechEnabled = ref(false)
 export const speechAutoPlay = ref(false)
 export const playingSpeech = ref(null)
+export const speechPlaybackBlocked = ref(false)
 export const speechPlayer = createSpeechPlayback(undefined, () => { playingSpeech.value = null; speechQueue.interrupt() })
-export const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null } })
+export const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null }, onBlocked: value => { speechPlaybackBlocked.value = value } })
 let loadSequence = 0
 onEvent('speech_update', job => { if (job?.id) speechJobs[job.id] = job })
 export function stopSpeech() { speechPlayer.stop(); playingSpeech.value = null }

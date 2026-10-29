@@ -5,6 +5,7 @@ import { dialogueCharacters, dialogueCharacterDelay, paginateDialogue, repaginat
 import { useGalgameTranscript } from '../src/composables/useGalgameTranscript.js'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '../src/stores/chat.js'
+import { chatSpeechAutoPlay } from '../src/utils/speechAutoPlay.js'
 
 test('pagination preserves full text and never splits emoji or combining characters', () => {
   const source = '你👩‍👩‍👧‍👦好。\n\n（轻声说）e\u0301再见。'.repeat(12)
@@ -71,6 +72,8 @@ test('saved full reply and prediction identity arrive before image tasks release
   setActivePinia(createPinia())
   const chat = useChatStore()
   chat.activeCharId = 1
+  const leaveSpeech = chatSpeechAutoPlay.enter('chat:1', () => true)
+  t.after(leaveSpeech)
   const send = chat.sendMessage('你好', 'smart', false, { galgameMode: true })
   assert.equal(requestBody.galgame_mode, true)
   assert.equal(requestBody.message, '你好', 'the mode preference must not be appended to the user message')
@@ -84,6 +87,9 @@ test('saved full reply and prediction identity arrive before image tasks release
   emit('guesses', { a: '好呀', b: '再聊一会儿', source_raw_id: 12 })
   await new Promise(resolve => setTimeout(resolve, 20))
   assert.equal(chat.responseComplete, true)
+  const sentence = chat.messages.find(message => message.speech_message_id === 22)
+  assert.ok(sentence, 'Galgame replies retain the real ID required for speech synthesis')
+  assert.equal(chatSpeechAutoPlay.claim(sentence.speech_auto_token), true, 'Galgame requests use the same automatic speech pipeline')
   assert.equal(chat.dialogueRevision, 1)
   assert.equal(chat.guessSourceRawId, 12)
   assert.deepEqual(chat.guesses, { a: '好呀', b: '再聊一会儿' })

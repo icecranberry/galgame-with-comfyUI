@@ -24,22 +24,25 @@ import { ttsApi } from '../api/tts.js'
 import { speechEnabled, speechJobs, messageSpeech, speechQueue, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
-const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, touchTarget: Boolean, autoToken: Number })
+const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, touchTarget: Boolean, autoToken: Number, notifyErrors: Boolean })
 const toast = inject('toast', null)
 const error = ref(''), pending = ref(false), phase = ref('idle')
-const waiting = computed(() => ['preparing', 'ready'].includes(phase.value))
+const waiting = computed(() => ['preparing', 'ready', 'blocked'].includes(phase.value))
 const isPlaying = computed(() => phase.value === 'playing')
 const job = computed(() => speechJobs[messageSpeech[props.messageId]])
 const failure = computed(() => error.value || (!pending.value && job.value?.status === 'failed' && (job.value.error || '朗读失败，请重试')))
 const label = computed(() => isPlaying.value ? '停止朗读' : waiting.value
-  ? `${phase.value === 'ready' ? '等待播放' : pending.value ? '正在请求' : job.value?.status === 'queued' ? '语音排队中' : '语音生成中'}，点击取消`
+  ? `${phase.value === 'blocked' ? '轻触页面继续播放' : phase.value === 'ready' ? '等待播放' : pending.value ? '正在请求' : job.value?.status === 'queued' ? '语音排队中' : '语音生成中'}，点击取消`
   : failure.value ? '重试朗读' : '朗读')
 let entry, disposed = false
 function showError(e) {
   if (disposed || e.name === 'AbortError') return
   if (e.code === 'VOICE_NOT_CONFIGURED' && toast) {
     toast(`请先为${props.characterName ? `「${props.characterName}」` : '该角色'}配置声音：角色详情 → 声音设置`, 'warning')
-  } else error.value = e.message
+  } else {
+    error.value = e.message
+    if (props.notifyErrors) toast?.(e.message, 'error')
+  }
 }
 async function play() {
   if (entry?.active) { await cancel(); return }
