@@ -4,6 +4,7 @@ import * as api from '../api/index.js'
 import { useMessageWindow } from '../composables/useMessageWindow.js'
 import { useProactiveStore } from './notifications.js'
 import { emitCharacterAvatarChanged } from '../utils/characterReactionProducers.js'
+import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -682,6 +683,7 @@ export const useChatStore = defineStore('chat', () => {
                if (m) {
                  m.id = d.id
                  m.speech_message_id = d.id
+                 m.speech_auto_token = chatSpeechAutoPlay.mark(`chat:${charId}`, d.id)
                   if (d.content !== undefined) m.content = d.content
                   if (Array.isArray(d.images) && d.images.length && !m.sticker_images?.length && !pendingStickerTimers.has(m)) {
                     scheduleSticker(m, d.images, !!d.leadingSticker)
@@ -854,6 +856,7 @@ export const useChatStore = defineStore('chat', () => {
         messages.value.push({
           id: msgIds[i] || (i === 0 ? data.msg_id : uid()),
           speech_message_id: msgIds[i] || (i === 0 ? data.msg_id : null),
+          speech_auto_token: chatSpeechAutoPlay.mark(`chat:${charId}`, msgIds[i] || (i === 0 ? data.msg_id : null)),
           role: 'assistant',
           type: 'text',
           content: segments[i],
@@ -927,6 +930,8 @@ export const useChatStore = defineStore('chat', () => {
           content: msg.content,
           created_at: data.created_at,
           is_delayed_reply: true,
+          speech_message_id: msg.id,
+          speech_auto_token: chatSpeechAutoPlay.mark(`chat:${charId}`, msg.id),
         })
       }
     }

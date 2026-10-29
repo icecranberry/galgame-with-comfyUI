@@ -7,6 +7,7 @@ import { createSpeechTask } from '../src/utils/speechTask.js'
 import { createSpeechPlayback } from '../src/utils/speechPlayback.js'
 import { createSpeechQueue } from '../src/utils/speechQueue.js'
 import { ttsApi } from '../src/api/tts.js'
+import { chatSpeechAutoPlay } from '../src/utils/speechAutoPlay.js'
 
 const source = readFileSync(new URL('../src/components/SpeechButton.vue', import.meta.url), 'utf8')
 const code = compileScript(parse(source).descriptor, { id: 'speech-button-test' }).content
@@ -25,14 +26,14 @@ function sharedPlayback() {
 }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
-function fixture(t, groupId, api, overrides = {}, messageId = 34) {
+function fixture(t, groupId, api, overrides = {}, messageId = 34, autoToken) {
   let state
   const notifications = [], calls = []
-  const deps = { Vue, LinsheButton: {}, createSpeechTask, speechEnabled: Vue.ref(true), ...sharedPlayback(),
+  const deps = { Vue, LinsheButton: {}, createSpeechTask, chatSpeechAutoPlay, speechEnabled: Vue.ref(true), ...sharedPlayback(),
     ttsApi: async (...args) => { calls.push(args); return api(...args) }, waitSpeech: async job => job, ...overrides }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
-  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId }, { expose() {} }); return () => null } })
+  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId, autoToken }, { expose() {} }); return () => null } })
   app.provide('toast', (...args) => notifications.push(args))
   app.mount({}); t.after(() => app.unmount())
   return { state, notifications, calls, played: deps.played, unmount: () => app.unmount() }
@@ -61,6 +62,29 @@ test('missing voices show a named warning toast in private and group chat and re
 test('transport preserves configuration error codes for the shared button', async t => {
   t.mock.method(globalThis, 'fetch', async () => Response.json({ error: '需要配置声音', code: 'VOICE_NOT_CONFIGURED' }, { status: 400 }))
   await assert.rejects(ttsApi('/characters/12/messages/34', {}), { code: 'VOICE_NOT_CONFIGURED', message: '需要配置声音' })
+})
+
+test('new private/group sentences auto-enqueue in order and never replay on remount', async t => {
+  for (const groupId of [null, 56]) {
+    const scope = groupId ? 'group:56' : 'chat:12'
+    const leave = chatSpeechAutoPlay.enter(scope, () => true)
+    const runtime = sharedPlayback(), pending = deferred()
+    const token = chatSpeechAutoPlay.mark(scope, 34)
+    const first = fixture(t, groupId, () => pending.promise, runtime, 34, token)
+    const second = fixture(t, groupId, async () => ({ id: 'second', audio_url: '/second.wav' }), runtime, 35, chatSpeechAutoPlay.mark(scope, 35))
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(first.calls.length, 1)
+    assert.equal(second.state.label.value, '等待播放，点击取消')
+    assert.equal(runtime.played.length, 0)
+    const duplicate = fixture(t, groupId, () => assert.fail('must not replay'), runtime, 34, token)
+    assert.equal(duplicate.calls.length, 0)
+    pending.resolve({ id: 'first', audio_url: '/first.wav' })
+    await new Promise(resolve => setImmediate(resolve))
+    runtime.played[0].onended()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(runtime.played.map(audio => audio.src), ['/first.wav', '/second.wav'])
+    leave()
+  }
 })
 
 test('private and group buttons retain click order when later synthesis finishes first', async t => {

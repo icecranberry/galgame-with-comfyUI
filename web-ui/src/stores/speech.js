@@ -7,6 +7,7 @@ import { createSpeechQueue } from '../utils/speechQueue.js'
 export const speechJobs = reactive({})
 export const messageSpeech = reactive({})
 export const speechEnabled = ref(false)
+export const speechAutoPlay = ref(false)
 export const playingSpeech = ref(null)
 export const speechPlayer = createSpeechPlayback(undefined, () => { playingSpeech.value = null; speechQueue.interrupt() })
 export const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null } })
@@ -19,6 +20,7 @@ export async function loadSpeech(characterId, { groupId } = {}) {
   const settings = await ttsApi('/settings')
   if (sequence !== loadSequence) return
   speechEnabled.value = settings.enabled
+  speechAutoPlay.value = settings.auto_play === true
   const history = await ttsApi(groupId ? `/groups/${groupId}/messages` : `/characters/${characterId}/messages`)
   if (sequence !== loadSequence) return
   // 历史快照不得覆盖加载期间收到的 SSE 更新或新一次朗读的消息绑定。

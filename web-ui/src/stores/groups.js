@@ -7,6 +7,7 @@
  * - 消息 id 去重：直连流 + 统一流会重复收到同一条消息
  */
 import { defineStore } from 'pinia'
+import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
 import { ref, computed, reactive } from 'vue'
 import { useMessageWindow, MESSAGE_WINDOW_INITIAL, MESSAGE_WINDOW_EXPAND } from '../composables/useMessageWindow.js'
 import * as api from '../api/index.js'
@@ -254,7 +255,9 @@ export const useGroupsStore = defineStore('groups', () => {
         // 延迟期间，已经上屏的上一条消息可能刚收到 prompt；此时暂停当前分句。
         await session.imageGate.waitUntilClear()
         if (session.messages.some(m => m.id === msg.id)) continue
-        session.messages.push({ ...msg, images: parseImages(msg.images) })
+        session.messages.push({ ...msg, images: parseImages(msg.images),
+          speech_auto_token: msg.role === 'assistant' && msg.content && msg.speaker_character_id
+            ? chatSpeechAutoPlay.mark(`group:${session.groupId}`, msg.id) : undefined })
         const hasImage = parseImages(msg.images).length > 0
           || ['pending', 'generating', 'retrying', 'done'].includes(msg.genStatus)
         if (hasImage) {

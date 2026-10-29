@@ -86,6 +86,7 @@
               <div class="msg-text">{{ msg.content }}</div>
               <SpeechButton
                 v-if="canSpeak(msg)"
+                :auto-token="msg.speech_auto_token"
                 :key="`${store.activeGroupId}-${msg.id}`"
                 :character-id="msg.speaker_character_id" :character-name="msg.speaker_name || memberOf(msg)?.display_name"
                 :message-id="msg.id" :group-id="store.activeGroupId" :touch-target="isMobile"
@@ -433,10 +434,12 @@ import { collectGroupImages } from '../utils/groupAlbum.js'
 import { applyMention, useMentionPicker } from '../composables/useMentionPicker.js'
 import SpeechButton from '../components/SpeechButton.vue'
 import { loadSpeech, stopSpeech, speechEnabled } from '../stores/speech.js'
+import { useSpeechAutoPlay } from '../composables/useSpeechAutoPlay.js'
 import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
 import '../styles/speechBubble.css'
 
 const route = useRoute()
+useSpeechAutoPlay(() => `group:${route.params.id}`)
 const router = useRouter()
 const store = useGroupsStore()
 const chat = useChatStore()

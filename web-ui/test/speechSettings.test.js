@@ -12,7 +12,7 @@ const code = compileScript(parse(source).descriptor, { id: 'speech-settings-test
 function fixture(t, api, settingsApi = async () => ({ enabled: true })) {
   let state, stops = 0
   const calls = [], speechEnabled = Vue.ref(true)
-  const deps = { Vue, speechEnabled, stopSpeech: () => stops++, LocalSpeechModels: {}, LinsheButton: {}, LinsheSwitch: {}, LinsheTabs: {}, LinsheInput: {},
+  const deps = { Vue, speechEnabled, speechAutoPlay: Vue.ref(false), stopSpeech: () => stops++, LocalSpeechModels: {}, LinsheButton: {}, LinsheSwitch: {}, LinsheTabs: {}, LinsheInput: {},
     ttsApi: async (...args) => { calls.push(args); return args[0] === '/settings' ? settingsApi(...args) : api(...args) } }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
@@ -64,4 +64,27 @@ test('restart failure and missing models remain retryable errors, never success 
     assert.equal(f.state.notice.value, '')
     assert.equal(f.state.error.value, response.message || response.error)
   }
+})
+
+test('auto playback defaults off, saves independently and preserves state on failed saves', async t => {
+  let settings = { enabled: true }, fail = false
+  const f = fixture(t, async () => {}, async (_, body) => {
+    if (fail) throw new Error('保存失败')
+    settings = { ...settings, ...body }
+    return settings
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.state.speechAutoPlay.value, false)
+  await f.state.toggleAutoPlay(true)
+  assert.deepEqual(f.calls.at(-1), ['/settings', { auto_play: true }, 'PUT'])
+  assert.equal(f.state.speechAutoPlay.value, true)
+  fail = true
+  await f.state.toggleAutoPlay(false)
+  assert.equal(f.state.speechAutoPlay.value, true)
+  assert.equal(f.state.error.value, '保存失败')
+  fail = false
+  await f.state.toggleAutoPlay(false)
+  assert.equal(f.state.speechAutoPlay.value, false)
+  assert.equal(f.stops(), 1)
+  assert.equal(settings.enabled, true)
 })

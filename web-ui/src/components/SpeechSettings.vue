@@ -7,6 +7,13 @@
       </div>
       <linshe-switch :model-value="speechEnabled" :disabled="busy" size="sm" aria-label="启用语音朗读" on-text="已开启" off-text="未开启" @update:model-value="toggle" />
     </div>
+    <div class="speech-heading speech-auto-play">
+      <div class="speech-title">
+        <h4>对话自动播放</h4>
+        <p>停留在私聊或群聊页面时，自动合成并依次播放新分句。需要开启语音朗读并为角色配置声音，不补播历史消息。</p>
+      </div>
+      <linshe-switch :model-value="speechAutoPlay" :disabled="busy || disabled" size="sm" aria-label="对话自动播放" on-text="已开启" off-text="未开启" @update:model-value="toggleAutoPlay" />
+    </div>
     <linshe-tabs class="speech-mode" :model-value="mode" :options="modes" :disabled="busy || disabled || localModelBusy || checking || restarting || recovering" aria-label="语音接入方式" @update:model-value="switchMode" />
     <Transition name="speech-maintenance" mode="out-in">
     <div v-if="mode === 'api'" key="api" class="speech-api">
@@ -62,7 +69,7 @@ import LinsheTabs from './ui/LinsheTabs.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LocalSpeechModels from './LocalSpeechModels.vue'
 import { ttsApi } from '../api/tts.js'
-import { speechEnabled, stopSpeech } from '../stores/speech.js'
+import { speechEnabled, speechAutoPlay, stopSpeech } from '../stores/speech.js'
 defineProps({ disabled: Boolean })
 const emit = defineEmits(['changed'])
 const mode = ref('local'), api = ref({ endpoint: '', model: '', has_key: false }), apiKey = ref(''), clearKey = ref(false)
@@ -70,6 +77,7 @@ const localModelBusy = ref(false)
 const modes = [{ label: '本地模型', value: 'local' }, { label: 'API 接入', value: 'api' }]
 function applySettings(settings) {
   speechEnabled.value = settings.enabled
+  speechAutoPlay.value = settings.auto_play === true
   mode.value = settings.mode || 'local'
   if (settings.api) api.value = { ...settings.api }
   apiKey.value = ''; clearKey.value = false
@@ -101,6 +109,15 @@ async function toggle(enabled) {
   busy.value = true; error.value = ''; notice.value = ''
   try { speechEnabled.value = (await ttsApi('/settings', { enabled }, 'PUT')).enabled; if (!enabled) stopSpeech() }
   catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+async function toggleAutoPlay(auto_play) {
+  if (busy.value) return
+  busy.value = true; error.value = ''; notice.value = ''
+  try {
+    speechAutoPlay.value = (await ttsApi('/settings', { auto_play }, 'PUT')).auto_play === true
+    if (!speechAutoPlay.value) stopSpeech()
+  } catch (e) { error.value = e.message }
   finally { busy.value = false }
 }
 async function check() {
@@ -141,6 +158,7 @@ onMounted(async () => {
 <style scoped>
 .speech-settings { padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--bg-sunken); }
 .speech-mode { margin-top:14px; }
+.speech-auto-play { margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
 .speech-api { display:grid; gap:12px; margin-top:14px; }
 .speech-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
 .speech-api-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }

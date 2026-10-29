@@ -18,12 +18,13 @@
   </div>
 </template>
 <script setup>
-import { computed, inject, onBeforeUnmount, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import { ttsApi } from '../api/tts.js'
 import { speechEnabled, speechJobs, messageSpeech, speechQueue, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
-const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, touchTarget: Boolean })
+import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
+const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, touchTarget: Boolean, autoToken: Number })
 const toast = inject('toast', null)
 const error = ref(''), pending = ref(false), phase = ref('idle')
 const waiting = computed(() => ['preparing', 'ready'].includes(phase.value))
@@ -72,6 +73,9 @@ async function cancel() {
   try { await previous?.cancel() }
   catch (e) { if (entry === previous) showError(e) }
 }
+watch(() => props.autoToken, token => {
+  if (chatSpeechAutoPlay.claim(token) && !entry?.active) play()
+}, { immediate: true })
 onBeforeUnmount(() => { disposed = true; cancel() })
 </script>
 <style scoped>

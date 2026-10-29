@@ -129,6 +129,7 @@
                 <div class="msg-text" v-html="renderContent(item.msg.content)"></div>
                 <SpeechButton
                   v-if="item.msg.role === 'assistant' && item.msg.speech_message_id"
+                  :auto-token="item.msg.speech_auto_token"
                   :key="`${chat.activeCharId}-${item.msg.speech_message_id}`" :character-id="chat.activeCharId" :character-name="chat.activeChar?.display_name" :message-id="item.msg.speech_message_id" :touch-target="isMobile"
                 />
               </div>
@@ -612,6 +613,7 @@ import SpeechButton from '../components/SpeechButton.vue'
 import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
 import '../styles/speechBubble.css'
 import { loadSpeech, stopSpeech, speechEnabled } from '../stores/speech.js'
+import { useSpeechAutoPlay } from '../composables/useSpeechAutoPlay.js'
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
@@ -667,6 +669,7 @@ watch(immersive, async value => {
   else { galgameEntering.value = false; await nextTick(); if (!isMobile?.value) inputEl.value?.focus({ preventScroll: true }) }
 })
 const chat = useChatStore()
+useSpeechAutoPlay(() => `chat:${route.params.id || chat.activeCharId}`)
 let galgameBackgroundImage = null
 let galgameBackgroundReady = Promise.resolve()
 let modeRequest = 0
