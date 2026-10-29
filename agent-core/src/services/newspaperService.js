@@ -24,6 +24,7 @@ import { getLocalDateKey } from '../utils/localDate.js';
 import { getLightNoteWithWeather } from './timeLight.js';
 import { extractFirstJson, repairJson } from './eventGenerator.js';
 import { buildCharacterPersona } from './characterPersona.js';
+import { getActiveOutfits } from './outfitService.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { ITEM_EFFECTS, WORLD_OUTFIT_CHANCE } from './itemService.js';
 
@@ -809,8 +810,12 @@ export function buildMaterialsPrompt(featured, withWorldState, worldLoot = null)
   const now = new Date();
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
   const weatherNote = getLightNoteWithWeather(now);
-  // 统一入口：short_prompt + 外观段（含生效外观注入，「你」→主角名），特稿写作与主角配图共用
-  const persona = buildCharacterPersona(featured, { variant: 'short', person: featured.display_name });
+  // 日报封面跳过日程套装，保留道具换装、专属形态和全镇状态。
+  const persona = buildCharacterPersona(featured, {
+    variant: 'short',
+    person: featured.display_name,
+    outfits: getActiveOutfits(featured.id),
+  });
   const lootBlock = withWorldState && worldLoot ? `\n【今日镇内异变】
 今天全镇居民都受到同一个效果影响，world_state 必须围绕它展开，不得自创其他状态：
 - 类型：${worldLoot.kind === 'transform' ? '变身形态（全镇每个居民都变成素材指定的同一种拟人形态）' : '服装（每个居民换上同一主题的服装）'}

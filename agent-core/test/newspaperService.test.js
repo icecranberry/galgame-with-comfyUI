@@ -144,6 +144,49 @@ test('buildFormatPrompt toggles world_state section and includes featured name',
   assert.ok(withoutWs.includes('不要出现它'));
 });
 
+test('newspaper featured persona ignores scheduled outfits while keeping active special appearances', async t => {
+  const db = getDb();
+  t.after(() => closeDb());
+  const { buildCharacterPersona } = await import('../src/services/characterPersona.js');
+  const id = Number(db.prepare(`
+    INSERT INTO characters (name, display_name, short_prompt, base_prompt)
+    VALUES ('paperOutfit', '封面小姐', '封面小姐是镇上的旅客。', '你是旅客。\n\n## 你的外观\n你有银色长发，穿着蓝色长裙。')
+  `).run().lastInsertRowid);
+  const featured = db.prepare('SELECT * FROM characters WHERE id = ?').get(id);
+  const insertOutfit = db.prepare(`
+    INSERT INTO character_outfits (character_id, name, description, scene, enabled) VALUES (?, ?, ?, ?, 0)
+  `);
+  insertOutfit.run(id, '便装', '日程专用红色运动服', 'casual');
+  insertOutfit.run(id, '睡衣', '日程专用粉色睡衣', 'sleep');
+  const schedule = db.prepare(`
+    INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json) VALUES (?, ?, ?)
+  `);
+  // 日间换装和睡眠强制换装均不影响日报封面。
+  for (const [replyDelay, expectedOutfit] of [[10, '日程专用红色运动服'], [-1, '日程专用粉色睡衣']]) {
+    schedule.run(id, getLocalDateKey(), JSON.stringify([
+      { startTime: '00:00', endTime: '24:00', outfit: '便装', replyDelay },
+    ]));
+    assert.ok(buildCharacterPersona(featured).includes(expectedOutfit), 'normal persona still follows the schedule');
+    const materials = svc.buildMaterialsPrompt(featured, false);
+    assert.ok(materials.includes(featured.short_prompt));
+    assert.ok(materials.includes('封面小姐有银色长发，穿着蓝色长裙。'));
+    assert.ok(!materials.includes('日程专用'), 'newspaper must not inherit daytime clothes or forced sleepwear');
+  }
+
+  // 道具、专属形态和全镇外观仍正常注入。
+  db.prepare(`INSERT INTO global_outfits (name, description, enabled, character_id) VALUES ('节日披肩', '道具专用金色披肩', 1, ?)`).run(id);
+  db.prepare(`INSERT INTO character_outfits (character_id, name, description, enabled) VALUES (?, '临时形态', '道具专用白色羽翼', 1)`).run(id);
+  db.prepare(`
+    INSERT INTO town_newspapers (publish_date, name, edition, items_json, world_state_json)
+    VALUES (?, '邻舍日报', 1, '[]', ?)
+  `).run(getLocalDateKey(), JSON.stringify({ name: '花冠日', outfit: '全镇专用鲜花冠' }));
+  const materials = svc.buildMaterialsPrompt(featured, false);
+  for (const appearance of ['道具专用金色披肩', '道具专用白色羽翼', '全镇专用鲜花冠']) {
+    assert.ok(materials.includes(appearance), 'active item and town appearances must remain available');
+  }
+  assert.ok(!materials.includes('日程专用'));
+});
+
 test('buildComplaintTopic builds forced topic from event', () => {
   const topic = svc.buildComplaintTopic(VALID_EVENT, '林小姐');
   assert.equal(topic.name, '今日报纸吐槽');
