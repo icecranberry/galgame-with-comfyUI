@@ -3,14 +3,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as Vue from 'vue'
 import { createSpeechPlayback } from '../src/utils/speechPlayback.js'
+import { createSpeechQueue } from '../src/utils/speechQueue.js'
 
 const code = readFileSync(new URL('../src/stores/speech.js', import.meta.url), 'utf8')
   .replace(/^import .*$/gm, '').replace(/\bexport /g, '')
-  + '\nreturn { loadSpeech, speechJobs, messageSpeech, speechEnabled, playSpeechJob, speechPlayer, playingSpeech }'
+  + '\nreturn { loadSpeech, speechJobs, messageSpeech, speechEnabled, speechQueue, speechPlayer, playingSpeech, stopSpeech }'
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
 function fixture(api, playerFactory = createSpeechPlayback) {
   let event
-  const store = new Function('reactive', 'ref', 'onEvent', 'ttsApi', 'createSpeechPlayback', code)(Vue.reactive, Vue.ref, (name, fn) => { event = fn }, api, playerFactory)
+  const store = new Function('reactive', 'ref', 'onEvent', 'ttsApi', 'createSpeechPlayback', 'createSpeechQueue', code)(Vue.reactive, Vue.ref, (name, fn) => { event = fn }, api, playerFactory, createSpeechQueue)
   return { ...store, update: job => event(job) }
 }
 
@@ -45,13 +46,12 @@ test('history arriving late cannot overwrite a new retry mapping or a live job u
   assert.equal(store.messageSpeech[35], 'other')
 })
 
-test('an obsolete play promise for the same cached job cannot clear the newer playing state', async () => {
-  const firstPlay = deferred()
-  let intent = 0, count = 0
-  const store = fixture(async () => [], () => ({ current: ticket => ticket === intent, begin: () => ++intent, play: () => ++count === 1 ? firstPlay.promise : true }))
-  const job = { id: 'cached', audio_url: '/audio.wav' }
-  const first = store.playSpeechJob(job, store.speechPlayer.begin())
-  await store.playSpeechJob(job, store.speechPlayer.begin())
-  firstPlay.resolve(false); await first
-  assert.equal(store.playingSpeech.value, 'cached')
+test('global stop clears queued chat audio before late synthesis can start it', async () => {
+  const store = fixture(async () => [])
+  const first = store.speechQueue.reserve(), second = store.speechQueue.reserve()
+  store.stopSpeech()
+  first.ready({ id: 'late', audio_url: '/late.wav' })
+  assert.equal(first.active, false)
+  assert.equal(second.active, false)
+  assert.equal(store.playingSpeech.value, null)
 })

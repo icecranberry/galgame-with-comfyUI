@@ -2,12 +2,14 @@ import { reactive, ref } from 'vue'
 import { onEvent } from './unifiedStream.js'
 import { ttsApi } from '../api/tts.js'
 import { createSpeechPlayback } from '../utils/speechPlayback.js'
+import { createSpeechQueue } from '../utils/speechQueue.js'
 
 export const speechJobs = reactive({})
 export const messageSpeech = reactive({})
 export const speechEnabled = ref(false)
 export const playingSpeech = ref(null)
-export const speechPlayer = createSpeechPlayback(undefined, () => { playingSpeech.value = null })
+export const speechPlayer = createSpeechPlayback(undefined, () => { playingSpeech.value = null; speechQueue.interrupt() })
+export const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null } })
 let loadSequence = 0
 onEvent('speech_update', job => { if (job?.id) speechJobs[job.id] = job })
 export function stopSpeech() { speechPlayer.stop(); playingSpeech.value = null }
@@ -41,15 +43,4 @@ export async function waitSpeech(job, signal) {
   }
   if (job.status !== 'completed') throw new Error(job.error || '语音生成已取消')
   return job
-}
-export async function playSpeechJob(job, ticket) {
-  if (!speechPlayer.current(ticket)) return
-  playingSpeech.value = job.id
-  try {
-    const played = await speechPlayer.play(job.audio_url, ticket, () => { playingSpeech.value = null })
-    if (!played && playingSpeech.value === job.id && speechPlayer.current(ticket)) playingSpeech.value = null
-  } catch {
-    if (playingSpeech.value === job.id && speechPlayer.current(ticket)) playingSpeech.value = null
-    throw new Error('浏览器未允许播放，请再次点击播放')
-  }
 }

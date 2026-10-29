@@ -5,6 +5,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import { createSpeechTask } from '../src/utils/speechTask.js'
 import { createSpeechPlayback } from '../src/utils/speechPlayback.js'
+import { createSpeechQueue } from '../src/utils/speechQueue.js'
 import { ttsApi } from '../src/api/tts.js'
 
 const source = readFileSync(new URL('../src/components/SpeechButton.vue', import.meta.url), 'utf8')
@@ -13,26 +14,28 @@ const code = compileScript(parse(source).descriptor, { id: 'speech-button-test' 
   .replace(/^import .* from .*$/gm, '').replace('export default', 'return')
 
 function sharedPlayback() {
-  const playingSpeech = Vue.ref(null)
-  const speechPlayer = createSpeechPlayback(() => ({ play: async () => {}, pause() {}, currentTime: 0 }), () => { playingSpeech.value = null })
-  return { playingSpeech, speechPlayer, stopSpeech: () => speechPlayer.stop(),
-    speechJobs: Vue.reactive({}), messageSpeech: Vue.reactive({}),
-    playSpeechJob: async (job, ticket) => { playingSpeech.value = job.id; await speechPlayer.play(job.audio_url, ticket) } }
+  const playingSpeech = Vue.ref(null), played = []
+  const speechPlayer = createSpeechPlayback(() => {
+    const audio = { play: async () => {}, pause() {}, currentTime: 0 }
+    played.push(audio); return audio
+  }, () => { playingSpeech.value = null; speechQueue.interrupt() })
+  const speechQueue = createSpeechQueue({ player: speechPlayer, onPlaying: job => { playingSpeech.value = job?.id || null } })
+  return { playingSpeech, speechPlayer, speechQueue, played, stopSpeech: () => speechPlayer.stop(),
+    speechJobs: Vue.reactive({}), messageSpeech: Vue.reactive({}) }
 }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
 function fixture(t, groupId, api, overrides = {}, messageId = 34) {
   let state
-  const notifications = [], calls = [], played = []
-  const deps = { Vue, LinsheButton: {}, createSpeechTask, speechEnabled: Vue.ref(true), speechJobs: Vue.reactive({}), messageSpeech: Vue.reactive({}),
-    playingSpeech: Vue.ref(null), speechPlayer: { begin: () => 1, current: () => true }, stopSpeech() {},
-    ttsApi: async (...args) => { calls.push(args); return api(...args) }, waitSpeech: async job => job, playSpeechJob: async job => played.push(job), ...overrides }
+  const notifications = [], calls = []
+  const deps = { Vue, LinsheButton: {}, createSpeechTask, speechEnabled: Vue.ref(true), ...sharedPlayback(),
+    ttsApi: async (...args) => { calls.push(args); return api(...args) }, waitSpeech: async job => job, ...overrides }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId }, { expose() {} }); return () => null } })
   app.provide('toast', (...args) => notifications.push(args))
   app.mount({}); t.after(() => app.unmount())
-  return { state, notifications, calls, played, unmount: () => app.unmount() }
+  return { state, notifications, calls, played: deps.played, unmount: () => app.unmount() }
 }
 
 test('missing voices show a named warning toast in private and group chat and remain retryable', async t => {
@@ -60,6 +63,27 @@ test('transport preserves configuration error codes for the shared button', asyn
   await assert.rejects(ttsApi('/characters/12/messages/34', {}), { code: 'VOICE_NOT_CONFIGURED', message: '需要配置声音' })
 })
 
+test('private and group buttons retain click order when later synthesis finishes first', async t => {
+  for (const groupId of [null, 56]) {
+    const runtime = sharedPlayback(), pending = deferred()
+    const first = fixture(t, groupId, () => pending.promise, runtime)
+    const second = fixture(t, groupId, async () => ({ id: 'second', status: 'completed', audio_url: '/second.wav' }), runtime, 35)
+    const firstRun = first.state.play()
+    await second.state.play()
+    assert.equal(runtime.played.length, 0)
+    assert.equal(second.state.label.value, '等待播放，点击取消')
+    pending.resolve({ id: 'first', status: 'completed', audio_url: '/first.wav' })
+    await firstRun
+    assert.equal(first.state.isPlaying.value, true)
+    assert.equal(second.state.isPlaying.value, false)
+    runtime.played[0].onended()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(first.state.isPlaying.value, false)
+    assert.equal(second.state.isPlaying.value, true)
+    assert.deepEqual(runtime.played.map(audio => audio.src), ['/first.wav', '/second.wav'])
+  }
+})
+
 test('connection failures are not mislabeled as missing voice configuration', async t => {
   const f = fixture(t, 56, async () => { throw new Error('无法连接语音服务') })
   await f.state.play()
@@ -83,16 +107,16 @@ test('cancelling an old request cannot stop a newer private/group playback or ca
   assert.equal(newer.state.isPlaying.value, true)
 })
 
-test('unmounting a bubble sharing cached audio does not stop its current owner', async t => {
+test('unmounting a queued bubble sharing cached audio does not stop the current owner', async t => {
   const runtime = sharedPlayback(), job = { id: 'cached', status: 'completed', audio_url: '/cached.wav' }
   const first = fixture(t, null, async () => job, runtime)
   const second = fixture(t, 56, async () => job, runtime, 35)
   await first.state.play(); await second.state.play()
-  assert.equal(first.state.isPlaying.value, false)
-  assert.equal(second.state.isPlaying.value, true)
-  first.unmount()
-  assert.equal(runtime.playingSpeech.value, 'cached')
+  assert.equal(first.state.isPlaying.value, true)
+  assert.equal(second.state.waiting.value, true)
   second.unmount()
+  assert.equal(runtime.playingSpeech.value, 'cached')
+  first.unmount()
   assert.equal(runtime.playingSpeech.value, null)
 })
 

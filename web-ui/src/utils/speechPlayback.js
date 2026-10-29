@@ -14,7 +14,8 @@ export function createSpeechPlayback(createAudio = () => new Audio(), onStop = (
       const next = createAudio()
       audio = next
       next.src = url
-      next.onended = next.onerror = () => { if (audio === next) { audio = null; ended() } }
+      next.onended = () => { if (audio === next) { audio = null; ended() } }
+      next.onerror = () => { if (audio === next) { audio = null; ended(new Error('语音播放失败，请重试')) } }
       try { await next.play() } catch (error) { if (audio === next) audio = null; throw error }
       if (!current(ticket)) { next.pause(); return false }
       return true
