@@ -30,13 +30,15 @@
 <script setup>
 import { ref } from 'vue'
 
-defineProps({
+const props = defineProps({
   /** primary 主操作 / secondary 次要 / danger 危险 / ghost 幽灵 / icon 圆形图标钮 / chip 胶囊选择 / link 链接 */
   variant: { type: String, default: 'secondary' },
   /** sm / md / lg */
   size: { type: String, default: 'md' },
   /** Keep the existing skin while reserving an accessible touch target. */
   touchTarget: { type: Boolean, default: false },
+  /** 是否启用鼠标移入、移出时的果冻形变 */
+  hoverMotion: { type: Boolean, default: true },
   type: { type: String, default: 'button' },
   disabled: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
@@ -53,7 +55,7 @@ defineProps({
 const jellyPhase = ref('')
 
 const startJelly = (phase) => {
-  jellyPhase.value = phase
+  jellyPhase.value = props.hoverMotion ? phase : ''
 }
 
 const endJelly = (event) => {
