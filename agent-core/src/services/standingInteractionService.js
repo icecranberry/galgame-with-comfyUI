@@ -15,7 +15,7 @@ function version(value) {
 export function defaultStandingInteraction() {
   return { style: 'calm', expressionsEnabled: false, bindings: Object.fromEntries(SEMANTICS.map(k => [k, null])), compatibleSources: [], linesEnabled: false, lines: Object.fromEntries(INTERACTION_ACTIONS.map(k => [k, []])) };
 }
-export function createStandingInteractionService({ db, imageExists, emit = () => {} }) {
+export function createStandingInteractionService({ db, imageExists, emit = () => {}, readLines = readTouchLines }) {
   if (!db?.prepare || typeof imageExists !== 'function') throw new TypeError('standing interaction dependencies missing');
   function character(id) {
     if (!Number.isSafeInteger(Number(id)) || Number(id) < 1) fail('角色不存在', 404);
@@ -58,7 +58,7 @@ export function createStandingInteractionService({ db, imageExists, emit = () =>
     const regions = db.prepare('SELECT * FROM standing_interaction_regions WHERE character_id=?').all(char.id);
     return {
       characterId: char.id, name: char.display_name, isSleeping: Boolean(char.is_sleeping), version: row?.version || 0,
-      touchLines: readTouchLines(db, char.id),
+      touchLines: readLines(db, char.id),
       config: row ? parse(row.config_json, defaultStandingInteraction()) : defaultStandingInteraction(),
       slots: images(char.id).map(image => {
         const region = regions.find(r => r.slot_id === image.slot_id);

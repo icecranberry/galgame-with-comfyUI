@@ -8,10 +8,13 @@ import {onEvent,isUnifiedStreamConnected} from '../../stores/unifiedStream.js'
 import {standingPresentationChanged,standingSelectionKey} from '../../utils/standingInteractionRules.js'
 import {createStandingInteractionLifetime} from '../../utils/standingInteractionLifetime.js'
 import {createTouchReplyEngine} from '../../utils/standingTouch.js'
+import {createStandingTouchSpeech} from '../../utils/standingTouchSpeech.js'
+import {speechPlayer} from '../../stores/speech.js'
 const props=defineProps({base:{type:Object,required:true},suspended:Boolean,bubbleBottom:{type:Number,default:null}})
 const emit=defineEmits(['state','reaction'])
 const data=ref(null),connected=ref(isUnifiedStreamConnected()),note=ref(''),generation=ref(0),loadError=ref('')
 const engine=createTouchReplyEngine()
+const speech=createStandingTouchSpeech(speechPlayer)
 const lifetime=createStandingInteractionLifetime({scope:()=>standingSelectionKey(props.base)})
 // Feedback cancellation (blur/new chat) must not cancel a pending config retry.
 const requests=createStandingInteractionLifetime({scope:()=>standingSelectionKey(props.base)})
@@ -26,7 +29,7 @@ const message=computed(()=>{
   if(data.value.isSleeping)return '角色正在休息，醒来后即可触摸。'
   return note.value
 })
-function clear(){generation.value++;lifetime.clear();note.value='';emit('reaction',null)}
+function clear(){generation.value++;lifetime.clear();speech.stop();note.value='';emit('reaction',null)}
 function stopLoading(){requests.invalidate();requests.clear();controller?.abort();controller=null}
 async function load(){
   stopLoading()
@@ -40,6 +43,7 @@ async function load(){
     const value=await getStandingInteraction(id,{signal:own.signal})
     if(!requests.current(ticket))return
     data.value=value;loadError.value='';retryDelay=1000
+    speech.reconcile(value.touchLines?.speech)
   }catch(error){
     if(!requests.current(ticket))return
     data.value=null;loadError.value=error.message||'读取失败';clear()
@@ -50,11 +54,21 @@ async function load(){
   }
 }
 function refresh(){connected.value=isUnifiedStreamConnected();retryDelay=1000;load()}
+function standingUpdated(event){
+  if(String(event.characterId)!==String(props.base.characterId))return
+  if(event.voiceChanged){
+    speech.stop()
+    // Invalidate immediately, including gestures during the refresh request.
+    if(data.value?.touchLines)data.value={...data.value,touchLines:{...data.value.touchLines,speech:null}}
+  }
+  refresh()
+}
 function act(part,point=null){
   if(disabled.value)return
   const result=engine.act(part,data.value.touchLines?.lines)
   if(!result)return
   note.value=result.text;emit('reaction',{...result,point})
+  speech.play(part,result.text,data.value.touchLines?.speech)
   lifetime.after('motion',1100,()=>emit('reaction',null))
   lifetime.after('note',3200,()=>note.value='')
 }
@@ -64,7 +78,7 @@ watch(()=>props.base,(next,old)=>{
 },{immediate:true})
 watch(()=>props.suspended,suspended=>{clear();if(suspended)stopLoading();else refresh()})
 watch([enabled,disabled,generation,message],()=>emit('state',{enabled:enabled.value,disabled:disabled.value,generation:generation.value,speaking:Boolean(message.value)}),{immediate:true})
-const offs=[onEvent('connected',refresh),onEvent('disconnected',()=>{stopLoading();connected.value=false;data.value=null;clear()}),onEvent('expression_standings_updated',e=>{if(String(e.characterId)===String(props.base.characterId))refresh()}),onEvent('schedule_state_change',e=>{if(String(e.character_id)===String(props.base.characterId)){data.value=null;clear();refresh()}})]
+const offs=[onEvent('connected',refresh),onEvent('disconnected',()=>{stopLoading();connected.value=false;data.value=null;clear()}),onEvent('expression_standings_updated',standingUpdated),onEvent('schedule_state_change',e=>{if(String(e.character_id)===String(props.base.characterId)){data.value=null;clear();refresh()}})]
 window.addEventListener('blur',clear)
 window.addEventListener('focus',refresh)
 onBeforeUnmount(()=>{stopLoading();requests.dispose();lifetime.dispose();clear();offs.forEach(fn=>fn());window.removeEventListener('blur',clear);window.removeEventListener('focus',refresh)})

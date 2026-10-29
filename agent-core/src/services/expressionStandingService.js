@@ -18,6 +18,7 @@ import { getStandingDisplay } from './standingDisplay.js';
 import { parseStandingPrompts, runStandingBatch, frameStandingPrompt } from './expressionStandingPipeline.js';
 import { buildTouchLineMessages, readTouchLines, startTouchLines, hasTouchLines } from './standingTouchLines.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
+import { readStandingTouchLines } from './standingTouchSpeechRuntime.js';
 
 const CATEGORY = 'expression_standing';
 const busyCharacters = new Set();
@@ -51,7 +52,7 @@ export function listExpressionStandings(id) {
   character(id);
   const rows = getDb().prepare('SELECT * FROM character_expression_standings WHERE character_id=?').all(id);
   return {
-    touchLines: readTouchLines(getDb(), id),
+    touchLines: readStandingTouchLines(getDb(), id),
     slots: standingSlots().map(s => {
       const row = rows.find(r => r.slot_id === s.id);
       return { ...s, ...row, generation: JSON.parse(row?.config_json || '{}'), bounds: JSON.parse(row?.bounds_json || 'null') };
@@ -78,8 +79,13 @@ export function listStandingOverview() {
       SELECT id FROM expression_standing_jobs WHERE character_id=c.id ORDER BY created_at DESC,rowid DESC LIMIT 1
     ) ORDER BY c.id`).all().map(row => {
     const missingSlotIds = slots.filter(s => !images.get(row.id)?.has(s.id)).map(s => s.id);
-    const touch = readTouchLines(db,row.id);
-    return { ...row, hasTouchLines:hasTouchLines(touch), touchStatus:touch.status, count: slots.length - missingSlotIds.length, total: slots.length, missingSlotIds, busy: busyCharacters.has(row.id) };
+    const touch = readStandingTouchLines(db,row.id);
+    const speechLines = Object.values(touch.speech.lines).flat();
+    const touchSpeech = { enabled: touch.speech.enabled, configured: touch.speech.configured, reason: touch.speech.reason,
+      total: speechLines.length, ready: speechLines.filter(line => line.audio_url).length,
+      pending: speechLines.filter(line => ['queued', 'generating'].includes(line.status)).length,
+      failed: speechLines.filter(line => ['failed', 'cancelled'].includes(line.status)).length };
+    return { ...row, touchSpeech, hasTouchLines:hasTouchLines(touch), touchStatus:touch.status, count: slots.length - missingSlotIds.length, total: slots.length, missingSlotIds, busy: busyCharacters.has(row.id) };
   });
 }
 

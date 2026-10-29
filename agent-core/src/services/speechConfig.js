@@ -3,6 +3,16 @@ import { getSetting, setSetting } from '../db/settings.js';
 import { API_DEFAULTS, apiConnection, apiVoiceParams } from './speechApiClient.js';
 import { resolveApiReferences } from './speechApiAssets.js';
 import { localTtsModel, selectedLocalTtsModel } from './localTtsModels.js';
+import { broadcast } from './unifiedStreamBus.js';
+
+export function notifyStandingVoiceChanged(characterId) {
+  const characters = characterId === undefined
+    ? getDb().prepare('SELECT character_id FROM character_standing_touch_lines').all()
+    : [{ character_id: Number(characterId) }];
+  for (const row of characters) broadcast('expression_standings_updated', {
+    characterId: row.character_id, scope: 'touch-lines-speech', voiceChanged: true,
+  });
+}
 
 export function getSpeechSettings() {
   getDb();
@@ -29,6 +39,7 @@ export function setSpeechSettings(input) {
     if (input.api?.clear_key === true) setSetting('tts_api_key', '');
     else if (input.api?.key?.trim()) setSetting('tts_api_key', input.api.key.trim());
   })();
+  notifyStandingVoiceChanged();
   return getSpeechSettings();
 }
 export function getApiVoice(characterId) {
@@ -41,5 +52,6 @@ export function saveApiVoice(characterId, input) {
   resolveApiReferences(characterId, params);
   db.prepare(`INSERT INTO character_api_voices(character_id,params) VALUES(?,?)
     ON CONFLICT(character_id) DO UPDATE SET params=excluded.params,version=version+1`).run(characterId, JSON.stringify(params));
+  notifyStandingVoiceChanged(characterId);
   return getApiVoice(characterId);
 }

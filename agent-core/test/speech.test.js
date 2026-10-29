@@ -310,6 +310,31 @@ test('event-linked dialogue remains speakable while event cards and foreign spea
   assert.equal(db.prepare('SELECT job_id FROM message_speech WHERE message_id=?').get(cardId), undefined);
 });
 
+test('local portrait speech uses the bound reference and regeneration bypasses completed chat cache', async () => {
+  const { standingTouchSpeech } = await import('../src/services/standingTouchSpeechRuntime.js');
+  const { saveTouchLines } = await import('../src/services/standingTouchLines.js');
+  const db = getDb(), characterId = db.prepare("SELECT character_id FROM voices WHERE id='tts-v'").pluck().get();
+  await fs.mkdir(path.join(root, 'references'), { recursive: true });
+  await fs.writeFile(path.join(root, 'references/s.wav'), 'reference-fixture');
+  const initial = saveTouchLines({ db, id: characterId, expectedVersion: null, lines: { head: ['本地立绘语音测试'] } });
+  const portraits = standingTouchSpeech(db);
+  assert.equal(portraits.read(characterId).speech.configured, true);
+  const input = { expectedVersion: initial.version, part: 'head', index: 0 };
+  const before = inferCount;
+  const first = portraits.generate(characterId, input).speech.lines.head[0];
+  assert.equal((await terminal(first.job_id)).status, 'completed');
+  const messageId = db.prepare("INSERT INTO messages(conversation_id,role,content) VALUES(?,'assistant',?)").run(`char_${characterId}`, first.text).lastInsertRowid;
+  assert.equal(service.speakMessage(characterId, messageId).id, first.job_id);
+  const next = portraits.generate(characterId, { ...input, force: true }).speech.lines.head[0];
+  assert.notEqual(next.job_id, first.job_id);
+  assert.equal(portraits.generate(characterId, { ...input, force: true }).summary.started, 0);
+  assert.equal((await terminal(next.job_id)).status, 'completed');
+  assert.equal(inferCount, before + 2);
+  assert.equal(service.speakMessage(characterId, messageId).id, first.job_id);
+  assert.equal(synthesisRequests.at(-1).reference, 'references/s.wav');
+  assert.match(portraits.read(characterId).speech.lines.head[0].audio_url, new RegExp(next.job_id));
+});
+
 test('audio import/crop uses bounded decoding, preserves original, and rejects invalid clips', async () => {
   // Two seconds of PCM, no external fixture or model required.
   const frames = 48000, wav = Buffer.alloc(44 + frames * 2);
