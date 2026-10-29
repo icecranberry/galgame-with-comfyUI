@@ -104,12 +104,19 @@ const guideDialog = ref(null)
 const changelogDialog = ref(null)
 const themeAutoTimer = ref(null)
 let stopPageZoomHint
+let stopSpeechPreparationHint
 
 // 独立于数据加载，首屏及窗口缩放稳定后检查；复用全局暖纸 Toast。
 onMounted(() => {
   stopPageZoomHint = observePageZoomHint(window, toast)
+  // Global subscription: private/group bubbles and voice previews share one
+  // service. Never multiply notices by the number of mounted speech buttons.
+  stopSpeechPreparationHint = onStreamEvent('speech_preparing', data => {
+    if (data?.phase === 'service_start') toast('正在启动 TTS 语音服务，请稍候…', 'info', 6000)
+    if (data?.phase === 'model_load') toast('正在加载 TTS 语音模型，加载后将自动朗读，请稍候…', 'info', 8000)
+  })
 })
-onUnmounted(() => stopPageZoomHint?.())
+onUnmounted(() => { stopPageZoomHint?.(); stopSpeechPreparationHint?.() })
 
 // ── 手机端访问 Toast（启动器打开时通过 ?mobile_ip= 传入）──
 const mobileToast = ref({ visible: false, url: '' })

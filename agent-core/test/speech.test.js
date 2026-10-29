@@ -115,6 +115,7 @@ process.env.DB_PATH = ':memory:';
 process.env.TTS_AUDIO_DIR = root;
 const originalFetch = globalThis.fetch;
 let inferCount = 0, acquireCount = 0, failInference = false, offline = false, fetchFailure = null;
+let modelLoaded = false;
 const gpuEvents = [];
 const synthesisRequests = [];
 globalThis.fetch = async (url, options) => {
@@ -122,10 +123,11 @@ globalThis.fetch = async (url, options) => {
   if (u.includes(':7861')) {
     if (fetchFailure) throw fetchFailure;
     if (offline) throw new Error('offline');
-    if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true });
-    if (u.endsWith('/unload')) { gpuEvents.push('unload'); return Response.json({ unloaded: true }); }
+    if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true, loaded: modelLoaded });
+    if (u.endsWith('/unload')) { modelLoaded = false; gpuEvents.push('unload'); return Response.json({ unloaded: true }); }
     if (u.endsWith('/synthesize')) {
       inferCount++;
+      modelLoaded = true;
       if (failInference) return Response.json({ error: 'CUDA out of memory' }, { status: 500 });
       const body = JSON.parse(options.body);
       synthesisRequests.push(body);
@@ -428,4 +430,30 @@ test('HTTP audio lifecycle, character-owned voices and cross-character guards', 
     assert.equal(await (await originalFetch(`${base}/characters/${character}`)).json(), null);
     assert.ok(getDb().prepare('SELECT id FROM voice_samples WHERE id=?').get(crop.body.id));
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('preparation notices fire for each cold load, never for warm synthesis, cache hits or completion', async () => {
+  const { addClient, removeClient } = await import('../src/services/unifiedStreamBus.js');
+  const notices = [];
+  const client = { write(payload) {
+    if (payload.startsWith('event: speech_preparing\n')) notices.push(JSON.parse(payload.split('\ndata: ')[1]));
+  } };
+  addClient(client);
+  try {
+    const db = getDb();
+    const char = Number(db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('tts-notices','测试','persona')").run().lastInsertRowid);
+    db.prepare("INSERT INTO voices(id,name,sample_id,character_id) VALUES('notice-v','日常','tts-s',?)").run(char);
+    service.setSpeechSettings({ enabled: true, mode: 'local' });
+    await gpu.recoverSpeechGpu();
+    const speak = text => service.requestSpeech({ characterId: char, voiceId: 'notice-v', text });
+    const cold = speak('首次加载提示');
+    assert.equal((await terminal(cold.id)).status, 'completed');
+    assert.deepEqual(notices, [{ phase: 'model_load' }]);
+    assert.equal(speak('首次加载提示').id, cold.id);
+    assert.equal((await terminal(speak('模型已热无需提示').id)).status, 'completed');
+    assert.equal(notices.length, 1);
+    await gpu.withImageGpu(async () => {});
+    assert.equal((await terminal(speak('再次加载重新提示').id)).status, 'completed');
+    assert.deepEqual(notices, [{ phase: 'model_load' }, { phase: 'model_load' }]);
+  } finally { removeClient(client); }
 });

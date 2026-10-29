@@ -4,6 +4,7 @@ import path from 'node:path';
 import { ttsHealth } from './indexTtsClient.js';
 import { restartSpeechGpu } from './speechGpu.js';
 import { selectedLocalTtsModel } from './localTtsModels.js';
+import { broadcast } from './unifiedStreamBus.js';
 
 // Windows descendants can retain the launcher's pipe handles after PowerShell
 // exits. execFile's callback waits for those handles forever; observe the
@@ -28,7 +29,8 @@ const serviceDir = fileURLToPath(new URL('../../../tts-service/', import.meta.ur
 // Share one restart across windows/clients; keep it in the image/speech FIFO.
 export function createSpeechServiceRestarter({ run = executeSpeechLauncher, health = ttsHealth,
   exclusive = restartSpeechGpu, env = process.env, platform = process.platform,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), model = () => '2.0', onlyIfOffline = false } = {}) {
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), model = () => '2.0', onlyIfOffline = false,
+  onStarting = () => {} } = {}) {
   let pending = null;
   return function restart() {
     if (pending) return pending;
@@ -44,6 +46,7 @@ export function createSpeechServiceRestarter({ run = executeSpeechLauncher, heal
         throw new Error('一键重启仅支持本机声音服务，请在远程服务所在主机重启');
       }
       return exclusive(async () => {
+        onStarting();
         try {
           await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-File', path.join(serviceDir, 'restart.ps1'),
@@ -63,9 +66,10 @@ export function createSpeechServiceRestarter({ run = executeSpeechLauncher, heal
   };
 }
 
-export const restartSpeechService = createSpeechServiceRestarter({ model: () => selectedLocalTtsModel().id });
+const onStarting = () => broadcast('speech_preparing', { phase: 'service_start' });
+export const restartSpeechService = createSpeechServiceRestarter({ model: () => selectedLocalTtsModel().id, onStarting });
 
 // Called INSIDE the GPU FIFO. Re-entering restartSpeechGpu here would deadlock.
 export const ensureSpeechService = createSpeechServiceRestarter({
-  model: () => selectedLocalTtsModel().id, onlyIfOffline: true, exclusive: work => work(),
+  model: () => selectedLocalTtsModel().id, onlyIfOffline: true, exclusive: work => work(), onStarting,
 });

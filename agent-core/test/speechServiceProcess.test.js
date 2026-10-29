@@ -25,16 +25,18 @@ test('launcher resolves on process exit even when Python retains its pipes; fail
 });
 
 test('on-demand startup reuses online services and launches offline services once without killing processes', async () => {
-  let checks = 0, launches = 0;
+  let checks = 0, launches = 0, notices = 0;
   const ensure = createSpeechServiceRestarter({ ...options, onlyIfOffline: true,
     health: async () => ++checks === 1 ? { online: false } : ready,
     run: async (_, args) => { launches++; assert.ok(args.includes('-StartOnly')); },
+    onStarting: () => { notices++; },
   });
   const first = ensure();
   assert.equal(first, ensure());
   assert.deepEqual(await first, { ...ready, started: true });
   assert.deepEqual(await ensure(), ready);
   assert.equal(launches, 1);
+  assert.equal(notices, 1, 'only the actual startup notifies; concurrent and warm calls stay silent');
 });
 
 test('on-demand startup does not restart online incompatible or remote services', async () => {

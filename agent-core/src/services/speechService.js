@@ -43,6 +43,9 @@ function enqueue(job) {
     const status = await ttsHealth();
     if (!status.online || !status.compatible || !status.ready) throw new Error(status.error || 'TTS 模型尚未安装或固定版本不匹配');
     const output = `generated/${job.id}.wav`;
+    // The FIFO owns the adapter here; only a cold worker needs a load notice.
+    // Warm synthesis and cached audio stay silent, including on completion.
+    if (!status.loaded) broadcast('speech_preparing', { phase: 'model_load' });
     await ttsRequest('/synthesize', { reference: sample.reference_path, output, text: job.text,
       ...JSON.parse(job.params), model_version: job.model_version }, 600000);
     if (!fs.existsSync(audioPath(output))) throw new Error('TTS 没有生成音频，请检查两端音频目录配置');
