@@ -5,7 +5,6 @@
     <div class="local-model-actions">
       <span class="local-model-hint" role="status">{{ loading ? '正在检查安装…' : selected?.installed ? 'IndexTTS 2.0 已安装' : 'IndexTTS 2.0 尚未安装完整' }}</span>
       <linshe-button size="sm" :loading="installing" :disabled="loading || using || installing || disabled" @click="install">{{ selected?.installed ? '检查 / 修复安装' : '安装 IndexTTS 2.0' }}</linshe-button>
-      <linshe-button size="sm" :loading="using" :disabled="loading || using || installing || !selected?.installed || disabled" @click="use">重启本地模型</linshe-button>
       <linshe-button variant="link" size="sm" :disabled="using || loading" @click="refresh">刷新安装状态</linshe-button>
     </div>
     <p v-if="installing" class="local-model-hint" role="status">正在安装 IndexTTS 2.0，首次需要下载模型。可以关闭窗口，安装会在后台继续。</p>
