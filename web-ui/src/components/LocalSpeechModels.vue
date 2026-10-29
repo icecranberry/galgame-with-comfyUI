@@ -1,7 +1,7 @@
 <template>
   <section class="local-speech-models" aria-label="本地语音模型">
     <div class="local-model-heading"><h4>本地语音 · IndexTTS 2.0</h4><span>所有角色统一使用</span></div>
-    <div class="local-model-description"><p class="local-model-hint">支持中文和英文，沿用已有角色参考音频与采样参数，无需填写参考台词；语速通过音频变速处理。</p><p class="local-model-hint">离线包解压到 tts-service，模型目录为 runtime/indextts-2.0；首次还需配套的 Python 与工具。</p></div>
+    <p class="local-model-hint">支持中英文，使用角色已配置的音色。朗读时自动启动服务、按需加载模型。</p>
     <div class="local-model-actions">
       <span class="local-model-hint" role="status">{{ loading ? '正在检查安装…' : selected?.installed ? 'IndexTTS 2.0 已安装' : 'IndexTTS 2.0 尚未安装完整' }}</span>
       <linshe-button size="sm" :loading="installing" :disabled="loading || using || installing || disabled" @click="install">{{ selected?.installed ? '检查 / 修复安装' : '安装 IndexTTS 2.0' }}</linshe-button>
@@ -64,7 +64,6 @@ onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); emit('
 </script>
 <style scoped>
 .local-speech-models { display:grid; gap:12px; margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
-.local-model-description { display:grid; gap:6px; }
 .local-model-heading,.local-model-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .local-model-heading { justify-content:space-between; }
 .local-model-heading h4 { margin:0; font-size:var(--fs-sm); color:var(--text-primary); }
