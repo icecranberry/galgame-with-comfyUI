@@ -63,7 +63,7 @@ onMounted(refresh)
 onBeforeUnmount(() => { disposed = true; revision++; clearTimeout(timer); emit('busy', false) })
 </script>
 <style scoped>
-.local-speech-models { display:grid; gap:12px; margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
+.local-speech-models { display:grid; gap:12px; margin-top:14px; }
 .local-model-heading,.local-model-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .local-model-heading { justify-content:space-between; }
 .local-model-heading h4 { margin:0; font-size:var(--fs-sm); color:var(--text-primary); }

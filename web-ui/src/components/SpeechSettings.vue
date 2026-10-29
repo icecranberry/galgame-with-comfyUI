@@ -13,7 +13,9 @@
       </div>
       <linshe-switch :model-value="speechAutoPlay" :disabled="busy || disabled" size="sm" aria-label="对话自动播放" on-text="已开启" off-text="未开启" @update:model-value="toggleAutoPlay" />
     </div>
-    <linshe-tabs class="speech-mode" :model-value="mode" :options="modes" :disabled="busy || disabled || localModelBusy || checking || restarting || recovering" aria-label="语音接入方式" @update:model-value="switchMode" />
+    <div class="speech-mode">
+      <linshe-tabs :model-value="mode" :options="modes" :disabled="busy || disabled || localModelBusy || checking || restarting || recovering" aria-label="语音接入方式" @update:model-value="switchMode" />
+    </div>
     <Transition name="speech-maintenance" mode="out-in">
     <div v-if="mode === 'api'" key="api" class="speech-api">
       <p class="speech-feedback">使用 OpenAI 兼容的语音合成协议。连接信息由所有角色共用，每个角色独立设置音色和参数；本地录音与参数会保留。</p>
@@ -156,7 +158,7 @@ onMounted(async () => {
 </script>
 <style scoped>
 .speech-settings { padding:18px 20px; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--bg-sunken); }
-.speech-mode { margin-top:14px; }
+.speech-mode { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
 .speech-auto-play { margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
 .speech-api { display:grid; gap:12px; margin-top:14px; }
 .speech-field { display:flex; flex-direction:column; gap:6px; min-width:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
