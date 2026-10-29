@@ -78,7 +78,10 @@
             <path class="gal-frame-inner" :d="frame.inner" />
           </svg>
           <div class="gal-heading">
-            <strong :title="character.display_name">{{ currentMessage?.role === 'user' ? '我' : character.display_name }}</strong>
+            <div class="gal-speaker">
+              <strong :title="character.display_name">{{ currentMessage?.role === 'user' ? '我' : character.display_name }}</strong>
+              <SpeechButton v-if="assetsReady && active && currentSpeechIds.length" :key="`${character.id}:${currentId}:${pageIndex}`" appearance="dialogue" :character-id="character.id" :character-name="character.display_name" :message-ids="currentSpeechIds" notify-errors />
+            </div>
             <div class="gal-heading-actions">
               <span v-if="pages.length > 1" class="gal-page-count">{{ pageIndex + 1 }} / {{ pages.length }}</span>
               <Transition name="gal-fade">
@@ -120,6 +123,8 @@
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 import GalgameHistory from './GalgameHistory.vue'
+import SpeechButton from '../SpeechButton.vue'
+import { dialoguePageSpeechIds } from '../../utils/historySpeech.js'
 import GalgamePhoto from './GalgamePhoto.vue'
 import GalgameMenuFrame from './GalgameMenuFrame.vue'
 import TownVnChoice from '../town/TownVnChoice.vue'
@@ -165,6 +170,7 @@ const geometry = computed(() => standingGeometry(standing.value?.bounds, size.va
 const currentId = ref(null), pageIndex = ref(0), pages = ref(['']), revealed = ref(0), paginationSourceId = ref(null)
 const playable = computed(() => messages.value.filter(message => (message.content || message.images?.length) && message.role === 'assistant'))
 const currentMessage = computed(() => playable.value.find(message => message.id === currentId.value))
+const currentSpeechIds = computed(() => dialoguePageSpeechIds(currentMessage.value, pages.value, pageIndex.value))
 const currentImages = computed(() => currentMessage.value?.images || [])
 const dialogueContent = computed(() => currentMessage.value?.content || (currentImages.value.length ? `（发来了 ${currentImages.value.length} 张图片）` : ''))
 const pageCharacters = computed(() => dialogueCharacters(pages.value[pageIndex.value] || ''))
@@ -381,6 +387,9 @@ onBeforeUnmount(() => {
 .gal-frame-paper { fill: var(--dialogue-paper); stroke: var(--dialogue-outline); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .gal-frame-inner { fill: none; stroke: var(--dialogue-inner); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .gal-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--dialogue-rule); padding-bottom: 7px; margin-bottom: 9px; flex-shrink: 0; }
+.gal-speaker { display:flex; align-items:center; min-width:0; gap:6px; }
+/* Keep the 44px touch target inside the header padding without reducing text space on short screens. */
+.gal-speaker > .speech-control { flex-shrink:0; height:28px; }
 .gal-heading strong { font-size: clamp(20px, 2.1vw, 29px); font-weight: 800; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .gal-heading-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .gal-page-count { font-size: var(--fs-xs); color: var(--dialogue-muted); white-space: nowrap; }

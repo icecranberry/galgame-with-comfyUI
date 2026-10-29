@@ -26,14 +26,14 @@ function sharedPlayback() {
 }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 
-function fixture(t, groupId, api, overrides = {}, messageId = 34, autoToken, notifyErrors = false) {
+function fixture(t, groupId, api, overrides = {}, messageId = 34, autoToken, notifyErrors = false, messageIds = null) {
   let state
   const notifications = [], calls = []
   const deps = { Vue, LinsheButton: {}, createSpeechTask, chatSpeechAutoPlay, speechEnabled: Vue.ref(true), ...sharedPlayback(),
     ttsApi: async (...args) => { calls.push(args); return api(...args) }, waitSpeech: async job => job, ...overrides }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
-  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, groupId, autoToken, notifyErrors }, { expose() {} }); return () => null } })
+  const app = renderer.createApp({ setup() { state = component.setup({ characterId: 12, characterName: '测试角色', messageId, messageIds, groupId, autoToken, notifyErrors }, { expose() {} }); return () => null } })
   app.provide('toast', (...args) => notifications.push(args))
   app.mount({}); t.after(() => app.unmount())
   return { state, notifications, calls, played: deps.played, unmount: () => app.unmount() }
@@ -170,4 +170,41 @@ test('cancellation before the creation response still cancels the owned backend 
   await run
   assert.equal(f.calls.filter(([path]) => path === '/jobs/own/cancel').length, 1)
   assert.equal(runtime.playingSpeech.value, null)
+})
+
+
+test('main dialogue reserves page sentences together and plays them in order', async t => {
+  const runtime = sharedPlayback(), first = deferred()
+  const f = fixture(t, null, path => path.endsWith('/101') ? first.promise : {id:'second',status:'completed',audio_url:'/second.wav'}, runtime, null, undefined, true, [101,102,101])
+  const running = f.state.play()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(f.calls.map(([path]) => path), ['/characters/12/messages/101','/characters/12/messages/102'])
+  assert.equal(runtime.played.length,0)
+  first.resolve({id:'first',status:'completed',audio_url:'/first.wav'}); await running
+  assert.equal(f.state.isPlaying.value,true)
+  assert.deepEqual(runtime.played.map(audio=>audio.src),['/first.wav'])
+  runtime.played[0].onended(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.state.isPlaying.value,true)
+  assert.deepEqual(runtime.played.map(audio=>audio.src),['/first.wav','/second.wav'])
+  await f.state.play() // The same button stops the page instead of queuing it again.
+  assert.equal(runtime.playingSpeech.value,null)
+  assert.equal(f.state.waiting.value,false)
+})
+
+test('leaving a dialogue page cancels every pending sentence and ignores late responses', async t => {
+  const runtime = sharedPlayback(), response = deferred()
+  const f = fixture(t, null, () => response.promise, runtime, null, undefined, true, [101,102])
+  const running = f.state.play()
+  f.unmount()
+  response.resolve({id:'late',status:'completed',audio_url:'/late.wav'}); await running
+  assert.equal(runtime.played.length,0)
+  assert.equal(f.state.waiting.value,false)
+})
+
+test('a page with several sentences reports missing voice configuration only once', async t => {
+  const f = fixture(t, null, async () => { throw Object.assign(new Error('未配置声音'), {code:'VOICE_NOT_CONFIGURED'}) }, {}, null, undefined, true, [101,102])
+  await f.state.play()
+  assert.equal(f.notifications.length,1)
+  assert.match(f.notifications[0][0],/测试角色/)
+  assert.equal(f.state.waiting.value,false)
 })

@@ -27,3 +27,18 @@ export function historySpeechLines(message) {
   if (cursor < text.length) lines.push({ text: text.slice(cursor), messageId: null })
   return lines
 }
+
+/** Read the complete persisted sentences intersecting the visible Galgame page. */
+export function dialoguePageSpeechIds(message, pages, pageIndex) {
+  if (!message || pageIndex < 0 || pageIndex >= pages.length || pages.join('') !== message.content) return []
+  const start = pages.slice(0, pageIndex).join('').length, end = start + pages[pageIndex].length
+  const ids = []
+  let offset = 0
+  for (const line of historySpeechLines(message)) {
+    const firstText = line.text.search(/\S/)
+    const lineEnd = offset + line.text.length
+    if (line.messageId && firstText >= 0 && lineEnd > start && offset + firstText < end) ids.push(line.messageId)
+    offset = lineEnd
+  }
+  return [...new Set(ids)]
+}

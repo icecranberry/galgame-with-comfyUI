@@ -24,7 +24,7 @@ import { ttsApi } from '../api/tts.js'
 import { speechEnabled, speechJobs, messageSpeech, speechQueue, waitSpeech } from '../stores/speech.js'
 import { createSpeechTask } from '../utils/speechTask.js'
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
-const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, required: true }, groupId: { type: Number, default: null }, appearance: { type: String, default: 'default' }, touchTarget: Boolean, autoToken: Number, notifyErrors: Boolean })
+const props = defineProps({ characterId: { type: Number, required: true }, characterName: { type: String, default: '' }, messageId: { type: Number, default: null }, messageIds: { type: Array, default: null }, groupId: { type: Number, default: null }, appearance: { type: String, default: 'default' }, touchTarget: Boolean, autoToken: Number, notifyErrors: Boolean })
 const toast = inject('toast', null)
 const error = ref(''), pending = ref(false), phase = ref('idle')
 const waiting = computed(() => ['preparing', 'ready', 'blocked'].includes(phase.value))
@@ -51,30 +51,53 @@ function showError(e) {
 }
 async function play() {
   if (entry?.active) { await cancel(); return }
-  error.value = ''; pending.value = true
-  const active = createSpeechTask({
-    request: () => ttsApi(`${props.groupId ? `/groups/${props.groupId}` : ''}/characters/${props.characterId}/messages/${props.messageId}`, {}),
-    wait: waitSpeech,
-    // Another bubble may share this backend job, including a request whose
-    // creation response is still pending. Cancel only when it has no consumers.
-    cancel: job => speechQueue.usesJob(job.id) ? undefined : ttsApi(`/jobs/${job.id}/cancel`, {}),
-    onJob: next => {
-      if (!disposed && entry === slot && slot.active) {
-        slot.job = next
-        messageSpeech[props.messageId] = next.id; speechJobs[next.id] = next
-        pending.value = false
-      }
-    },
-  })
-  const slot = speechQueue.reserve({
-    onState: state => { phase.value = state },
-    onError: showError,
-    onCancel: () => active.cancel(),
-  })
-  entry = slot
-  try { slot.ready(await active.run()) }
-  catch (e) { slot.fail(e) }
-  finally { if (entry === slot) pending.value = false }
+  const ids = [...new Set(props.messageIds || [props.messageId])].filter(id => Number.isSafeInteger(id) && id > 0)
+  if (!ids.length) return
+  error.value = ''
+  const batch = {
+    items: [], errors: new Set(),
+    get active() { return this.items.some(item => item.slot?.active) },
+    cancel() { return Promise.all(this.items.map(item => item.slot.cancel())) },
+  }
+  entry = batch
+  const sync = () => {
+    if (entry !== batch) return
+    phase.value = batch.items.find(item => item.state !== 'idle')?.state || 'idle'
+    pending.value = batch.items.some(item => item.state !== 'idle' && item.pending)
+  }
+  // Reserve every sentence before sending requests, so the page remains in
+  // order even when cached responses arrive before unfinished synthesis.
+  for (const messageId of ids) {
+    const item = { state: 'preparing', pending: true }
+    batch.items.push(item)
+    const active = createSpeechTask({
+      request: () => ttsApi(`${props.groupId ? `/groups/${props.groupId}` : ''}/characters/${props.characterId}/messages/${messageId}`, {}),
+      wait: waitSpeech,
+      // Other bubbles can share this job; cancel only without consumers.
+      cancel: job => speechQueue.usesJob(job.id) ? undefined : ttsApi(`/jobs/${job.id}/cancel`, {}),
+      onJob: next => {
+        if (!disposed && entry === batch && item.slot.active) {
+          item.slot.job = next
+          messageSpeech[messageId] = next.id; speechJobs[next.id] = next
+          item.pending = false; sync()
+        }
+      },
+    })
+    item.slot = speechQueue.reserve({
+      onState: state => { item.state = state; sync() },
+      onError: error => {
+        if (batch.errors.has(error.code || error.message)) return
+        batch.errors.add(error.code || error.message); showError(error)
+      },
+      onCancel: () => active.cancel(),
+    })
+    item.run = async () => {
+      try { item.slot.ready(await active.run()) }
+      catch (e) { item.slot.fail(e) }
+      finally { item.pending = false; sync() }
+    }
+  }
+  await Promise.all(batch.items.map(item => item.run()))
 }
 async function cancel() {
   const previous = entry
