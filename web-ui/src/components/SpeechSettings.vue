@@ -2,8 +2,7 @@
   <section class="speech-settings" aria-label="语音设置">
     <div class="speech-heading">
       <div class="speech-title">
-        <h4>全局语音设置</h4>
-        <p>所有角色统一使用当前模式。本地与 API 二选一，切换后保留另一套已存配置。</p>
+        <h4>启用语音朗读</h4>
       </div>
       <linshe-switch :model-value="speechEnabled" :disabled="busy" size="sm" aria-label="启用语音朗读" on-text="已开启" off-text="未开启" @update:model-value="toggle" />
     </div>
@@ -167,6 +166,7 @@ onMounted(async () => {
 .speech-heading,.speech-service-row { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .speech-title { min-width:0; }
 .speech-title h4 { margin:0 0 5px; color:var(--text-primary); font-size:var(--fs-md); font-weight:700; }
+.speech-title h4:only-child { margin:0; }
 .speech-title p,.speech-maintenance p { margin:0; color:var(--text-secondary); font-size:var(--fs-xs); line-height:1.6; }
 .speech-heading > :last-child { flex-shrink:0; }
 .speech-service-row { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); flex-wrap:wrap; gap:8px 16px; }
