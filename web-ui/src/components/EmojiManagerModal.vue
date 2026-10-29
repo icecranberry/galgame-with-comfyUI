@@ -1934,6 +1934,8 @@ onBeforeUnmount(() => {
   .emoji-char-meta { flex: 1; width: 100%; }
 
   .emoji-body {
+    flex: 1 0 auto;
+    overflow: visible;
     gap: 8px;
     margin: 0;
     padding: 0;
@@ -2005,7 +2007,12 @@ onBeforeUnmount(() => {
   .emoji-char-item { transition: none; }
   .emoji-batch-row { margin-top: 8px; flex: 0 0 auto; }
   .emoji-batch-btn { padding: 8px 10px; font-size: 12px; }
+  .emoji-right {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
   .emoji-toolbar-row {
+    position: static;
     gap: 12px;
     padding: 12px;
     border-radius: 10px;
@@ -2018,9 +2025,8 @@ onBeforeUnmount(() => {
   .emoji-generation-actions { gap: 8px; }
   .emoji-progress-strip { padding: 6px 10px; font-size: 12px; }
   .emoji-char-section {
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
-    touch-action: pan-y;
+    flex: 0 0 auto;
+    overflow: visible;
   }
   .emoji-card {
     contain: content;
@@ -2067,5 +2073,13 @@ onBeforeUnmount(() => {
   flex-direction: column;
   overflow: hidden;
   padding: 0;
+}
+@media (max-width: 767px) {
+  /* 手机端由正文统一滚动，设置区与图片列表一起移动。 */
+  .modal-body.emoji-manager-body {
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 </style>
