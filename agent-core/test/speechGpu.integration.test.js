@@ -10,6 +10,13 @@ test('real TTS: voices, cache, long text, idle unload and Anima GPU handoff', {
   skip: process.env.RUN_TTS_GPU_TESTS !== '1', timeout: 1800000,
 }, async t => {
   process.env.DB_PATH = ':memory:';
+  // This suite exercises the explicit exclusive-mode guard contract.
+  const previousMode = process.env.TTS_GPU_MODE;
+  process.env.TTS_GPU_MODE = 'exclusive';
+  t.after(() => {
+    if (previousMode === undefined) delete process.env.TTS_GPU_MODE;
+    else process.env.TTS_GPU_MODE = previousMode;
+  });
   const { getDb, closeDb } = await import('../src/db/index.js');
   const { config } = await import('../src/config.js');
   const service = await import('../src/services/speechService.js');

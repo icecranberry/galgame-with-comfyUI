@@ -113,6 +113,10 @@ test('legacy migration retains owners and unused recordings without allowing sha
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'linshe-tts-test-'));
 process.env.DB_PATH = ':memory:';
 process.env.TTS_AUDIO_DIR = root;
+// Handoff assertions below deliberately cover the legacy exclusive contract;
+// auto/shared admission has deterministic injected coverage in speechGpu.test.
+const previousGpuMode = process.env.TTS_GPU_MODE;
+process.env.TTS_GPU_MODE = 'exclusive';
 const originalFetch = globalThis.fetch;
 let inferCount = 0, acquireCount = 0, failInference = false, offline = false, fetchFailure = null;
 let modelLoaded = false;
@@ -146,7 +150,14 @@ const { getDb, closeDb } = await import('../src/db/index.js');
 const service = await import('../src/services/speechService.js');
 const assets = await import('../src/services/voiceAssets.js');
 const gpu = await import('../src/services/speechGpu.js');
-after(async () => { await gpu.recoverSpeechGpu(); globalThis.fetch = originalFetch; closeDb(); await fs.rm(root, { recursive: true, force: true }); });
+after(async () => {
+  try { await gpu.recoverSpeechGpu(); }
+  finally {
+    if (previousGpuMode === undefined) delete process.env.TTS_GPU_MODE;
+    else process.env.TTS_GPU_MODE = previousGpuMode;
+    globalThis.fetch = originalFetch; closeDb(); await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 async function terminal(id) {
   for (let i = 0; i < 200; i++) {

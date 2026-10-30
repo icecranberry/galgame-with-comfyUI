@@ -7,6 +7,7 @@ function fixture(overrides = {}) {
   const events = [];
   let lease = 'orphan-from-previous-node';
   const gpu = createSpeechGpuCoordinator({ queue: createGpuQueue(),
+    policy: async () => ({ shared: false, guard: true }),
     ensureService: async () => { events.push('ensure'); return { online: true, compatible: true, ready: true, busy: false }; },
     unload: async options => { events.push(options?.idle_only ? 'idle-unload' : 'unload'); return { unloaded: true }; },
     guard: async (route, body) => {
@@ -83,4 +84,129 @@ test('a newly started adapter can clear an earlier unload failure before retryin
   await gpu.withSpeechGpu(async () => events.push('retried'));
   assert.ok(events.indexOf('release') < events.indexOf('retried'));
   await gpu.withImageGpu(async () => {});
+});
+
+const deferred = () => Promise.withResolvers();
+
+for (const first of ['speech', 'image']) {
+  test(`ample memory allows real overlap with ${first} started first`, { timeout: 2000 }, async () => {
+    const { gpu, events } = fixture({ policy: async () => ({ shared: true, guard: true }) });
+    const started = deferred(), finish = deferred();
+    const initial = first === 'speech' ? gpu.withSpeechGpu : gpu.withImageGpu;
+    const other = first === 'speech' ? gpu.withImageGpu : gpu.withSpeechGpu;
+    const running = initial(async () => { started.resolve(); await finish.promise; });
+    await started.promise;
+    try {
+      await other(async () => events.push('overlapped'));
+      assert.ok(events.includes('overlapped'));
+      assert.equal(events.includes('acquire'), false);
+      assert.equal(events.includes('unload'), false);
+    } finally { finish.resolve(); await running; await gpu.recoverSpeechGpu(); }
+  });
+}
+
+test('remote image generation never calls a remote guard for local speech or recovery', async () => {
+  const { gpu, events } = fixture({ policy: async () => ({ shared: true, guard: false }),
+    guard: async () => assert.fail('remote guard must not be called'),
+  });
+  await gpu.withSpeechGpu(async () => events.push('speech'));
+  await gpu.withImageGpu(async () => events.push('image'));
+  assert.equal(events.includes('unload'), false);
+  await gpu.recoverSpeechGpu();
+});
+
+test('shared mode tolerates a missing guard and retains the warm speech model', async () => {
+  let recoveries = 0;
+  const { gpu, events } = fixture({ policy: async () => ({ shared: true, guard: true }),
+    guard: async () => { recoveries++; throw Object.assign(new Error('missing'), { code: 'GUARD_MISSING' }); },
+  });
+  await gpu.withSpeechGpu(async () => {});
+  await gpu.withSpeechGpu(async () => {});
+  assert.equal(recoveries, 1);
+  assert.equal(events.filter(e => e === 'idle-unload').length, 1);
+  assert.equal(events.includes('unload'), false);
+  await gpu.recoverSpeechGpu();
+});
+
+test('memory pressure waits for shared speech to finish before unloading for an image', { timeout: 2000 }, async () => {
+  let shared = true;
+  const { gpu, events } = fixture({ policy: async () => ({ shared, guard: true }) });
+  const started = deferred(), finish = deferred();
+  const speech = gpu.withSpeechGpu(async () => { started.resolve(); await finish.promise; events.push('finished'); });
+  await started.promise;
+  shared = false;
+  const image = gpu.withImageGpu(async () => events.push('image'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.includes('image'), false);
+  assert.equal(events.includes('unload'), false);
+  finish.resolve();
+  await Promise.all([speech, image]);
+  assert.ok(events.indexOf('finished') < events.indexOf('unload'));
+  assert.ok(events.indexOf('unload') < events.indexOf('image'));
+});
+
+test('exclusive speech waits for a running image before acquiring the lease', { timeout: 2000 }, async () => {
+  const { gpu, events } = fixture();
+  const started = deferred(), finish = deferred();
+  const image = gpu.withImageGpu(async () => { started.resolve(); await finish.promise; events.push('image-finished'); });
+  await started.promise;
+  const speech = gpu.withSpeechGpu(async () => events.push('speech'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.includes('acquire'), false);
+  finish.resolve();
+  await Promise.all([image, speech]);
+  assert.ok(events.indexOf('image-finished') < events.indexOf('acquire'));
+  await gpu.recoverSpeechGpu();
+});
+
+test('recovery accepts a stale lease token after confirming worker exit', async () => {
+  const { gpu, events } = fixture({ guard: async route => { events.push(route); return route !== 'release'; } });
+  await gpu.withSpeechGpu(async () => {});
+  await gpu.recoverSpeechGpu();
+  assert.equal(events.includes('release'), false);
+  await gpu.withImageGpu(async () => events.push('image'));
+  assert.ok(events.includes('image'));
+});
+
+test('maintenance waits for shared speech and speech jobs remain serialized', { timeout: 2000 }, async () => {
+  const { gpu, events } = fixture({ policy: async () => ({ shared: true, guard: false }) });
+  const started = deferred(), finish = deferred();
+  const first = gpu.withSpeechGpu(async () => { started.resolve(); await finish.promise; events.push('first-finished'); });
+  await started.promise;
+  const second = gpu.withSpeechGpu(async () => events.push('second'));
+  const restart = gpu.restartSpeechGpu(async () => events.push('restart'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.includes('second'), false);
+  assert.equal(events.includes('restart'), false);
+  finish.resolve();
+  await Promise.all([first, second, restart]);
+  assert.ok(events.indexOf('first-finished') < events.indexOf('second'));
+  assert.ok(events.indexOf('second') < events.indexOf('restart'));
+});
+
+test('insufficient memory cannot bypass a missing guard', async () => {
+  const { gpu } = fixture({ guard: async () => { throw Object.assign(new Error('missing guard'), { code: 'GUARD_MISSING' }); } });
+  await assert.rejects(gpu.withSpeechGpu(() => assert.fail('must not run')), /missing guard/);
+});
+
+test('cancelled queued speech preserves idle cleanup for an already warm shared model', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { gpu, events } = fixture({ policy: async () => ({ shared: true, guard: false }) });
+  await gpu.withSpeechGpu(async () => {});
+  await assert.rejects(gpu.withSpeechGpu(() => assert.fail('cancelled work'), () => true), /取消/);
+  t.mock.timers.tick(10 * 60 * 1000);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(events.filter(e => e === 'unload').length, 1);
+  assert.equal(events.includes('release'), false);
+});
+
+test('startup memory admission measures free memory after unloading the orphan worker', async () => {
+  let unloaded = false;
+  const { gpu, events } = fixture({
+    unload: async () => { unloaded = true; return { unloaded: true }; },
+    policy: async () => ({ shared: unloaded, guard: true }),
+  });
+  await gpu.withSpeechGpu(async () => {});
+  assert.equal(events.includes('acquire'), false);
+  await gpu.recoverSpeechGpu();
 });
