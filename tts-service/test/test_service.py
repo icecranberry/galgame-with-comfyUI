@@ -113,6 +113,34 @@ class ServiceTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 adapter.generation_options(invalid)
 
+    def test_legacy_recording_effects_process_the_final_audio_once_and_stay_out_of_model_options(self):
+        calls = []
+        class Model:
+            def infer(self, **kwargs): calls.append(kwargs); Path(kwargs['output_path']).write_bytes(b'wave')
+        effects = {'pitch': 2, 'resonance': -8, 'brightness': 1}
+        with tempfile.TemporaryDirectory() as directory, patch.object(adapter, 'adjust_voice') as adjust, patch.object(adapter, 'adjust_audio_speed') as speed:
+            temporary = Path(directory) / 'result.wav'
+            adapter.synthesize_to_file(Model(), {'reference': 'references/test.wav', 'text': '你好', 'language': 'zh', 'duration_factor': .8, 'voice_effects': effects}, temporary)
+            adjust.assert_called_once_with(temporary, {**adapter.voice_effects(), **effects}, 1.25)
+            speed.assert_not_called()
+        self.assertNotIn('voice_effects', calls[0])
+
+    def test_designed_reference_is_cloned_without_changing_generated_audio(self):
+        calls = []
+        class Model:
+            def infer(self, **kwargs):
+                calls.append(kwargs)
+                Path(kwargs['output_path']).write_bytes(b'original model output')
+        with tempfile.TemporaryDirectory() as directory, patch.object(adapter, 'adjust_voice') as adjust, patch.object(adapter, 'adjust_audio_speed') as speed:
+            temporary = Path(directory) / 'result.wav'
+            adapter.synthesize_to_file(Model(), {'reference': 'references/designed.wav', 'text': '你好', 'language': 'zh', 'duration_factor': 1}, temporary)
+            self.assertEqual(temporary.read_bytes(), b'original model output')
+            self.assertEqual(calls[0]['spk_audio_prompt'], str(adapter.controlled_path('references/designed.wav', 'references')))
+            adjust.assert_not_called()
+            speed.assert_not_called()
+        self.assertNotIn('voice_effects', calls[0])
+        self.assertNotIn('speed', calls[0])
+
     def test_custom_parameters_survive_stop_token_retry(self):
         calls = []
         class Model:

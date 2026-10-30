@@ -21,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 # Direct launches and multiprocessing children use the same local source tree.
 sys.path.insert(0, str(HERE))
 from deployment import CATALOG, installation_error, model_id, model_versions, model_directory, source_directory
+from voice_effects import voice_effects, adjust_voice
 
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
@@ -84,7 +85,10 @@ def synthesize_to_file(model, args, temporary, *, generation_options=None):
                 warnings.filterwarnings("error", message=r"WARN: generation stopped due to exceeding `max_mel_tokens`", category=RuntimeWarning)
                 model.infer(spk_audio_prompt=str(controlled_path(args["reference"], "references")),
                             text=args["text"], output_path=str(temporary), use_emo_text=False, **options)
-            if MODEL_ID == "2.0" and args["duration_factor"] != 1:
+            effects = voice_effects(args.get("voice_effects"))
+            if any(effects.values()):
+                adjust_voice(temporary, effects, 1 / args["duration_factor"])
+            elif MODEL_ID == "2.0" and args["duration_factor"] != 1:
                 adjust_audio_speed(temporary, 1 / args["duration_factor"])
             return
         except RuntimeWarning as error:
@@ -291,7 +295,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         error = installation_error()
-        self.respond(200, {"local_model": MODEL_ID, "model_version": MODEL_VERSION, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
+        self.respond(200, {"local_model": MODEL_ID, "model_version": MODEL_VERSION, "voice_effects_version": 2, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
                            "loaded": ENGINE.loaded, "worker_alive": bool(ENGINE.process and ENGINE.process.is_alive()),
                            "busy": ENGINE.inference.locked()})
 
@@ -316,6 +320,7 @@ class Handler(BaseHTTPRequestHandler):
             if MODEL_ID == "2.0" and body["language"] == "ja":
                 raise ValueError("IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文")
             body["generation_params"] = generation_options(body.get("generation_params"))
+            body["voice_effects"] = voice_effects(body.get("voice_effects"))
             if not controlled_path(body["reference"], "references").is_file():
                 raise ValueError("Reference file missing")
             controlled_path(body["output"], "generated")

@@ -84,6 +84,12 @@ export function migrateTtsSchema(db) {
   if (!db.prepare('PRAGMA table_info(voices)').all().some(column => column.name === 'generation_params')) {
     db.exec("ALTER TABLE voices ADD COLUMN generation_params TEXT NOT NULL DEFAULT '{}'");
   }
+  if (!db.prepare('PRAGMA table_info(voice_samples)').all().some(column => column.name === 'base_sample_id')) {
+    db.exec('ALTER TABLE voice_samples ADD COLUMN base_sample_id TEXT REFERENCES voice_samples(id)');
+  }
+  if (!db.prepare('PRAGMA table_info(voices)').all().some(column => column.name === 'voice_effects')) {
+    db.exec("ALTER TABLE voices ADD COLUMN voice_effects TEXT NOT NULL DEFAULT '{}'");
+  }
   if (!db.prepare('PRAGMA table_info(voices)').all().some(column => column.name === 'character_id')) {
     db.transaction(() => {
       db.exec('ALTER TABLE voices ADD COLUMN character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL');

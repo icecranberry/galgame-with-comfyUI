@@ -1,0 +1,40 @@
+[
+  {
+    "id": "female",
+    "name": "基础女声",
+    "file": "female.wav",
+    "description": "",
+    "duration": 7.862395833333333,
+    "sha256": "fe15c446c7fee3a34ba96ec80196bfecfadd60df4a859175acf4cc628de6c888",
+    "sample_rate": 48000,
+    "source_type": "official_reference_audio",
+    "source_model": "IndexTeam/IndexTTS-2 official reference sample",
+    "source_voice": "examples/voice_11.wav",
+    "source_repo": "IndexTeam/IndexTTS-2-Demo",
+    "source_revision": "b01840e8e4fd9753743a6d0466cd73ae1d634a68",
+    "source_url": "https://huggingface.co/spaces/IndexTeam/IndexTTS-2-Demo/blob/b01840e8e4fd9753743a6d0466cd73ae1d634a68/examples/voice_11.wav",
+    "source_sha256": "82730e38498413d4371a76e841cd91fa2f74843b79ad3b606d45ad8a7b7a736c",
+    "language": "Chinese",
+    "voice_description": "官方发布的 voice_11.wav 中文女声参考音频（试听对比 B），不额外生成或设计声线；官方未提供固定默认女声名称。",
+    "transcript": "",
+    "transcript_status": "Upstream provides synthesis test text, not a reference transcript; intentionally left blank.",
+    "imported_at": "2026-10-30",
+    "audio_processing": "Original mono float32 at 48000 Hz converted to PCM16 with linear gain 1.1637606666860891, identical to comparison B. No resampling, pitch, EQ, denoise, speed processing or synthesis.",
+    "processed_pcm_sha256": "abd81f0dc970eac96492a7ee1c93b46eb8c2acb5baa8bf8d5c18e2369a63d00b"
+  },
+  {
+    "id": "male",
+    "name": "基础男声",
+    "file": "male.wav",
+    "description": "清朗温和的普通话青年男声，适合调节为明亮或厚重的原创角色声音。",
+    "duration": 6.696875,
+    "sha256": "e9082440bfe897b68babb3492ff677158acc933faece176cc2a8e7a1c6089729",
+    "source_model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "source_voice": "VoiceDesign · young Mandarin man",
+    "language": "Chinese",
+    "voice_description": "A young adult Chinese man in his early twenties, with a clear, warm, youthful medium-low tenor voice. Speak fluent native standard Mandarin Chinese with clean, precise articulation, friendly and relaxed, like chatting with a friend. A natural youthful male voice, warm and gentle, moderate pace, calm neutral emotion. Not a child or an older man, not deep bass, no gravel or rasp, no whispering, no breathy affectation, no exaggerated acting, no background music.",
+    "transcript": "你好，今天过得怎么样？先坐下来休息一会儿，慢慢说，我会认真听。",
+    "generated_at": "2026-10-30",
+    "audio_processing": "Gain 0.94 for peak headroom; no pitch, EQ, noise reduction or speed processing."
+  }
+]

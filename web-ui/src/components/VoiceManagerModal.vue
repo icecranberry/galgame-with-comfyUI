@@ -14,6 +14,13 @@
       <Transition name="voice-content" mode="out-in">
         <p v-if="voicesLoading" key="loading" class="voice-hint" role="status">正在读取角色声音…</p>
         <div v-else-if="!selected" key="new" class="voice-fields">
+          <linshe-tabs v-model="materialMode" :options="materialModes" :disabled="busy" size="sm" aria-label="新声音来源" />
+          <Transition name="voice-content" mode="out-in">
+          <div v-if="materialMode === 'builtin'" key="builtin" class="voice-reference">
+            <label class="voice-field">基础声音<linshe-select v-model="builtinId" :options="builtinOptions" :disabled="busy || !builtinVoices.length" aria-label="基础声音" /></label>
+            <p class="voice-hint">{{ activeBuiltin?.description || '正在读取内置声音…' }}</p>
+          </div>
+          <div v-else key="upload" class="voice-reference">
           <div class="voice-source-actions">
             <div><linshe-button :disabled="busy" @click="openRecorder">录制系统声音</linshe-button><p>打开置顶小窗，录下正在播放的对白</p></div>
             <div><linshe-button :loading="busy && operation === 'upload'" :disabled="busy" @click="chooseFile">{{ original ? '更换音频文件' : '上传音频文件' }}</linshe-button><p>音频文件 · 25MB / 120 秒以内</p></div>
@@ -33,21 +40,38 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
 />
             </svg>
             <p class="fd" role="status">{{ validRange ? `已选择 ${(end - start).toFixed(1)} 秒` : '请选择原音范围内 1～15 秒的片段' }}</p>
-            <div class="voice-inline-action"><linshe-button size="sm" :loading="busy && operation === 'crop'" :disabled="busy || !validRange" @click="crop">试听处理后的片段</linshe-button><span class="voice-hint">生成试听时会自动处理选段</span></div>
+            <div class="voice-inline-action"><linshe-button size="sm" :loading="busy && operation === 'crop'" :disabled="busy || !validRange" @click="crop">试听处理后的片段</linshe-button><span class="voice-hint">保存或合成试听时会自动处理选段</span></div>
           </template>
           <section v-if="sample" class="voice-reference" aria-label="处理后的参考音">
             <div class="voice-section-heading"><h4>处理后的参考音</h4><span>{{ sample.duration.toFixed(1) }} 秒</span></div>
             <VoiceAudioPlayer :src="sample.reference_url" label="处理后的参考音试听" @play="speechPlayer.adopt($event.target)" />
             <p v-for="warning in sample.warnings" :key="warning" class="fd">{{ warning }}</p>
           </section>
+          </div>
+          </Transition>
           <label class="voice-field">音色名称<linshe-input v-model="name" maxlength="80" :disabled="busy" /></label>
         </div>
         <div v-else key="existing" class="voice-fields">
           <label class="voice-field">已存音色<linshe-select :model-value="selected" :disabled="busy" :options="voiceOptions" @update:model-value="selectVoice" /></label>
           <div class="voice-section-heading"><h4>{{ selectedVoice?.name }}</h4><span>{{ selected === binding?.voice_id ? '当前角色正在使用' : '选择后立即使用' }}</span></div>
-          <VoiceAudioPlayer :src="selectedVoice?.reference_url" label="已有音色参考试听" @play="speechPlayer.adopt($event.target)" />
+          <VoiceAudioPlayer v-if="!designEnabled" :src="selectedVoice?.reference_url" label="已有音色参考试听" @play="speechPlayer.adopt($event.target)" />
           <div class="voice-inline-action"><linshe-button variant="danger" size="sm" :disabled="busy" :loading="busy && operation === 'delete'" @click="deleteSelectedVoice">删除音色</linshe-button></div>
         </div>
+      </Transition>
+      <Transition name="voice-design">
+      <section v-if="designEnabled" class="voice-design" aria-label="调节声音">
+        <div class="voice-section-heading"><h4>调节声音</h4><div class="voice-inline-action"><linshe-button size="sm" :disabled="busy || voicesLoading" @click="randomizeVoice">随机一组</linshe-button><linshe-button variant="ghost" size="sm" :disabled="busy || voicesLoading || isDefaultVoiceControls" @click="resetVoiceControls">恢复原声</linshe-button></div></div>
+        <p class="voice-hint">播放下方样音，边听边调出喜欢的声音。随机只改变当前调节，保存后角色会固定使用。</p>
+        <VoiceSamplePreview v-if="modelValue && !recorderOpen" :src="liveSource.src" :start="liveSource.start" :end="liveSource.end" :parameters="previewControls" />
+        <div class="voice-parameter-grid">
+          <label v-for="field in voiceControlFields" :key="field.key" class="voice-field">
+            <span class="voice-parameter-label"><span>{{ field.label }}</span><output :for="`voice-control-${field.key}`" class="voice-parameter-value">{{ formatVoiceControl(field.key) }}</output></span>
+            <linshe-slider :id="`voice-control-${field.key}`" v-model="voiceControls[field.key]" :min="field.min" :max="field.max" :step="field.step" :disabled="busy || voicesLoading" :aria-label="field.label" />
+            <span class="voice-hint">{{ field.hint }}</span>
+          </label>
+        </div>
+        <div v-if="selected" class="voice-inline-action"><linshe-button size="sm" :disabled="busy || !parametersDirty || !parametersValid" :loading="busy && operation === 'parameters'" @click="saveParameters">保存声音调节</linshe-button><span class="voice-hint" role="status">{{ parametersDirty ? '调节尚未保存' : '已使用保存的参数' }}</span></div>
+      </section>
       </Transition>
       <section class="voice-advanced" :class="{ 'is-open': advancedOpen }" aria-label="音色高级参数">
         <div class="voice-advanced-heading" role="button" tabindex="0" :aria-expanded="advancedOpen" aria-controls="voice-advanced-fields" @click="advancedOpen = !advancedOpen" @keydown.enter.prevent="advancedOpen = !advancedOpen" @keydown.space.prevent="advancedOpen = !advancedOpen">
@@ -58,7 +82,7 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
         <div id="voice-advanced-fields" class="voice-advanced-content" :aria-hidden="!advancedOpen" :inert="!advancedOpen">
           <div class="voice-advanced-clip">
           <div class="voice-advanced-body">
-            <p class="voice-hint">仅调整当前音色。先生成试听确认效果，保存后用于聊天朗读；未保存的修改会在关闭或切换音色时丢弃。</p>
+            <p class="voice-hint">仅影响模型合成；可生成试听确认效果，保存后用于聊天朗读。未保存的修改会在关闭或切换音色时丢弃。</p>
             <div class="voice-parameter-grid">
               <label v-for="field in parameterFields" :key="field.key" class="voice-field">
                 <span class="voice-parameter-label"><span>{{ field.label }} <span class="voice-parameter-key">{{ field.key }}</span></span><output :for="`voice-param-${field.key}`" class="voice-parameter-value">{{ field.step === 1 ? generationParams[field.key] : generationParams[field.key].toFixed(2) }}</output></span>
@@ -77,7 +101,7 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
         </div>
       </section>
       <section class="voice-fields voice-test">
-      <div class="voice-section-heading"><h4>听听效果</h4><span>换一句台词，确认声音是否合适</span></div>
+      <div class="voice-section-heading"><h4>合成试听 · 可选</h4><span>换一句台词，确认模型朗读的效果</span></div>
       <Transition name="voice-content">
         <div v-if="previewJob?.audio_url" class="voice-preview-result">
           <VoiceAudioPlayer ref="previewAudio" :src="previewJob.audio_url" preload="metadata" label="合成试听" @play="playPreview" />
@@ -98,7 +122,7 @@ v-for="edge in ['start', 'end']" :key="edge" :x="(edge === 'start' ? start : end
     </div>
     <template v-if="mode === 'local'" #footer>
       <div class="voice-footer">
-<span class="voice-hint">{{ selected ? '选择音色后立即用于聊天朗读' : '先生成试听，保存后自动使用' }}</span><div class="voice-footer-actions">
+<span class="voice-hint">{{ selected ? '选择音色后立即用于聊天朗读' : designEnabled ? '调好声音即可保存，保存后自动使用' : '选好参考片段即可保存，保存后自动使用' }}</span><div class="voice-footer-actions">
       <linshe-button v-if="selected" :disabled="busy" @click="$emit('update:modelValue', false)">完成</linshe-button>
       <linshe-button v-else variant="primary" :disabled="busy || !canSave" :loading="busy && operation === 'save'" @click="save">保存音色</linshe-button>
       </div>
@@ -118,6 +142,7 @@ import LinsheSelect from './ui/LinsheSelect.vue'
 import LinsheTabs from './ui/LinsheTabs.vue'
 import SystemAudioRecorder from './SystemAudioRecorder.vue'
 import VoiceAudioPlayer from './VoiceAudioPlayer.vue'
+import VoiceSamplePreview from './VoiceSamplePreview.vue'
 import VoiceApiEditor from './VoiceApiEditor.vue'
 import { ttsApi, uploadVoice } from '../api/tts.js'
 import { speechEnabled, speechJobs, speechPlayer, stopSpeech, waitSpeech } from '../stores/speech.js'
@@ -132,6 +157,41 @@ const sourceName = ref(''), voicesLoading = ref(true)
 const start = ref(0), end = ref(10), dragging = ref(''), sourceAudio = ref(null)
 const name = ref('日常')
 const voiceDefaults = { speed: 1, language: 'zh' }
+const materialMode = ref('upload'), builtinId = ref(''), builtinVoices = ref([])
+const materialModes = [{ label: '录制 / 上传', value: 'upload' }, { label: '内置声音', value: 'builtin' }]
+const builtinOptions = computed(() => builtinVoices.value.map(voice => ({ label: voice.name, value: voice.id })))
+const activeBuiltin = computed(() => materialMode.value === 'builtin' && builtinVoices.value.find(voice => voice.id === builtinId.value))
+const voiceControlDefaults = { pitch: 0, resonance: 0, speed: 1, thickness: 0, clarity: 0, air: 0 }
+const voiceControls = ref({ ...voiceControlDefaults })
+const voiceControlFields = [
+  { key: 'pitch', label: '音高', min: -4, max: 4, step: 0.25, hint: '低沉 ↔ 高挑 · 保持共鸣不变' },
+  { key: 'resonance', label: '共鸣', min: -15, max: 15, step: 1, hint: '厚重 ↔ 轻巧 · 保持音高不变' },
+  { key: 'speed', label: '语速', min: 0.5, max: 2, step: 0.05, hint: '舒缓 ↔ 轻快 · 保持音高不变' },
+  { key: 'thickness', label: '厚度', min: -6, max: 6, step: 0.5, hint: '轻薄 ↔ 浑厚 · 调整低频的饱满度' },
+  { key: 'clarity', label: '清晰度', min: -6, max: 6, step: 0.5, hint: '柔和 ↔ 清晰 · 调整咬字细节的存在感' },
+  { key: 'air', label: '空气感', min: -6, max: 6, step: 0.5, hint: '收敛 ↔ 通透 · 调整高频的轻盈感' },
+]
+const savedVoiceControls = computed(() => Object.fromEntries(Object.entries(voiceControlDefaults).map(([key, fallback]) => [key,
+  (key === 'speed' ? selectedVoice.value?.speed : selectedVoice.value?.voice_effects?.[key]) ?? fallback,
+])))
+const previewControls = computed(() => ({ ...voiceControls.value, brightness: selectedVoice.value?.voice_effects?.brightness ?? 0 }))
+const sameVoiceControls = (a, b) => Object.keys(voiceControlDefaults).every(key => a[key] === b[key])
+const isDefaultVoiceControls = computed(() => sameVoiceControls(voiceControls.value, voiceControlDefaults))
+function resetVoiceControls() { voiceControls.value = { ...voiceControlDefaults } }
+function randomizeVoice() {
+  if (busy.value || voicesLoading.value || !designEnabled.value) return
+  const pick = (min, max, step) => Number((min + Math.floor(Math.random() * (Math.round((max - min) / step) + 1)) * step).toFixed(2))
+  voiceControls.value = { pitch: pick(-2.5, 2.5, 0.25), resonance: pick(-10, 10, 1), speed: pick(0.9, 1.1, 0.05), thickness: pick(-3, 3, 0.5), clarity: pick(-3, 3, 0.5), air: pick(-3, 3, 0.5) }
+}
+function formatVoiceControl(key) {
+  const value = voiceControls.value[key]
+  if (key === 'speed') return `${value.toFixed(2)} 倍`
+  return `${value > 0 ? '+' : ''}${value}${key === 'pitch' ? ' 半音' : key === 'resonance' ? '%' : ' dB'}`
+}
+function voiceDraft() {
+  const { speed, ...effects } = effectiveVoiceControls.value
+  return { speed, voice_effects: { brightness: selectedVoice.value?.voice_effects?.brightness ?? 0, ...effects }, generation_params: { ...generationParams.value } }
+}
 const generationDefaults = { temperature: 0.8, top_k: 30, top_p: 0.9, num_beams: 3 }
 const generationParams = ref({ ...generationDefaults }), advancedOpen = ref(false)
 const parameterFields = [
@@ -144,10 +204,10 @@ function validParameter(field) {
   const value = generationParams.value[field.key]
   return typeof value === 'number' && Number.isFinite(value) && value >= field.min && value <= field.max && (field.step !== 1 || Number.isInteger(value))
 }
-const parametersValid = computed(() => parameterFields.every(validParameter))
+const parametersValid = computed(() => parameterFields.every(validParameter) && voiceControlFields.every(field => Number.isFinite(effectiveVoiceControls.value[field.key]) && effectiveVoiceControls.value[field.key] >= field.min && effectiveVoiceControls.value[field.key] <= field.max))
 const sameParameters = (a, b) => Object.keys(generationDefaults).every(key => a[key] === b[key])
 const isDefaultParameters = computed(() => sameParameters(generationParams.value, generationDefaults))
-const parametersDirty = computed(() => !sameParameters(generationParams.value, { ...generationDefaults, ...selectedVoice.value?.generation_params }))
+const parametersDirty = computed(() => !sameParameters(generationParams.value, { ...generationDefaults, ...selectedVoice.value?.generation_params }) || (designEnabled.value && !sameVoiceControls(voiceControls.value, savedVoiceControls.value)))
 function resetParameters() { generationParams.value = { ...generationDefaults } }
 const busy = ref(false), operation = ref(''), error = ref(''), notice = ref(''), previewId = ref(null)
 const recorderOpen = ref(false), recorderPanel = ref(null), uploadPicker = ref(null)
@@ -168,18 +228,23 @@ const sourceMode = computed({
 })
 const voiceOptions = computed(() => voices.value.map(v => ({ label: v.name, value: v.id })))
 const selectedVoice = computed(() => voices.value.find(v => v.id === selected.value))
-const auditionSource = computed(() => voicesLoading.value ? '正在读取声音素材…' : selected.value ? `已存音色 · ${selectedVoice.value?.name || ''}` : original.value ? `新素材 · ${sourceName.value}` : '等待录制或上传新素材')
+const designEnabled = computed(() => selected.value ? selectedVoice.value?.source === 'builtin' : materialMode.value === 'builtin')
+const effectiveVoiceControls = computed(() => designEnabled.value ? voiceControls.value : selected.value ? savedVoiceControls.value : voiceControlDefaults)
+const auditionSource = computed(() => voicesLoading.value ? '正在读取声音素材…' : selected.value ? `已存音色 · ${selectedVoice.value?.name || ''}` : activeBuiltin.value ? activeBuiltin.value.name : original.value ? `新素材 · ${sourceName.value}` : '等待录制或上传新素材')
 const previewJob = computed(() => speechJobs[previewId.value])
 watch(previewId, () => { playbackHint.value = '' })
 const validRange = computed(() => original.value && Number.isFinite(start.value) && Number.isFinite(end.value) && start.value >= 0 && end.value <= original.value.duration && end.value - start.value >= 1 && end.value - start.value <= 15)
-const canPreview = computed(() => parametersValid.value && speechEnabled.value && !!text.value.trim() && (!!selectedVoice.value || (!selected.value && !!validRange.value)))
-const canSave = computed(() => parametersValid.value && !selected.value && !!name.value.trim() && !!sample.value && previewJob.value?.status === 'completed')
-const previewHint = computed(() => !speechEnabled.value ? '请先在音色管理的全局设置中开启语音朗读' : !selected.value && !original.value ? '先上传或录制一段声音' : !selected.value && !validRange.value ? '请先选取 1～15 秒参考片段' : !text.value.trim() ? '请输入试听台词' : '首次生成需要加载模型，请稍候；试听不会更换当前声音')
+const liveSource = computed(() => !designEnabled.value ? { src: '' } : selected.value ? { src: selectedVoice.value?.base_reference_url || selectedVoice.value?.reference_url || '' } : { src: activeBuiltin.value?.reference_url || '' })
+const canPreview = computed(() => parametersValid.value && speechEnabled.value && !!text.value.trim() && (!!selectedVoice.value || (!selected.value && (!!activeBuiltin.value || (materialMode.value === 'upload' && !!validRange.value)))))
+const canSave = computed(() => parametersValid.value && !selected.value && !!name.value.trim() && (!!activeBuiltin.value || (materialMode.value === 'upload' && !!validRange.value)))
+const previewHint = computed(() => !speechEnabled.value ? '请先在音色管理的全局设置中开启语音朗读' : !selected.value && !activeBuiltin.value && !original.value ? '请选择内置声音，或上传 / 录制声音' : !selected.value && !activeBuiltin.value && !validRange.value ? '请先选取 1～15 秒参考片段' : !text.value.trim() ? '请输入试听台词' : '首次生成需要加载模型，请稍候；试听不会更换当前声音')
 
 watch([start, end], () => { sample.value = null; previewId.value = null; stopSpeech() })
 watch([selected, text], () => { previewId.value = null; stopSpeech() })
-watch(selected, () => { notice.value = ''; generationParams.value = { ...generationDefaults, ...selectedVoice.value?.generation_params } }, { flush: 'sync' })
+watch(selected, () => { notice.value = ''; generationParams.value = { ...generationDefaults, ...selectedVoice.value?.generation_params }; voiceControls.value = { ...savedVoiceControls.value } }, { flush: 'sync' })
 watch(generationParams, () => { previewId.value = null; stopSpeech() }, { deep: true, flush: 'sync' })
+watch(voiceControls, () => { previewAudio.value?.media?.pause(); previewId.value = null }, { deep: true, flush: 'sync' })
+watch([materialMode, builtinId], () => { sample.value = null; previewId.value = null; stopSpeech() }, { flush: 'sync' })
 async function loadVoice([open, characterId]) {
   const current = ++session
   previewTask?.cancel().catch(() => {}); previewTask = null; stopSpeech(); busy.value = false; operation.value = ''
@@ -188,6 +253,7 @@ async function loadVoice([open, characterId]) {
   mode.value = null
   voicesLoading.value = true
   advancedOpen.value = false; resetParameters()
+  resetVoiceControls(); materialMode.value = 'upload'; builtinId.value = ''; builtinVoices.value = []
   text.value = testLines[0].value
   error.value = ''; notice.value = ''; original.value = null; sample.value = null; previewId.value = null
   voices.value = []; binding.value = null; selected.value = ''; sourceName.value = ''
@@ -205,6 +271,11 @@ async function loadVoice([open, characterId]) {
     binding.value = voices.value.some(voice => voice.id === bound?.voice_id) ? bound : null
     selected.value = binding.value?.voice_id || ''
     name.value = nextVoiceName()
+    const builtins = await ttsApi('/builtin-voices')
+    if (current !== session) return
+    builtinVoices.value = Array.isArray(builtins) ? builtins : []
+    builtinId.value = builtinVoices.value[0]?.id || ''
+    if (!builtinVoices.value.length) materialMode.value = 'upload'
   } catch (e) { if (current === session) error.value = e.message }
   finally { if (current === session) { busy.value = false; voicesLoading.value = false } }
 }
@@ -242,6 +313,7 @@ function importRecording(file) {
     stopSpeech(); sample.value = null; previewId.value = null
     if (selected.value || !original.value) name.value = nextVoiceName()
     selected.value = ''
+    materialMode.value = 'upload'
     sourceName.value = `${file.name || '新录音'} · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
     original.value = result; start.value = 0; end.value = Math.min(result.duration, 12)
     notice.value = '已切换到新素材。接下来的试听使用这段声音，保存后自动用于聊天朗读。'
@@ -287,11 +359,13 @@ function preview() {
     const task = createSpeechTask({
       request: async signal => {
         if (!selected.value && !sample.value) {
-          const cropped = await ttsApi(`/samples/${original.value.id}/crop`, { start: start.value, end: end.value }, 'POST', signal)
+          const cropped = activeBuiltin.value
+            ? await ttsApi(`/builtin-voices/${builtinId.value}/sample`, {}, 'POST', signal)
+            : await ttsApi(`/samples/${original.value.id}/crop`, { start: start.value, end: end.value }, 'POST', signal)
           if (signal.aborted || !current()) throw new DOMException('已取消试听', 'AbortError')
           sample.value = cropped
         }
-        return ttsApi('/preview', { character_id: props.character.id, voice_id: selected.value || undefined, sample_id: sample.value?.id, text: text.value, ...voiceDefaults, generation_params: { ...generationParams.value } })
+        return ttsApi('/preview', { character_id: props.character.id, voice_id: selected.value || undefined, sample_id: sample.value?.id, text: text.value, ...voiceDefaults, ...voiceDraft() })
       },
       wait: waitSpeech,
       cancel: job => ttsApi(`/jobs/${job.id}/cancel`, {}),
@@ -327,7 +401,14 @@ function save() {
   if (busy.value || !canSave.value) return
   const characterId = props.character.id
   return perform('save', async current => {
-    await ttsApi('/voices', { character_id: characterId, sample_id: sample.value.id, name: name.value, ...voiceDefaults, generation_params: { ...generationParams.value } })
+    if (!sample.value) {
+      const prepared = activeBuiltin.value
+        ? await ttsApi(`/builtin-voices/${builtinId.value}/sample`, {})
+        : await ttsApi(`/samples/${original.value.id}/crop`, { start: start.value, end: end.value })
+      if (!current()) return
+      sample.value = prepared
+    }
+    await ttsApi('/voices', { character_id: characterId, sample_id: sample.value.id, name: name.value, ...voiceDefaults, ...voiceDraft() })
     if (current()) { emit('saved'); emit('update:modelValue', false) }
   })
 }
@@ -335,10 +416,10 @@ function saveParameters() {
   const voice = selectedVoice.value
   if (busy.value || !voice || !parametersValid.value || !parametersDirty.value) return
   return perform('parameters', async current => {
-    const saved = await ttsApi(`/voices/${voice.id}/parameters`, { character_id: props.character.id, generation_params: { ...generationParams.value } }, 'PUT')
+    const saved = await ttsApi(`/voices/${voice.id}/parameters`, { character_id: props.character.id, ...voiceDraft() }, 'PUT')
     if (!current()) return
     voices.value = voices.value.map(item => item.id === saved.id ? saved : item)
-    notice.value = '音色参数已保存，之后的聊天朗读将使用这组参数。'
+    notice.value = designEnabled.value ? '调节后的参考声音已保存，之后的聊天朗读将使用这段参考音频。' : '音色参数已保存，之后的聊天朗读将使用这组参数。'
     emit('saved')
   })
 }
@@ -386,6 +467,8 @@ onBeforeUnmount(() => { session++; previewTask?.cancel().catch(() => {}); stopSp
 .voice-error { border-left-color:var(--danger); color:var(--danger); }
 .voice-content-enter-active, .voice-content-leave-active { transition:opacity .3s ease, transform .3s ease; }
 .voice-content-enter-from, .voice-content-leave-to { opacity:0; transform:translateY(4px); }
+.voice-design-enter-active,.voice-design-leave-active { transition:opacity .3s ease, transform .3s ease; }
+.voice-design-enter-from,.voice-design-leave-to { opacity:0; transform:translateY(4px); }
 
 .voice-intro,.voice-section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; }
 .voice-intro { padding:0 0 18px; border-bottom:1px solid var(--border); }
@@ -400,6 +483,7 @@ onBeforeUnmount(() => { session++; previewTask?.cancel().catch(() => {}); stopSp
 .voice-source-actions p { margin:0; font-size:var(--fs-xs); color:var(--text-secondary); line-height:1.6; }
 .voice-inline-action,.voice-presets,.voice-footer-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .voice-test { padding-bottom:0; }
+.voice-design { display:grid; gap:16px; border-top:1px solid var(--border); padding-top:18px; }
 .voice-advanced { border-top:1px solid var(--border); }
 .voice-advanced-heading { display:flex; align-items:center; gap:12px; padding:16px 0; cursor:pointer; text-align:left; border-radius:var(--radius-sm); }
 .voice-advanced-heading h4 { margin:0; font-size:var(--fs-sm); font-weight:700; }

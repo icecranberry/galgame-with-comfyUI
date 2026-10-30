@@ -1,7 +1,8 @@
 <template>
   <div class="voice-audio" role="group" :aria-label="label">
     <audio
-ref="media" :src="src" :preload="preload" @play="onPlay" @pause="onPause" @ended="onEnded"
+v-if="!transport && src"
+ref="media" :src="transport ? undefined : src" :preload="preload" @play="onPlay" @pause="onPause" @ended="onEnded"
       @timeupdate="onTime" @loadedmetadata="syncTime" @durationchange="syncTime" @seeked="syncTime"
       @waiting="buffering = playing" @playing="buffering = false" @volumechange="syncVolume"
       @error="onError" @emptied="reset"
@@ -46,9 +47,10 @@ class="voice-audio-seek" :class="{ 'is-disabled': !duration }" role="slider" tab
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 
-const props = defineProps({ src: { type: String, default: '' }, label: { type: String, default: '音频' }, preload: { type: String, default: 'metadata' } })
+const props = defineProps({ src: { type: String, default: '' }, label: { type: String, default: '音频' }, preload: { type: String, default: 'metadata' }, transport: { type: Object, default: null } })
 const emit = defineEmits(['play', 'timeupdate', 'ended'])
 const media = ref(null), playing = ref(false), buffering = ref(false), muted = ref(false)
+const playback = computed(() => props.transport || media.value)
 const position = ref(0), duration = ref(0), dragging = ref(false), error = ref('')
 const fraction = computed(() => duration.value ? Math.min(1, Math.max(0, position.value / duration.value)) : 0)
 let intent = 0, frame = null
@@ -57,7 +59,7 @@ function formatTime(value) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 function syncTime() {
-  const audio = media.value
+  const audio = playback.value
   duration.value = Number.isFinite(audio?.duration) ? Math.max(0, audio.duration) : 0
   position.value = Number.isFinite(audio?.currentTime) ? Math.max(0, audio.currentTime) : 0
 }
@@ -77,7 +79,7 @@ function onEnded(event) { onPause(); emit('ended', event) }
 function onTime(event) { emit('timeupdate', event); syncTime() }
 function onError() { onPause(); error.value = '音频加载失败，请重新播放或更换音频' }
 async function play() {
-  const audio = media.value
+  const audio = playback.value
   if (!audio || !props.src) return
   const ticket = ++intent
   playing.value = true; error.value = ''
@@ -89,19 +91,19 @@ async function play() {
     }
   }
 }
-function pause() { onPause(); media.value?.pause() }
+function pause() { onPause(); playback.value?.pause() }
 function toggle() { if (playing.value) pause(); else void play() }
-function syncVolume() { muted.value = !!media.value?.muted || media.value?.volume === 0 }
+function syncVolume() { muted.value = !!playback.value?.muted || playback.value?.volume === 0 }
 function toggleMute() {
-  if (!media.value) return
-  media.value.muted = !muted.value
-  if (!media.value.muted && media.value.volume === 0) media.value.volume = 1
+  if (!playback.value) return
+  playback.value.muted = !muted.value
+  if (!playback.value.muted && playback.value.volume === 0) playback.value.volume = 1
   syncVolume()
 }
 function seek(seconds) {
-  if (!media.value || !duration.value) return
+  if (!playback.value || !duration.value) return
   const target = Math.max(0, Math.min(duration.value, seconds))
-  media.value.currentTime = target
+  playback.value.currentTime = target
   position.value = target
 }
 function seekPointer(event) {
@@ -122,8 +124,20 @@ function seekKey(event) {
 }
 function reset() { onPause(); position.value = 0; duration.value = 0; dragging.value = false; error.value = '' }
 watch(() => props.src, () => { pause(); reset() }, { flush: 'sync' })
-onBeforeUnmount(pause)
-defineExpose({ media })
+let detachTransport = () => {}
+watch(() => props.transport, (transport, previous) => {
+  detachTransport(); previous?.pause(); reset(); syncTime(); syncVolume()
+  const handlers = { play: onPlay, pause: onPause, timeupdate: onTime, loadedmetadata: syncTime, seeked: syncTime, volumechange: syncVolume, error: onError }
+  // A local DSP transport implements media events without an HTML element.
+  const listeners = Object.entries(handlers).map(([type, handle]) => {
+    const listener = () => handle({ target: transport })
+    transport?.addEventListener(type, listener)
+    return [type, listener]
+  })
+  detachTransport = () => listeners.forEach(([type, listener]) => transport?.removeEventListener(type, listener))
+}, { immediate: true, flush: 'sync' })
+onBeforeUnmount(() => { pause(); detachTransport() })
+defineExpose({ media: playback })
 </script>
 
 <style scoped>

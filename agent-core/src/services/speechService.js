@@ -11,6 +11,8 @@ import { getSpeechSettings, setSpeechSettings as configureSpeechSettings, getApi
 import { apiConnection, apiVoiceParams, apiSpeechCacheKey, fetchApiSpeech } from './speechApiClient.js';
 import { resolveApiReferences, encodeApiReferences } from './speechApiAssets.js';
 import { selectedLocalTtsModel } from './localTtsModels.js';
+import { localVoiceSource } from './builtinVoices.js';
+import { baseVoiceSample, prepareVoiceReference, referenceDesign } from './voiceReferences.js';
 
 import { clearGeneratedSpeech } from './speechCache.js';
 
@@ -78,15 +80,30 @@ function enqueue(job) {
   withSpeechGpu(async () => {
     if (cancelled()) throw new Error('语音已关闭或任务已取消');
     updateJob(job.id, 'generating');
-    const sample = getDb().prepare('SELECT * FROM voice_samples WHERE id=?').get(job.sample_id);
+    let sample = getDb().prepare('SELECT * FROM voice_samples WHERE id=?').get(job.sample_id);
+    const { reference_design: design, ...params } = JSON.parse(job.params);
+    if (design) {
+      sample = await prepareVoiceReference(sample, design);
+      getDb().prepare('UPDATE speech_jobs SET sample_id=? WHERE id=?').run(sample.id, job.id);
+    }
+    if (cancelled()) throw new Error('语音已关闭或任务已取消');
     const status = await ttsHealth();
     if (!status.online || !status.compatible || !status.ready) throw new Error(status.error || 'TTS 模型尚未安装或固定版本不匹配');
+    const effects = params.voice_effects || {};
+    const requiredEffectsVersion = ['thickness', 'clarity', 'air'].some(key => effects[key]) ? 2 : 1;
+    if (Object.values(effects).some(value => value !== 0) && !(status.voice_effects_version >= requiredEffectsVersion)) {
+      throw new Error('声音服务尚未更新，请在音色管理的服务维护中重启声音服务后重试');
+    }
     const output = `generated/${job.id}.wav`;
     // The FIFO owns the adapter here; only a cold worker needs a load notice.
     // Warm synthesis and cached audio stay silent, including on completion.
     if (!status.loaded) broadcast('speech_preparing', { phase: 'model_load' });
+    const serviceEffects = Object.fromEntries(Object.entries(effects).filter(([key, value]) => ['pitch', 'resonance', 'brightness'].includes(key) || value !== 0));
+    // Built-in controls have already been baked into the reference. They are
+    // never forwarded to the adapter or applied to generated speech again.
+    const { voice_effects: ignoredEffects, ...synthesisParams } = params;
     await ttsRequest('/synthesize', { reference: sample.reference_path, output, text: job.text,
-      ...JSON.parse(job.params), model_version: job.model_version }, 600000);
+      ...synthesisParams, ...(!design ? { voice_effects: serviceEffects } : {}), model_version: job.model_version }, 600000);
     if (!fs.existsSync(audioPath(output))) throw new Error('TTS 没有生成音频，请检查两端音频目录配置');
     return output;
   }, cancelled).then(output => updateJob(job.id, 'completed', null, output))
@@ -107,12 +124,15 @@ export function requestSpeech({ characterId, voiceId, sampleId, text, params, me
   if (cleaned.length > 1000) throw new Error('单次朗读最多 1000 字，请选择较短的气泡');
   // Preview drafts can override sampling without mutating the saved voice.
   // Message playback always uses the saved profile.
-  const actualParams = speechParams(voice ? { ...voice, ...(!messageId && params?.generation_params !== undefined ? { generation_params: params.generation_params } : {}) } : params);
+  const draft = !messageId ? Object.fromEntries(['generation_params', 'voice_effects', 'speed'].filter(key => params?.[key] !== undefined).map(key => [key, params[key]])) : {};
+  let actualParams = speechParams(voice ? { ...voice, ...draft } : params);
+  const builtin = localVoiceSource(sample.id) === 'builtin';
+  if (builtin) actualParams = { ...speechParams({ language: actualParams.language, generation_params: actualParams.generation_params }), reference_design: referenceDesign(actualParams) };
   const modelVersion = selectedLocalTtsModel().version;
   if (actualParams.language === 'ja') throw new Error('IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文');
   // A regeneration has its own cache namespace. Existing chat associations and
   // their completed files remain playable even when this new attempt fails.
-  const key = speechCacheKey(cleaned, sample.content_hash, actualParams, modelVersion) + (force ? `:fresh:${randomUUID()}` : '');
+  const key = speechCacheKey(cleaned, builtin ? baseVoiceSample(sample).content_hash : sample.content_hash, actualParams, modelVersion) + (force ? `:fresh:${randomUUID()}` : '');
   let job = db.prepare("SELECT * FROM speech_jobs WHERE cache_key=? AND status IN ('queued','generating','completed')").get(key);
   if (job?.status === 'completed' && !fs.existsSync(audioPath(job.output_path))) { updateJob(job.id, 'failed', '缓存文件已丢失'); job = null; }
   let created = false;

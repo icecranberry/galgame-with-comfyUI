@@ -92,3 +92,23 @@ test('progress follows current media time on animation frames without waiting fo
   assert.equal(f.state.formatTime(f.state.position.value), '0:23')
   f.state.pause(); assert.equal(f.frames.size, 0)
 })
+
+test('local sample transport reuses player controls and yields to global playback', async t => {
+  const f = fixture(t), events = new EventTarget()
+  const transport = Vue.markRaw({ paused: true, currentTime: 0, duration: 8, volume: 1, muted: false,
+    addEventListener: (...args) => events.addEventListener(...args), removeEventListener: (...args) => events.removeEventListener(...args),
+    async play() { this.paused = false; events.dispatchEvent(new Event('play')) },
+    pause() { this.paused = true; events.dispatchEvent(new Event('pause')) },
+  })
+  f.props.transport = transport
+  await f.state.play()
+  assert.equal(f.state.playing.value, true)
+  assert.equal(f.events.at(-1)[1].target, transport)
+  const owner = createSpeechPlayback(); owner.adopt(transport)
+  f.state.seek(3); assert.equal(transport.currentTime, 3)
+  f.state.toggleMute(); assert.equal(transport.muted, true)
+  owner.begin()
+  assert.equal(transport.paused, true)
+  assert.equal(transport.currentTime, 0)
+  assert.equal(f.state.playing.value, false)
+})

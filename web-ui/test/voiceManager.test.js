@@ -20,7 +20,7 @@ function fixture(t, api = async route => route === '/voices?character_id=1' ? []
   const deps = { Vue, speechEnabled, speechJobs, createSpeechTask, stopSpeech: () => { stops++; speechPlayer.stop() },
     speechPlayer, ttsApi: async (...args) => { calls.push(args); if (args[0] === '/settings') return options.settings ? options.settings() : { mode: 'local', enabled: false }; return api(args[0].replace('?mode=local', ''), ...args.slice(1)) }, uploadVoice: options.upload || (async () => null),
     waitSpeech: options.wait || (async job => { const ready = { ...job, status: 'completed', audio_url: '/preview.wav' }; speechJobs[job.id] = ready; return ready }),
-    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSlider: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, VoiceAudioPlayer: {}, VoiceApiEditor: {} }
+    LinsheModal: {}, LinsheButton: {}, LinsheInput: {}, LinsheSlider: {}, LinsheSelect: {}, LinsheTabs: {}, SystemAudioRecorder: {}, VoiceAudioPlayer: {}, VoiceSamplePreview: {}, VoiceApiEditor: {} }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() {
@@ -104,15 +104,15 @@ test('advanced draft previews separately, saves to its voice, restores defaults 
   assert.deepEqual(saved.generation_params, defaults)
 })
 
-test('new voices save audition parameters and cannot save an outdated preview', async t => {
+test('new voices can save adjusted parameters without generating another preview', async t => {
   const f = fixture(t, async (route, body) => route.startsWith('/voices?') ? [] : route === '/preview' ? { id: 'new-preview', status: 'queued' } : route === '/voices' ? { id: 'new', ...body } : null)
   await flush(); readyPreview(f)
   f.state.generationParams.value.top_p = 0.95
   await f.state.preview()
   assert.equal(f.state.canSave.value, true)
   f.state.generationParams.value.temperature = 0.75
-  assert.equal(f.state.canSave.value, false)
-  await f.state.preview(); await f.state.save()
+  assert.equal(f.state.canSave.value, true)
+  await f.state.save()
   const payload = f.calls.find(([route]) => route === '/voices')[1]
   assert.equal(payload.generation_params.temperature, 0.75)
   assert.equal(payload.generation_params.top_p, 0.95)
@@ -237,7 +237,7 @@ test('new recording replaces the audition source, clears old preview and saves t
   assert.equal(f.state.binding.value.voice_id, 'old')
   assert.equal(f.state.sample.value, null)
   assert.equal(f.state.previewId.value, null)
-  assert.equal(f.state.canSave.value, false)
+  assert.equal(f.state.canSave.value, true)
   assert.match(f.state.auditionSource.value, /新素材.*新录音/)
   assert.equal(f.state.name.value, '测试 · 日常 2')
   await f.state.preview()
@@ -250,8 +250,8 @@ test('new recording replaces the audition source, clears old preview and saves t
   // A same-length second recording must also invalidate the previous crop.
   await f.state.importRecording({ name: 'replacement.wav' }); await Vue.nextTick()
   assert.equal(f.state.sample.value, null)
-  assert.equal(f.state.canSave.value, false)
-  await f.state.preview(); await f.state.save()
+  assert.equal(f.state.canSave.value, true)
+  await f.state.save()
   assert.equal(f.calls.find(([route, body]) => route === '/voices' && body)[1].sample_id, 'clip-2')
   assert.equal(f.calls.find(([route, body]) => route === '/voices' && body)[1].character_id, 1)
   assert.equal(f.calls.find(([route, body]) => route === '/voices' && body)[1].language, 'zh')
@@ -332,4 +332,136 @@ test('only the current character voices appear, including after changing charact
   assert.equal(f.state.selected.value, '')
   assert.equal(f.state.canSave.value, false)
   assert.equal(f.state.sourceMode.value, 'new')
+})
+
+test('built-in voices preview without uploading, invalidate stale samples and save a fixed design', async t => {
+  const builtins = [{ id: 'female', name: '基础女声' }, { id: 'male', name: '基础男声' }]
+  const f = fixture(t, async (route, body) => {
+    if (route === '/builtin-voices') return builtins
+    if (route.startsWith('/voices?')) return []
+    if (route.includes('/sample')) return { id: route.includes('female') ? 'female-sample' : 'male-sample' }
+    if (route === '/preview') return { id: `preview-${body.sample_id}-${body.voice_effects.pitch}`, status: 'queued' }
+    if (route === '/voices') return body
+    return null
+  })
+  await flush(); f.speechEnabled.value = true
+  assert.equal(f.state.materialMode.value, 'upload')
+  assert.equal(f.state.original.value, null)
+  assert.equal(f.state.canPreview.value, false)
+  f.state.materialMode.value = 'builtin'
+  assert.equal(f.state.canPreview.value, true)
+  f.state.voiceControls.value = { pitch: 2, resonance: -5, speed: 1.15, thickness: 2, clarity: 1, air: 3 }
+  await f.state.preview()
+  assert.equal(f.state.canSave.value, true)
+  f.state.builtinId.value = 'male'
+  assert.equal(f.state.sample.value, null)
+  assert.equal(f.state.canSave.value, true)
+  await f.state.save()
+  const payload = f.calls.find(([route]) => route === '/voices')[1]
+  assert.equal(payload.sample_id, 'male-sample')
+  assert.equal(payload.speed, 1.15)
+  assert.deepEqual(payload.voice_effects, { pitch: 2, resonance: -5, brightness: 0, thickness: 2, clarity: 1, air: 3 })
+  assert.equal(f.calls.find(([route]) => route === '/preview')[1].speed, 1.15)
+  assert.equal(f.calls.some(([route]) => route.includes('/crop')), false)
+})
+
+test('voice adjustments persist after reopen, preserve drafts on failed saves and randomize only on demand', async t => {
+  let fail = false
+  let saved = { id: 'voice', name: '日常', character_id: 1, source: 'builtin', reference_url: '/saved-builtin.wav', base_reference_url: '/original-builtin.wav', speed: 1.1, voice_effects: { pitch: -1, resonance: 5, brightness: 2 } }
+  const f = fixture(t, async (route, body) => {
+    if (route.startsWith('/voices?')) return [structuredClone(saved)]
+    if (route === '/characters/1') return { voice_id: 'voice' }
+    if (route === '/voices/voice/parameters') {
+      if (fail) throw new Error('保存失败')
+      saved = { ...saved, ...body }; return structuredClone(saved)
+    }
+    if (route === '/preview') return { id: 'draft', status: 'queued' }
+    return null
+  })
+  await flush(); f.speechEnabled.value = true
+  assert.equal(f.state.voiceControls.value.pitch, -1)
+  assert.equal(f.state.liveSource.value.src, '/original-builtin.wav', 'editing uses the unprocessed source, never the designed reference');
+  f.state.voiceControls.value.pitch = 2
+  f.state.voiceControls.value.thickness = 1.5
+  f.state.voiceControls.value.clarity = -2
+  f.state.voiceControls.value.air = 3
+  f.state.voiceControls.value.speed = 1.25
+  fail = true; await f.state.saveParameters()
+  assert.equal(f.state.voiceControls.value.pitch, 2)
+  assert.equal(saved.voice_effects.pitch, -1)
+  assert.equal(f.state.parametersDirty.value, true)
+  fail = false; await f.state.saveParameters()
+  assert.equal(saved.voice_effects.pitch, 2)
+  assert.equal(f.state.parametersDirty.value, false)
+  assert.equal(f.state.liveSource.value.src, '/original-builtin.wav');
+  f.props.modelValue = false; await Vue.nextTick(); f.props.modelValue = true; await flush()
+  assert.deepEqual({ ...f.state.voiceControls.value }, { pitch: 2, resonance: 5, speed: 1.25, thickness: 1.5, clarity: -2, air: 3 })
+  assert.equal(f.state.previewControls.value.speed, 1.25)
+  assert.equal(f.state.previewControls.value.brightness, 2, 'removing the brightness slider preserves existing saved settings')
+  assert.equal(f.state.voiceControlFields.some(field => field.key === 'brightness'), false)
+  assert.deepEqual(f.state.voiceControlFields.find(field => field.key === 'speed'), { key: 'speed', label: '语速', min: .5, max: 2, step: .05, hint: '舒缓 ↔ 轻快 · 保持音高不变' })
+  const values = []
+  for (let i = 0; i < 30; i++) {
+    f.state.randomizeVoice(); assert.equal(f.state.parametersValid.value, true)
+    values.push(JSON.stringify(f.state.voiceControls.value))
+  }
+  assert.ok(new Set(values).size > 1)
+  const draft = JSON.stringify(f.state.voiceControls.value)
+  await f.state.preview()
+  assert.equal(JSON.stringify(f.state.voiceControls.value), draft)
+  assert.equal(saved.voice_effects.pitch, 2)
+  f.state.resetVoiceControls()
+  assert.deepEqual({ ...f.state.voiceControls.value }, { pitch: 0, resonance: 0, speed: 1, thickness: 0, clarity: 0, air: 0 })
+  assert.equal(f.state.voiceDraft().speed, 1)
+})
+
+test('only built-in sources are adjustable and uploaded voices cannot inherit a built-in draft', async t => {
+  const f = fixture(t)
+  await flush()
+  assert.equal(f.state.designEnabled.value, false)
+  f.state.original.value = { id: 'original', duration: 12, preview_url: '/original.wav' }
+  f.state.start.value = 2; f.state.end.value = 7
+  assert.deepEqual(f.state.liveSource.value, { src: '' })
+  await Vue.nextTick()
+  f.state.builtinVoices.value = [{ id: 'female', reference_url: '/builtin.wav' }]
+  f.state.builtinId.value = 'female'
+  f.state.materialMode.value = 'builtin'
+  assert.equal(f.state.designEnabled.value, true)
+  assert.deepEqual(f.state.liveSource.value, { src: '/builtin.wav' })
+  const audio = { currentTime: 3, paused: false, pause() { this.paused = true } }
+  f.speechPlayer.adopt(audio)
+  const stops = f.stops(), requests = f.calls.length
+  f.state.voiceControls.value.pitch = 2
+  f.state.voiceControls.value.resonance = -5
+  await Vue.nextTick()
+  assert.equal(audio.paused, false)
+  assert.equal(audio.currentTime, 3)
+  assert.equal(f.stops(), stops)
+  assert.equal(f.calls.length, requests)
+  assert.equal(f.state.canSave.value, true, 'saving/local audition do not depend on speech being enabled')
+  f.state.materialMode.value = 'upload'
+  assert.equal(audio.paused, true)
+  assert.equal(f.state.designEnabled.value, false)
+  assert.deepEqual(f.state.voiceDraft().voice_effects, { pitch: 0, resonance: 0, brightness: 0, thickness: 0, clarity: 0, air: 0 })
+  assert.equal(f.state.voiceDraft().speed, 1)
+  assert.equal(f.state.parametersDirty.value, false)
+  const draft = { ...f.state.voiceControls.value }
+  f.state.randomizeVoice()
+  assert.deepEqual(f.state.voiceControls.value, draft, 'randomize is guarded for uploaded recordings')
+  f.state.materialMode.value = 'builtin'
+  assert.equal(f.state.voiceDraft().voice_effects.pitch, 2, 'returning to built-ins restores their draft')
+})
+
+test('saved recordings hide design controls and advanced saves preserve existing settings', async t => {
+  const saved = { id: 'recording', character_id: 1, source: 'upload', reference_url: '/recording.wav', speed: 1.1, voice_effects: { pitch: 1, resonance: 0, brightness: 0 } }
+  const f = fixture(t, async (route, body) => route.startsWith('/voices?') ? [saved] : route === '/characters/1' ? { voice_id: saved.id } : route.endsWith('/parameters') ? { ...saved, ...body } : null)
+  await flush()
+  assert.equal(f.state.designEnabled.value, false)
+  assert.deepEqual(f.state.liveSource.value, { src: '' })
+  f.state.generationParams.value.top_k = 40
+  await f.state.saveParameters()
+  const body = f.calls.find(([route]) => route.endsWith('/parameters'))[1]
+  assert.equal(body.generation_params.top_k, 40)
+  assert.equal(body.speed, saved.speed)
+  assert.deepEqual(body.voice_effects, { thickness: 0, clarity: 0, air: 0, ...saved.voice_effects })
 })
