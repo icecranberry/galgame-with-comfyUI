@@ -1,6 +1,5 @@
 """Download all models into the same layout consumed by offline bundles."""
 import os
-import shutil
 import time
 import threading
 import logging
@@ -147,12 +146,9 @@ def download_models(root=HERE, version=None):
         if not (aux / 'semantic_codec_model.safetensors').is_file():
             downloaded = retry_download(hf_hub_download, repo_id='amphion/MaskGCT', filename='semantic_codec/model.safetensors', local_dir=aux)
             destination = aux / 'semantic_codec_model.safetensors'
-            partial = destination.with_name(destination.name + '.copying')
-            try:
-                shutil.copy2(downloaded, partial)
-                partial.replace(destination)
-            finally:
-                partial.unlink(missing_ok=True)
+            # Both paths are in the same local_dir. Atomically rename the
+            # completed download instead of keeping a second 169 MiB copy.
+            Path(downloaded).replace(destination)
     print('下载完成，正在校验并写入所选版本的完整性清单…', flush=True)
     seal_models(root, version)
 

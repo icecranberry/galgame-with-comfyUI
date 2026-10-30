@@ -99,6 +99,8 @@ try {
     $env:HF_HUB_OFFLINE = '1'
     $env:TRANSFORMERS_OFFLINE = '1'
     Initialize-TtsRuntime
+    & $python -X utf8 (Join-Path $ttsRoot 'compact_runtime.py') --apply
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot compact the inference runtime.' }
     Write-Host "$($modelEntry.label) ready. Start with: .\tts-service\start.ps1 -ModelVersion $ModelVersion"
 } catch {
     throw "TTS setup failed: $($_.Exception.Message) Retry this model, or extract its offline package into tts-service. Other models are not required."

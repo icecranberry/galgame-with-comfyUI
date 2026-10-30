@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 import deployment
 import download_model
 import pack_runtime
+import compact_runtime
 
 
 class DeploymentTests(unittest.TestCase):
@@ -126,6 +127,70 @@ class DeploymentTests(unittest.TestCase):
         pack_runtime.pack_runtime(self.root, output, model_only=True)
         with ZipFile(output) as archive:
             self.assertTrue(all(name.startswith('runtime/indextts-2.0/') for name in archive.namelist()))
+
+    def test_inference_package_and_compaction_preserve_runtime_dependencies(self):
+        library = self.source / '.venv/Lib/site-packages/torch/lib'
+        static = library / 'dnnl.lib'
+        dll = library / 'torch_cpu.dll'
+        player = self.root / 'runtime/tools/ffmpeg/bin/ffplay.exe'
+        duplicate = self.models / 'hf_cache/semantic_codec/model.safetensors'
+        canonical = self.models / 'hf_cache/semantic_codec_model.safetensors'
+        for path, data in ((static, b'compile-only'), (dll, b'runtime'),
+                           (player, b'player'), (duplicate, canonical.read_bytes())):
+            self.write_path(path, data)
+        expected = sum(path.stat().st_size for path in (static, player, duplicate))
+        self.assertEqual(compact_runtime.compact_runtime(self.root), expected)
+        self.assertTrue(static.exists())
+        output = Path(self.directory.name) / 'compact.zip'
+        pack_runtime.pack_runtime(self.root, output)
+        with ZipFile(output) as archive:
+            names = archive.namelist()
+            for path in (static, player, duplicate):
+                self.assertNotIn(path.relative_to(self.root).as_posix(), names)
+            for path in (dll, canonical, self.root / 'runtime/tools/ffmpeg/bin/ffmpeg.exe',
+                         self.root / 'runtime/tools/ffmpeg/bin/ffprobe.exe'):
+                self.assertIn(path.relative_to(self.root).as_posix(), names)
+        self.assertEqual(compact_runtime.compact_runtime(self.root, apply=True), expected)
+        self.assertTrue(dll.exists()); self.assertTrue(canonical.exists())
+        self.assertIsNone(deployment.installation_error(self.root))
+        self.assertEqual(compact_runtime.compact_runtime(self.root, apply=True), 0)
+
+    def test_compaction_keeps_different_duplicate_and_rejects_incomplete_install(self):
+        duplicate = self.models / 'hf_cache/semantic_codec/model.safetensors'
+        self.write_path(duplicate, b'other-data')
+        self.assertNotIn(duplicate, compact_runtime.removable_files(self.root))
+        (self.models / 'hf_cache/semantic_codec_model.safetensors').unlink()
+        with self.assertRaises(ValueError):
+            compact_runtime.compact_runtime(self.root, apply=True)
+        self.assertTrue(duplicate.exists())
+
+    def test_compaction_rejects_external_library_symlink(self):
+        outside = Path(self.directory.name) / 'external.lib'
+        outside.write_bytes(b'keep')
+        link = self.source / '.venv/Lib/site-packages/torch/lib/external.lib'
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(outside)
+        except OSError:
+            self.skipTest('symlink creation unavailable')
+        with self.assertRaisesRegex(ValueError, '越界'):
+            compact_runtime.compact_runtime(self.root, apply=True)
+        self.assertEqual(outside.read_bytes(), b'keep')
+
+    def test_semantic_download_is_promoted_without_duplicate_weights(self):
+        canonical = self.models / 'hf_cache/semantic_codec_model.safetensors'
+        canonical.unlink()
+        downloaded = self.models / 'hf_cache/semantic_codec/model.safetensors'
+        def download(**kwargs):
+            self.assertEqual(kwargs['filename'], 'semantic_codec/model.safetensors')
+            self.write_path(downloaded, b'completed-model')
+            return str(downloaded)
+        hub = types.SimpleNamespace(snapshot_download=lambda **kwargs: None, hf_hub_download=download)
+        with patch.dict(sys.modules, {'huggingface_hub': hub}):
+            download_model.download_models(self.root)
+        self.assertEqual(canonical.read_bytes(), b'completed-model')
+        self.assertFalse(downloaded.exists())
+        self.assertIsNone(deployment.installation_error(self.root))
 
     def test_downloader_uses_only_pinned_index_files_and_existing_auxiliaries(self):
         calls = []

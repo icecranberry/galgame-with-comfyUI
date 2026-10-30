@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from zipfile import ZipFile, ZIP_DEFLATED
 from deployment import ROOT, CATALOG, child, installation_error, read_json, model_id
+from compact_runtime import removable_files
 
 EXCLUDED = {".git", ".cache", "__pycache__", "outputs"}
 
@@ -15,6 +16,7 @@ def pack_runtime(root, output, version=None, *, model_only=False):
     if error:
         raise ValueError(error)
     bundle = root / "runtime"
+    non_inference = set(removable_files(root))
     output = output.resolve()
     if output.is_relative_to(bundle.resolve()):
         raise ValueError("压缩包不能写入 runtime 内部")
@@ -48,7 +50,7 @@ def pack_runtime(root, output, version=None, *, model_only=False):
                     # Include exactly one engine, even if many are installed.
                     if relative.parts[0] not in allowed:
                         continue
-                    if EXCLUDED.intersection(relative.parts) or path.suffix == ".pyc" or not path.is_file():
+                    if EXCLUDED.intersection(relative.parts) or path.suffix == ".pyc" or not path.is_file() or path in non_inference:
                         continue
                     if not path.resolve().is_relative_to(bundle.resolve()):
                         raise ValueError(f"运行包包含外部文件链接：{relative}")

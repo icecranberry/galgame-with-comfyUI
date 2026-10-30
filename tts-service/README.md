@@ -64,6 +64,12 @@ tts-service/
 
 输出在 `tts-service/dist`，文件名为 `linshe-tts-indextts-2.0.zip`，增量包后缀为 `-model.zip`；可用 `-OutputPath` 指定输出。ZIP64 支持超过 4 GiB 的文件，每个包旁生成 SHA-256 文件。只打包 IndexTTS 2.0 和必要运行文件，排除其他模型目录、旧权重、用户音频、下载缓存、`.git`、`__pycache__` 与上游生成输出；增量包不改当前选择。
 
+安装完成后会精简纯推理不需要的 PyTorch `torch/lib/*.lib` 编译链接库、`ffplay.exe` 和经 SHA-256 确认相同的重复语音编码权重；离线打包也排除这些文件。保留全部 DLL、必需模型、FFmpeg/ffprobe 和许可文件。当前适配器关闭 DeepSpeed 与自定义 CUDA 内核；精简环境不适合编译 PyTorch 扩展，若以后启用这些功能需重新安装完整依赖。已有完整安装可手动精简（不带 `--apply` 仅预览）：
+
+```powershell
+.\tts-service\runtime\indextts-2.0\source\.venv\Scripts\python.exe -X utf8 .\tts-service\compact_runtime.py --apply
+```
+
 迁移到另一台电脑后会修复虚拟环境的基础 Python 路径。已兼容 Python 3.11 路径文件、Kaldi FST 与 SentencePiece 的 Windows 中文路径问题，无需移动到英文目录或修改系统区域设置。离线包应与主程序版本匹配，不能手动修改清单版本号冒充兼容。
 
 ## 服务与显存调度
