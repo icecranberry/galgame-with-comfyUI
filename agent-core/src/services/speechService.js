@@ -15,17 +15,18 @@ import { localVoiceSource } from './builtinVoices.js';
 import { baseVoiceSample, prepareVoiceReference, referenceDesign } from './voiceReferences.js';
 
 import { clearGeneratedSpeech } from './speechCache.js';
+import { SPEECH_EMOTION_VERSION, speechEmotionContext, inferSpeechEmotion } from './speechEmotion.js';
 
 export { getSpeechSettings };
 export function setSpeechSettings(input) {
   const previous = getSpeechSettings();
   const settings = configureSpeechSettings(input);
-  if (settings.mode !== previous.mode || settings.local_model !== previous.local_model || !settings.enabled) {
+  if (settings.mode !== previous.mode || settings.local_model !== previous.local_model || settings.emotion_enhancement !== previous.emotion_enhancement || !settings.enabled) {
     for (const { id } of getDb().prepare("SELECT id FROM speech_jobs WHERE status IN ('queued','generating')").all()) cancelSpeech(id);
   }
   return settings;
 }
-const apiControllers = new Map(), localJobs = new Set();
+const apiControllers = new Map(), localJobs = new Set(), emotionControllers = new Map();
 export function clearSpeechCache() {
   const result = clearGeneratedSpeech(getDb(), AUDIO_ROOT, new Set([...localJobs, ...apiControllers.keys()]));
   broadcast('speech_cache_cleared', result);
@@ -38,21 +39,21 @@ export function clearSpeechCache() {
   return result;
 }
 // Bulk portrait lines must not open hundreds of upstream requests at once.
-// Interactive chat/preview requests retain their existing immediate behavior.
-const backgroundApiQueue = [];
-let backgroundApiActive = 0;
-function scheduleBackgroundApi(work) {
+// Also bound LLM emotion analysis before jobs reach the local GPU queue.
+const remoteSpeechQueue = [];
+let remoteSpeechActive = 0;
+function scheduleRemoteSpeech(work) {
   return new Promise((resolve, reject) => {
-    backgroundApiQueue.push({ work, resolve, reject });
-    drainBackgroundApi();
+    remoteSpeechQueue.push({ work, resolve, reject });
+    drainRemoteSpeech();
   });
 }
-function drainBackgroundApi() {
-  while (backgroundApiActive < 2 && backgroundApiQueue.length) {
-    const next = backgroundApiQueue.shift();
-    backgroundApiActive++;
+function drainRemoteSpeech() {
+  while (remoteSpeechActive < 2 && remoteSpeechQueue.length) {
+    const next = remoteSpeechQueue.shift();
+    remoteSpeechActive++;
     Promise.resolve().then(next.work).then(next.resolve, next.reject).finally(() => {
-      backgroundApiActive--; drainBackgroundApi();
+      remoteSpeechActive--; drainRemoteSpeech();
     });
   }
 }
@@ -76,12 +77,30 @@ function notifyStandingSpeech(id) {
 }
 function enqueue(job) {
   localJobs.add(job.id);
+  const controller = new AbortController();
+  emotionControllers.set(job.id, controller);
   const cancelled = () => getSpeechJob(job.id)?.status === 'cancelled' || !getSpeechSettings().enabled || getSpeechSettings().mode !== 'local';
-  withSpeechGpu(async () => {
+  const jobParams = JSON.parse(job.params);
+  const prepareEmotion = async () => {
+    if (cancelled()) throw new Error('语音已关闭或任务已取消');
+    if (!jobParams.emotion_analysis) return;
+    updateJob(job.id, 'generating');
+    try {
+      jobParams.emo_vector = await inferSpeechEmotion(job.text, jobParams.emotion_analysis, { signal: controller.signal });
+      if (cancelled()) throw new Error('任务已取消');
+      getDb().prepare('UPDATE speech_jobs SET params=? WHERE id=?').run(JSON.stringify(jobParams), job.id);
+    } catch (error) {
+      if (cancelled() || controller.signal.aborted) throw error;
+      console.warn('[语音情感增强] 推断失败，使用自然朗读：', error.message);
+    }
+  };
+  // Run remote analysis before acquiring the shared image/TTS GPU lease.
+  const prepared = jobParams.emotion_analysis ? scheduleRemoteSpeech(prepareEmotion) : prepareEmotion();
+  prepared.then(() => withSpeechGpu(async () => {
     if (cancelled()) throw new Error('语音已关闭或任务已取消');
     updateJob(job.id, 'generating');
     let sample = getDb().prepare('SELECT * FROM voice_samples WHERE id=?').get(job.sample_id);
-    const { reference_design: design, ...params } = JSON.parse(job.params);
+    const { reference_design: design, emotion_analysis: analysis, ...params } = jobParams;
     if (design) {
       sample = await prepareVoiceReference(sample, design);
       getDb().prepare('UPDATE speech_jobs SET sample_id=? WHERE id=?').run(sample.id, job.id);
@@ -89,6 +108,7 @@ function enqueue(job) {
     if (cancelled()) throw new Error('语音已关闭或任务已取消');
     const status = await ttsHealth();
     if (!status.online || !status.compatible || !status.ready) throw new Error(status.error || 'TTS 模型尚未安装或固定版本不匹配');
+    if (params.emo_vector && status.emotion_vector_version !== 1) throw new Error('声音服务尚未更新，请在音色管理中重启声音服务后重试情感增强');
     const effects = params.voice_effects || {};
     const requiredEffectsVersion = ['thickness', 'clarity', 'air'].some(key => effects[key]) ? 2 : 1;
     if (Object.values(effects).some(value => value !== 0) && !(status.voice_effects_version >= requiredEffectsVersion)) {
@@ -106,9 +126,9 @@ function enqueue(job) {
       ...synthesisParams, ...(!design ? { voice_effects: serviceEffects } : {}), model_version: job.model_version }, 600000);
     if (!fs.existsSync(audioPath(output))) throw new Error('TTS 没有生成音频，请检查两端音频目录配置');
     return output;
-  }, cancelled).then(output => updateJob(job.id, 'completed', null, output))
+  }, cancelled)).then(output => updateJob(job.id, 'completed', null, output))
     .catch(error => updateJob(job.id, 'failed', error.message))
-    .finally(() => localJobs.delete(job.id));
+    .finally(() => { localJobs.delete(job.id); emotionControllers.delete(job.id); });
 }
 export function requestSpeech({ characterId, voiceId, sampleId, text, params, messageId, force = false, background = false }) {
   const db = getDb();
@@ -130,6 +150,11 @@ export function requestSpeech({ characterId, voiceId, sampleId, text, params, me
   if (builtin) actualParams = { ...speechParams({ language: actualParams.language, generation_params: actualParams.generation_params }), reference_design: referenceDesign(actualParams) };
   const modelVersion = selectedLocalTtsModel().version;
   if (actualParams.language === 'ja') throw new Error('IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文');
+  if (getSpeechSettings().emotion_enhancement) {
+    const context = messageId ? speechEmotionContext(db, messageId, db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key)) : { previous: null, next: null };
+    const character = db.prepare('SELECT display_name,name FROM characters WHERE id=?').get(characterId);
+    actualParams.emotion_analysis = { version: SPEECH_EMOTION_VERSION, speaker: character?.display_name || character?.name || 'assistant', ...context };
+  }
   // A regeneration has its own cache namespace. Existing chat associations and
   // their completed files remain playable even when this new attempt fails.
   const key = speechCacheKey(cleaned, builtin ? baseVoiceSample(sample).content_hash : sample.content_hash, actualParams, modelVersion) + (force ? `:fresh:${randomUUID()}` : '');
@@ -168,6 +193,7 @@ export function cancelSpeech(id) {
   const db = getDb();
   db.prepare("UPDATE speech_jobs SET status='cancelled', error='用户取消', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued','generating')").run(id);
   apiControllers.get(id)?.abort();
+  emotionControllers.get(id)?.abort();
   const result = publicJob(getSpeechJob(id));
   // Running work keeps the GPU lease until inference exits, even after cancellation.
   broadcast('speech_update', result);
@@ -211,7 +237,7 @@ function requestApiSpeech({ characterId, text, params, messageId, force = false,
       const encoded = await encodeApiReferences(references);
       return fetchApiSpeech(cleaned, connection, profile, apiKey, controller.signal, encoded);
     };
-    (background ? scheduleBackgroundApi(work) : work()).then(async ({ buffer, extension }) => {
+    (background ? scheduleRemoteSpeech(work) : work()).then(async ({ buffer, extension }) => {
       if (controller.signal.aborted || !getSpeechSettings().enabled) throw new Error('语音已关闭或任务已取消');
       const output = `generated/${job.id}.${extension}`;
       await fs.promises.mkdir(audioPath('generated'), { recursive: true });

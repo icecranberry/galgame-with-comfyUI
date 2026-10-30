@@ -123,7 +123,7 @@ globalThis.fetch = async (url, options) => {
   if (u.includes(':7861')) {
     if (fetchFailure) throw fetchFailure;
     if (offline) throw new Error('offline');
-    if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true, loaded: modelLoaded });
+    if (u.endsWith('/health')) return Response.json({ model_version: MODEL_VERSION, ready: true, loaded: modelLoaded, emotion_vector_version: 1 });
     if (u.endsWith('/unload')) { modelLoaded = false; gpuEvents.push('unload'); return Response.json({ unloaded: true }); }
     if (u.endsWith('/synthesize')) {
       inferCount++;
@@ -481,4 +481,84 @@ test('preparation notices fire for each cold load, never for warm synthesis, cac
     assert.equal((await terminal(speak('再次加载重新提示').id)).status, 'completed');
     assert.deepEqual(notices, [{ phase: 'model_load' }, { phase: 'model_load' }]);
   } finally { removeClient(client); }
+});
+
+test('emotion enhancement sends adjacent sentences once, isolates caches, falls back and cancels before GPU work', async () => {
+  const { createServer } = await import('node:http');
+  const { config } = await import('../src/config.js');
+  const { resetClient } = await import('../src/llm/llm-client.js');
+  const requests = [], responses = new Set();
+  let malformed = false, hold = false, onRequest;
+  const llm = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    requests.push(JSON.parse(body)); responses.add(res); res.on('close', () => responses.delete(res));
+    onRequest?.();
+    if (hold) return;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ message: { content: malformed ? 'invalid JSON' : JSON.stringify({ happy: 0.4, angry: 0, sad: 0, afraid: 0, disgusted: 0, melancholic: 0, surprised: 0.1, calm: 0 }) }, finish_reason: 'stop' }] }));
+  });
+  await new Promise(resolve => llm.listen(0, '127.0.0.1', resolve));
+  const original = Object.fromEntries(['baseURL', 'apiKey', 'model', 'headers', 'extraBody', 'freeEgg', 'connectionType'].map(key => [key, config.llm[key]]));
+  const settings = service.getSpeechSettings();
+  try {
+    config.llm.freeEgg = false; config.llm.connectionType = 'openai';
+    config.llm.baseURL = `http://127.0.0.1:${llm.address().port}/v1`;
+    config.llm.apiKey = 'test-only'; config.llm.model = 'test'; config.llm.headers = {}; config.llm.extraBody = {}; resetClient();
+    service.setSpeechSettings({ enabled: true, mode: 'local', emotion_enhancement: true });
+    const db = getDb();
+    const char = Number(db.prepare("INSERT INTO characters(name,display_name,base_prompt) VALUES('emotion-test','情绪测试','persona')").run().lastInsertRowid);
+    db.prepare("INSERT INTO voices(id,name,sample_id,character_id) VALUES('emotion-v','测试','tts-s',?)").run(char);
+    db.prepare('INSERT INTO character_voices(character_id,voice_id) VALUES(?,?)').run(char, 'emotion-v');
+    const insert = db.prepare('INSERT INTO messages(conversation_id,role,content) VALUES(?,?,?)');
+    insert.run(`char_${char}`, 'user', '上一段。等你好久了！');
+    const messageId = Number(insert.run(`char_${char}`, 'assistant', '你终于来了。').lastInsertRowid);
+    const first = service.speakMessage(char, messageId);
+    assert.equal(service.speakMessage(char, messageId).id, first.id);
+    assert.equal((await terminal(first.id)).status, 'completed');
+    assert.equal(requests.length, 1);
+    assert.deepEqual(requests[0].messages.map(message => message.role), ['system', 'user']);
+    const material = JSON.parse(requests[0].messages[1].content.split('\n')[1]);
+    assert.equal(material.previous.text, '等你好久了！'); assert.equal(material.next, null);
+    assert.equal(material.current.text, '你终于来了。');
+    assert.deepEqual(synthesisRequests.at(-1).emo_vector, [0.4, 0, 0, 0, 0, 0, 0.1, 0]);
+    assert.equal(synthesisRequests.at(-1).emotion_analysis, undefined);
+    assert.equal(service.speakMessage(char, messageId).id, first.id); assert.equal(requests.length, 1);
+    insert.run(`char_${char}`, 'assistant', '我很担心你。先坐下吧。');
+    const withNext = service.speakMessage(char, messageId);
+    assert.notEqual(withNext.id, first.id); assert.equal((await terminal(withNext.id)).status, 'completed');
+    assert.match(requests.at(-1).messages[1].content, /我很担心你。/);
+    assert.doesNotMatch(requests.at(-1).messages[1].content, /先坐下吧/);
+    service.setSpeechSettings({ emotion_enhancement: false });
+    const natural = service.speakMessage(char, messageId);
+    assert.notEqual(natural.id, withNext.id); assert.equal((await terminal(natural.id)).status, 'completed');
+    assert.equal(synthesisRequests.at(-1).emo_vector, undefined); assert.equal(requests.length, 2);
+    service.setSpeechSettings({ emotion_enhancement: true });
+    assert.equal(service.speakMessage(char, messageId).id, withNext.id); assert.equal(requests.length, 2);
+    malformed = true;
+    const fallback = service.requestSpeech({ characterId: char, voiceId: 'emotion-v', text: '分析失败也能朗读。' });
+    assert.equal((await terminal(fallback.id)).status, 'completed');
+    assert.equal(synthesisRequests.at(-1).emo_vector, undefined);
+    const before = inferCount;
+    hold = true;
+    const pendingCount = requests.length;
+    const requested = new Promise(resolve => { onRequest = () => { if (requests.length === pendingCount + 2) resolve(); }; });
+    const cancelled = service.requestSpeech({ characterId: char, voiceId: 'emotion-v', text: '取消推断测试。' });
+    const second = service.requestSpeech({ characterId: char, voiceId: 'emotion-v', text: '第二句取消推断。' });
+    const queued = service.requestSpeech({ characterId: char, voiceId: 'emotion-v', text: '第三句等待推断。' });
+    await requested;
+    assert.equal(requests.length, pendingCount + 2, 'at most two analyses run concurrently');
+    service.cancelSpeech(queued.id);
+    service.cancelSpeech(cancelled.id);
+    service.cancelSpeech(second.id);
+    await new Promise(resolve => setTimeout(resolve, 25));
+    assert.equal(service.getSpeechJob(cancelled.id).status, 'cancelled');
+    assert.equal(requests.length, pendingCount + 2, 'cancelled queued analysis does not call the LLM');
+    assert.equal(inferCount, before, 'cancelled LLM analysis never starts TTS');
+  } finally {
+    onRequest = null;
+    service.setSpeechSettings({ enabled: settings.enabled, mode: settings.mode, emotion_enhancement: settings.emotion_enhancement });
+    Object.assign(config.llm, original); resetClient();
+    for (const response of responses) response.destroy();
+    llm.closeAllConnections(); await new Promise(resolve => llm.close(resolve));
+  }
 });

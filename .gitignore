@@ -80,6 +80,7 @@ agent-core/test/*
 !agent-core/test/speechGpu.test.js
 !agent-core/test/speechApi.test.js
 !agent-core/test/speechConfig.test.js
+!agent-core/test/speechEmotion.test.js
 !agent-core/test/speechVoiceDesign.test.js
 !agent-core/test/speechVoiceDesign.integration.test.js
 !agent-core/test/voiceReferences.test.js

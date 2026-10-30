@@ -32,7 +32,8 @@ export function standingSpeechProfile(db, id, settings = getSpeechSettings()) {
     if (!voice) return missing('角色尚未配置本地声音，已跳过');
     if (!fileExists(voice.reference_path)) return missing('角色的声音参考片段已丢失');
     return { enabled: settings.enabled, configured: true, reason: disabled, voiceId: voice.id,
-      key: fingerprint({ mode: 'local', model: settings.local_model, voice }) };
+      key: fingerprint({ mode: 'local', model: settings.local_model, voice,
+        ...(settings.emotion_enhancement ? { emotion_enhancement: true } : {}) }) };
   } catch (error) { return missing(error.message || '角色声音配置无效'); }
 }
 

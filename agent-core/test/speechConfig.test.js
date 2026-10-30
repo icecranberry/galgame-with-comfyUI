@@ -23,6 +23,9 @@ test('auto playback defaults off, validates booleans and persists across databas
     db.exec('CREATE TABLE character_standing_touch_lines(character_id INTEGER PRIMARY KEY); INSERT INTO character_standing_touch_lines VALUES(1)');
     const events = [], config = fixture(db, events);
     assert.equal(config.getSpeechSettings().auto_play, false);
+    assert.equal(config.getSpeechSettings().emotion_enhancement, false);
+    config.setSpeechSettings({ emotion_enhancement: true });
+    for (const value of ['true', 1, null, {}]) assert.throws(() => config.setSpeechSettings({ emotion_enhancement: value }), /布尔值/);
     config.setSpeechSettings({ enabled: true, auto_play: true });
     assert.deepEqual(events[0], { type: 'expression_standings_updated', payload: { characterId: 1, scope: 'touch-lines-speech', voiceChanged: true } });
     assert.equal(db.prepare("SELECT setting_value FROM system_settings WHERE setting_key='tts_auto_play'").pluck().get(), 'true');
@@ -33,6 +36,8 @@ test('auto playback defaults off, validates booleans and persists across databas
     db.close(); db = new Database(path.join(dir, 'test.db'));
     const reopened = fixture(db);
     assert.equal(reopened.getSpeechSettings().auto_play, true);
+    assert.equal(reopened.getSpeechSettings().emotion_enhancement, true);
+    assert.equal(reopened.setSpeechSettings({ emotion_enhancement: false }).emotion_enhancement, false);
     assert.equal(reopened.setSpeechSettings({ auto_play: false }).auto_play, false);
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
 });

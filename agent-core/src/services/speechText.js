@@ -67,5 +67,6 @@ export function speechCacheKey(text, hash, params, modelVersion = MODEL_VERSION)
     language: params.language, speed: params.speed, duration_factor: params.duration_factor,
     generation_params: speechGenerationParams(params.generation_params), voice_effects: cachedEffects,
     ...(params.reference_design ? { referenceDesign: params.reference_design, referenceDesignVersion: REFERENCE_DESIGN_VERSION } : {}),
+    ...(params.emotion_analysis ? { emotionAnalysis: params.emotion_analysis } : {}),
     ...(effects.pitch || effects.resonance ? { voiceEffectsVersion: VOICE_EFFECTS_VERSION } : {}) })).digest('hex');
 }

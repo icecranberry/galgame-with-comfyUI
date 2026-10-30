@@ -28,6 +28,7 @@ const DB_ONLY_KEYS = new Set([
   'moment_interval_schedule',
   'tts_enabled',
   'tts_auto_play',
+  'tts_emotion_enhancement',
   'tts_mode',
   'tts_local_model',
   'tts_api_config',

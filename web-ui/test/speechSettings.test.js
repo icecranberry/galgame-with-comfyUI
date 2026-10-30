@@ -114,3 +114,23 @@ test('cache cleanup works in both modes, blocks duplicate clicks, and reports fa
   assert.equal(f.state.clearingCache.value, false)
   assert.deepEqual(f.invalidated, [])
 })
+
+test('emotion enhancement loads, saves independently, stops playback and preserves its value on failure', async t => {
+  let settings = { enabled: true, auto_play: true, mode: 'local', emotion_enhancement: true }, fail = false
+  const f = fixture(t, async () => {}, async (_, body) => {
+    if (fail) throw new Error('保存失败')
+    settings = { ...settings, ...body }; return settings
+  })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.state.emotionEnhancement.value, true)
+  fail = true; await f.state.toggleEmotionEnhancement(false)
+  assert.equal(f.state.emotionEnhancement.value, true)
+  assert.equal(f.state.error.value, '保存失败')
+  fail = false; await f.state.toggleEmotionEnhancement(false)
+  assert.deepEqual(f.calls.at(-1), ['/settings', { emotion_enhancement: false }, 'PUT'])
+  assert.equal(f.state.emotionEnhancement.value, false)
+  assert.equal(f.stops(), 1)
+  assert.equal(settings.auto_play, true)
+  await f.state.switchMode('api'); await f.state.switchMode('local')
+  assert.equal(settings.emotion_enhancement, false)
+})

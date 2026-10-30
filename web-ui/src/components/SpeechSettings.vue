@@ -32,6 +32,13 @@
       </div>
     </div>
     <div v-else key="local">
+    <div class="speech-heading speech-auto-play">
+      <div class="speech-title">
+        <h4>情感增强</h4>
+        <p>结合上文、下文各一句推断朗读情绪，会增加 LLM 消耗。</p>
+      </div>
+      <linshe-switch :model-value="emotionEnhancement" :disabled="busy || disabled" size="sm" aria-label="情感增强" on-text="已开启" off-text="未开启" @update:model-value="toggleEmotionEnhancement" />
+    </div>
     <LocalSpeechModels :disabled="busy || disabled || checking || restarting || recovering" @changed="applySettings" @busy="localModelBusy = $event" />
     <div class="speech-service-row">
       <span class="speech-status" :class="{ 'is-ready': ready, 'is-error': !!error }" role="status">
@@ -79,10 +86,12 @@ defineProps({ disabled: Boolean })
 const emit = defineEmits(['changed'])
 const mode = ref('local'), api = ref({ endpoint: '', model: '', has_key: false }), apiKey = ref(''), clearKey = ref(false)
 const localModelBusy = ref(false), clearingCache = ref(false)
+const emotionEnhancement = ref(false)
 const modes = [{ label: '本地模型', value: 'local' }, { label: 'API 接入', value: 'api' }]
 function applySettings(settings) {
   speechEnabled.value = settings.enabled
   speechAutoPlay.value = settings.auto_play === true
+  emotionEnhancement.value = settings.emotion_enhancement === true
   mode.value = settings.mode || 'local'
   if (settings.api) api.value = { ...settings.api }
   apiKey.value = ''; clearKey.value = false
@@ -133,6 +142,17 @@ async function toggleAutoPlay(auto_play) {
   try {
     speechAutoPlay.value = (await ttsApi('/settings', { auto_play }, 'PUT')).auto_play === true
     if (!speechAutoPlay.value) stopSpeech()
+  } catch (e) { error.value = e.message }
+  finally { busy.value = false }
+}
+async function toggleEmotionEnhancement(emotion_enhancement) {
+  if (busy.value) return
+  busy.value = true; error.value = ''; notice.value = ''
+  try {
+    const settings = await ttsApi('/settings', { emotion_enhancement }, 'PUT')
+    emotionEnhancement.value = settings.emotion_enhancement === true
+    stopSpeech()
+    emit('changed', settings)
   } catch (e) { error.value = e.message }
   finally { busy.value = false }
 }

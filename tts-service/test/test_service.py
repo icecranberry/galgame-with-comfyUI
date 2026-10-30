@@ -113,6 +113,30 @@ class ServiceTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 adapter.generation_options(invalid)
 
+    def test_emotion_vectors_are_validated_and_forwarded_without_loading_qwen(self):
+        vector = [0.4, 0, 0, 0, 0, 0, 0.1, 0]
+        calls = []
+        class Model:
+            def infer(self, **kwargs):
+                calls.append(kwargs)
+                Path(kwargs['output_path']).write_bytes(b'wave')
+                if len(calls) == 1:
+                    warnings.warn('WARN: generation stopped due to exceeding `max_mel_tokens`', RuntimeWarning)
+        args = {'reference': 'references/test.wav', 'text': '你终于来了。', 'duration_factor': 1, 'emo_vector': vector}
+        with tempfile.TemporaryDirectory() as directory:
+            adapter.synthesize_to_file(Model(), args, Path(directory) / 'result.wav')
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual(call['emo_vector'], vector)
+            self.assertFalse(call['use_emo_text'])
+            self.assertFalse(call['use_random'])
+            self.assertEqual(call['text'], args['text'])
+        self.assertIsNone(adapter.emotion_vector(None))
+        for invalid in ([], {}, 'bad', [0] * 7, [True] + [0] * 7, [float('nan')] + [0] * 7,
+                        [float('inf')] + [0] * 7, [-0.1] + [0] * 7, [0.81] + [0] * 7, [0.5, 0.5] + [0] * 6):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                adapter.emotion_vector(invalid)
+
     def test_legacy_recording_effects_process_the_final_audio_once_and_stay_out_of_model_options(self):
         calls = []
         class Model:

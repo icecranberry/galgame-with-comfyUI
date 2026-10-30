@@ -61,6 +61,18 @@ def configure_stdio():
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
+def emotion_vector(value):
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) != 8 or any(
+            isinstance(number, bool) or not isinstance(number, (int, float))
+            or not math.isfinite(number) or not 0 <= number <= 0.8 for number in value):
+        raise ValueError("Invalid emotion vector")
+    if sum(value) > 0.800001:
+        raise ValueError("Emotion intensity exceeds 0.8")
+    return value
+
+
 def controlled_path(relative, kind):
     relative = Path(relative)
     path = (AUDIO_ROOT / relative).resolve()
@@ -77,6 +89,9 @@ def synthesize_to_file(model, args, temporary, *, generation_options=None):
     # The worker supplies the production profile; standalone comparisons may
     # supply their own settings without changing the service defaults.
     base_options = dict(generation_options or {})
+    vector = emotion_vector(args.get("emo_vector"))
+    if vector is not None:
+        base_options.update(emo_vector=vector, use_random=False)
     attempts = (base_options, {**base_options, "max_text_tokens_per_segment": 24, "do_sample": False})
     for attempt, options in enumerate(attempts):
         temporary.unlink(missing_ok=True)
@@ -295,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         error = installation_error()
-        self.respond(200, {"local_model": MODEL_ID, "model_version": MODEL_VERSION, "voice_effects_version": 2, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
+        self.respond(200, {"local_model": MODEL_ID, "model_version": MODEL_VERSION, "voice_effects_version": 2, "emotion_vector_version": 1, "generation_defaults": DEFAULT_GENERATION_OPTIONS, "ready": error is None, "error": error,
                            "loaded": ENGINE.loaded, "worker_alive": bool(ENGINE.process and ENGINE.process.is_alive()),
                            "busy": ENGINE.inference.locked()})
 
@@ -320,6 +335,7 @@ class Handler(BaseHTTPRequestHandler):
             if MODEL_ID == "2.0" and body["language"] == "ja":
                 raise ValueError("IndexTTS 2.0 支持中英文，请将语音语言调整为中文或英文")
             body["generation_params"] = generation_options(body.get("generation_params"))
+            body["emo_vector"] = emotion_vector(body.get("emo_vector"))
             body["voice_effects"] = voice_effects(body.get("voice_effects"))
             if not controlled_path(body["reference"], "references").is_file():
                 raise ValueError("Reference file missing")

@@ -17,7 +17,7 @@ export function notifyStandingVoiceChanged(characterId) {
 export function getSpeechSettings() {
   getDb();
   const api = JSON.parse(getSetting('tts_api_config') || 'null') || API_DEFAULTS;
-  return { enabled: getSetting('tts_enabled') === 'true', auto_play: getSetting('tts_auto_play') === 'true', mode: getSetting('tts_mode') === 'api' ? 'api' : 'local', local_model: selectedLocalTtsModel().id,
+  return { enabled: getSetting('tts_enabled') === 'true', auto_play: getSetting('tts_auto_play') === 'true', emotion_enhancement: getSetting('tts_emotion_enhancement') === 'true', mode: getSetting('tts_mode') === 'api' ? 'api' : 'local', local_model: selectedLocalTtsModel().id,
     api: { ...api, has_key: !!getSetting('tts_api_key') } };
 }
 export function setSpeechSettings(input) {
@@ -26,6 +26,7 @@ export function setSpeechSettings(input) {
   if (!input || typeof input !== 'object') throw new Error('无效的语音设置');
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new Error('enabled 必须是布尔值');
   if (input.auto_play !== undefined && typeof input.auto_play !== 'boolean') throw new Error('auto_play 必须是布尔值');
+  if (input.emotion_enhancement !== undefined && typeof input.emotion_enhancement !== 'boolean') throw new Error('emotion_enhancement 必须是布尔值');
   if (input.mode !== undefined && !['local', 'api'].includes(input.mode)) throw new Error('无效的语音接入方式');
   if (input.local_model !== undefined) localTtsModel(input.local_model);
   const connection = input.api === undefined ? null : apiConnection({ ...getSpeechSettings().api, ...input.api });
@@ -33,6 +34,7 @@ export function setSpeechSettings(input) {
   db.transaction(() => {
     if (input.enabled !== undefined) setSetting('tts_enabled', input.enabled);
     if (input.auto_play !== undefined) setSetting('tts_auto_play', input.auto_play);
+    if (input.emotion_enhancement !== undefined) setSetting('tts_emotion_enhancement', input.emotion_enhancement);
     if (input.mode !== undefined) setSetting('tts_mode', input.mode);
     if (input.local_model !== undefined) setSetting('tts_local_model', input.local_model);
     if (connection) setSetting('tts_api_config', JSON.stringify(connection));
