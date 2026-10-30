@@ -12,7 +12,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve))
 function fixture(t, api) {
   let state, stops = 0, count = 0
   const calls = [], events = [], timers = new Map()
-  const deps = { Vue, ttsApi: async (...args) => { calls.push(args); return api(...args) }, stopSpeech: () => stops++, LinsheButton: {},
+  const deps = { Vue, ttsApi: async (...args) => { calls.push(args); return api(...args) }, stopSpeech: () => stops++, LinsheButton: {}, LinsheModal: {},
     setTimeout: fn => { timers.set(++count, fn); return count }, clearTimeout: id => timers.delete(id) }
   const component = new Function(...Object.keys(deps), code)(...Object.values(deps))
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })

@@ -24,13 +24,23 @@
 //    手动改它没有意义（下次 tag 会被覆盖），想让用户重新看到弹窗，
 //    改文案就行了 —— 哪怕只是加一个标点。
 // ────────────────────────────────────────────────────────────────────────
-export const CHANGELOG_FLAG = 'c1944bc1b23a'
+export const CHANGELOG_FLAG = 'bb5218ad5f4c'
 
 /** 弹窗标题 */
 export const CHANGELOG_TITLE = '更新说明'
 
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
+  {
+    version: 'v4.0.0',
+    date: '2026-10-30',
+    title: '初步上线TTS语音支持',
+    summary: '真是，绕了好长一圈啊',
+    items: [
+      '目前tts语音支持范围是私聊群聊和立绘触摸',
+      'tts依赖包如果网络条件支持可以自动下载，不然需要从网盘下载',
+    ],
+  },
   {
     version: 'v3.10.0',
     date: '2026-10-19',
