@@ -27,6 +27,7 @@ export function setSpeechSettings(input) {
   return settings;
 }
 const apiControllers = new Map(), localJobs = new Set(), emotionControllers = new Map();
+const localSynthesis = new Set();
 export function clearSpeechCache() {
   const result = clearGeneratedSpeech(getDb(), AUDIO_ROOT, new Set([...localJobs, ...apiControllers.keys()]));
   broadcast('speech_cache_cleared', result);
@@ -122,8 +123,16 @@ function enqueue(job) {
     // Built-in controls have already been baked into the reference. They are
     // never forwarded to the adapter or applied to generated speech again.
     const { voice_effects: ignoredEffects, ...synthesisParams } = params;
-    await ttsRequest('/synthesize', { reference: sample.reference_path, output, text: job.text,
-      ...synthesisParams, ...(!design ? { voice_effects: serviceEffects } : {}), model_version: job.model_version }, 600000);
+    if (cancelled()) throw new Error('语音已关闭或任务已取消');
+    localSynthesis.add(job.id);
+    try {
+      await ttsRequest('/synthesize', { job_id: job.id, reference: sample.reference_path, output, text: job.text,
+        ...synthesisParams, ...(!design ? { voice_effects: serviceEffects } : {}), model_version: job.model_version }, 600000);
+    } finally { localSynthesis.delete(job.id); }
+    if (cancelled()) {
+      await fs.promises.rm(audioPath(output), { force: true });
+      throw new Error('任务已取消');
+    }
     if (!fs.existsSync(audioPath(output))) throw new Error('TTS 没有生成音频，请检查两端音频目录配置');
     return output;
   }, cancelled)).then(output => updateJob(job.id, 'completed', null, output))
@@ -194,6 +203,10 @@ export function cancelSpeech(id) {
   db.prepare("UPDATE speech_jobs SET status='cancelled', error='用户取消', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued','generating')").run(id);
   apiControllers.get(id)?.abort();
   emotionControllers.get(id)?.abort();
+  if (localSynthesis.has(id)) {
+    // Target the job, never unload a worker now serving a different window.
+    ttsRequest('/cancel', { job_id: id }, 30000).catch(error => console.warn('[TTS] 取消本地合成失败，请检查或重启声音服务：', error.message));
+  }
   const result = publicJob(getSpeechJob(id));
   // Running work keeps the GPU lease until inference exits, even after cancellation.
   broadcast('speech_update', result);

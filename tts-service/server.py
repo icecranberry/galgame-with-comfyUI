@@ -220,6 +220,21 @@ class Engine:
         self.process = None
         self.pipe = None
         self.loaded = False
+        self.active_job = None
+        self.cancelled_jobs = {}
+
+    def cancel(self, job_id):
+        if not isinstance(job_id, str) or not 1 <= len(job_id) <= 128:
+            raise ValueError("Invalid job id")
+        with self.lock:
+            # Remember requests which race ahead of /synthesize. Bound memory
+            # for jobs whose HTTP creation request never reaches this service.
+            self.cancelled_jobs[job_id] = True
+            while len(self.cancelled_jobs) > 1024:
+                del self.cancelled_jobs[next(iter(self.cancelled_jobs))]
+            if self.active_job == job_id:
+                self.unload()
+        return {"cancelled": True}
 
     def unload(self, idle_only=False):
         if idle_only:
@@ -263,6 +278,9 @@ class Engine:
             if error:
                 raise RuntimeError(error)
             with self.lock:
+                self.active_job = args.get("job_id")
+                if self.active_job in self.cancelled_jobs:
+                    raise RuntimeError("TTS 任务已取消")
                 if not self.process:
                     self.pipe, child = mp.Pipe()
                     self.process = mp.Process(target=worker, args=(child,), daemon=True)
@@ -271,15 +289,25 @@ class Engine:
                 pipe = self.pipe
             if not self.loaded:
                 self.receive(pipe, 240)
+            with self.lock:
+                if self.active_job in self.cancelled_jobs:
+                    raise RuntimeError("TTS 任务已取消")
                 self.loaded = True
-            pipe.send(args)
+                pipe.send(args)
             self.receive(pipe, 300)
+            with self.lock:
+                if self.active_job in self.cancelled_jobs:
+                    raise RuntimeError("TTS 任务已取消")
             return {"ok": True, "elapsed_seconds": round(time.monotonic() - started, 3)}
         except BaseException:
             self.unload()
             raise
         finally:
             try:
+                with self.lock:
+                    if args.get("job_id") in self.cancelled_jobs:
+                        controlled_path(args["output"], "generated").unlink(missing_ok=True)
+                    self.active_job = None
                 controlled_path(args["output"], "generated").with_name(Path(args["output"]).stem + ".partial.wav").unlink(missing_ok=True)
             except OSError:
                 pass
@@ -322,6 +350,8 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 16384:
                 raise ValueError("Invalid body length")
             body = json.loads(self.rfile.read(length))
+            if self.path == "/cancel":
+                return self.respond(200, ENGINE.cancel(body.get("job_id")))
             if self.path == "/unload":
                 return self.respond(200, ENGINE.unload(idle_only=body.get("idle_only") is True))
             if self.path != "/synthesize":

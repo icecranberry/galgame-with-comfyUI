@@ -439,7 +439,7 @@ import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.
 import '../styles/speechBubble.css'
 
 const route = useRoute()
-useSpeechAutoPlay(() => `group:${route.params.id}`)
+useSpeechAutoPlay(() => route.path.startsWith('/group/') ? `group:${route.params.id}` : null)
 const router = useRouter()
 const store = useGroupsStore()
 const chat = useChatStore()

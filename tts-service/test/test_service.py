@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 import warnings
+import threading
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,56 @@ adapter = load("tts_adapter", ROOT / "server.py")
 
 
 class ServiceTests(unittest.TestCase):
+    def test_cancel_targets_only_its_job_and_remembers_early_requests(self):
+        engine = adapter.Engine()
+        engine.active_job = 'new-window'
+        with patch.object(engine, 'unload') as unload:
+            engine.cancel('old-window')
+            unload.assert_not_called()
+            engine.cancel('new-window')
+            unload.assert_called_once()
+        with tempfile.TemporaryDirectory() as directory, patch.object(adapter, 'AUDIO_ROOT', Path(directory)), patch.object(adapter, 'installation_error', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, '已取消'):
+                engine.synthesize({'job_id': 'old-window', 'output': 'generated/old.wav'})
+        self.assertIsNone(engine.active_job)
+        self.assertFalse(engine.inference.locked())
+
+    def test_cancelling_running_inference_terminates_worker_and_cleans_output(self):
+        engine = adapter.Engine()
+        started, stopped = threading.Event(), threading.Event()
+        errors = []
+        with tempfile.TemporaryDirectory() as directory, patch.object(adapter, 'AUDIO_ROOT', Path(directory)), patch.object(adapter, 'installation_error', return_value=None), patch.object(engine, 'process') as process, patch.object(engine, 'pipe'), patch.object(engine, 'receive') as receive:
+            output = Path(directory) / 'generated/test.wav'
+            output.parent.mkdir()
+            output.write_bytes(b'late output')
+            output.with_name('test.partial.wav').write_bytes(b'partial')
+            engine.loaded = True
+            process.is_alive.return_value = False
+            process.terminate.side_effect = stopped.set
+            def wait_for_cancel(*args):
+                started.set()
+                if not stopped.wait(3):
+                    raise AssertionError('worker was not terminated')
+                raise EOFError()
+            receive.side_effect = wait_for_cancel
+            def run():
+                try:
+                    engine.synthesize({'job_id': 'running', 'output': 'generated/test.wav'})
+                except BaseException as error:
+                    errors.append(error)
+            thread = threading.Thread(target=run)
+            thread.start()
+            self.assertTrue(started.wait(3))
+            engine.cancel('running')
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+            process.terminate.assert_called_once()
+            self.assertIsInstance(errors[0], EOFError)
+            self.assertFalse(output.exists())
+            self.assertFalse(output.with_name('test.partial.wav').exists())
+            self.assertFalse(engine.inference.locked())
+            self.assertIsNone(engine.active_job)
+
     def test_idle_only_unload_refuses_active_inference_and_releases_gate_after_failure(self):
         engine = adapter.Engine()
         engine.inference.acquire()

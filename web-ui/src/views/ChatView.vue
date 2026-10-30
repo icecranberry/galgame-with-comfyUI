@@ -670,7 +670,7 @@ watch(immersive, async value => {
   else { galgameEntering.value = false; await nextTick(); if (!isMobile?.value) inputEl.value?.focus({ preventScroll: true }) }
 })
 const chat = useChatStore()
-useSpeechAutoPlay(() => `chat:${route.params.id || chat.activeCharId}`)
+useSpeechAutoPlay(() => route.path.startsWith('/chat') ? `chat:${route.params.id || chat.activeCharId}` : null)
 let galgameBackgroundImage = null
 let galgameBackgroundReady = Promise.resolve()
 let modeRequest = 0

@@ -251,6 +251,35 @@ test('saved bubble identity, dedup, history, cache invalidation, retry and offli
   assert.equal((await terminal(cancelled.id)).status, 'cancelled');
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(service.getSpeechJob(cancelled.id).status, 'cancelled');
+  const fetchBeforeCancel = globalThis.fetch;
+  let started, endInference, didCancel;
+  const start = new Promise(resolve => { started = resolve; });
+  const end = new Promise(resolve => { endInference = resolve; });
+  const cancellation = new Promise(resolve => { didCancel = resolve; });
+  globalThis.fetch = async (url, options) => {
+    if (String(url).endsWith('/synthesize')) {
+      const body = JSON.parse(options.body);
+      started(body);
+      await end;
+      return Response.json({ error: '任务已取消' }, { status: 400 });
+    }
+    if (String(url).endsWith('/cancel')) {
+      didCancel(JSON.parse(options.body));
+      return Response.json({ cancelled: true });
+    }
+    return fetchBeforeCancel(url, options);
+  };
+  try {
+    const running = service.requestSpeech({ characterId: char, voiceId: 'tts-v', text: '中断正在进行的本地合成' });
+    assert.equal((await start).job_id, running.id);
+    service.cancelSpeech(running.id);
+    assert.deepEqual(await cancellation, { job_id: running.id });
+    assert.equal(service.getSpeechJob(running.id).status, 'cancelled');
+    endInference();
+    // The lease is released only after the targeted worker has actually exited.
+    await gpu.withImageGpu(async () => {});
+    assert.equal(service.getSpeechJob(running.id).status, 'cancelled');
+  } finally { endInference(); globalThis.fetch = fetchBeforeCancel; }
 });
 
 test('group speech uses the saved speaker, rejects cross-conversation access and checks local voice configuration', async () => {

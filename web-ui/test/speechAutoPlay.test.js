@@ -100,6 +100,9 @@ test('group history is silent; new sentences are marked only when displayed and 
 })
 
 test('page lifecycle clears pending playback on switch, disable and leave; hidden tabs do not enqueue', t => {
+  const previousWindow = globalThis.window
+  globalThis.window = new EventTarget()
+  t.after(() => { globalThis.window = previousWindow })
   const previous = globalThis.document
   globalThis.document = { hidden: false, addEventListener() {}, removeEventListener() {} }
   t.after(() => { globalThis.document = previous; speechEnabled.value = false; speechAutoPlay.value = false })
@@ -130,6 +133,9 @@ test('page lifecycle clears pending playback on switch, disable and leave; hidde
 })
 
 test('blocked playback is visible in a toast and trusted desktop/mobile gestures resume it', async t => {
+  const previousWindow = globalThis.window
+  globalThis.window = new EventTarget()
+  t.after(() => { globalThis.window = previousWindow })
   const previous = globalThis.document, handlers = new Map(), notices = []
   globalThis.document = { hidden: false,
     addEventListener(type, fn) { handlers.set(type, fn) },
@@ -153,4 +159,36 @@ test('blocked playback is visible in a toast and trusted desktop/mobile gestures
     assert.equal(resumes, 2)
   } finally { app.unmount() }
   assert.equal(handlers.size, 0)
+})
+
+test('leaving the window cancels all slots, invalidates tokens and never replays on return', async t => {
+  const previous = { document: globalThis.document, window: globalThis.window }
+  globalThis.document = Object.assign(new EventTarget(), { hidden: false })
+  globalThis.window = new EventTarget()
+  t.after(() => { Object.assign(globalThis, previous); speechEnabled.value = false; speechAutoPlay.value = false })
+  speechEnabled.value = true; speechAutoPlay.value = true
+  const scope = ref('chat:12'), cancelled = []
+  const renderer = createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+  const app = renderer.createApp({ setup() { useSpeechAutoPlay(() => scope.value); return () => null } })
+  app.mount({})
+  try {
+    for (const event of ['visibilitychange', 'pagehide', 'route']) {
+      const slots = [1, 2, 3].map(id => speechQueue.reserve({ onCancel: () => cancelled.push(`${event}:${id}`) }))
+      const token = chatSpeechAutoPlay.mark('chat:12', cancelled.length + 1)
+      if (event === 'visibilitychange') { document.hidden = true; document.dispatchEvent(new Event(event)) }
+      else if (event === 'pagehide') window.dispatchEvent(new Event(event))
+      else scope.value = null
+      assert.ok(slots.every(slot => !slot.active))
+      assert.equal(chatSpeechAutoPlay.claim(token), false)
+      assert.equal(chatSpeechAutoPlay.mark('chat:12', 100), undefined)
+      await Promise.resolve()
+      assert.equal(cancelled.filter(id => id.startsWith(event)).length, 3)
+      if (event === 'visibilitychange') { document.hidden = false; document.dispatchEvent(new Event(event)) }
+      else if (event === 'pagehide') window.dispatchEvent(new Event('pageshow'))
+      else scope.value = 'chat:12'
+      assert.equal(chatSpeechAutoPlay.claim(token), false)
+      assert.ok(slots.every(slot => !slot.active))
+      assert.equal(chatSpeechAutoPlay.claim(chatSpeechAutoPlay.mark('chat:12', 200)), true)
+    }
+  } finally { app.unmount() }
 })

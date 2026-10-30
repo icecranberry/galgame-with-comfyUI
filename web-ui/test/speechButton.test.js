@@ -150,6 +150,22 @@ test('unmounting a queued bubble sharing cached audio does not stop the current 
   assert.equal(runtime.playingSpeech.value, null)
 })
 
+test('late cancellation is not lost while the new window is still creating a different job', async t => {
+  const runtime = sharedPlayback(), oldResponse = deferred(), newResponse = deferred()
+  const old = fixture(t, null, path => path.endsWith('/cancel') ? { status: 'cancelled' } : oldResponse.promise, runtime)
+  const oldRun = old.state.play()
+  runtime.stopSpeech()
+  const newer = fixture(t, 56, () => newResponse.promise, runtime, 35)
+  const newRun = newer.state.play()
+  oldResponse.resolve({ id: 'old-job', status: 'generating' })
+  await oldRun
+  newResponse.resolve({ id: 'new-job', status: 'completed', audio_url: '/new.wav' })
+  await newRun
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(old.calls.filter(([path]) => path === '/jobs/old-job/cancel').length, 1)
+  assert.equal(runtime.playingSpeech.value, 'new-job')
+})
+
 test('late errors from cancelled requests do not show a misleading configuration toast', async t => {
   const runtime = sharedPlayback(), pending = deferred()
   const f = fixture(t, null, () => pending.promise, runtime)

@@ -74,7 +74,7 @@ async function play() {
       request: () => ttsApi(`${props.groupId ? `/groups/${props.groupId}` : ''}/characters/${props.characterId}/messages/${messageId}`, {}),
       wait: waitSpeech,
       // Other bubbles can share this job; cancel only without consumers.
-      cancel: job => speechQueue.usesJob(job.id) ? undefined : ttsApi(`/jobs/${job.id}/cancel`, {}),
+      cancel: job => speechQueue.cancelUnusedJob(job.id, () => ttsApi(`/jobs/${job.id}/cancel`, {})),
       onJob: next => {
         if (!disposed && entry === batch && item.slot.active) {
           item.slot.job = next

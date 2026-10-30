@@ -3,6 +3,8 @@ export async function ttsApi(path, body, method = 'POST', signal) {
     method: body === undefined ? 'GET' : method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body), signal,
+    // Cancellation must survive pagehide/navigation while the document unloads.
+    ...(path.endsWith('/cancel') ? { keepalive: true } : {}),
   })
   const value = await res.json()
   if (!res.ok) throw Object.assign(new Error(value.error || '语音请求失败'), { code: value.code })
