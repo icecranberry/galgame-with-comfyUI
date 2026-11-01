@@ -1,4 +1,4 @@
-param([switch]$CheckOnly, [ValidateSet('2.0')][string]$ModelVersion)
+﻿param([switch]$CheckOnly, [ValidateSet('2.0')][string]$ModelVersion)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'runtime.ps1')
@@ -17,6 +17,7 @@ $env:UV_PYTHON_INSTALL_DIR = Join-Path $bundleRoot 'python'
 $env:UV_PYTHON_CACHE_DIR = Join-Path $ttsRoot 'cache\python'
 $env:UV_LINK_MODE = 'copy'
 $env:UV_PROJECT_ENVIRONMENT = Join-Path $upstream '.venv'
+$env:UV_HTTP_TIMEOUT = '120'
 $env:HF_HUB_OFFLINE = '0'
 $env:TRANSFORMERS_OFFLINE = '0'
 
@@ -29,6 +30,20 @@ function Expand-TtsDownload([string]$Url, [string]$Name) {
     }
     Expand-Archive -LiteralPath $archive -DestinationPath $stage
     return $stage
+}
+
+function Install-TtsPython([string]$Uv) {
+    $ErrorActionPreference = 'Continue'
+    $lastOutput = ''
+    $lastCode = 0
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $output = & $Uv python install 3.11.13 --no-bin --no-registry 2>&1
+        $lastCode = $LASTEXITCODE
+        $lastOutput = (($output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+        if ($lastCode -eq 0) { return }
+        if ($attempt -lt 3) { Start-Sleep -Seconds (2 * $attempt) }
+    }
+    throw "Python 运行时下载失败（uv 退出码 $lastCode）。自动安装需要从 GitHub 下载 Python 构建，请检查网络（可设置 UV_PYTHON_INSTALL_MIRROR 指向镜像），或解压包含 runtime/python 的完整离线包到 tts-service。`nuv 输出：`n$lastOutput"
 }
 
 try {
@@ -44,10 +59,9 @@ try {
     # Reuse a complete per-engine environment even when only weights are absent.
     $dependenciesReady = $false
     if ($basePython) {
-        & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') migrate
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot migrate legacy installation.' }
+        Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Cannot migrate legacy installation.' migrate
         if (Test-Path -LiteralPath $python) {
-            & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') prepare --model $ModelVersion
+            Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Cannot prepare the offline TTS environment.' prepare --model $ModelVersion
             & $python -X utf8 (Join-Path $ttsRoot 'deployment.py') check-runtime --model $ModelVersion
             $dependenciesReady = $LASTEXITCODE -eq 0
         }
@@ -59,8 +73,18 @@ try {
             Copy-Item -LiteralPath (Join-Path $stage 'uv.exe') -Destination $uv
         }
         if (-not $basePython) {
-            & $uv python install 3.11.13 --no-bin --no-registry
-            if ($LASTEXITCODE -ne 0) { throw 'Python download failed.' }
+            # A relocated or partially extracted bundle may have lost runtime.json
+            # while its Python tree is still present. Reuse it instead of downloading.
+            $candidate = Get-ChildItem -LiteralPath (Join-Path $bundleRoot 'python') -Filter 'python.exe' -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notmatch '\\\.venv\\' } | Select-Object -First 1
+            if ($candidate) {
+                $basePython = $candidate.FullName
+                & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') record-python --python-home (Split-Path $basePython)
+                if ($LASTEXITCODE -ne 0) { $basePython = $null }
+            }
+        }
+        if (-not $basePython) {
+            Install-TtsPython $uv
             $basePython = (& $uv python find 3.11.13 --managed-python --no-python-downloads).Trim()
             if ($LASTEXITCODE -ne 0) { throw 'Bundled Python not found.' }
             & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') record-python --python-home (Split-Path $basePython)
@@ -103,5 +127,5 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot compact the inference runtime.' }
     Write-Host "$($modelEntry.label) ready. Start with: .\tts-service\start.ps1 -ModelVersion $ModelVersion"
 } catch {
-    throw "TTS setup failed: $($_.Exception.Message) Retry this model, or extract its offline package into tts-service. Other models are not required."
+    throw "TTS setup failed: $($_.Exception.Message) 请重试，或把包含 runtime/python、runtime/tools 和 runtime/indextts-2.0 的完整离线包解压到 tts-service。"
 }

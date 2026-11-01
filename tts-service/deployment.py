@@ -4,6 +4,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -133,31 +135,71 @@ def installation_error(root=ROOT, version=None):
     return None
 
 
+def _migration_warning(root, message):
+    text = f"旧版 TTS 部署警告：{message}"
+    try:
+        print(text, file=sys.stderr)
+    except Exception:
+        pass
+    try:
+        log = root / "logs" / "tts-deploy.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"[{datetime.now().isoformat(timespec='seconds')}] {text}\n")
+    except OSError:
+        pass
+
+
 def migrate_legacy(root=ROOT):
-    """Move the old IndexTTS 2.0 installation once, without touching recordings."""
+    """Best-effort cleanup of older layouts.
+
+    A legacy directory must never stop a complete installation from starting.
+    Failed moves are logged and the old files are left untouched.
+    """
     legacy = root / "runtime/index-tts"
     target = source_directory(root, "2.0")
     if legacy.is_dir() and not target.exists():
-        manifest = read_json(legacy / "linshe-code-version.json")
-        if manifest["code_revision"] != model_versions(root, "2.0")["code_revision"]:
-            raise ValueError("旧版 IndexTTS 源码版本不匹配，未迁移")
-        for name, digest in manifest["files"].items():
-            if hashlib.sha256(child(legacy, name).read_bytes()).hexdigest() != digest:
-                raise ValueError(f"旧版源码已修改，未迁移：{name}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        legacy.rename(target)
+        try:
+            manifest_path = legacy / "linshe-code-version.json"
+            if not manifest_path.is_file():
+                _migration_warning(root, f"{legacy} 缺少 linshe-code-version.json，已跳过迁移并保留原目录。")
+            else:
+                manifest = read_json(manifest_path)
+                if manifest.get("code_revision") != model_versions(root, "2.0")["code_revision"]:
+                    # Old IndexTTS 2.5 source. Keep it out of the new engine but
+                    # never delete or overwrite it.
+                    archive = root / "cache/retired-indextts-2.5-source"
+                    if archive.exists():
+                        _migration_warning(root, f"旧版源码归档目录已存在，已跳过：{archive}")
+                    else:
+                        archive.parent.mkdir(parents=True, exist_ok=True)
+                        legacy.rename(archive)
+                else:
+                    for name, digest in manifest.get("files", {}).items():
+                        if hashlib.sha256(child(legacy, name).read_bytes()).hexdigest() != digest:
+                            raise ValueError(f"旧版源码已修改：{name}")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    legacy.rename(target)
+        except Exception as error:
+            _migration_warning(root, f"旧版源码未迁移（{error}），已保留原目录，不影响当前安装。")
     old_models = root / "runtime/checkpoints-2.0"
     models = model_directory(root, "2.0")
     if old_models.is_dir() and not models.exists():
-        models.parent.mkdir(parents=True, exist_ok=True)
-        old_models.rename(models)
-    obsolete = child(root, 'runtime/checkpoints')
-    archive = child(root, 'cache/retired-indextts-2.5')
-    manifest = obsolete / 'linshe-model-version.json'
-    if obsolete.is_dir() and manifest.is_file() and not archive.exists():
-        if read_json(manifest).get('model_repo') == 'IndexTeam/IndexTTS-2.5':
-            archive.parent.mkdir(parents=True, exist_ok=True)
-            obsolete.rename(archive)
+        try:
+            models.parent.mkdir(parents=True, exist_ok=True)
+            old_models.rename(models)
+        except Exception as error:
+            _migration_warning(root, f"旧版 2.0 权重未迁移（{error}），已保留原目录，不影响当前安装。")
+    try:
+        obsolete = child(root, "runtime/checkpoints")
+        archive = child(root, "cache/retired-indextts-2.5")
+        manifest = obsolete / "linshe-model-version.json"
+        if obsolete.is_dir() and manifest.is_file() and not (archive / "linshe-model-version.json").is_file():
+            if read_json(manifest).get("model_repo") == "IndexTeam/IndexTTS-2.5":
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                obsolete.rename(archive)
+    except Exception as error:
+        _migration_warning(root, f"旧版 2.5 权重未归档（{error}），已保留原目录，不影响当前安装。")
 
 
 def prepare_runtime(root=ROOT, version=None):
@@ -168,16 +210,17 @@ def prepare_runtime(root=ROOT, version=None):
     if not (venv / "Scripts/python.exe").is_file():
         raise ValueError("缺少所选模型的 Python 依赖环境，请解压对应离线包")
     config = venv / "pyvenv.cfg"
-    old = config.read_text(encoding="utf-8")
+    old = config.read_text(encoding="utf-8-sig") if config.is_file() else ""
     lines = [line for line in old.splitlines() if line.split("=", 1)[0].strip() not in ("home", "executable", "command")]
     content = f"home = {base}\n" + "\n".join(lines) + "\n"
     if old != content:
         config.write_text(content, encoding="utf-8")
     editable = venv / "Lib/site-packages/_editable_impl_indextts.pth"
-    if editable.exists():
-        # Python 3.11 reads .pth using the Windows locale even in UTF-8 mode.
-        # ASCII escapes keep Chinese/moved installation paths portable.
-        editable.write_text(f"import sys; sys.path.insert(0, {ascii(str(upstream))})\n", encoding="ascii")
+    # Always rewrite: packaging strips the builder's path, leaving an empty file.
+    editable.parent.mkdir(parents=True, exist_ok=True)
+    # Python 3.11 reads .pth using the Windows locale even in UTF-8 mode.
+    # ASCII escapes keep Chinese/moved installation paths portable.
+    editable.write_text(f"import sys; sys.path.insert(0, {ascii(str(upstream))})\n", encoding="ascii")
 
 
 def check_dependencies(version=None):

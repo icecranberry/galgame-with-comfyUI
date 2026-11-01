@@ -9,7 +9,6 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'runtime.ps1')
-Initialize-TtsRuntime
 $serverFile = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'server.py'))
 
 # Only terminate this checkout's exact adapter, never arbitrary Python or port owners.
@@ -38,6 +37,9 @@ while (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Silently
     if ((Get-Date) -gt $deadline) { throw "TTS port $Port did not close." }
     Start-Sleep -Milliseconds 200
 }
+# The old service is gone: legacy directories are no longer locked, so the
+# best-effort migration in Initialize-TtsRuntime can run before the new start.
+Initialize-TtsRuntime
 $env:TTS_PORT = [string]$Port
 Start-Process -FilePath $python -ArgumentList @('-X', 'utf8', ('"' + $serverFile + '"')) `
     -WorkingDirectory $upstream -WindowStyle Hidden `

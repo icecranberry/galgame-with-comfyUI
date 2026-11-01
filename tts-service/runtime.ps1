@@ -47,7 +47,7 @@ function Invoke-TtsDeploymentStep {
 }
 
 function Initialize-TtsRuntime {
-    param([switch]$RuntimeOnly)
+    param([switch]$RuntimeOnly, [switch]$SkipMigration)
     $manifestPath = Join-Path $bundleRoot 'runtime.json'
     if (-not (Test-Path -LiteralPath $manifestPath)) {
         throw 'TTS runtime missing. Run tts-service/setup.ps1, or extract the complete offline bundle into tts-service.'
@@ -59,7 +59,11 @@ function Initialize-TtsRuntime {
     }
     $basePython = Join-Path $baseDir 'python.exe'
     if (-not (Test-Path -LiteralPath $basePython)) { throw 'Bundled Python missing. Extract the complete offline bundle into tts-service.' }
-    Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Unable to migrate the old IndexTTS installation.' migrate
+    # Migration belongs to setup/upgrade. restart.ps1 calls this after the old
+    # service is stopped so the legacy directories are no longer locked.
+    if (-not $SkipMigration) {
+        Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Unable to migrate the old IndexTTS installation.' migrate
+    }
     Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Unable to prepare the offline TTS environment.' prepare --model $ModelVersion
     if (-not $RuntimeOnly) {
         Invoke-TtsDeploymentStep -Python $python -FailMessage 'TTS files incomplete. Run setup.ps1 or extract the complete offline bundle into tts-service.' check --model $ModelVersion

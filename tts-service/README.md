@@ -32,7 +32,7 @@ tts-service/
       └─ checkpoints/            # 2.0 权重、hf_cache 辅助模型、完整性清单
 ```
 
-用户录音、参考片段与生成语音仍在 `agent-core/data/audio`，角色绑定和参数在应用数据库中，不进入离线包。旧布局的 `runtime/index-tts` 与 `runtime/checkpoints-2.0` 会迁移到新目录，不覆盖已有新安装。已确认的旧 2.5 权重归档到 `cache/retired-indextts-2.5`，不再读取或打包。
+用户录音、参考片段与生成语音仍在 `agent-core/data/audio`，角色绑定和参数在应用数据库中，不进入离线包。旧布局的 `runtime/index-tts` 与 `runtime/checkpoints-2.0` 会尽量迁移到新目录，不覆盖已有新安装。已确认的旧 2.5 权重归档到 `cache/retired-indextts-2.5`，旧 2.5 源码归档到 `cache/retired-indextts-2.5-source`，不再读取或打包。`setup.ps1` 与 `restart.ps1` 都会执行 best-effort 迁移；`restart.ps1` 先停止旧服务，避免旧进程锁住待迁移目录。残缺旧目录或迁移失败会保留原目录并写入 `logs/tts-deploy.log`，不会阻塞声音服务启动。
 
 ## 安装与启动（Windows）
 
@@ -70,7 +70,7 @@ tts-service/
 .\tts-service\runtime\indextts-2.0\source\.venv\Scripts\python.exe -X utf8 .\tts-service\compact_runtime.py --apply
 ```
 
-迁移到另一台电脑后会修复虚拟环境的基础 Python 路径。已兼容 Python 3.11 路径文件、Kaldi FST 与 SentencePiece 的 Windows 中文路径问题，无需移动到英文目录或修改系统区域设置。离线包应与主程序版本匹配，不能手动修改清单版本号冒充兼容。
+打包时会移除 `.venv/pyvenv.cfg`、`_editable_impl_indextts.pth` 和 `indextts-*.dist-info/direct_url.json` 里的打包机绝对路径，首次启动由 `deployment.py prepare` 按当前解压位置补全；迁移到另一台电脑后也会自动修复虚拟环境的基础 Python 路径。已兼容 Python 3.11 路径文件、Kaldi FST 与 SentencePiece 的 Windows 中文路径问题，无需移动到英文目录或修改系统区域设置。离线包应与主程序版本匹配，不能手动修改清单版本号冒充兼容。
 
 ## 服务与显存调度
 

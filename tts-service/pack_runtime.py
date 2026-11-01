@@ -10,6 +10,23 @@ from compact_runtime import removable_files
 EXCLUDED = {".git", ".cache", "__pycache__", "outputs"}
 
 
+def portable_pyvenv(text):
+    """Drop the builder's absolute Python paths; prepare_runtime rewrites home."""
+    lines = [line for line in text.splitlines()
+             if line.split("=", 1)[0].strip() not in ("home", "executable", "command")]
+    return "home = python\n" + "\n".join(lines) + "\n"
+
+
+def portable_editable():
+    """prepare_runtime rewrites this file with the extracted checkout path."""
+    return ""
+
+
+def portable_direct_url():
+    """Never ship the builder's editable-install source path in metadata."""
+    return '{"url":"file:///","dir_info":{"editable":true}}'
+
+
 def pack_runtime(root, output, version=None, *, model_only=False):
     version = model_id(version)
     error = installation_error(root, version)
@@ -54,7 +71,23 @@ def pack_runtime(root, output, version=None, *, model_only=False):
                         continue
                     if not path.resolve().is_relative_to(bundle.resolve()):
                         raise ValueError(f"运行包包含外部文件链接：{relative}")
-                    archive.write(path, "runtime/" + relative.as_posix())
+                    target_name = "runtime/" + relative.as_posix()
+                    if relative.name == "pyvenv.cfg":
+                        content = portable_pyvenv(path.read_text(encoding="utf-8-sig"))
+                        archive.writestr(target_name, content)
+                        packed_bytes += len(content.encode("utf-8"))
+                        continue
+                    if relative.name == "_editable_impl_indextts.pth":
+                        content = portable_editable()
+                        archive.writestr(target_name, content)
+                        packed_bytes += len(content.encode("utf-8"))
+                        continue
+                    if relative.name == "direct_url.json" and len(relative.parts) >= 2 and "indextts" in relative.parts[-2].lower():
+                        content = portable_direct_url()
+                        archive.writestr(target_name, content)
+                        packed_bytes += len(content.encode("utf-8"))
+                        continue
+                    archive.write(path, target_name)
                     packed_bytes += path.stat().st_size
                     if packed_bytes >= next_report:
                         print(f"已处理 {packed_bytes / 1024 ** 3:.1f} GiB", flush=True)

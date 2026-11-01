@@ -29,8 +29,10 @@ class DeploymentTests(unittest.TestCase):
         self.source = deployment.source_directory(self.root)
         for name in deployment.source_entries(): self.write_path(self.source / name, b'source')
         self.write_path(self.source / '.venv/Scripts/python.exe', b'launcher')
-        self.write_path(self.source / '.venv/pyvenv.cfg', b'home = C:\\old\\python\nversion_info = 3.11.13\nexecutable = C:\\old\\python.exe\n')
+        self.write_path(self.source / '.venv/pyvenv.cfg', b'\xef\xbb\xbfhome = C:\\old\\python\nversion_info = 3.11.13\nexecutable = C:\\old\\python.exe\n')
         self.write_path(self.source / '.venv/Lib/site-packages/_editable_impl_indextts.pth', b'D:\\old-project\n')
+        self.write_path(self.source / '.venv/Lib/site-packages/indextts-2.0.0.dist-info/direct_url.json',
+                        b'{"url":"file:///D:/AI/IndexTTS-2.5/index-tts","dir_info":{"editable":true}}')
         self.models = deployment.model_directory(self.root)
         for name in deployment.model_files(): self.write_path(self.models / name, b'model-data')
         deployment.seal_source(self.root); deployment.seal_models(self.root)
@@ -92,6 +94,36 @@ class DeploymentTests(unittest.TestCase):
         deployment.migrate_legacy(self.root)
         self.assertEqual((self.models / 'gpt.pth').read_bytes(), b'model-data')
 
+    def test_incomplete_legacy_source_is_kept_without_blocking(self):
+        self.source.rename(self.root / 'runtime/index-tts')
+        (self.root / 'runtime/index-tts/linshe-code-version.json').unlink()
+        deployment.migrate_legacy(self.root)
+        self.assertTrue((self.root / 'runtime/index-tts').is_dir())
+        self.assertFalse((self.root / 'runtime/indextts-2.0/source').exists())
+
+    def test_legacy_25_source_is_archived_without_deletion_or_overwrite(self):
+        self.source.rename(self.root / 'runtime/index-tts')
+        deployment.write_json(self.root / 'runtime/index-tts/linshe-code-version.json', {'code_revision': 'old-25', 'files': {}})
+        deployment.migrate_legacy(self.root)
+        archive = self.root / 'cache/retired-indextts-2.5-source'
+        self.assertTrue((archive / 'pyproject.toml').is_file())
+        self.assertFalse((self.root / 'runtime/index-tts').exists())
+        self.write('runtime/index-tts/pyproject.toml', b'another-copy')
+        deployment.write_json(self.root / 'runtime/index-tts/linshe-code-version.json', {'code_revision': 'old-25', 'files': {}})
+        deployment.migrate_legacy(self.root)
+        self.assertEqual((archive / 'pyproject.toml').read_bytes(), b'source')
+        self.assertEqual((self.root / 'runtime/index-tts/pyproject.toml').read_bytes(), b'another-copy')
+
+    def test_legacy_25_source_and_weights_are_archived_separately(self):
+        self.source.rename(self.root / 'runtime/index-tts')
+        deployment.write_json(self.root / 'runtime/index-tts/linshe-code-version.json', {'code_revision': 'old-25', 'files': {}})
+        self.write('runtime/checkpoints/gpt.pth', b'old-25-weights')
+        deployment.write_json(self.root / 'runtime/checkpoints/linshe-model-version.json', {'model_repo': 'IndexTeam/IndexTTS-2.5'})
+        deployment.migrate_legacy(self.root)
+        self.assertTrue((self.root / 'cache/retired-indextts-2.5-source/pyproject.toml').is_file())
+        self.assertEqual((self.root / 'cache/retired-indextts-2.5/gpt.pth').read_bytes(), b'old-25-weights')
+        self.assertFalse((self.root / 'runtime/checkpoints').exists())
+
     def test_full_package_excludes_removed_engines_and_legacy_weights(self):
         self.write('runtime/checkpoints/gpt.pth', b'removed-2.5')
         self.write('runtime/voxcpm-2.0/checkpoints/model.safetensors', b'removed-engine')
@@ -104,6 +136,12 @@ class DeploymentTests(unittest.TestCase):
             self.assertIn('runtime/indextts-2.0/source/.venv/Scripts/python.exe', names)
             self.assertEqual({name.split('/')[1] for name in names}, {'python', 'tools', 'runtime.json', 'selected-model.json', 'indextts-2.0'})
             self.assertFalse(any('__pycache__' in name or 'voxcpm' in name for name in names))
+            packed_cfg = archive.read('runtime/indextts-2.0/source/.venv/pyvenv.cfg').decode('utf-8')
+            self.assertNotIn('C:\\old', packed_cfg)
+            self.assertIn('home = python', packed_cfg)
+            self.assertEqual(archive.read('runtime/indextts-2.0/source/.venv/Lib/site-packages/_editable_impl_indextts.pth'), b'')
+            packed_url = archive.read('runtime/indextts-2.0/source/.venv/Lib/site-packages/indextts-2.0.0.dist-info/direct_url.json').decode('utf-8')
+            self.assertNotIn('D:/AI', packed_url)
             target = Path(self.directory.name) / '离线语音' / 'tts-service'; archive.extractall(target)
         shutil.copyfile(self.root / 'versions-2.0.json', target / 'versions-2.0.json')
         deployment.prepare_runtime(target); self.assertIsNone(deployment.installation_error(target))
