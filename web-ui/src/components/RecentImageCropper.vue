@@ -1,5 +1,5 @@
 <template>
-  <linshe-modal :model-value="true" title="从最近图片挑选并截取" wide @update:model-value="$emit('close')">
+  <linshe-modal :model-value="visible" title="从最近图片挑选并截取" wide :transition-ms="300" @update:model-value="$emit('close')">
     <!-- 选图：该角色全部渠道的近期图片 -->
     <div v-if="!pickedSrc" class="ric-gallery">
       <div v-if="loading" class="ric-hint">加载中...</div>
@@ -44,13 +44,15 @@
 <script setup>
 // 最近图片挑选 + 全图拖拽截取（修正外观参考图专用，区别于头像固定框裁剪 AvatarCropper）：
 // 先选图，然后完整展示全图，用户在图上直接拖拽画选区，选哪块截哪块。
-import { ref, computed, nextTick, onUnmounted } from 'vue'
+import { ref, computed, nextTick, watch, onUnmounted } from 'vue'
 import { getRecentImages } from '../api/index.js'
 import LinsheModal from './ui/LinsheModal.vue'
 import LinsheButton from './ui/LinsheButton.vue'
 
 const props = defineProps({
   characterId: { type: [Number, String], default: null },
+  visible: { type: Boolean, default: true },
+  imagesLoader: { type: Function, default: null },
 })
 
 const emit = defineEmits(['close', 'save'])
@@ -63,21 +65,24 @@ const imgBoxEl = ref(null)
 const imgEl = ref(null)
 // 选区 { x, y, w, h }，相对图片渲染尺寸；null = 尚未就绪
 const sel = ref(null)
+let requestVersion = 0
 
 async function fetchRecent() {
-  if (!props.characterId || loading.value) return
+  if (!props.characterId && !props.imagesLoader) return
+  const request = ++requestVersion
   loading.value = true
   try {
-    const res = await getRecentImages(props.characterId)
+    const res = await (props.imagesLoader ? props.imagesLoader() : getRecentImages(props.characterId))
+    if (request !== requestVersion || !props.visible) return
     images.value = res.images || []
   } catch {
-    images.value = []
+    if (request === requestVersion) images.value = []
   } finally {
-    loading.value = false
+    if (request === requestVersion) loading.value = false
   }
 }
 
-fetchRecent()
+
 
 function markErr(i) {
   const s = new Set(errSet.value)
@@ -99,6 +104,12 @@ function onPickErr() {
 // ── 选区拖拽 ──
 let dragging = false
 let anchor = { x: 0, y: 0 }
+
+watch(() => props.visible, visible => {
+  if (!visible) { ++requestVersion; loading.value = false; onTouchEnd(); return }
+  pickedSrc.value = ''; sel.value = null; errSet.value = new Set()
+  void fetchRecent()
+}, { immediate: true })
 
 function onImgLoad() {
   // 默认全图选中，用户可拖拽改小
@@ -170,6 +181,7 @@ function onTouchEnd() {
 }
 
 onUnmounted(() => {
+  ++requestVersion
   window.removeEventListener('mousemove', onPointerMove)
   window.removeEventListener('mouseup', onPointerUp)
   window.removeEventListener('touchmove', onTouchMove)

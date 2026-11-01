@@ -6,8 +6,61 @@ import { compressLlmImageInputs } from '../services/llmImageInput.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 import { defaultMaxTokens, isValidMaxTokens } from './modelCapabilities.js';
+import { buildAgentRequest, readAgentResponse } from './agentStream.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
+
+/** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
+export async function* chatAgentStream(messages, { tools = [], signal, label = '神说', requestId } = {}) {
+  const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
+  if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
+  const params = buildAgentRequest(messages, tools, llm);
+  applyOutputTokenLimit(params);
+  if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
+  const logLabel = requestId ? `${label} [${requestId}]` : label;
+  let usage;
+  let stream;
+  let content = '';
+  let reasoning = '';
+  let response;
+  let outcome = 'interrupted';
+  try {
+    signal?.throwIfAborted();
+    console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
+    console.log(JSON.stringify(compressLogMessages(messages), null, 2));
+    console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
+    console.log(`[${logLabel} 可用工具] ${tools.map(tool => tool.function?.name).filter(Boolean).join(', ')}`);
+    console.log('────────────────────────────────────────────────');
+    stream = await getClient().chat.completions.create(params, { signal, maxRetries: 0 });
+    console.log(`[${providerLabel()} ← ${logLabel} start]`);
+    for await (const event of readAgentResponse(stream, { signal })) {
+      if (event.type === 'usage') usage = event.usage;
+      else {
+        if (event.type === 'text_delta') content += event.text;
+        if (event.type === 'reasoning_delta') reasoning += event.text;
+        if (event.type === 'assistant_end') response = event.message;
+        yield event;
+      }
+    }
+    outcome = 'completed';
+  } catch (error) {
+    outcome = signal?.aborted ? 'cancelled' : 'failed';
+    console.error(`[${providerLabel()} ← ${logLabel}] ${outcome}:`, error.message);
+    if (error.status === 400 || error.status === 422) throw new Error('当前模型或接口不接受神说的思考 / 工具协议，请检查模型配置；本轮未完成的工具不会执行。');
+    throw error;
+  } finally {
+    stream?.controller?.abort?.();
+    console.log(`[${providerLabel()} ← ${logLabel} end] ${outcome}`);
+    logResponse(outcome === 'completed' ? logLabel : `${logLabel}（流中断，已收到的部分）`, content, reasoning);
+    if (response?.tool_calls?.length) {
+      console.log(`[${providerLabel()} ← ${logLabel} 工具调用]`);
+      console.log(JSON.stringify(response.tool_calls, null, 2));
+    }
+    logUsage(logLabel, usage);
+    recordLlmCall(label, usage, { failed: outcome !== 'completed' });
+    console.log('═══════════════════════════════════════════════\n');
+  }
+}
 
 function isDeepseek() {
   return config.llm.connectionType !== 'vertexai' && (config.llm.baseURL || '').includes('deepseek.com');

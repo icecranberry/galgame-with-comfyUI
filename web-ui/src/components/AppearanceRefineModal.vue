@@ -2,7 +2,7 @@
   <!-- ── 修正外观弹窗：上传 / 粘贴 / 拖拽参考图，邻舍分析后重写「## 你的外观」──
        整卡文本由 basePrompt prop 传入（可以是待确认的草稿卡，不要求角色已入库）；
        应用结果通过 @applied 回传重组后的整卡，落库/回填由父级决定。 -->
-  <linshe-modal v-model="visibleModel" :title="sceneLabel ? `修正「${sceneLabel === '工装' ? '默认' : sceneLabel}」外观 — ${displayName || ''}` : `修正外观 — ${displayName || ''}`" wide>
+  <linshe-modal v-model="visibleModel" :title="sceneLabel ? `修正「${sceneLabel === '工装' ? '默认' : sceneLabel}」外观 — ${displayName || ''}` : `修正外观 — ${displayName || ''}`" wide :transition-ms="300">
     <div class="refine-body" :class="{ 'is-dragging': refineDragging }" @dragover.prevent="refineDragging = true" @dragleave="onRefineDragLeave" @drop.prevent="onRefineDrop">
       <p class="refine-intro">
         提供一张该角色的参考图，邻舍会观察图片并重写<b v-if="sceneLabel">「{{ sceneLabel === '工装' ? '默认' : sceneLabel }}」</b><template v-else>人格卡里的「## 你的外观」</template>的外观描述，
@@ -73,8 +73,10 @@
   <!-- ── 从最近图片挑选并截取（完整展示全图，拖拽画选区）── Teleport 到 body 避免被弹窗 transform 困住 fixed 定位 -->
   <Teleport v-if="characterId" to="body">
     <RecentImageCropper
-      v-if="showRefinePicker"
+      v-if="pickerMounted"
+      :visible="modelValue && showRefinePicker"
       :character-id="characterId"
+      :images-loader="recentImagesLoader"
       @close="showRefinePicker = false"
       @save="onRefineRecentPicked"
     />
@@ -82,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, inject, onUnmounted } from 'vue'
+import { ref, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import * as api from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
@@ -93,6 +95,8 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   /** 已入库角色 id（用于「从最近图片中挑选」）；草稿卡场景传 null，隐藏该入口 */
   characterId: { type: [Number, String], default: null },
+  /** 系统角色可提供自己的最近图片接口，避免被当成普通居民查询。 */
+  recentImagesLoader: { type: Function, default: null },
   /** 角色名（标题 + 分析时的身份上下文） */
   displayName: { type: String, default: '' },
   /** 当前整卡文本（待重写「## 你的外观」的草稿/编辑中人格卡） */
@@ -124,8 +128,19 @@ const refineError = ref('')
 const refineFileInput = ref(null)
 // 最近图片挑选（RecentImageCropper 内部负责取图与拖拽截取）
 const showRefinePicker = ref(false)
+const pickerMounted = ref(false)
+let analysisVersion = 0
+let analysisController
+
+function cancelAnalysis() {
+  ++analysisVersion
+  analysisController?.abort()
+  analysisController = undefined
+  refineAnalyzing.value = false
+}
 
 function resetRefineState() {
+  cancelAnalysis()
   refineImage.value = ''
   refineDragging.value = false
   refineAnalyzing.value = false
@@ -160,10 +175,21 @@ function absorbResult(res) {
 
 watch(() => props.modelValue, (open) => {
   if (open) resetRefineState()
+  else { cancelAnalysis(); showRefinePicker.value = false }
   document.removeEventListener('paste', onRefinePaste)
   if (open) document.addEventListener('paste', onRefinePaste)
+}, { immediate: true })
+function onNestedEscape(event) {
+  if (event.key !== 'Escape' || !props.modelValue || !showRefinePicker.value) return
+  event.preventDefault(); event.stopImmediatePropagation()
+  showRefinePicker.value = false
+}
+onMounted(() => window.addEventListener('keydown', onNestedEscape, true))
+onUnmounted(() => {
+  cancelAnalysis()
+  document.removeEventListener('paste', onRefinePaste)
+  window.removeEventListener('keydown', onNestedEscape, true)
 })
-onUnmounted(() => document.removeEventListener('paste', onRefinePaste))
 
 function openRefineFilePicker() {
   refineFileInput.value?.click()
@@ -185,7 +211,9 @@ function handleRefineFile(file) {
     toastFn('图片不能超过 6MB', 'error')
     return
   }
+  const version = analysisVersion
   readFileAsDataURL(file).then(dataUrl => {
+    if (!props.modelValue || version !== analysisVersion) return
     refineImage.value = dataUrl
     clearResult()
     // 图片就位后直接开始分析
@@ -203,6 +231,7 @@ function clearRefineImage() {
 // ── 从最近图片挑选并截取 ──
 function openRecentPicker() {
   if (!props.characterId || refineAnalyzing.value) return
+  pickerMounted.value = true
   showRefinePicker.value = true
 }
 
@@ -237,7 +266,9 @@ function onRefinePaste(e) {
 }
 
 async function startRefineAnalysis() {
-  if (!props.basePrompt.trim() || !refineImage.value || refineAnalyzing.value) return
+  if (!props.modelValue || !props.basePrompt.trim() || !refineImage.value || refineAnalyzing.value) return
+  const version = ++analysisVersion
+  analysisController = new AbortController()
   refineAnalyzing.value = true
   clearResult()
   try {
@@ -246,13 +277,16 @@ async function startRefineAnalysis() {
       basePrompt: props.basePrompt,
       displayName: props.displayName,
       sceneLabel: props.sceneLabel,
+      signal: analysisController.signal,
     })
+    if (version !== analysisVersion || !props.modelValue) return
     absorbResult(res)
   } catch (err) {
+    if (version !== analysisVersion || err.name === 'AbortError') return
     console.error('startRefineAnalysis failed:', err)
     refineError.value = err?.message || '修正外观失败'
   } finally {
-    refineAnalyzing.value = false
+    if (version === analysisVersion) { refineAnalyzing.value = false; analysisController = undefined }
   }
 }
 

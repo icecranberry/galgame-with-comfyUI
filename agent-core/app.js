@@ -12,6 +12,8 @@ import { asyncHandler, wrapRouterAsync } from './src/middleware/asyncHandler.js'
 import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
+import godSaysRoutes from './src/routes/godSays.js';
+import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
@@ -128,6 +130,7 @@ app.use('/town-assets', express.static('data/town/assets'));
 // API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
 app.use('/api', wrapRouterAsync(expressionStandingRoutes));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
+app.use('/api/god-says', wrapRouterAsync(godSaysRoutes));
 app.use('/api/tts', wrapRouterAsync(ttsRoutes));
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
@@ -340,6 +343,7 @@ startWeatherScheduler();
 
 // 启动群聊后台调度器（预算制闲聊 + 角色自发建群，由 config.features.groupChat 控制）
 startGroupIdleScheduler();
+startGodSays();
 
 // 启动图片知识库同步调度器（用户安静时才执行同步，不阻塞生图）
 startKnowledgeSyncScheduler();
@@ -413,6 +417,7 @@ const shutdown = () => {
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
   stopConsolidationScheduler();
+  stopGodSays();
   stopTownScheduler();
   stopTownNpcStockScheduler();
 

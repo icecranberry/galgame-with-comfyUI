@@ -19,6 +19,7 @@ import { matchAll } from '../services/characterSearch.js';
 import { getUserName, matchUser } from '../services/userSearch.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
 import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
+import { studioDimensions, saveStudioChatImages } from '../services/studioChatImages.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -194,6 +195,9 @@ router.get('/tasks/:id/status', (req, res) => {
 // mode: 'chat' (对话配图) | 'moments' (朋友圈配图) | 'event' (奇遇配图)，默认 'chat'
 // sceneDesc: 自由画面描述（可选）→ 分层 LLM 生图链路完善为 prompt 后再生图
 router.post('/test-style', async (req, res) => {
+  let dimensions;
+  try { dimensions = studioDimensions(req.body, config.comfyui); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
   // 实验室可选流式返回提示词；其他调用方保留原 JSON 响应。
   const streaming = req.body.stream === true;
   const send = (event, data) => {
@@ -219,7 +223,7 @@ router.post('/test-style', async (req, res) => {
     }, 15000);
     res.on('close', () => clearInterval(heartbeat));
   }
-  const { artist, width, height, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras, alreadyPrepared } = req.body;
+  const { artist, mode = 'chat', prompt: customPrompt, sceneDesc, reuseSceneLoras, alreadyPrepared } = req.body;
 
   /**
    * 自由画面描述 → 分层 system LLM 生成生图 prompt（对齐私聊生图链路）：
@@ -277,8 +281,7 @@ router.post('/test-style', async (req, res) => {
   const isEvent = mode === 'event';
   // 测试时显式留空也要生效，与正式生图的空画师串语义一致。
   const finalArtist = artist ?? (isEvent ? config.comfyui.eventArtist : (isMoments ? config.comfyui.momentsArtist : config.comfyui.artist));
-  const finalWidth = width || (isEvent ? config.comfyui.eventWidth : (isMoments ? config.comfyui.momentsWidth : config.comfyui.width));
-  const finalHeight = height || (isEvent ? config.comfyui.eventHeight : (isMoments ? config.comfyui.momentsHeight : config.comfyui.height));
+  const { width: finalWidth, height: finalHeight } = dimensions;
 
   // 自由画面描述 → LLM 分层链路生成 prompt（匹配到的角色 lora 一并带入生图）
   const freeScene = typeof sceneDesc === 'string' ? sceneDesc.trim() : '';
@@ -368,8 +371,12 @@ router.post('/test-style', async (req, res) => {
         wfMode: result.wfMode,
         sceneLoras,
       };
+      const saved = req.body.saveToChat === true ? saveStudioChatImages(getDb(), result, {
+        prompt: result.promptRefined || prompt, originalPrompt: freeScene || customPrompt || prompt,
+        width: finalWidth, height: finalHeight, artist: finalArtist,
+      }) : { images: result.images };
       finish({
-        success: true, images: result.images, promptId: result.promptId, elapsed,
+        success: true, ...saved, width: finalWidth, height: finalHeight, promptId: result.promptId, elapsed,
         generatedPrompt,
         timing: {
           total_ms: elapsed,

@@ -128,3 +128,17 @@ test('model discovery paginates and excludes non-text Gemini models', async () =
   assert.deepEqual(result.models, ['gemini-2.5-flash', 'gemini-2.5-pro']);
   assert.equal(pages, 2);
 });
+
+test('native agent tools preserve signed model parts and pair each function response', () => {
+  const parts = [{ thought: true, text: 'plan' }, { functionCall: { name: 'inspect_neighbors', args: {} }, thoughtSignature: 'opaque-signature' }];
+  const schema = { type: 'object', properties: {}, additionalProperties: false };
+  const body = buildVertexBody({ model: 'gemini-3-pro', tools: [{ type: 'function', function: { name: 'inspect_neighbors', description: '查看', parameters: schema } }], messages: [
+    { role: 'system', content: 'stable' }, { role: 'user', content: '看看' },
+    { role: 'assistant', content: '', vertex_parts: parts, tool_calls: [{ id: 'unique-call', function: { name: 'inspect_neighbors', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'unique-call', content: '{"ok":true,"value":{"characters":[]}}' },
+  ] });
+  assert.deepEqual(body.contents[1].parts, parts);
+  assert.deepEqual(body.contents[2].parts[0].functionResponse, { name: 'inspect_neighbors', response: { ok: true, value: { characters: [] } } });
+  assert.deepEqual(body.tools[0].functionDeclarations[0].parametersJsonSchema, schema);
+  assert.equal(body.toolConfig.functionCallingConfig.mode, 'AUTO');
+});

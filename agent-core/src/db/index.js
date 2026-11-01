@@ -38,6 +38,7 @@ import { migrateCharacterDiarySchema } from './diarySchema.js';
 import { migrateMediaAvatarLibrary } from './mediaAvatarSchema.js';
 import { migrateMediaFavorites } from './mediaFavorites.js';
 import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
+import { migrateGodSaysSchema } from './godSaysSchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1173,6 +1174,7 @@ function initSchema(db) {
   // 迁移: 角色日记（每角色每日一篇，同日覆盖、历史保留）
   migrateCharacterDiarySchema(db);
   migrateTtsSchema(db);
+  migrateGodSaysSchema(db);
 
   // 迁移: 角色服装的场景标记（工装/外出/居家/睡眠，由日程决定穿哪套）
   migrateCharacterOutfitScene(db);

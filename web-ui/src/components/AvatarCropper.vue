@@ -1,7 +1,8 @@
 <template>
-  <!-- 头像选择器弹窗 -->
-  <div v-if="!cropImage" class="avpicker-overlay" @click.self="tryClose">
-    <div class="avpicker-panel">
+  <!-- 固定弹窗根节点，外层关闭过渡不参与选图 / 裁剪内容的替换。 -->
+  <div :class="[cropImage ? 'crop-overlay' : 'avpicker-overlay', { 'is-themed': themed }]" @click.self="!cropImage && tryClose()">
+  <Transition name="av-content" mode="out-in" :duration="300">
+    <div v-if="!cropImage" key="picker" class="avpicker-panel">
       <div class="avpicker-header">
         <span>{{ title }}</span>
         <linshe-button variant="icon" :disabled="isGenerating" @click="tryClose">&times;</linshe-button>
@@ -11,6 +12,8 @@
         <div v-if="showRecentTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'recent', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && switchToRecent()" @keydown.enter.prevent="!isGenerating && switchToRecent()" @keydown.space.prevent="!isGenerating && switchToRecent()">最近图片</div>
         <div v-if="showGenerateTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'generate', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && (avTab = 'generate')" @keydown.enter.prevent="!isGenerating && (avTab = 'generate')" @keydown.space.prevent="!isGenerating && (avTab = 'generate')">生成头像</div>
       </div>
+
+      <p v-if="selectionError" class="crop-save-error" role="alert">{{ selectionError }}</p>
 
       <!-- 上传 tab -->
       <div v-if="avTab === 'upload'" class="avtab-body">
@@ -75,11 +78,8 @@
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- 头像裁剪编辑器 -->
-  <div v-else class="crop-overlay">
-    <div class="crop-panel">
+    <!-- 头像裁剪编辑器 -->
+    <div v-else key="crop" class="crop-panel">
       <div class="crop-header">
         <span>裁剪头像 — 拖拽移动图片、滚轮缩放</span>
         <linshe-button variant="icon" @click="cancelCrop">&times;</linshe-button>
@@ -102,12 +102,13 @@ ref="cropCanvas" class="crop-canvas"
           <div class="crop-zoom-info">{{ Math.round(cropVars.imgScale * 100) }}%</div>
         </div>
       </div>
+      <p v-if="saveError" class="crop-save-error" role="alert">{{ saveError }}</p>
       <div class="crop-actions">
         <!-- 无角色（群头像 / 用户头像）时没有可重新生成的对象，不摆这个死按钮 -->
         <linshe-button
           v-if="characterId"
           variant="secondary"
-          :disabled="isGenerating"
+          :disabled="isGenerating || cropSaving"
           @click="regenerateAvatar"
         >
 重新生成
@@ -116,11 +117,12 @@ ref="cropCanvas" class="crop-canvas"
         <linshe-button variant="primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</linshe-button>
       </div>
     </div>
+  </Transition>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, shallowRef, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 
@@ -132,6 +134,9 @@ const props = defineProps({
   characterBasePrompt: { type: String, default: '' },
   recentImages: { type: Array, default: () => [] },
   recentLoading: { type: Boolean, default: false },
+  generateHandler: { type: Function, default: null },
+  saveHandler: { type: Function, default: null },
+  themed: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'save', 'switchToRecent'])
@@ -141,10 +146,38 @@ const fileInput = ref(null)
 const recentImgErr = ref(new Set())
 
 // 裁剪状态
-const cropImage = ref(null)
+const cropImage = shallowRef(null)
 const cropCanvas = ref(null)
 const previewCanvas = ref(null)
 const cropSaving = ref(false)
+const saveError = ref('')
+const selectionError = ref('')
+let disposed = false, imageRequest = 0, pendingImage = null
+
+function cancelImageLoad() {
+  ++imageRequest
+  if (pendingImage) { pendingImage.onload = null; pendingImage.onerror = null; pendingImage = null }
+}
+
+function loadCropImage(src, request = ++imageRequest, crossOrigin = false) {
+  if (disposed || request !== imageRequest) return
+  const img = new Image()
+  pendingImage = img
+  if (crossOrigin) img.crossOrigin = 'anonymous'
+  img.onload = () => {
+    if (disposed || request !== imageRequest) return
+    pendingImage = null
+    genStatus.value = 'idle'
+    startCrop(img)
+  }
+  img.onerror = () => {
+    if (disposed || request !== imageRequest) return
+    pendingImage = null
+    genStatus.value = 'idle'
+    selectionError.value = '图片加载失败，请重新选择或上传图片。'
+  }
+  img.src = src
+}
 
 // ── 生成头像状态 ──
 const genStatus = ref('idle') // idle | generating | error
@@ -155,7 +188,8 @@ let _genPhaseTimer = null
 const isGenerating = computed(() => genStatus.value === 'generating')
 
 function tryClose() {
-  if (isGenerating.value) return
+  if (isGenerating.value || cropSaving.value) return
+  cancelImageLoad()
   emit('close')
 }
 
@@ -192,6 +226,7 @@ function onPaste(e) {
 }
 
 onMounted(() => document.addEventListener('paste', onPaste))
+onBeforeUnmount(() => { disposed = true; cancelImageLoad() })
 onUnmounted(() => {
   document.removeEventListener('paste', onPaste)
   stopPhaseCycle()
@@ -204,28 +239,15 @@ async function startGenerate() {
   cycleGenPhase(0)
 
   try {
-    const result = await generateAvatar(props.characterId)
+    const result = await (props.generateHandler ? props.generateHandler() : generateAvatar(props.characterId))
     stopPhaseCycle()
 
     if (result.success && result.images?.length > 0) {
+      if (disposed) return
       const imgData = result.images[0]
-      // 加载 base64 图片并进入裁剪流程
-      const img = new Image()
-      img.onload = () => {
-        genStatus.value = 'idle'
-        startCrop(img)
-      }
-      img.onerror = () => {
-        genStatus.value = 'idle'
-        genError.value = '图片加载失败，请重试'
-      }
-      if (imgData.base64) {
-        img.src = imgData.base64
-      } else if (imgData.url) {
-        // 如果返回的是 URL，需要通过 Image 加载（注意 CORS）
-        img.crossOrigin = 'anonymous'
-        img.src = imgData.url
-      }
+      cancelImageLoad()
+      selectionError.value = ''
+      loadCropImage(imgData.base64 || imgData.url, imageRequest, !imgData.base64)
     } else {
       genStatus.value = 'idle'
       genError.value = result.error || '图像生成失败，请重试'
@@ -244,6 +266,7 @@ function switchToRecent() {
 }
 
 function onRecentImgErr(i) {
+  if (recentImgErr.value.has(i)) return
   const s = new Set(recentImgErr.value)
   s.add(i)
   recentImgErr.value = s
@@ -257,20 +280,23 @@ function onFilePicked(e) {
 }
 
 function selectRecentImage(url) {
-  const img = new Image()
-  img.crossOrigin = 'anonymous'
-  img.onload = () => startCrop(img)
-  img.onerror = () => {}
-  img.src = url
+  if (cropSaving.value || isGenerating.value) return
+  cancelImageLoad()
+  selectionError.value = ''
+  loadCropImage(url, imageRequest, true)
 }
 
 function loadImageFromFile(file) {
+  if (cropSaving.value || isGenerating.value) return
+  cancelImageLoad()
+  selectionError.value = ''
+  const request = imageRequest
   const reader = new FileReader()
   reader.onload = () => {
-    const img = new Image()
-    img.onload = () => startCrop(img)
-    img.src = reader.result
+    if (disposed || request !== imageRequest) return
+    loadCropImage(reader.result, request)
   }
+  reader.onerror = () => { if (!disposed && request === imageRequest) selectionError.value = '图片读取失败，请重新选择。' }
   reader.readAsDataURL(file)
 }
 
@@ -295,9 +321,13 @@ let cropPinchDist = 0
 let cropPinchScale = 1
 
 function startCrop(img) {
-  cropImage.value = img
-
   const minDim = Math.min(img.naturalWidth, img.naturalHeight)
+  if (![img.naturalWidth, img.naturalHeight].every(size => Number.isFinite(size) && size > 0)) {
+    genStatus.value = 'idle'
+    selectionError.value = '图片尺寸无效，请重新选择或上传图片。'
+    return
+  }
+  selectionError.value = ''; saveError.value = ''
   const initScale = (CROP_R * 2) / minDim
 
   cropVars.imgScale = initScale
@@ -305,13 +335,27 @@ function startCrop(img) {
   cropVars.imgY = CROP_CY - (img.naturalHeight * initScale) / 2
 
   cropDragging = false
-  nextTick(() => drawCrop())
+  cropImage.value = img
+  // 内容过渡结束后画布才挂载，选图当下的 nextTick 无法保证拿到画布。
+  if (cropCanvas.value) drawCrop()
 }
 
+watch([cropCanvas, previewCanvas], () => drawCrop(), { flush: 'post' })
+
 function drawCrop() {
+  try { renderCrop() }
+  catch (err) {
+    selectionError.value = '图片绘制失败，请重新选择或上传图片。'
+    cropImage.value = null
+    console.error('[avatar] draw crop failed:', err)
+  }
+}
+
+function renderCrop() {
   const canvas = cropCanvas.value
   if (!canvas || !cropImage.value) return
   const ctx = canvas.getContext('2d')
+  if (!ctx) { selectionError.value = '暂时无法打开图片画布，请重新选择图片。'; cropImage.value = null; return }
   canvas.width = CROP_CANVAS
   canvas.height = CROP_CANVAS
 
@@ -347,6 +391,7 @@ function drawCrop() {
     preview.width = bufSize
     preview.height = bufSize
     const pctx = preview.getContext('2d')
+    if (!pctx) return
     pctx.imageSmoothingQuality = 'high'
     pctx.clearRect(0, 0, bufSize, bufSize)
     pctx.save()
@@ -451,7 +496,7 @@ function cropTouchEnd(e) {
   if (e.touches.length === 0) cropDragging = false
 }
 
-function cancelCrop() { cropImage.value = null }
+function cancelCrop() { if (!cropSaving.value) { cancelImageLoad(); cropImage.value = null } }
 
 function regenerateAvatar() {
   cropImage.value = null
@@ -462,6 +507,7 @@ function regenerateAvatar() {
 async function saveCrop() {
   if (cropSaving.value || !cropImage.value) return
   cropSaving.value = true
+  saveError.value = ''
   try {
     const img = cropImage.value
     const s = cropVars.imgScale
@@ -478,20 +524,28 @@ async function saveCrop() {
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, srcX, srcY, srcLen, srcLen, 0, 0, outSize, outSize)
     const base64 = tmpCanvas.toDataURL('image/png')
-    emit('save', base64)
+    if (props.saveHandler) await props.saveHandler(base64)
+    else emit('save', base64)
   } catch (err) {
+    saveError.value = err.message || '头像保存失败，请重试'
     console.error('[avatar] save crop failed:', err)
   } finally { cropSaving.value = false }
 }
 </script>
 
 <style scoped>
+.av-content-enter-active,.av-content-leave-active { transition:opacity .3s,transform .3s; }
+.av-content-enter-from,.av-content-leave-to { opacity:0; transform:scale(.95); }
 /* ── 选择器弹窗 ── */
 .avpicker-overlay {
   position:fixed; inset:0; background:transparent;
   display:flex; align-items:center; justify-content:center; z-index:11001;
-  animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: avFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
+.crop-save-error { margin:0; padding:10px 20px; color:var(--danger); font-size:var(--fs-sm); line-height:1.7; }
+.is-themed .avpicker-panel,.is-themed .crop-panel { background:var(--modal-bg); border:var(--modal-border); border-radius:var(--modal-radius); box-shadow:var(--modal-shadow); }
+.is-themed .avpicker-header,.is-themed .avpicker-tabs,.is-themed .crop-header { border-bottom:var(--modal-divider); }
+.is-themed .av-upload-zone { border-color:var(--border-strong); }
 .avpicker-panel {
   width:676px; max-width:calc(100vw - 24px); max-height:80vh;
   background: rgba(255, 255, 255, 0.85);
@@ -501,7 +555,7 @@ async function saveCrop() {
   border:1px solid rgba(255, 255, 255, 0.35);
   box-shadow: 0 12px 48px rgba(0,0,0,0.1);
   display:flex; flex-direction:column; overflow:hidden;
-  animation: avScaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: avScaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 @keyframes avFadeIn  { from { opacity:0; } to { opacity:1; } }
 @keyframes avScaleIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
@@ -558,7 +612,7 @@ async function saveCrop() {
 .crop-overlay {
   position:fixed; inset:0; background:transparent;
   display:flex; align-items:center; justify-content:center; z-index:11002;
-  animation: avFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: avFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .crop-panel {
   background: rgba(255, 255, 255, 0.55);
@@ -568,7 +622,7 @@ async function saveCrop() {
   border:1px solid rgba(255, 255, 255, 0.35);
   box-shadow: 0 12px 48px rgba(0,0,0,0.1);
   overflow:hidden;
-  animation: avScaleIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: avScaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .crop-header { padding:18px 23px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
 .crop-header span { font-size:18px; font-weight:600; color:var(--text-bright); }

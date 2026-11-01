@@ -91,3 +91,4 @@ agent-core/test/*
 !agent-core/test/promptPresets.test.js
 !agent-core/test/townMapCapabilities.test.js
 !agent-core/test/imageCacheRevalidation.test.js
+!agent-core/test/godSays*.test.js

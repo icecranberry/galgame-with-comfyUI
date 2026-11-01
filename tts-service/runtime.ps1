@@ -1,4 +1,4 @@
-# Fixed deployment root, independent of the caller's cwd and old .env settings.
+﻿# Fixed deployment root, independent of the caller's cwd and old .env settings.
 $ttsRoot = $PSScriptRoot
 if (-not $ModelVersion) {
     $selectionFile = Join-Path $ttsRoot 'runtime\selected-model.json'
@@ -25,6 +25,27 @@ $env:TORCH_HOME = Join-Path $ttsRoot 'cache\torch'
 $env:NUMBA_CACHE_DIR = Join-Path $ttsRoot 'cache\numba'
 $env:PATH = (Join-Path $bundleRoot 'tools\ffmpeg\bin') + ';' + $env:PATH
 
+# Runs one deployment.py step and, on failure, surfaces python's real output
+# and exit code. With $ErrorActionPreference='Stop' (restart.ps1) a bare native
+# call turns its first stderr line into a NativeCommandError and callers only
+# end up showing the generic message without any python detail.
+function Invoke-TtsDeploymentStep {
+    param(
+        [Parameter(Mandatory)][string]$Python,
+        [Parameter(Mandatory)][string]$FailMessage,
+        [Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$StepArgs
+    )
+    $ErrorActionPreference = 'Continue'
+    $output = & $Python -X utf8 (Join-Path $ttsRoot 'deployment.py') @StepArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $detail = (($output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+        if (-not $detail) {
+            $detail = 'python 没有任何输出：通常是杀软拦截/隔离了 runtime 内置的 python，或压缩包解压不完整。'
+        }
+        throw "$FailMessage（退出码 $LASTEXITCODE）`n$detail"
+    }
+}
+
 function Initialize-TtsRuntime {
     param([switch]$RuntimeOnly)
     $manifestPath = Join-Path $bundleRoot 'runtime.json'
@@ -38,20 +59,16 @@ function Initialize-TtsRuntime {
     }
     $basePython = Join-Path $baseDir 'python.exe'
     if (-not (Test-Path -LiteralPath $basePython)) { throw 'Bundled Python missing. Extract the complete offline bundle into tts-service.' }
-    & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') migrate
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to migrate the old IndexTTS installation.' }
-    & $basePython -X utf8 (Join-Path $ttsRoot 'deployment.py') prepare --model $ModelVersion
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the offline TTS environment.' }
+    Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Unable to migrate the old IndexTTS installation.' migrate
+    Invoke-TtsDeploymentStep -Python $basePython -FailMessage 'Unable to prepare the offline TTS environment.' prepare --model $ModelVersion
     if (-not $RuntimeOnly) {
-        & $python -X utf8 (Join-Path $ttsRoot 'deployment.py') check --model $ModelVersion
-        if ($LASTEXITCODE -ne 0) { throw 'TTS files incomplete. Run setup.ps1 or extract the complete offline bundle into tts-service.' }
+        Invoke-TtsDeploymentStep -Python $python -FailMessage 'TTS files incomplete. Run setup.ps1 or extract the complete offline bundle into tts-service.' check --model $ModelVersion
     }
     foreach ($tool in @('ffmpeg', 'ffprobe')) {
         if (-not (Test-Path -LiteralPath (Join-Path $bundleRoot "tools\ffmpeg\bin\$tool.exe"))) {
             throw "Missing tools/ffmpeg/bin/$tool.exe. Run setup.ps1 or extract the complete offline bundle."
         }
     }
-    & $python -X utf8 (Join-Path $ttsRoot 'deployment.py') check-runtime --model $ModelVersion
-    if ($LASTEXITCODE -ne 0) { throw 'Python dependencies incomplete. Run setup.ps1 or extract the complete offline bundle.' }
+    Invoke-TtsDeploymentStep -Python $python -FailMessage 'Python dependencies incomplete. Run setup.ps1 or extract the complete offline bundle.' check-runtime --model $ModelVersion
     New-Item -ItemType Directory -Force -Path (Join-Path $ttsRoot 'logs') | Out-Null
 }

@@ -22,11 +22,12 @@ const sourceUrl = new URL('../src/llm/llm-client.js', import.meta.url);
 const imports = {
   openai: import.meta.resolve('openai'),
   './modelCapabilities.js': new URL('../src/llm/modelCapabilities.js', import.meta.url).href,
+  './agentStream.js': new URL('../src/llm/agentStream.js', import.meta.url).href,
   './vertex-client.js': new URL('../src/llm/vertex-client.js', import.meta.url).href,
   '../config.js': configModule,
   '../services/llmImageInput.js': stub('export const compressLlmImageInputs = async messages => messages;'),
   '../services/llmConcurrency.js': stub('export const acquireSlot = async () => {}; export const releaseSlot = () => {};'),
-  '../services/llmTelemetry.js': stub('export const recordLlmCall = () => {};'),
+  '../services/llmTelemetry.js': stub('export const calls = []; export const recordLlmCall = (...args) => calls.push(args);'),
 };
 const source = readFileSync(sourceUrl, 'utf8').replace(/from '([^']+)'/g,
   (match, specifier) => imports[specifier] ? `from ${JSON.stringify(imports[specifier])}` : match);
@@ -233,4 +234,63 @@ test('all LLM request paths use the configured output allowance', async t => {
     assert.equal(requests.at(-1).model, 'free-test');
     assertAllowance(requests.at(-1));
   });
+});
+
+test('native tool stream logs requests, tool calls, usage and partial failures without leaking credentials', async t => {
+  const logs = [];
+  t.mock.method(console, 'log', (...args) => logs.push(args.join(' ')));
+  t.mock.method(console, 'error', (...args) => logs.push(args.join(' ')));
+  let mode = 'tools';
+  const bodies = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const part of req) body += part;
+    bodies.push(JSON.parse(body));
+    if (mode === 'error') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message: 'unsupported tool protocol' } }));
+    }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const emit = value => res.write(`data: ${JSON.stringify(value)}\n\n`);
+    emit({ choices: [{ delta: { reasoning_content: '已经收到的思考片段', content: '我先核对一下。' } }] });
+    if (mode === 'tools') {
+      emit({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call-1', type: 'function', function: { name: 'inspect_neighbors', arguments: '{}' } }] }, finish_reason: 'tool_calls' }] });
+      emit({ choices: [], usage: { prompt_tokens: 80, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 40 } } });
+    }
+    res.end('data: [DONE]\n\n');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { client.resetClient(); await new Promise(resolve => server.close(resolve)); });
+  Object.assign(config.llm, { connectionType: 'openai', freeEgg: false, baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'secret-must-not-be-logged', model: 'test-model', maxTokens: 8192, extraBody: {}, headers: {} });
+  client.resetClient();
+  const telemetry = await import(imports['../services/llmTelemetry.js']);
+  const before = telemetry.calls.length;
+  const tools = [{ type: 'function', function: { name: 'inspect_neighbors', parameters: { type: 'object', properties: {} } } }];
+  const events = [];
+  for await (const event of client.chatAgentStream(messages, { tools, requestId: 'run-1/round-1' })) events.push(event);
+  assert.deepEqual(bodies[0].messages, messages);
+  assert.deepEqual(bodies[0].tools, tools);
+  assert.equal(events.at(-1).message.tool_calls[0].id, 'call-1');
+  assert.match(logs.join('\n'), /run-1\/round-1/);
+  assert.match(logs.join('\n'), /stable rules/);
+  assert.match(logs.join('\n'), /工具调用/);
+  assert.match(logs.join('\n'), /命中 40\/80/);
+  assert.equal(telemetry.calls.at(-1)[2].failed, false);
+  logs.length = 0;
+  mode = 'partial';
+  await assert.rejects(async () => { for await (const event of client.chatAgentStream(messages, { tools })) void event; }, /连接提前结束/);
+  assert.match(logs.join('\n'), /流中断，已收到的部分/);
+  assert.match(logs.join('\n'), /已经收到的思考片段/);
+  assert.match(logs.join('\n'), /我先核对一下/);
+  assert.equal(telemetry.calls.at(-1)[2].failed, true);
+  logs.length = 0;
+  mode = 'error';
+  await assert.rejects(async () => { for await (const event of client.chatAgentStream(messages, { tools })) void event; }, /不接受神说/);
+  assert.equal(bodies.length, 3, 'native tool requests are not automatically retried');
+  assert.match(logs.join('\n'), /unsupported tool protocol/);
+  assert.doesNotMatch(logs.join('\n'), /secret-must-not-be-logged/);
+  const aborted = AbortSignal.abort(new DOMException('stopped', 'AbortError'));
+  await assert.rejects(async () => { for await (const event of client.chatAgentStream(messages, { tools, signal: aborted })) void event; }, /stopped/);
+  assert.match(logs.join('\n'), /cancelled/);
+  assert.equal(telemetry.calls.length - before, 4, 'each outcome is counted exactly once');
 });

@@ -838,7 +838,7 @@ export function isGroupRoundRunning(groupId) {
  * @param {function} [opts.emit] - (event, data) => void，SSE 推送回调
  * @returns {Promise<{messages: object[], rawId: number|null, busy?: boolean}>}
  */
-export async function runGroupRound(groupId, { trigger = 'user', userMessage = '', emit = () => {} } = {}) {
+export async function runGroupRound(groupId, { trigger = 'user', userMessage = '', emit = () => {}, directive = '', godDeliveryKey = null } = {}) {
   const numericGroupId = Number(groupId);
   if (runningGroups.has(numericGroupId)) {
     console.log(`[group] round already running for group ${groupId}, skip (trigger=${trigger})`);
@@ -846,13 +846,21 @@ export async function runGroupRound(groupId, { trigger = 'user', userMessage = '
   }
   runningGroups.add(numericGroupId);
   try {
-    return await _runGroupRound(groupId, { trigger, userMessage, emit });
+    if (godDeliveryKey) {
+      const db = getDb();
+      const saved = db.prepare('SELECT id FROM raw_messages WHERE god_delivery_key=?').get(godDeliveryKey);
+      if (saved) {
+        const messages = db.prepare('SELECT id,content FROM messages WHERE raw_id=? ORDER BY id').all(saved.id);
+        if (messages.length) return { rawId: saved.id, messages, partial: true };
+      }
+    }
+    return await _runGroupRound(groupId, { trigger, userMessage, emit, directive, godDeliveryKey });
   } finally {
     runningGroups.delete(numericGroupId);
   }
 }
 
-async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emit = () => {} } = {}) {
+async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emit = () => {}, directive = '', godDeliveryKey = null } = {}) {
   const db = getDb();
   const group = getGroupWithMembers(groupId);
   if (!group || group.members.length === 0) {
@@ -868,6 +876,14 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   // ── 动态指令块 ──
   const directiveBlocks = [];
   directiveBlocks.push(`<time_context>${getTimeTag(new Date())}</time_context>`);
+  const { getGodWorldContext } = await import('./godSays/worldContext.js');
+  const godWorldContext = getGodWorldContext(group.members.map(m => m.id));
+  if (godWorldContext) directiveBlocks.push(godWorldContext);
+  if (trigger === 'world_event' || trigger === 'god_command') {
+    directiveBlocks.push(trigger === 'world_event'
+      ? `以下是刚刚感知到的世界事件，请至少一位成员主动提起，其他人按人格自然回应、接续现有群聊上文。不是用户发言，不要假装用户在群里发了指令。\n${directive}`
+      : `这轮请围绕以下要求自然开展讨论，至少一位成员发言，并接续现有群聊上文。不是用户发言，不要伪造用户发言。\n${directive}`);
+  }
   // 当日《邻舍日报》：世界状态 + 特稿新闻（成员含当天主角时附带点名），群里全员共享视角。
   // 限额发放：主角所在群只看前 GROUP_INJECT_ROUNDS 轮，用满后当天不再注入——
   // 每轮都提醒"今早报纸写了谁"会把特稿主角反复提起，报纸只该当开场谈资。
@@ -942,8 +958,8 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
 
   // ── 每轮消息上限：按群人数与话题动态设定；上限只是最多条数，不是必须凑满 ──
   const roundMessageLimit = computeRoundMessageLimit(group, {
-    hasTopicSeed: !!dyn,
-    minMessages: mentionAll ? group.members.length : 0,
+    hasTopicSeed: !!dyn || !!directive,
+    minMessages: mentionAll ? group.members.length : directive ? 1 : 0,
   });
   directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
 
@@ -962,12 +978,14 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const msgs = lorebookTurn.messages;
 
   // ── 先插 raw 占位（messages.raw_id FK 需要），流结束后回填完整剧本 ──
-  const rawResult = db.prepare(
-    `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', '')`
-  ).run(conversationId);
+  const existingGodRaw = godDeliveryKey ? db.prepare('SELECT id FROM raw_messages WHERE god_delivery_key=?').get(godDeliveryKey) : null;
+  const rawResult = existingGodRaw ? { lastInsertRowid: existingGodRaw.id } : db.prepare(
+    `INSERT INTO raw_messages (conversation_id, role, content, god_delivery_key) VALUES (?, 'assistant', '', ?)`
+  ).run(conversationId, godDeliveryKey);
   const rawId = rawResult.lastInsertRowid;
 
   const written = [];       // 已写入的 messages 行（含 speaker；分句后每段一条）
+  let partial = false;
   const rawLines = [];      // 回填 raw 用（每个剧本行一条，图片行已补齐角色前缀）
   const imagePromises = [];
   let buffer = '';
@@ -1120,6 +1138,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   } catch (err) {
     // 流中断：已写入的消息保留，回填已有内容
     console.error(`[group] stream error for group ${groupId}:`, err.message);
+    partial = true;
     if (written.length === 0) {
       db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(rawId);
       throw err;
@@ -1184,7 +1203,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     }
   });
 
-  return { messages: written, rawId: rawContent ? rawId : null };
+  return { messages: written, rawId: rawContent ? rawId : null, ...(godDeliveryKey ? { partial } : {}) };
 }
 
 function serializeMsg(rec, groupId) {

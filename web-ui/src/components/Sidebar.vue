@@ -6,6 +6,11 @@
     :inert="(!isMobile && collapsed) ? true : undefined"
   >
     <div ref="charListEl" class="char-list stagger">
+      <router-link to="/god-says" class="char-item god-entry" :class="{ active: route.path === '/god-says' }" @click="emit('charSelected')">
+        <div class="god-entry-emblem"><AngelEmblem /></div>
+        <div class="char-info"><div class="char-name">神说 <span class="god-entry-star" aria-hidden="true">✦</span></div><div class="char-preview">{{ godEntrySubtitle }}</div></div>
+        <span class="god-entry-arrow" aria-hidden="true">↗</span>
+      </router-link>
       <!-- 群聊分区 -->
       <div class="group-section-header">
         <span>群聊</span>
@@ -346,6 +351,8 @@ import { useCharacterFoldersStore, groupCharactersByFolder } from '../stores/cha
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import GearIcon from './GearIcon.vue'
+import AngelEmblem from './godSays/AngelEmblem.vue'
+import { useGodSaysStore } from '../stores/godSays.js'
 import { selectStandingCharacter } from '../utils/standingDisplay.js'
 
 const props = defineProps({
@@ -360,6 +367,8 @@ const emit = defineEmits(['charSelected'])
 const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
+const godSays = useGodSaysStore()
+const godEntrySubtitle = computed(() => godSays.state?.activity?.activity || [...(godSays.state?.messages || [])].reverse().find(m => m.role === 'assistant' && m.content)?.content || '天使在云庭等候')
 const moments = useMomentsStore()
 const events = useEventsStore()
 const proactive = useProactiveStore()
@@ -554,6 +563,10 @@ function formatTime(iso) {
 </script>
 
 <style scoped>
+.god-entry { text-decoration:none; color:var(--text-primary); margin-bottom:10px; }
+.god-entry-emblem { width:42px; height:42px; margin-right:10px; flex-shrink:0; }
+.god-entry-star { color:var(--fun-gold); font-size:11px; margin-left:5px; }
+.god-entry-arrow { color:var(--text-secondary); font-size:16px; }
 .sidebar {
   /* 收纳时不改变宽度，列表与文字在滑动过程中保持原有排版。 */
   width: var(--sidebar-width, 300px); min-width: var(--sidebar-width, 300px);

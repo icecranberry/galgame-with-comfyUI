@@ -3,7 +3,7 @@
     <div class="nav-top" ref="navTopEl">
       <!-- 游戏菜单式滑动指示器：跟随 active 项滑动，高亮统一用主题色 -->
       <div class="nav-indicator" :style="indicatorStyle" aria-hidden="true"></div>
-      <router-link to="/chat" data-nav="chat" class="nav-item" :class="{ active: $route.path.startsWith('/chat') }" title="聊天">
+      <router-link to="/chat" data-nav="chat" class="nav-item" :class="{ active: $route.path.startsWith('/chat') || $route.path === '/god-says' }" title="聊天">
         <div class="nav-icon-wrap">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -167,7 +167,7 @@ const indicatorStyle = ref({ opacity: 0 })
 
 const activeNavKey = computed(() => {
   const p = route.path
-  if (p.startsWith('/chat') || p.startsWith('/group')) return 'chat'
+  if (p.startsWith('/chat') || p.startsWith('/group') || p === '/god-says') return 'chat'
   if (p.startsWith('/moments')) return 'moments'
   if (p.startsWith('/events')) return 'events'
   if (p.startsWith('/town')) return 'town'

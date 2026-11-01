@@ -1,5 +1,25 @@
 const BASE = '/api'
 
+export const getGodSaysState = session => request(`/god-says/state${session ? `?session=${session}` : ''}`)
+export const getGodSaysSessions = before => request(`/god-says/sessions${before ? `?before=${encodeURIComponent(before)}` : ''}`)
+export const getGodSaysMemories = () => request('/god-says/memories')
+export const sendGodSaysMessage = (client_id, text, images = []) => request('/god-says/runs', { method: 'POST', body: { client_id, text, images } })
+export const stopGodSaysRun = id => request(`/god-says/runs/${id}/stop`, { method: 'POST' })
+export const deleteGodSaysTurn = id => request(`/god-says/runs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+export const getGodAngel = () => request('/god-says/angel')
+export const updateGodAngel = body => request('/god-says/angel', { method: 'PUT', body })
+export const getGodAngelImageJobs = () => request('/god-says/angel/image-jobs')
+export const getGodAngelImageJob = id => request(`/god-says/angel/image-jobs/${encodeURIComponent(id)}`)
+export const generateGodAngelImage = body => request('/god-says/angel/image-jobs', { method: 'POST', body })
+export const saveGodAngelAvatar = base64 => request('/god-says/angel/avatar', { method: 'POST', body: { base64 } })
+export const saveGodAngelStanding = (base64, scene = 'work') => request('/god-says/angel/standing', { method: 'POST', body: { base64, scene } })
+export const removeGodAngelStanding = (scene = 'work') => request(`/god-says/angel/standing?scene=${encodeURIComponent(scene)}`, { method: 'DELETE' })
+export const generateGodAngelClothingDraft = ({ basePrompt, scene, tags, brief, signal }) => request('/god-says/angel/clothing-draft', { method: 'POST', body: { basePrompt, scene, tags, brief }, signal })
+export const getGodWorldEvents = session => request(`/god-says/world-events${session ? `?session=${session}` : ''}`)
+export const getGodAngelActivity = () => request('/god-says/activity')
+export const retryGodWorldEvent = id => request(`/god-says/world-events/${id}/retry`, { method: 'POST' })
+export const retryGodSummary = id => request(`/god-says/sessions/${id}/summarize`, { method: 'POST' })
+
 export const getPromptPresets = () => request('/presets')
 export const createPromptPreset = body => request('/presets', { method: 'POST', body })
 export const updatePromptPreset = (id, body) => request(`/presets/${id}`, { method: 'PUT', body })
@@ -342,10 +362,11 @@ export function uploadStanding(characterId, base64) {
 
 /** 修正外观：上传参考图（base64 data URL）+ 当前整卡文本（可为待确认的草稿卡），邻舍分析后重写「## 你的外观」（不入库，由前端回填）
  *  sceneLabel 用于按场景追加硬性约束（如睡衣必须赤脚）——原先没传，导致修睡衣与修工装走同一条提示词。 */
-export function refineAppearanceDraft({ image, basePrompt, displayName, sceneLabel }) {
+export function refineAppearanceDraft({ image, basePrompt, displayName, sceneLabel, signal }) {
   return request('/characters/refine-appearance-draft', {
     method: 'POST',
     body: { image, base_prompt: basePrompt, display_name: displayName, scene_label: sceneLabel },
+    signal,
   })
 }
 

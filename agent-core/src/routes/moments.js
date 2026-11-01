@@ -7,6 +7,7 @@ import { getMomentDelay } from '../services/momentTiming.js';
 import { generateImageRaw } from '../services/imageSkill.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { buildCharacterPersona } from '../services/characterPersona.js';
+import { getGodWorldContext } from '../services/godSays/worldContext.js';
 import { createCharacterTownLifeContext } from '../services/characterTownLifeContext.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
 import { recordCompletedImageTask } from '../services/imageTaskRecorder.js';
@@ -605,6 +606,10 @@ async function generateTownNpcMomentImages(npc, imagePrompts, opts = {}) {
  */
 const generatingCharacters = new Map();
 async function generateMomentPost(character, opts = {}) {
+  if (opts.godDeliveryKey) {
+    const saved = getDb().prepare("SELECT * FROM moment_posts WHERE god_delivery_key=? AND status='done'").get(opts.godDeliveryKey);
+    if (saved) return { ...saved, images: JSON.parse(saved.images || '[]') };
+  }
   if (isMomentBackfillRunning() && !opts.backfill) throw new Error('ALREADY_GENERATING');
   const existing = generatingCharacters.get(character.id);
   if (existing) {
@@ -719,15 +724,17 @@ async function generateMomentPostImpl(character, opts = {}) {
   if (imageCount > 1) console.log(`[moments] ${character.display_name} posts ${imageCount} images this time`);
 
   // 2. 创建 pending 记录
-  const postResult = db.prepare(
-    `INSERT INTO moment_posts (character_id, content, prompt, style, resolution, status)
-     VALUES (?, '', '', ?, ?, 'generating')`
-  ).run(
-    character.id,
-    combinedStyle,
-    `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`
-  );
-  const postId = postResult.lastInsertRowid;
+  const priorGodPost = opts.godDeliveryKey ? db.prepare('SELECT id FROM moment_posts WHERE god_delivery_key=?').get(opts.godDeliveryKey) : null;
+  let postId;
+  if (priorGodPost) {
+    postId = priorGodPost.id;
+    db.prepare("UPDATE moment_posts SET status='generating',error_message=NULL WHERE id=?").run(postId);
+  } else {
+    postId = db.prepare(
+      `INSERT INTO moment_posts (character_id, content, prompt, style, resolution, status, god_delivery_key)
+       VALUES (?, '', '', ?, ?, 'generating', ?)`
+    ).run(character.id, combinedStyle, `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`, opts.godDeliveryKey || null).lastInsertRowid;
+  }
 
   // 2.5 Sigmoid 模型：根据角色关系网数量决定多人概率
   // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k × (R - R_mid)))
@@ -958,6 +965,8 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   if (selectedTopic) {
     msgs.push({ role: 'system', content: `【用户指定的朋友圈话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
   }
+  const godWorldContext = getGodWorldContext([Number(character.id)]);
+  if (godWorldContext) msgs.push({ role: 'system', content: godWorldContext });
   msgs.push({ role: 'user', content: selectedTopic
     ? `${userMsg} 本次围绕用户指定话题生成图文，严格按 JSON 格式输出。`
     : userMsg });

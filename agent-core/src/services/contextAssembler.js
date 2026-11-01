@@ -23,7 +23,9 @@ export function sha256(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
-function cloneMessage(message) {
+function cloneMessage(message, preserveStructuredHistory = false) {
+  // 原生 agent 的工具关联与服务商签名必须随历史原样回传；普通私聊保持原有纯文本口径。
+  if (preserveStructuredHistory) return { ...message };
   return { role: message.role, content: String(message.content ?? '') };
 }
 
@@ -36,13 +38,14 @@ function cloneMessage(message) {
  * @param {string}    [summaryBlock] 最新摘要文本（可选），置于稳定块之后、历史之前
  * @param {object[]}  [preHistoryMessages] 历史之前的消息层块（如群聊实况），插在摘要之后、私聊历史之前
  * @param {object[]}  history        不可变历史消息数组，[{ role, content }]
- * @param {string[]}  dynamicBlocks  本轮动态上下文块，会以 <dynamic_context> 标签附加到最新 user 消息尾部
+ * @param {string[]}  dynamicBlocks  本轮动态上下文块，以 <dynamic_context> 放在最新 user 的原始输入之前
+ * @param {boolean} [preserveStructuredHistory=false] 保留原生工具调用、多模态内容及服务商元数据
  * @returns {{ messages: object[], metadata: object }}
  */
-export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, preHistoryMessages = [], history = [], dynamicBlocks = [] } = {}) {
+export function buildChatContext({ stableBlocks = [], preSummarySystem = null, summaryBlock = null, preHistoryMessages = [], history = [], dynamicBlocks = [], preserveStructuredHistory = false } = {}) {
   const stableMessages = stableBlocks.filter(Boolean).map(content => ({ role: 'system', content: String(content) }));
 
-  const historyMessages = history.map(cloneMessage);
+  const historyMessages = history.map(message => cloneMessage(message, preserveStructuredHistory));
 
   // 摘要前 system：多条按空行拼成一条（空段自动省略）
   const preSummaryContent = (Array.isArray(preSummarySystem) ? preSummarySystem : [preSummarySystem])
@@ -61,7 +64,7 @@ export function buildChatContext({ stableBlocks = [], preSummarySystem = null, s
   messages.push(...stableMessages);
   if (preSummaryMessage) messages.push(preSummaryMessage);
   if (summaryMessage) messages.push(summaryMessage);
-  messages.push(...preHistoryMessages.filter(Boolean).map(cloneMessage));
+  messages.push(...preHistoryMessages.filter(Boolean).map(message => cloneMessage(message, preserveStructuredHistory)));
   messages.push(...historyMessages);
 
   // 动态上下文块附加到最新 user 消息
@@ -70,10 +73,14 @@ export function buildChatContext({ stableBlocks = [], preSummarySystem = null, s
     const reverseIdx = [...messages].reverse().findIndex(m => m.role === 'user');
     if (reverseIdx >= 0) {
       const latestUserIdx = messages.length - 1 - reverseIdx;
-      const originalContent = messages[latestUserIdx].content;
+      const original = messages[latestUserIdx];
+      const context = `<dynamic_context>\n${dynamicText}\n</dynamic_context>`;
       messages[latestUserIdx] = {
+        ...(preserveStructuredHistory ? original : {}),
         role: 'user',
-        content: `<dynamic_context>\n${dynamicText}\n</dynamic_context>\n\n${originalContent}`,
+        content: preserveStructuredHistory && Array.isArray(original.content)
+          ? [{ type: 'text', text: context }, ...original.content]
+          : `${context}\n\n${original.content}`,
       };
     }
   }

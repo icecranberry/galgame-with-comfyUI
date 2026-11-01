@@ -34,6 +34,7 @@ const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
+  { path: '/god-says', component: () => import('./views/GodSaysView.vue') },
   { path: '/chat/:id', component: ChatView },
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },

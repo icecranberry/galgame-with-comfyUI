@@ -1,5 +1,5 @@
 <template>
-  <div class="ls-auto-textarea" :class="{ 'is-collapsed': collapsible && !focused }">
+  <div class="ls-auto-textarea" :class="{ 'is-collapsed': collapsible && !focused, 'is-embedded': embedded }" :style="embedded ? { '--ls-auto-min-height': typeof minHeight === 'number' ? `${minHeight}px` : minHeight } : undefined">
     <textarea
       ref="el"
       class="ls-auto-textarea__field"
@@ -37,6 +37,8 @@ const props = defineProps({
   collapsible: { type: Boolean, default: false },
   /** 非折叠文本域的最小高度 */
   minHeight: { type: [String, Number], default: 100 },
+  /** 嵌入聊天输入容器，边框和底色由宿主统一承载；不改变普通表单默认皮肤 */
+  embedded: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'focus', 'blur', 'enter', 'escape'])
@@ -181,5 +183,22 @@ defineExpose({
   border-color: var(--border);
   color: var(--text-secondary);
   cursor: not-allowed;
+}
+
+/* 整体聊天输入框：文本与下方工具栏共用外壳，避免两圈输入边框。 */
+.is-embedded .ls-auto-textarea__field,
+.is-embedded .ls-auto-textarea__field:hover:not(:disabled):not(:focus),
+.is-embedded .ls-auto-textarea__field:focus,
+.is-embedded .ls-auto-textarea__field:disabled {
+  min-height: var(--ls-auto-min-height, 64px);
+  max-height: min(240px, 30dvh);
+  padding: 4px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  line-height: 1.7;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 </style>

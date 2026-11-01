@@ -10,6 +10,8 @@
         'ls-btn--active': active,
         'ls-btn--tone-danger': tone === 'danger',
         'ls-btn--tone-paper': tone === 'paper',
+        'ls-btn--tone-muted': tone === 'muted',
+        'ls-btn--tone-ink': tone === 'ink',
         'ls-btn--jelly-enter': jellyPhase === 'enter',
         'ls-btn--jelly-leave': jellyPhase === 'leave',
         'ls-btn--loading': loading,
@@ -48,7 +50,7 @@ const props = defineProps({
   block: { type: Boolean, default: false },
   /** chip 变体的选中态 */
   active: { type: Boolean, default: false },
-  /** 色调覆盖：danger 转红色；paper 为白底图标按钮 */
+  /** 色调覆盖：danger 转红色；paper 为白底图标按钮；muted 为弱操作的中性墨色；ink 为高对比图标操作 */
   tone: { type: String, default: 'default' },
 })
 
@@ -195,6 +197,14 @@ const endJelly = (event) => {
   color: var(--button-paper-ink);
 }
 .ls-btn--icon.ls-btn--tone-paper:hover:not(:disabled) { color: var(--button-paper-hover); }
+.ls-btn--icon.ls-btn--tone-ink {
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+}
+.ls-btn--icon.ls-btn--tone-ink:hover:not(:disabled) {
+  background: var(--text-bright);
+  color: var(--bg-secondary);
+}
 /* 尺寸档位统一为正方形：重置 lg/md 的 min-height，避免被拉成椭圆 */
 .ls-btn--icon.ls-btn--sm { width: 24px; height: 24px; min-height: 0; }
 .ls-btn--icon.ls-btn--md { width: 30px; height: 30px; min-height: 0; }
@@ -238,6 +248,16 @@ const endJelly = (event) => {
 /* 色调覆盖：危险色 */
 .ls-btn--tone-danger { color: var(--danger); }
 .ls-btn--tone-danger:hover:not(:disabled) { color: #c74949; }
+
+/* 可选中性墨色：用于折叠说明与辅助入口，沿用原变体结构和反馈。 */
+.ls-btn--link.ls-btn--tone-muted,
+.ls-btn--ghost.ls-btn--tone-muted,
+.ls-btn--icon.ls-btn--tone-muted {
+  color: color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary));
+}
+.ls-btn--link.ls-btn--tone-muted:hover:not(:disabled),
+.ls-btn--ghost.ls-btn--tone-muted:hover:not(:disabled),
+.ls-btn--icon.ls-btn--tone-muted:hover:not(:disabled) { color: var(--text-primary); }
 
 /* ── 按压：下沉、厚底压扁 ── */
 .ls-btn--primary:active:not(:disabled),

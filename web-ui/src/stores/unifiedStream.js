@@ -135,6 +135,8 @@ function _connect() {
     // 小镇货摊买来的道具送给角色：礼物叙事（图片 + 描述）
     item_gift_ready:           d => _dispatch('item_gift_ready', d),
     item_gift_progress:        d => _dispatch('item_gift_progress', d),
+    // 神说世界事件 / 工作卡实时更新
+    god_world_event:           d => _dispatch('god_world_event', d),
   }, {
     onClose: _scheduleReconnect,
   })

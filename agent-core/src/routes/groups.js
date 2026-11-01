@@ -281,14 +281,18 @@ router.get('/:id/messages', (req, res) => {
   const group = getGroupWithMembers(groupId);
   if (!group) return res.status(404).json({ error: '群不存在' });
 
+  const paged = req.query.limit !== undefined;
+  const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+  const before = Number(req.query.before) || 0;
   const messages = db.prepare(`
     SELECT m.id, m.role, m.content, m.images, m.seq, m.created_at,
            m.speaker_character_id, c.display_name AS speaker_name, c.avatar_path AS speaker_avatar
     FROM messages m
     LEFT JOIN characters c ON c.id = m.speaker_character_id
-    WHERE m.conversation_id = ?
-    ORDER BY m.id ASC
-  `).all(groupConvId(groupId)).map(m => ({ ...m, created_at: toISODate(m.created_at) }));
+    WHERE m.conversation_id = ? ${paged && before > 0 ? 'AND m.id < ?' : ''}
+    ORDER BY m.id ${paged ? 'DESC LIMIT ?' : 'ASC'}
+  `).all(groupConvId(groupId), ...(paged && before > 0 ? [before] : []), ...(paged ? [limit] : [])).map(m => ({ ...m, created_at: toISODate(m.created_at) }));
+  if (paged) messages.reverse();
 
   res.json({ group: serializeGroup(group), messages });
 });

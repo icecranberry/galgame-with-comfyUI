@@ -16,7 +16,7 @@ import { config } from '../config.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { reapplyActiveEventSchedule } from './eventSchedule.js';
-import { buildOutfitAnnotateLayer } from './outfitScene.js';
+import { buildOutfitAnnotateLayer, buildOutfitAnnotation } from './outfitScene.js';
 
 /**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
@@ -48,13 +48,14 @@ function normalizeTags(tags) {
  */
 // 同一角色的自动刷新、手动刷新与补发任务共享正在执行的生成。
 const pendingSchedules = new Map();
-export function generateSchedule(character, direction) {
-  if (pendingSchedules.has(character.id)) return pendingSchedules.get(character.id);
-  const pending = generateScheduleImpl(character, direction).finally(() => pendingSchedules.delete(character.id));
-  pendingSchedules.set(character.id, pending);
+export function generateSchedule(character, direction, options = {}) {
+  const key = options.persist === false ? `detached:${character.id}` : character.id;
+  if (pendingSchedules.has(key)) return pendingSchedules.get(key);
+  const pending = generateScheduleImpl(character, direction, options).finally(() => pendingSchedules.delete(key));
+  pendingSchedules.set(key, pending);
   return pending;
 }
-async function generateScheduleImpl(character, direction) {
+async function generateScheduleImpl(character, direction, options = {}) {
   const db = getDb();
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
@@ -152,7 +153,7 @@ ${direction}**
   // msgs[3.5]: 着装标注（仅当角色配了 ≥2 套场景服装时才有；没配则完全不加，原提示词不变）
   //   放在这里而非 scheduleInst：scheduleInst 是跨角色共享常量（吃 LLM 前缀缓存），
   //   服装列表每个角色都不同，塞进去会让缓存全部失效。
-  const outfitLayer = buildOutfitAnnotateLayer(character.id);
+  const outfitLayer = Array.isArray(options.outfits) ? buildOutfitAnnotation(options.outfits.filter(outfit => outfit.description)) : options.persist === false ? null : buildOutfitAnnotateLayer(character.id);
   if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
@@ -172,12 +173,15 @@ ${directionMsg}`;
         temperature: 0.5,
         response_format: { type: 'json_object' },
         label: `schedule-gen:${character.display_name}`,
+        ...(options.thinking ? { thinking: options.thinking } : {}),
         lorebook:{personaTexts:[personaMsg],staticTexts:[scheduleInst],characterName:character.display_name},
       });
 
       const schedule = parseAndValidateSchedule(rawResult, character.display_name);
       if (schedule) {
         const json = JSON.stringify(schedule);
+        // 系统角色（天使）复用生成与校验，但由自己的存储负责，不混入普通居民表。
+        if (options.persist === false) return { schedule_json: json, version: 1 };
         const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(character.id);
 
         if (existing) {

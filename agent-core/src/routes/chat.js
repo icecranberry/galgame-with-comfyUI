@@ -39,6 +39,7 @@ import { saveBase64Image } from '../services/imagePaths.js';
 import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
 import { withGalgameEmojiPreference } from '../services/chatModePrompt.js';
 import { getReplyDelay, formatScheduleContext, getCurrentActivity, isTempWoken, extendTempWake } from '../services/scheduleManager.js';
+import { getGodWorldContext } from '../services/godSays/worldContext.js';
 import { detectAndApplyAppointment } from '../services/appointmentDetector.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { getStandingDisplay, publishStandingKeys } from '../services/standingDisplay.js';
@@ -821,6 +822,8 @@ ${coreRules}
 
     // 4. 日程上下文（当前在做什么 / 睡醒等）
     const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
+    const godWorldContext = getGodWorldContext([Number(characterId)]);
+    if (godWorldContext) dynamicBlocks.push(godWorldContext);
     if (scheduleCtx) {
       dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
     }

@@ -220,7 +220,11 @@ export function asPersonaOutfits(sceneOutfit) {
  * @returns {string|null}
  */
 export function buildOutfitAnnotateLayer(characterId) {
-  const outfits = listSceneOutfits(characterId);
+  return buildOutfitAnnotation(listSceneOutfits(characterId));
+}
+
+/** 系统角色可显式提供独立衣柜，复用同一日程着装规范。 */
+export function buildOutfitAnnotation(outfits) {
   if (outfits.length < 2) return null;   // 只有一套就没什么可分配的
 
   const list = outfits.map(o => `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）：${o.description.slice(0, 60)}`).join('\n');

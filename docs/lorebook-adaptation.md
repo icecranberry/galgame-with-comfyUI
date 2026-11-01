@@ -4,6 +4,8 @@
 
 ## 位置与缓存的共同规则
 
+神说 `services/godSays/runtime.js`：世界规则、共用工具规则、天使人格组成稳定前缀，时间、日程、私有记忆、世界事件和历史位于动态区。提供 `personaTexts` / `staticTexts` / `cacheBoundary` / `historyStart` 及扫描历史，保留原生 assistant/tool 配对；记忆归档不注入世界书。世界事件在普通私聊、朋友圈和群聊的既有动态区域注入，不改变稳定前缀或拆解群聊历史。
+
 | 酒馆位置 | 邻舍实际语义 | 高缓存模式：稳定常驻 | 高缓存模式：条件/随机/动态宏 | 按条目位置模式 |
 |---|---|---|---|---|
 | 角色定义之前 | 当前人设正文开始处；群聊用群名片 | 原人设前；前面已有动态内容则提前到稳定区末尾 | 最后 user 的任务之前 | 实际人设开始处，可能在 system 或最后 user 内 |
@@ -100,6 +102,9 @@ SillyTavern 预设仅由需要文风的业务请求显式接入 `services/preset
 | 请求 | 原结构要点 | 常驻角色前/后、深度/示例的实际位置 | 作者注前/后 | 动态条目 |
 |---|---|---|---|---|
 | 私聊主聊天/规划复用/重试 | 规则+世界观 → 人设+buff/世界状态 → 格式关系 → 摘要/历史 → dynamic_context user | 人设原文前/后；深度/示例在人设原文后、buff 与世界状态之前 | 第一个 system 内世界观前/后 | 最后 user 的 dynamic_context 结束标签之前 |
+| 神说 | 破甲词+中文要求+世界观 → 强化 → 工具/聊天规范 → 天使原文 → 神与天使关系/用户资料 → 聊天节奏 → 摘要 → 原生 user/assistant/tool 历史 | 人设原文前/后；稳定深度/示例在聊天节奏末尾、摘要之前；按位置模式的历史深度按完整神谕轮次定位，不插入调用与结果之间 | 第一个 system 内世界观前/后 | 最后 user 的 dynamic_context 结束标签之前；扫描原始 user/assistant 历史，不混入时间与工具 JSON |
+| 天使头像／形象／日程快照 | 规则+世界观 → 强化（可选）→ 固定摄影／立绘与英文输出要求 → characterPersona 完整天使人格 → 本次服装注入（可选）→ user | 实际组装的人格前/后；稳定深度／示例在人格末尾，活动、日期、额外要求都在 user，本次服装在稳定人格之后，不认证为静态 | 第一个 system 内世界观前/后 | 最后 user 开头；扫描选中活动与额外要求，按图片种类隔离 scope 与任务 turnKey |
+| 天使场景服装／衣服库 | 复用 sceneOutfitPrompt / clothingLibrary：规则+世界观 → 强化（可选）→ 固定规范及完整 JSON 示例 → 人设 → 默认外观设计基准或所选词条 → user | 实际发送的人设层前/后；稳定区截止人设末尾，后续基准、场景和词条不认证为静态 | 第一个 system 内世界观前/后 | 最后 user 开头；扫描实际基准/词条/额外要求，独立 god:angel:outfits / clothing scope 与任务 turnKey |
 | 群聊 | 规则世界观 → 协议 → group_info 群名片 → 摘要 → transcript user → directive user | group_info 前/后；深度/示例在群名片后、摘要和 transcript 之前 | 舞台 system 内世界观前/后 | directive user 开头；动态示例另用其前方 system 槽 |
 | 角色回复用户评论、朋友首评、朋友续评、帖主回朋友 | 规则世界观 → 世界观强化 → 人设 → 情绪/关系/帖子/记忆 → user | 主要回复者人设前/后；示例/深度在其人设后、情绪或关系材料之前 | 第一 system 内世界观前/后 | 最后 user 开头；关键词/向量扫描实际帖子与评论记录 |
 | 角色评论用户朋友圈 | 规则世界观 → 强化 → 评论规则 → 用户资料+帖子/图片 → 人设 → user | 人设之前已有动态帖子，常驻角色前/后都提前到评论规则末尾；按位置模式仍围绕真实人设 | 第一 system 内世界观前/后 | 最后 user 开头 |
@@ -149,7 +154,7 @@ SillyTavern 预设仅由需要文风的业务请求显式接入 `services/preset
 | 聊天 | routes/chat.js、services/groupChatEngine.js、proactiveChatScheduler.js、replyQueueScheduler.js、wakeService.js |
 | 朋友圈 | routes/moments.js、services/momentCommentService.js、momentInteractionService.js、momentUserPostService.js、town/townNpcMomentGenerator.js |
 | 生活叙事 | services/eventGenerator.js、diaryGenerator.js、dreamService.js、mailboxScheduler.js、scheduleGenerator.js、itemGiftNarrative.js |
-| 图片与角色 | routes/characters.js、images.js、schedule.js；services/characterAppearanceService.js、characterReactionService.js、characterReactionPackService.js、dialogueBackground.js、emojiService.js、expressionStandingService.js、outfitScene.js；maibot-bridge/prompt.js |
+| 图片与角色 | routes/characters.js、images.js、schedule.js；services/characterGenerator.js（居民与天使共用；参考资料前为稳定边界，保留原 system/user 结构）、characterAppearanceService.js、characterReactionService.js、characterReactionPackService.js、dialogueBackground.js、emojiService.js、expressionStandingService.js、outfitScene.js；maibot-bridge/prompt.js |
 | 世界内容 | routes/relationships.js；services/itemService.js、libraryGenerator.js、mediaAvatarDesigner.js、mediaOutletDesigner.js、mediaService.js、newspaperService.js |
 | 小镇 | services/town/townBuildingFeatureGenerator.js、townBuildingFeatureRuntime.js、townInitService.js、townLayoutAI.js、townNpcEventGenerator.js、townNpcOfferService.js、townNpcService.js、townNpcServiceRuntime.js、townNpcStockService.js、townPromptBuilder.js、townService.js |
 

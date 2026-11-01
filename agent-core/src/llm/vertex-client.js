@@ -1,4 +1,4 @@
-import { createPrivateKey, createSign, createHash } from 'node:crypto';
+import { createPrivateKey, createSign, createHash, randomUUID } from 'node:crypto';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const tokens = new Map();
@@ -94,7 +94,25 @@ export function buildVertexBody(params) {
   const systemParts = [];
   const contents = [];
   for (const message of params.messages || []) {
+    if (message.role === 'tool') {
+      const call = (params.messages || []).flatMap(m => m.tool_calls || []).find(c => c.id === message.tool_call_id);
+      if (!call) throw badConfig('Vertex AI 工具结果缺少对应调用');
+      let response;
+      try { response = JSON.parse(message.content); } catch { response = { result: message.content }; }
+      const part = { functionResponse: { name: call.function.name, response } };
+      const previous = contents.at(-1);
+      if (previous?.role === 'user' && previous.parts.every(p => p.functionResponse)) previous.parts.push(part);
+      else contents.push({ role: 'user', parts: [part] });
+      continue;
+    }
+    if (message.role === 'assistant' && message.vertex_parts?.length) {
+      contents.push({ role: 'model', parts: message.vertex_parts });
+      continue;
+    }
     const parts = contentParts(message.content);
+    if (message.tool_calls?.length) {
+      for (const call of message.tool_calls) parts.push({ functionCall: { name: call.function.name, args: JSON.parse(call.function.arguments) } });
+    }
     if (message.role === 'system' && !contents.length) systemParts.push(...parts);
     // Later system messages stay at their original chronological boundary.
     else if (['system', 'user', 'assistant'].includes(message.role)) contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts });
@@ -118,10 +136,14 @@ export function buildVertexBody(params) {
   for (const field of ['safetySettings', 'tools', 'toolConfig', 'cachedContent', 'labels']) {
     if (params[field] !== undefined) body[field] = params[field];
   }
+  if (params.tools?.some(t => t.type === 'function')) {
+    body.tools = [{ functionDeclarations: params.tools.map(t => ({ name: t.function.name, description: t.function.description, parametersJsonSchema: t.function.parameters })) }];
+    body.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+  }
   return body;
 }
 
-function completion(data, stream, model) {
+function completion(data, stream, model, state = { toolIndex: 0, prefix: randomUUID() }) {
   if (data.error) throw new Error('Vertex AI 流式请求返回错误');
   const candidate = data.candidates?.[0];
   const blocked = data.promptFeedback?.blockReason || (candidate?.finishReason && !['STOP', 'MAX_TOKENS'].includes(candidate.finishReason) ? candidate.finishReason : null);
@@ -131,6 +153,15 @@ function completion(data, stream, model) {
     content: parts.filter(p => !p.thought).map(p => p.text || '').join(''),
     reasoning_content: parts.filter(p => p.thought).map(p => p.text || '').join(''),
   };
+  const functions = parts.filter(p => p.functionCall);
+  if (functions.length) {
+    message.tool_calls = functions.map(p => {
+      const index = state.toolIndex++;
+      return { index, id: `vertex_${state.prefix}_${index}`, type: 'function', function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args || {}) } };
+    });
+  }
+  // 保存带签名的原始 parts，后续工具回合原样返给 Gemini。
+  if (parts.length) message.vertex_parts = parts;
   if (!stream && !candidate) throw new Error('Vertex AI 未返回候选回复');
   const u = data.usageMetadata;
   return {
@@ -144,9 +175,10 @@ async function* streamResponse(response, model, controller) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const state = { toolIndex: 0, prefix: randomUUID() };
   const event = text => {
     const data = text.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
-    return data && data !== '[DONE]' ? completion(JSON.parse(data), true, model) : null;
+    return data && data !== '[DONE]' ? completion(JSON.parse(data), true, model, state) : null;
   };
   try {
     while (true) {

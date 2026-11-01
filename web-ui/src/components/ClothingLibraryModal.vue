@@ -84,6 +84,7 @@ import { useClothingDraft, getSavedClothingTags } from '../composables/useClothi
 
 const props = defineProps({
   modelValue: Boolean,
+  generateHandler: { type: Function, default: null },
   characterId: { type: [Number, String], default: null },
   displayName: { type: String, default: '' },
   basePrompt: { type: String, default: '' },
@@ -106,7 +107,7 @@ const mobilePanel = ref('browse')
 const resultMode = ref('read')
 const listViewport = ref(null)
 let filtering = false
-const { tags, brief, result, error, busy, createDraft, reset, cancel } = useClothingDraft(api.generateClothingAppearanceDraft, () => ({ characterId: props.characterId, basePrompt: props.basePrompt, scene: props.scene }))
+const { tags, brief, result, error, busy, createDraft, reset, cancel } = useClothingDraft(payload => (props.generateHandler || api.generateClothingAppearanceDraft)(payload), () => ({ characterId: props.characterId, basePrompt: props.basePrompt, scene: props.scene }))
 
 async function loadCatalog() {
   loading.value = true
