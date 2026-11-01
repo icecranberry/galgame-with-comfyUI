@@ -325,7 +325,7 @@ export const WORLD_TRANSFORM_FORMS = [
  */
 export function pickWorldLoot(hasWorldSetting = false) {
   const all = Object.entries(ITEM_EFFECTS);
-  const byKind = kind => all.filter(([, e]) => e.kind === kind);
+  const byKind = kind => all.filter(([, e]) => !e.injectionOnly && e.kind === kind);
   if (Math.random() < WORLD_TRANSFORM_CHANCE) {
     const form = WORLD_TRANSFORM_FORMS[Math.floor(Math.random() * WORLD_TRANSFORM_FORMS.length)];
     return { key: 'transform', kind: 'transform', name: form.name, theme: form.theme };

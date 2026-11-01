@@ -42,6 +42,13 @@ export const GOD_MODULE_TOOLS = [
   tool('open_daily_chest', '背包', '开启每日宝箱', '遵循现有16小时冷却，图片可能后台生成，不绕过额度。', {}, [], 'POST', '/api/items/chest/open', { href: '/backpack' }),
   tool('collect_item', '背包', '收下道具', '将待收下道具收入背包。', { item_id: ident('真实道具编号') }, ['item_id'], 'POST', '/api/items/:item_id/collect', { href: '/backpack' }),
   tool('use_item', '背包', '对角色使用道具', '仅按神明确指定使用，沿用库存、消耗与效果校验；礼物叙事可能后台生成。', { item_id: ident('道具编号'), ...char }, ['item_id', 'character_id'], 'POST', '/api/items/:item_id/use', { href: '/backpack' }),
+  tool('inject_character_state', '背包', '注入状态或变装', '神的直接塑造：给角色注入一种状态或外观，默认持续一天，不消耗背包道具。kind 选 outfit（服饰/换装）、hairstyle（发型）、transform（变身形态）、buff（身心状态）；description 写清外观细节或状态表现。', {
+    ...char,
+    kind: { type: 'string', enum: ['outfit', 'hairstyle', 'transform', 'buff'], description: '状态类型：outfit 服饰/换装、hairstyle 发型、transform 变身形态、buff 身心状态' },
+    name: text('状态或外观名称', 60),
+    description: text('外观细节；buff 时写清角色应如何表现', 1000),
+    hours: integer('持续小时数，默认 24', 1, 168),
+  }, ['character_id', 'kind', 'name', 'description'], 'POST', '/api/items/inject', { href: '/backpack' }),
   tool('read_gift_story', '背包', '查看赠礼叙事', '查询 use_item 返回的 sessionId，确认赠礼叙事实际进展。', { session_id: text('礼物叙事 sessionId', 100) }, ['session_id'], 'GET', '/api/items/gift/:session_id', { href: '/backpack' }),
   tool('read_relationships', '关系', '查询角色关系', '读取真实关系文本。', char, ['character_id'], 'GET', '/api/relationships', { query: { character_id: 'character_id' }, href: '/tavern' }),
   tool('create_relationship', '关系', '设定角色关系', '只按神明确要求建立一条有方向的关系，已存在时会拒绝。', { from_character_id: ident('起点角色'), to_character_id: ident('目标角色'), relationship_text: text('关系设定', 2000) }, ['from_character_id', 'to_character_id', 'relationship_text'], 'POST', '/api/relationships', { href: '/tavern' }),

@@ -12,6 +12,7 @@
 6. 窗口（含弹窗）打开时使用 0.3 秒的渐入动画，关闭时使用 0.3 秒的渐出动画；关闭动画完成后再隐藏或卸载窗口
 
 除非任务明确要求，不要随意重做已有设计或引入新的 UI 体系。
+Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.
 
 ## 小镇游戏化 UI
 

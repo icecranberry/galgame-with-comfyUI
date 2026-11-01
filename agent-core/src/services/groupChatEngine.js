@@ -882,7 +882,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   if (trigger === 'world_event' || trigger === 'god_command') {
     directiveBlocks.push(trigger === 'world_event'
       ? `以下是刚刚感知到的世界事件，请至少一位成员主动提起，其他人按人格自然回应、接续现有群聊上文。不是用户发言，不要假装用户在群里发了指令。\n${directive}`
-      : `这轮请围绕以下要求自然开展讨论，至少一位成员发言，并接续现有群聊上文。不是用户发言，不要伪造用户发言。\n${directive}`);
+      : `这轮请顺着下面的真实起因自然展开讨论（当作正在发生的事，不必复述起因，也不要写成「被要求」的转述），至少一位成员发言，并接续现有群聊上文。不是用户发言，不要伪造用户发言。\n${directive}`);
   }
   // 当日《邻舍日报》：世界状态 + 特稿新闻（成员含当天主角时附带点名），群里全员共享视角。
   // 限额发放：主角所在群只看前 GROUP_INJECT_ROUNDS 轮，用满后当天不再注入——

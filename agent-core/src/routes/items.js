@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { listBackpack, listActiveEffects, openChest, useItem, discardItem, collectItem, removeActiveEffect } from '../services/itemService.js';
+import { listBackpack, listActiveEffects, openChest, useItem, discardItem, collectItem, removeActiveEffect, injectCharacterState } from '../services/itemService.js';
 import { startGiftNarrative, getGiftNarrative } from '../services/itemGiftNarrative.js';
 
 const router = Router();
@@ -25,6 +25,19 @@ router.post('/chest/open', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[items] open chest error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/items/inject — 神说内部路由：直接给角色注入状态或变装（默认 24 小时）
+router.post('/inject', (req, res) => {
+  try {
+    const { character_id, kind, name, description, hours } = req.body || {};
+    const result = injectCharacterState({ characterId: character_id, kind, name, description, hours });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json(result);
+  } catch (err) {
+    console.error('[items] inject error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

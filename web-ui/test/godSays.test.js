@@ -25,6 +25,22 @@ test('successful sends expose the accepted run after a daily-session change; fai
   assert.equal(god.error, 'offline');
 });
 
+test('attached images reach the request body instead of being dropped on the way to the store', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options?.method === 'POST') {
+      bodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ run: { id: 'with-image', session_id: 1 } }), { headers: { 'Content-Type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ session: { id: 1 }, runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  god.draft = '看看这张图';
+  await god.send(['data:image/jpeg;base64,AAAA', null]);
+  assert.deepEqual(bodies[0].images, ['data:image/jpeg;base64,AAAA']);
+});
+
 test('angel appearance editing preserves identity and trailing sections without exposing VAD', () => {
   const original = '你是天使。\n## 你的身份\n云庭信使\n\n## 你的外观\n白羽、光环\n## 其他说明\n保留这段';
   const parts = splitAngelPersona(original);

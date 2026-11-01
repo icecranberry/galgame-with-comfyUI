@@ -1,5 +1,13 @@
 <template>
   <main class="god-page">
+    <svg class="god-torn-defs" width="0" height="0" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="god-torn-paper" x="-10%" y="-10%" width="120%" height="120%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.012 0.05" numOctaves="4" seed="9" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="9" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
     <Transition name="god-history">
       <aside v-if="!isMobile || historyOpen" class="god-history" aria-label="按日期查看对话">
         <div class="history-heading"><span>神说 · 对话</span><GodSacredButton v-if="isMobile" variant="icon" size="sm" tone="muted" aria-label="收起对话列表" @click="historyOpen = false"><svg class="gsb-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10 4-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton></div>
@@ -96,10 +104,18 @@
             <TransitionGroup name="god-turn" tag="div">
             <section v-for="turn in god.turns" :key="turn.id" class="god-turn">
               <div class="god-user">
-                <div v-if="turn.images?.length" class="god-user-images">
-                  <GodMessageImages :images="turn.images.map(url => ({ url }))" @loaded="imageLoaded" />
+                <div class="god-user-bubble">
+                  <div v-if="turn.images?.length" class="god-user-images">
+                    <GodMessageImages :images="turn.images.map(url => ({ url }))" @loaded="imageLoaded" />
+                  </div>
+                  <div class="god-user-text-line">
+                    <div v-if="turn.input" class="god-user-text" :style="userBubbleFontStyle">{{ turn.input }}</div>
+                    <div class="god-user-avatar" aria-hidden="true">
+                      <img v-if="showUserAvatar" :src="userAvatar" alt="" @error="userAvatarFailed = true" />
+                      <span v-else>我</span>
+                    </div>
+                  </div>
                 </div>
-                <div v-if="turn.input" class="god-user-text">{{ turn.input }}</div>
               </div>
               <div class="god-angel-reply">
                 <div class="speaker-heading"><div class="speaker-emblem" role="button" tabindex="0" aria-label="查看天使角色详情" @click="openAngel" @keydown.enter.prevent="openAngel" @keydown.space.prevent="openAngel"><img v-if="god.state?.angel.avatar_path" :src="god.state.angel.avatar_path" alt="天使头像" /><AngelEmblem v-else emblem /></div><span>{{ god.state?.angel.display_name || '天使' }}</span></div>
@@ -114,10 +130,14 @@
                   </div>
                   <div v-if="message.content" class="god-reply-text" v-html="renderText(message.content)"></div>
                   <div v-if="message.tool_calls?.length" class="god-tool-list">
-                    <div v-for="call in message.tool_calls" :key="call.id" class="god-tool-row" :data-status="callState(turn, call).status">
-                      <span class="tool-mark" aria-hidden="true">{{ callState(turn, call).status === 'done' ? '✓' : '·' }}</span>
+                    <div v-for="call in message.tool_calls" :key="call.id" class="god-tool-row" :data-status="callState(turn, call).status || 'pending'">
+                      <span class="tool-mark" :data-status="callState(turn, call).status || 'pending'" role="img" :aria-label="toolStateText[callState(turn, call).status] || (turn.status === 'running' ? '准备中' : '未执行')">
+                        <span class="mark-spinner" aria-hidden="true"></span>
+                        <svg class="mark-glyph mark-check" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.6 8.4 6.6 11.4 12.4 4.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                        <svg class="mark-glyph mark-bang" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 4.2v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /><circle cx="8" cy="11.7" r=".95" fill="currentColor" /></svg>
+                        <span class="mark-dot" aria-hidden="true"></span>
+                      </span>
                       <span class="tool-label">{{ toolLabels[call.function.name] || '处理神谕' }}</span>
-                      <span class="tool-state">{{ toolStateText[callState(turn, call).status] || (turn.status === 'running' ? '准备中' : '未执行') }}</span>
                     </div>
                   </div>
                   <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" @loaded="imageLoaded" />
@@ -126,7 +146,12 @@
                 <div v-if="turn.status === 'running' && !turn.messages.some(m => m.role === 'assistant')" class="preparing-reply"><span class="thinking-pulse">✦</span>天使正在整理今日见闻…</div>
                 <GodWorkCard v-for="event in turn.events" :key="event.id" :event="event" @updated="god.updateWorld" />
                 <div v-if="turn.calls.length" class="execution-record">
-                  <GodSacredButton variant="link" tone="muted" size="sm" :aria-expanded="!!expandedRuns[turn.id]" @click="expandedRuns[turn.id] = !expandedRuns[turn.id]">{{ expandedRuns[turn.id] ? '收起执行详情' : '查看执行详情' }}</GodSacredButton>
+                  <GodSacredButton class="execution-toggle" variant="line" tone="gold" size="sm" :touch-target="isMobile" :aria-expanded="!!expandedRuns[turn.id]" @click="expandedRuns[turn.id] = !expandedRuns[turn.id]">
+                    <svg class="gsb-icon exec-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
+                    <span>{{ expandedRuns[turn.id] ? '收起执行详情' : '查看执行详情' }}</span>
+                    <span class="exec-count" :aria-label="`${turn.calls.length} 项`">{{ turn.calls.length }}</span>
+                    <svg class="exec-chevron" :class="{ 'is-open': !!expandedRuns[turn.id] }" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 4 4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  </GodSacredButton>
                   <CollapseTransition :show="!!expandedRuns[turn.id]">
                     <div class="execution-body">
                       <div v-for="call in turn.calls" :key="call.id" class="execution-item">
@@ -160,13 +185,14 @@
       <div class="god-composer" @paste="onComposerPaste">
         <div v-if="draftImages.length" class="composer-images">
           <figure v-for="(image, index) in draftImages" :key="image.id" class="composer-image">
-            <img :src="image.url" alt="" />
+            <img v-if="image.url" :src="image.url" alt="" />
+            <div v-else class="composer-image-pending" role="status" aria-label="图片处理中"></div>
             <button type="button" class="composer-image-remove" aria-label="移除这张图片" @click="removeImage(index)">
               <svg viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3.2 3.2l5.6 5.6M8.8 3.2l-5.6 5.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>
             </button>
           </figure>
         </div>
-        <linshe-auto-textarea ref="composer" embedded :model-value="god.draft" :min-height="56" :maxlength="20000" placeholder="向天使说些什么…也可以粘贴图片" @update:model-value="god.setDraft" @enter="sendOnEnter" />
+        <linshe-auto-textarea ref="composer" embedded :model-value="god.draft" :min-height="56" :maxlength="20000" placeholder="「准备降下神谕让天使做什么？答什么？吃什么...？」" @update:model-value="god.setDraft" @enter="sendOnEnter" />
         <div class="composer-tools">
           <div class="composer-left">
             <GodSacredButton variant="icon" tone="muted" size="md" :touch-target="isMobile" :disabled="draftImages.length >= maxImages" :aria-label="draftImages.length >= maxImages ? '最多添加四张图片' : '添加图片'" :title="draftImages.length >= maxImages ? '最多添加四张图片' : '添加图片'" @click="pickImages">
@@ -203,7 +229,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, reactive, computed, inject, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useGodSaysStore } from '../stores/godSays.js'
 import { useGodThinking } from '../composables/useGodThinking.js'
 import { onEvent } from '../stores/unifiedStream.js'
@@ -218,6 +244,11 @@ import GodAngelScheduleModal from '../components/godSays/GodAngelScheduleModal.v
 import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
 import { godMessageImages } from '../utils/godSaysImages.js'
+import { userAvatar, loadUserAvatar } from '../userConfig.js'
+import { loadFont, getFontFamily } from '../composables/useHandwritingFont.js'
+
+const USER_BUBBLE_FONT_ID = 'moon_stars_kai'
+const userBubbleFontStyle = { fontFamily: getFontFamily(USER_BUBBLE_FONT_ID) }
 
 const god = useGodSaysStore()
 const isMobile = inject('isMobile', ref(false))
@@ -317,6 +348,8 @@ function rollSuggestions() {
 const coreToolLabels = { inspect_neighbors: '看看邻舍的近况', read_character: '了解角色与日程', set_schedule: '安排日程', publish_moment: '请居民分享动态', discuss_in_group: '把话题带进群聊', create_encounter: '开启一段奇遇', create_world_event: '让神谕成为现实', inspect_work: '查看回应进展', recall_memory: '翻阅往日记忆', list_capabilities: '查看可用能力' }
 const toolLabels = computed(() => ({ ...Object.fromEntries((god.state?.toolCatalog || []).map(t => [t.name, t.label])), ...coreToolLabels }))
 const toolStateText = { running: '处理中', done: '已处理', failed: '暂未完成', uncertain: '需要核对' }
+const userAvatarFailed = ref(false)
+const showUserAvatar = computed(() => !!userAvatar.value && !userAvatarFailed.value)
 const memoryLabels = { preference: '偏好', promise: '约定', event: '经历', relationship: '我们' }
 const subtitle = computed(() => !god.state ? '云庭 · 等待你的声音' : `${god.state.angel.display_name} · ${!god.state.scheduleEnabled ? '日程未启用' : god.state.activity?.activity || (god.state.angel.schedule_error ? '今日日程暂未就绪' : '在云庭等候')}`)
 
@@ -346,14 +379,21 @@ function trackScroll() { const el = scrollArea.value; if (el) atBottom.value = e
 async function goBottom() { await nextTick(); if (scrollArea.value) scrollArea.value.scrollTop = scrollArea.value.scrollHeight; atBottom.value = true }
 function imageLoaded() { if (atBottom.value) void goBottom() }
 function fillPrompt(text) { god.setDraft(text); composer.value?.focus() }
+let sending = false
+const pendingImageTasks = new Set()
 async function send() {
-  if (god.busy) return
-  if (!god.draft.trim() && !draftImages.value.length) return
-  atBottom.value = true
-  const images = draftImages.value.map(image => image.url)
-  const run = await god.send(images)
-  if (run) { draftImages.value = []; acceptThinking(run.id) }
-  await goBottom(); composer.value?.focus()
+  if (sending || god.busy) return
+  sending = true
+  try {
+    // 选中/粘贴后压缩是异步的：必须等占位图拿到 dataURI 再发，否则这条消息会静默丢图。
+    if (pendingImageTasks.size) await Promise.allSettled([...pendingImageTasks])
+    if (!god.draft.trim() && !draftImages.value.length) return
+    atBottom.value = true
+    const images = draftImages.value.map(image => image.url).filter(Boolean)
+    const run = await god.send(images)
+    if (run) { draftImages.value = []; acceptThinking(run.id) }
+    await goBottom(); composer.value?.focus()
+  } finally { sending = false }
 }
 function sendOnEnter(event) { if (!isMobile.value) { event.preventDefault(); void send() } }
 function pickImages() {
@@ -379,10 +419,18 @@ async function addImages(files) {
   if (!room) return
   const picked = files.filter(file => file && file.type.startsWith('image/')).slice(0, room)
   if (!picked.length) return
-  const urls = await Promise.all(picked.map(file => compressImageFile(file).catch(() => null)))
-  for (const url of urls) {
-    if (!url) continue
-    draftImages.value.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, url })
+  for (const file of picked) {
+    // 先占位再压缩：压缩完成前图片也必须算进草稿里，发送时才能等到它的 dataURI。
+    const entry = reactive({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, url: null })
+    draftImages.value.push(entry)
+    const task = compressImageFile(file)
+      .then(url => { entry.url = url })
+      .catch(() => {
+        const index = draftImages.value.indexOf(entry)
+        if (index >= 0) draftImages.value.splice(index, 1)
+      })
+      .finally(() => pendingImageTasks.delete(task))
+    pendingImageTasks.add(task)
   }
 }
 function compressImageFile(file) {
@@ -459,6 +507,8 @@ onActivated(rollSuggestions)
 watch(() => god.turns.length, len => { if (!len && !god.archiveId) rollSuggestions() })
 onMounted(async () => {
   rollSuggestions()
+  void loadUserAvatar()
+  loadFont(USER_BUBBLE_FONT_ID)
   unsubscribe = onEvent('god_world_event', god.updateWorld)
   await god.load(god.archiveId)
   if (!mounted) return
@@ -499,8 +549,8 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
 .speaker-emblem>img { display:block; width:100%; height:100%; border-radius:inherit; object-fit:cover; }
 @media(max-width:767px) { .god-history { position:absolute; left:0; top:0; bottom:0; width:min(280px,82%); z-index:6; box-shadow:var(--shadow-lg); }.history-heading { min-height:66px; } }
 .god-header { position:relative; z-index:1; display:flex; align-items:center; gap:14px; flex-shrink:0; padding:16px 28px; border-bottom:1px solid var(--border); background:var(--bg-secondary); }
-.header-emblem { width:52px; height:52px; padding:3px; box-sizing:border-box; flex-shrink:0; border:1px solid var(--border); border-radius:var(--radius-full); background:var(--bg-secondary); overflow:hidden; transition:border-color .3s var(--ease-standard); }
-.header-emblem:hover { border-color:var(--border-strong); }
+.header-emblem { width:52px; height:52px; box-sizing:border-box; flex-shrink:0; border-radius:var(--radius-full); overflow:hidden; transition:transform .15s ease, box-shadow .15s ease; }
+.header-emblem:hover { transform:scale(1.08); box-shadow:0 0 0 3px rgba(var(--accent-rgb), 0.25); }
 .header-title { min-width:0; flex:1; }
 .header-title h1 { font-size:var(--fs-xl); letter-spacing:2px; margin:0 0 4px; font-weight:700; }
 .header-title>span { display:block; color:var(--god-muted); font-size:var(--fs-sm); line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -543,38 +593,61 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
 .god-date::before,.god-date::after { content:''; width:42px; height:1px; background:var(--border-strong); }
 .god-date span { color:var(--accent); font-size:8px; }
 .god-turn { margin-bottom:32px; }
-.god-user { display:flex; flex-direction:column; align-items:flex-end; gap:8px; margin:0 0 24px; }
-.god-user>.god-user-text { max-width:80%; padding:13px 20px; background:color-mix(in srgb, var(--accent) 9%, var(--bg-secondary)); border:1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius:var(--radius-xl) var(--radius-xl) 6px var(--radius-xl); font-size:var(--fs-md); line-height:1.8; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:var(--shadow-xs); }
-.god-user-images { max-width:80%; }
+.god-user { display:flex; flex-direction:column; align-items:flex-end; margin:0 0 24px; }
+.god-user-bubble { display:flex; flex-direction:column; align-items:flex-end; gap:8px; min-width:0; max-width:min(80%, calc(100% - 60px)); }
+.god-user-text-line { display:flex; flex-direction:row; align-items:center; justify-content:flex-end; gap:12px; min-width:0; max-width:100%; }
+.god-user-text { position:relative; isolation:isolate; min-width:0; margin:0; padding:18px 24px; font-size:var(--fs-md); line-height:1.9; white-space:pre-wrap; overflow-wrap:anywhere; color:color-mix(in srgb, var(--text-primary) 90%, #4a3418); }
+.god-user-text::before { content:''; position:absolute; inset:0; z-index:-1; background:radial-gradient(ellipse at 50% -6%, color-mix(in srgb, #fff8e0 52%, transparent) 0%, transparent 58%), radial-gradient(circle at 18% 26%, color-mix(in srgb, #7a5230 22%, transparent) 0 2px, transparent 3px), radial-gradient(circle at 72% 68%, color-mix(in srgb, #7a5230 18%, transparent) 0 2px, transparent 3px), radial-gradient(circle at 45% 82%, color-mix(in srgb, #7a5230 14%, transparent) 0 1.5px, transparent 2.5px), linear-gradient(90deg, color-mix(in srgb, #6b4726 32%, transparent) 0%, transparent 9%, transparent 91%, color-mix(in srgb, #6b4726 32%, transparent) 100%), repeating-linear-gradient(0deg, color-mix(in srgb, #6b4726 6%, transparent) 0 1px, transparent 1px 7px), linear-gradient(158deg, color-mix(in srgb, var(--fun-gold) 40%, var(--bg-secondary)) 0%, color-mix(in srgb, var(--fun-gold) 26%, var(--bg-secondary)) 52%, color-mix(in srgb, var(--fun-gold) 36%, var(--bg-secondary)) 100%); filter:url(#god-torn-paper) drop-shadow(0 5px 8px color-mix(in srgb, #3a2614 40%, transparent)); }
+.god-torn-defs { position:absolute; width:0; height:0; overflow:hidden; }
+.god-user-images { max-width:100%; margin-right:calc(44px + 12px); }
+.god-user-avatar { width:44px; height:44px; flex-shrink:0; display:grid; place-items:center; overflow:hidden; border:none; border-radius:var(--radius-full); background:var(--bg-tertiary); color:var(--god-muted); font-size:var(--fs-xs); line-height:1; user-select:none; }
+.god-user-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
 .god-user-images :deep(.god-message-image) { margin:0; }
 .god-user-images :deep(.image-hit img) { max-height:240px; }
 .god-angel-reply { padding:20px 24px 22px; position:relative; border:1px solid var(--border); border-radius:6px var(--radius-xl) var(--radius-xl); background:var(--bg-secondary); box-shadow:var(--shadow-xs); }
 .speaker-heading { display:flex; align-items:center; gap:10px; font-size:var(--fs-sm); font-weight:600; letter-spacing:1px; margin-bottom:18px; min-height:56px; }
 .speaker-heading::after { content:''; height:1px; flex:1; margin-left:4px; background:var(--border); }
-.speaker-emblem { width:56px; height:56px; flex-shrink:0; padding:3px; box-sizing:border-box; border:1px solid var(--border); border-radius:var(--radius-full); background:var(--bg-secondary); overflow:hidden; }
+.speaker-emblem { width:56px; height:56px; flex-shrink:0; box-sizing:border-box; border-radius:var(--radius-full); overflow:hidden; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
+.speaker-emblem:hover { transform:scale(1.08); box-shadow:0 0 0 3px rgba(var(--accent-rgb), 0.25); }
+.speaker-emblem:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(var(--accent-rgb), 0.25); }
 .god-reply-text { max-width:640px; font-size:var(--fs-md); line-height:1.95; white-space:pre-wrap; overflow-wrap:anywhere; margin:18px 0 0; }
 .god-reply-text :deep(strong) { font-weight:650; color:var(--text-bright); }
 .god-reply-text :deep(code) { font-size:.92em; padding:2px 4px; background:var(--bg-tertiary); border-radius:var(--radius-sm); }
 .god-thinking { margin:12px 0; padding:8px 10px; color:var(--god-muted); border:1px solid var(--border); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bg-sunken) 72%, var(--bg-secondary)); }
 .thinking-chevron { display:block; width:14px; height:14px; flex-shrink:0; transition:transform .3s var(--ease-standard); }
 .thinking-chevron.expanded { transform:rotate(90deg); }
-.thinking-text { margin:6px 6px 4px; padding:12px 4px 4px; border-top:1px solid var(--border); line-height:1.85; font-size:var(--fs-base); color:color-mix(in srgb, var(--text-primary) 64%, var(--text-secondary)); white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; }
+.thinking-text { margin:6px 6px 4px; padding:12px 4px 4px; border-top:1px solid var(--border); line-height:1.85; font-size:var(--fs-base); color:color-mix(in srgb, var(--text-primary) 64%, var(--text-secondary)); white-space:pre-wrap; overflow-wrap:anywhere; }
 .thinking-pulse { animation:god-breathe 1.8s ease-in-out infinite; }
 .god-tool-list { display:flex; flex-direction:column; gap:8px; margin:14px 0; }
 .god-tool-row { display:flex; align-items:center; gap:10px; padding:8px 12px; font-size:var(--fs-sm); color:var(--text-primary); }
 .tool-label { min-width:0; overflow-wrap:anywhere; line-height:1.6; }
-.tool-mark { display:grid; place-items:center; width:22px; height:22px; flex-shrink:0; color:var(--accent-hover); background:color-mix(in srgb, var(--accent) 12%, var(--bg-secondary)); border-radius:var(--radius-full); font-size:var(--fs-xs); }
-.tool-state { margin-left:auto; flex-shrink:0; font-size:var(--fs-xs); line-height:1.6; padding:2px 8px; color:var(--god-muted); background:var(--bg-sunken); border-radius:var(--radius-sm); }
-.god-tool-row[data-status='failed'] .tool-state,.god-tool-row[data-status='uncertain'] .tool-state { color:var(--danger); background:color-mix(in srgb, var(--danger) 8%, var(--bg-secondary)); }
+.tool-mark { position:relative; display:grid; place-items:center; width:22px; height:22px; flex-shrink:0; color:var(--accent-hover); background:color-mix(in srgb, var(--accent) 12%, var(--bg-secondary)); border-radius:var(--radius-full); font-size:var(--fs-xs); transition:color .3s var(--ease-standard), background .3s var(--ease-standard); }
+.tool-mark > * { grid-area:1 / 1; transition:opacity .3s var(--ease-standard), transform .3s var(--ease-standard); }
+.tool-mark .mark-glyph { width:13px; height:13px; opacity:0; transform:scale(.55); }
+.tool-mark .mark-dot { width:5px; height:5px; border-radius:50%; background:currentColor; opacity:0; transform:scale(.55); }
+.tool-mark .mark-spinner { width:13px; height:13px; box-sizing:border-box; border-radius:50%; border:1.6px solid color-mix(in srgb, currentColor 24%, transparent); border-top-color:currentColor; opacity:0; }
+.tool-mark:not([data-status='running']):not([data-status='done']):not([data-status='failed']):not([data-status='uncertain']) .mark-dot { opacity:.55; transform:scale(1); }
+.tool-mark[data-status='running'] { color:color-mix(in srgb, var(--fun-gold) 72%, var(--text-primary)); background:color-mix(in srgb, var(--fun-gold) 12%, var(--bg-secondary)); }
+.tool-mark[data-status='running'] .mark-spinner { opacity:1; animation:tool-mark-spin .9s linear infinite; }
+.tool-mark[data-status='done'] .mark-check { opacity:1; transform:scale(1); }
+.tool-mark[data-status='failed'] { color:var(--danger); background:color-mix(in srgb, var(--danger) 10%, var(--bg-secondary)); }
+.tool-mark[data-status='uncertain'] { color:color-mix(in srgb, var(--fun-gold) 78%, var(--text-primary)); background:color-mix(in srgb, var(--fun-gold) 12%, var(--bg-secondary)); }
+.tool-mark[data-status='failed'] .mark-bang,.tool-mark[data-status='uncertain'] .mark-bang { opacity:1; transform:scale(1); }
+@keyframes tool-mark-spin { to { transform:rotate(360deg); } }
 .preparing-reply,.partial-note,.turn-notice { font-size:var(--fs-sm); line-height:1.7; color:var(--god-muted); margin:12px 0; }
 .preparing-reply span { margin-right:8px; color:var(--fun-gold); }
-.execution-record { margin-top:18px; padding-top:12px; border-top:1px solid var(--border); }
+.execution-record { margin-top:16px; padding-top:14px; border-top:1px solid color-mix(in srgb, var(--fun-gold) 20%, var(--border)); }
+.exec-icon { color:color-mix(in srgb, var(--fun-gold) 65%, currentColor); }
+.exec-count { display:inline-grid; place-items:center; min-width:18px; height:18px; padding:0 5px; border-radius:999px; font-size:var(--fs-xs); font-weight:650; letter-spacing:0; line-height:1; font-variant-numeric:tabular-nums; color:color-mix(in srgb, var(--fun-gold) 78%, var(--text-primary)); background:color-mix(in srgb, var(--fun-gold) 16%, transparent); }
+.exec-chevron { width:12px; height:12px; transition:transform .3s var(--ease-standard); }
+.exec-chevron.is-open { transform:rotate(90deg); }
 .execution-body { border-left:2px solid var(--border); margin:10px 0 0 9px; padding-left:16px; }
 .execution-item { margin:0 0 14px; font-size:var(--fs-sm); line-height:1.7; }
 .execution-item strong { font-weight:600; }
 .execution-item p { color:var(--god-muted); margin:5px 0; overflow-wrap:anywhere; }
 .execution-item a { color:var(--accent); text-decoration:none; }
-.god-composer-area { position:relative; flex-shrink:0; padding:22px 32px max(20px, env(safe-area-inset-bottom)); background:transparent; }
+.god-composer-area { position:relative; z-index:1; flex-shrink:0; padding: 0 22px 12px max(20px, env(safe-area-inset-bottom)); background:transparent; }
+.god-composer-area::before { content:''; position:absolute; left:0; right:0; bottom:100%; height:56px; z-index:1; pointer-events:none; background:linear-gradient(to top, var(--bg-sunken) 0%, color-mix(in srgb, var(--bg-sunken) 55%, transparent) 55%, transparent 100%); }
 .god-composer { max-width:var(--god-col); margin:auto; padding:12px 16px 10px; border:1px solid var(--border-strong); border-radius:calc(var(--radius-xl) + 4px); background:var(--bg-secondary); box-shadow:var(--shadow-sm); transition:border-color .3s var(--ease-standard); }
 .god-composer:focus-within { border-color:color-mix(in srgb,var(--text-secondary) 65%,var(--border-strong)); }
 .god-composer.is-readonly { background:var(--bg-tertiary); }
@@ -585,6 +658,9 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
 .composer-images { display:flex; gap:8px; padding:12px 0 2px; overflow-x:auto; scrollbar-width:thin; }
 .composer-image { position:relative; flex:0 0 auto; width:56px; height:56px; margin:0; border-radius:var(--radius-md); overflow:hidden; background:var(--bg-sunken); border:1px solid var(--border); }
 .composer-image img { display:block; width:100%; height:100%; object-fit:cover; }
+.composer-image-pending { display:grid; place-items:center; width:100%; height:100%; }
+.composer-image-pending::after { content:'···'; font-size:var(--fs-sm); letter-spacing:2px; color:var(--god-muted); animation:composer-image-breathe 1.2s ease-in-out infinite; }
+@keyframes composer-image-breathe { 0%,100% { opacity:.35; } 50% { opacity:1; } }
 .composer-image-remove { position:absolute; top:2px; right:2px; display:grid; place-items:center; width:16px; height:16px; padding:0; border:0; border-radius:50%; background:rgba(0,0,0,.5); color:#fff; cursor:pointer; }
 .composer-image-remove svg { width:9px; height:9px; }
 .composer-action-icon { display:block; width:20px; height:20px; }
@@ -639,6 +715,7 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
   .thinking-text { margin-right:4px; margin-left:4px; padding-top:10px; }
   .god-tool-row { padding:6px 4px; gap:8px; }
   .god-composer-area { padding:16px 12px max(12px, env(safe-area-inset-bottom)); }
+  .god-composer-area::before { height:36px; }
   .god-composer { padding:10px 14px 8px; }
   .god-latest { right:12px; }
   .composer-hint { display:none; }

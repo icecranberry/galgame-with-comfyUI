@@ -46,6 +46,17 @@ const BUFF_DURATION_HOURS = 6;
 const FAVOR_DELTA = 8;
 const IMAGE_STALE_MINUTES = 30;
 
+/** 神说 inject_character_state 允许注入的类型 → 专用 effect_key（injectionOnly，不进掉落池） */
+export const INJECT_STATE_KINDS = ['outfit', 'hairstyle', 'transform', 'buff'];
+const INJECT_EFFECT_KEYS = {
+  outfit: 'god_inject_outfit',
+  hairstyle: 'god_inject_hairstyle',
+  transform: 'god_inject_transform',
+  buff: 'god_inject_buff',
+};
+export const INJECT_DEFAULT_HOURS = 24;
+export const INJECT_MAX_HOURS = 24 * 7;
+
 /** 进程内开箱锁：LLM 调味/生图期间禁止重复开箱（进程重启后由启动清理兜底） */
 let chestOpening = false;
 
@@ -58,10 +69,10 @@ export const DROP_WEIGHTS = { clothes: 50, hairstyle: 20, item: 10, transform: 2
 
 /** 类别 → 道具池过滤（clothes = 常规服饰外观卡；transform = 变身形态；item = 功能道具） */
 const DROP_POOL_FILTERS = {
-  clothes: ([, e]) => e.kind === 'outfit',
-  hairstyle: ([, e]) => e.kind === 'hairstyle',
-  transform: ([, e]) => e.kind === 'transform',
-  item: ([, e]) => !isClothesKind(e.kind),
+  clothes: ([, e]) => !e.injectionOnly && e.kind === 'outfit',
+  hairstyle: ([, e]) => !e.injectionOnly && e.kind === 'hairstyle',
+  transform: ([, e]) => !e.injectionOnly && e.kind === 'transform',
+  item: ([, e]) => !e.injectionOnly && !isClothesKind(e.kind),
 };
 
 /** 外观卡家族（服饰/变身/世界观服装/发型），共享外观描述调味，与功能道具相对 */
@@ -101,6 +112,11 @@ export const ITEM_EFFECTS = {
                    effectText: '处于微醺状态：脸颊微红，语气黏糊放松，话变多、更容易坦白真心话和小秘密，但意识仍清醒，不会失态。' },
   mood_fix:      { kind: 'mood',  name: '心情修复贴' },
   favor_candy:   { kind: 'favor', name: '好感糖果' },
+  // 仅供神说 inject_character_state 使用；injectionOnly 让它永远不进宝箱/报纸掉落池
+  god_inject_outfit:    { kind: 'outfit', name: '神谕服饰', injectionOnly: true },
+  god_inject_hairstyle: { kind: 'hairstyle', name: '神谕发型', injectionOnly: true },
+  god_inject_transform: { kind: 'transform', name: '神谕变身', injectionOnly: true },
+  god_inject_buff:      { kind: 'buff', name: '神谕状态', injectionOnly: true, durationHours: 24 },
 };
 
 
@@ -498,19 +514,32 @@ function collectItemInTransaction(itemId, options) {
 export function listActiveEffects() {
   const db = getDb();
   return db.prepare(
-    `SELECT e.id, e.character_id, e.effect_key, e.expires_at,
-            c.display_name AS character_name, i.name AS item_name, i.image_url AS item_image_url
+    `SELECT e.id, e.character_id, e.effect_key, e.expires_at, e.payload_json,
+            c.display_name AS character_name, i.name AS item_name, i.image_url AS item_image_url,
+            i.source_type AS item_source_type
      FROM item_effects e
      JOIN characters c ON c.id = e.character_id
      JOIN backpack_items i ON i.id = e.item_id
      WHERE i.owner_key = 'me' AND i.status = 'used' AND (e.expires_at IS NULL OR e.expires_at > datetime('now'))
      ORDER BY e.expires_at ASC`
-  ).all().map(row => ({
-    ...row,
-    effect_name: ITEM_EFFECTS[row.effect_key]?.name || row.effect_key,
-    kind: ITEM_EFFECTS[row.effect_key]?.kind || 'unknown',
-    remaining_seconds: secondsUntil(row.expires_at),
-  }));
+  ).all().map(row => {
+    const payload = safeParseJson(row.payload_json) || {};
+    const isInject = row.item_source_type === 'inject';
+    return {
+      id: row.id,
+      character_id: row.character_id,
+      effect_key: row.effect_key,
+      expires_at: row.expires_at,
+      character_name: row.character_name,
+      item_name: row.item_name,
+      item_image_url: row.item_image_url,
+      // 注入类效果用神写下的具体名称，而不是「神谕服饰」这类通用标签
+      effect_name: isInject ? row.item_name : (ITEM_EFFECTS[row.effect_key]?.name || row.effect_key),
+      kind: ITEM_EFFECTS[row.effect_key]?.kind || 'unknown',
+      effect_text: payload.effect_text || ITEM_EFFECTS[row.effect_key]?.effectText || '',
+      remaining_seconds: secondsUntil(row.expires_at),
+    };
+  });
 }
 
 /**
@@ -702,6 +731,78 @@ export function discardItem(itemId, options = {}) {
   return { ok: true };
 }
 
+// ── 神说：直接注入状态或变装（内部路由 /api/items/inject） ──
+
+/**
+ * 神的直接塑造：给角色注入一段状态或外观，不必经过宝箱与库存。
+ * 服饰/发型/变身落临时外观（默认 24 小时后自然恢复），buff 落聊天人格的临时状态。
+ * 用一条 status='used' 的影子道具承载效果（不进背包列表，只在「生效中」面板显示）。
+ * @returns {{ok: true, summary: string, activeEffect: object}|{ok: false, error: string}}
+ */
+export function injectCharacterState({ characterId, kind, name, description, hours } = {}) {
+  const db = getDb();
+  const charId = Number(characterId);
+  if (!Number.isInteger(charId) || charId <= 0) return { ok: false, error: '缺少有效的 character_id' };
+  if (!INJECT_STATE_KINDS.includes(kind)) return { ok: false, error: '不支持的状态类型' };
+  const label = String(name || '').trim();
+  if (!label) return { ok: false, error: '缺少状态或外观名称' };
+  const desc = String(description || '').trim() || label;
+  const hoursNum = Number(hours);
+  const duration = Math.min(
+    INJECT_MAX_HOURS,
+    Math.max(1, Number.isFinite(hoursNum) && hoursNum > 0 ? Math.round(hoursNum) : INJECT_DEFAULT_HOURS),
+  );
+
+  return db.transaction(() => {
+    const char = db.prepare('SELECT id, display_name FROM characters WHERE id = ?').get(charId);
+    if (!char) return { ok: false, error: '目标角色不存在' };
+
+    const effectKey = INJECT_EFFECT_KEYS[kind];
+    const expiresAt = sqliteLater(duration);
+    const itemResult = db.prepare(
+      `INSERT INTO backpack_items (effect_key, name, description, rarity, status, payload_json, owner_key, source_type, collected_at, used_at)
+       VALUES (?, ?, ?, 'common', 'used', ?, 'me', 'inject', datetime('now'), datetime('now'))`,
+    ).run(effectKey, label.slice(0, 60), desc.slice(0, 500), JSON.stringify({ inject: true, kind, effect_text: desc }));
+    const itemId = Number(itemResult.lastInsertRowid);
+
+    const payload = { effect_text: desc };
+    let summary = '';
+    if (kind === 'outfit' || kind === 'hairstyle') {
+      const outfitRowId = createTemporaryLimitedOutfit(charId, { name: label, description: desc, expiresAt });
+      payload.outfitRowId = outfitRowId;
+      summary = kind === 'hairstyle'
+        ? `${char.display_name} 换上了「${label}」发型，持续 ${duration} 小时`
+        : `${char.display_name} 换上了「${label}」，持续 ${duration} 小时`;
+    } else if (kind === 'transform') {
+      const { outfitId, previousOutfitId } = createTemporaryExclusiveOutfit(charId, { name: label, description: desc, expiresAt });
+      payload.outfitId = outfitId;
+      payload.previousOutfitId = previousOutfitId;
+      summary = `${char.display_name} 变成了「${label}」形态，持续 ${duration} 小时`;
+    } else {
+      // 同角色同类型只保留最新一条（刷新时长，不叠加）
+      db.prepare('DELETE FROM item_effects WHERE character_id = ? AND effect_key = ?').run(charId, effectKey);
+      summary = `${char.display_name} 进入了「${label}」状态，持续 ${duration} 小时`;
+    }
+    const effectId = insertEffect({ itemId, characterId: charId, effectKey, payload, expiresAt });
+    return {
+      ok: true,
+      summary,
+      activeEffect: {
+        id: effectId,
+        character_id: charId,
+        character_name: char.display_name,
+        effect_key: effectKey,
+        item_name: label,
+        item_image_url: null,
+        effect_name: label,
+        kind,
+        expires_at: expiresAt,
+        remaining_seconds: secondsUntil(expiresAt),
+      },
+    };
+  }).immediate();
+}
+
 // ── 聊天人格注入 ──
 
 /**
@@ -714,7 +815,7 @@ export function buildBuffBlock(effects) {
   if (buffs.length === 0) return '';
   const lines = buffs.map((e, i) => {
     const hours = Math.max(1, Math.ceil((e.remaining_seconds || 0) / 3600));
-    const text = ITEM_EFFECTS[e.effect_key]?.effectText || '';
+    const text = e.effect_text || ITEM_EFFECTS[e.effect_key]?.effectText || '';
     return `${i + 1}. 受「${e.item_name}」影响（剩余约 ${hours} 小时）：${text}`;
   });
   return `【道具效果 · 临时状态】\n以下状态正在影响你——这是暂时的状态变化，不是你本性的改变，效果结束后会自然恢复。请在言行中自然体现这些状态，但不要在对话中提及「道具」「效果」这些字眼：\n${lines.join('\n')}`;
@@ -737,7 +838,7 @@ export function restoreExpiredTransforms() {
   const db = getDb();
   const expired = db.prepare(
     `SELECT id, character_id, payload_json FROM item_effects
-     WHERE effect_key = 'transform' AND expires_at IS NOT NULL AND expires_at <= datetime('now')
+     WHERE effect_key IN ('transform', 'god_inject_transform') AND expires_at IS NOT NULL AND expires_at <= datetime('now')
        AND item_id IN (SELECT id FROM backpack_items WHERE owner_key = 'me' AND status = 'used')`
   ).all();
   let restored = 0;
