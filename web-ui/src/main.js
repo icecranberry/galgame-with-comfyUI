@@ -29,12 +29,13 @@ import MemorySettingsView from './views/MemorySettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
+import GodSaysView from './views/GodSaysView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
-  { path: '/god-says', component: () => import('./views/GodSaysView.vue') },
+  { path: '/god-says', component: GodSaysView },
   { path: '/chat/:id', component: ChatView },
   { path: '/group/:id', component: GroupChatView },
   { path: '/moments', component: MomentsView },
