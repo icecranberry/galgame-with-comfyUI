@@ -43,8 +43,8 @@ export const useMailboxStore = defineStore('mailbox', () => {
     }
   }
 
-  async function sendLetter(characterId, title, content) {
-    const result = await api.sendLetter(characterId, title, content)
+  async function sendLetter(characterId, title, content, extra = {}) {
+    const result = await api.sendLetter(characterId, title, content, extra)
     if (result.letter) {
       letters.value.unshift(result.letter)
     }

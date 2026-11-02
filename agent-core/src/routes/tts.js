@@ -6,7 +6,7 @@ import { speechParams } from '../services/speechText.js';
 import { ttsHealth } from '../services/indexTtsClient.js';
 import { restartSpeechService } from '../services/speechServiceProcess.js';
 import { recoverSpeechGpu, speechGpuStatus } from '../services/speechGpu.js';
-import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech, clearSpeechCache } from '../services/speechService.js';
+import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, speakLetter, publicJob, getSpeechJob, cancelSpeech, clearSpeechCache } from '../services/speechService.js';
 import { getApiVoice, saveApiVoice, notifyStandingVoiceChanged } from '../services/speechConfig.js';
 import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, reuseLocalApiVoice } from '../services/speechApiAssets.js';
 import { localSpeechModels } from '../services/speechLocalModels.js';
@@ -162,6 +162,13 @@ router.get('/characters/:id/messages', route((req, res) => {
   const jobs = getDb().prepare(`SELECT j.*, m.id AS message_id FROM message_speech ms JOIN messages m ON m.id=ms.message_id
     JOIN speech_jobs j ON j.id=ms.job_id WHERE m.conversation_id=? ORDER BY m.id DESC LIMIT 500`).all(`char_${id(req.params.id)}`);
   res.json(jobs.map(j => ({ ...publicJob(j), message_id: j.message_id })));
+}));
+router.post('/letters/:letterId', route((req, res) => res.status(202).json(speakLetter(id(req.params.letterId), { force: req.body?.force === true }))));
+router.get('/letters/:letterId', route((req, res) => {
+  const row = getDb().prepare('SELECT speech_job_id FROM mailbox_letters WHERE id=?').get(id(req.params.letterId));
+  if (!row) return res.status(404).json({ error: '信件不存在' });
+  const job = row.speech_job_id ? getSpeechJob(row.speech_job_id) : null;
+  res.json(job ? publicJob(job) : null);
 }));
 router.get('/jobs/:id', route((req, res) => {
   const job = publicJob(getSpeechJob(req.params.id));

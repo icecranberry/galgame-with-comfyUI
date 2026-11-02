@@ -74,6 +74,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getFontFamily, loadFont, getPageDefaultFontFamily } from '../composables/useHandwritingFont.js'
 import LinsheButton from './ui/LinsheButton.vue'
+import { createLetterSpeech } from '../utils/letterSpeech.js'
 
 const props = defineProps({
   letter: { type: Object, required: true },
@@ -81,6 +82,9 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'delete'])
+
+// 信件展开时播放 TTS，合起时停止（不记录进度）
+const letterSpeech = createLetterSpeech()
 
 const displayText = computed(() => {
   if (props.letter.reply_content) return props.letter.reply_content
@@ -320,6 +324,7 @@ function scrollTextDown() {
 
 onMounted(async () => {
   show.value = true
+  letterSpeech.start(props.letter)
   await nextTick()
 
   const fontId = props.letter?.handwriting_font
@@ -365,6 +370,7 @@ watch(() => props.letter?.reply_content || props.letter?.content, async () => {
 function requestClose() {
   if (leaving.value) return
   cleanupDrag()
+  letterSpeech.stop()
 
   if (props.compact || !props.sourceRect || !paperRef.value) {
     leaving.value = true
@@ -394,6 +400,7 @@ function requestClose() {
 onUnmounted(() => {
   cleanupDrag()
   cancelTransitions()
+  letterSpeech.stop()
 })
 </script>
 

@@ -644,7 +644,9 @@ function initSchema(db) {
       illustration_path TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       replied_at DATETIME,
-      is_read INTEGER NOT NULL DEFAULT 0
+      is_read INTEGER NOT NULL DEFAULT 0,
+      auto_read INTEGER NOT NULL DEFAULT 0,
+      speech_job_id TEXT DEFAULT ''
     );
 
     -- 逐小时天气缓存表（仅保留 24 条，weather_time 为 HH:00）
@@ -2697,6 +2699,15 @@ function migrateMailboxSchema(db) {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_character_id ON mailbox_letters(character_id)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_status ON mailbox_letters(status)`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_mailbox_reply_at ON mailbox_letters(reply_at)`);
+    const cols = db.prepare(`PRAGMA table_info(mailbox_letters)`).all();
+    if (!cols.find(c => c.name === 'auto_read')) {
+      db.exec(`ALTER TABLE mailbox_letters ADD COLUMN auto_read INTEGER NOT NULL DEFAULT 0`);
+      console.log('[db] Added mailbox_letters.auto_read column');
+    }
+    if (!cols.find(c => c.name === 'speech_job_id')) {
+      db.exec(`ALTER TABLE mailbox_letters ADD COLUMN speech_job_id TEXT DEFAULT ''`);
+      console.log('[db] Added mailbox_letters.speech_job_id column');
+    }
     console.log('[db] mailbox indexes ensured');
   } catch (err) {
     console.log('[db] migrateMailboxSchema error:', err.message);

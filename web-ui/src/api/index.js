@@ -1517,8 +1517,8 @@ export async function getUnreadCount() {
   return request(`/mailbox/unread`)
 }
 
-export async function sendLetter(characterId, title, content) {
-  return request(`/mailbox/send`, { method: 'POST', body: { character_id: characterId, title, content } })
+export async function sendLetter(characterId, title, content, extra = {}) {
+  return request(`/mailbox/send`, { method: 'POST', body: { character_id: characterId, title, content, ...extra } })
 }
 
 export async function getLetter(id) {

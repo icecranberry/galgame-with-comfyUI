@@ -54,7 +54,7 @@ router.get('/unread', (req, res) => {
 // POST /api/mailbox/send — 用户发信给角色
 router.post('/send', (req, res) => {
   try {
-    const { character_id, title, content } = req.body;
+    const { character_id, title, content, auto_read } = req.body;
     if (!character_id) return res.status(400).json({ error: '缺少 character_id' });
     if (!content || !content.trim()) return res.status(400).json({ error: '信件内容不能为空' });
 
@@ -67,10 +67,11 @@ router.post('/send', (req, res) => {
     const replyDelayMs = 180000 + Math.random() * 420000;
     const replyAt = new Date(Date.now() + replyDelayMs).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
 
+    const autoRead = auto_read === true || auto_read === 1 || auto_read === '1' ? 1 : 0;
     const result = db.prepare(`
-      INSERT INTO mailbox_letters (character_id, direction, title, content, status, reply_at)
-      VALUES (?, 'user_to_char', ?, ?, 'pending', ?)
-    `).run(character_id, title || '', content.trim(), replyAt);
+      INSERT INTO mailbox_letters (character_id, direction, title, content, status, reply_at, auto_read)
+      VALUES (?, 'user_to_char', ?, ?, 'pending', ?, ?)
+    `).run(character_id, title || '', content.trim(), replyAt, autoRead);
 
     const replyAtLocal = new Date(Date.now() + replyDelayMs);
     const replyAtStr = `${String(replyAtLocal.getHours()).padStart(2,'0')}:${String(replyAtLocal.getMinutes()).padStart(2,'0')}`;

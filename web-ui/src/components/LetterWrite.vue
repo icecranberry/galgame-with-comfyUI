@@ -32,20 +32,31 @@
 
     <!-- Actions -->
     <div class="write-actions">
-      <linshe-button variant="secondary" @click="$emit('cancel')">取消</linshe-button>
-      <linshe-button variant="primary" :disabled="!content.trim()" :loading="sending" @click="send">
-        <svg v-if="!sending" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9"/></svg>
-        {{ sending ? '寄送中...' : '寄出' }}
-      </linshe-button>
+      <linshe-switch
+        v-if="ttsEnabled"
+        v-model="autoRead"
+        size="sm"
+        on-text="自动阅读"
+        class="auto-read-switch"
+      />
+      <div class="write-actions-btns">
+        <linshe-button variant="secondary" @click="$emit('cancel')">取消</linshe-button>
+        <linshe-button variant="primary" :disabled="!content.trim()" :loading="sending" @click="send">
+          <svg v-if="!sending" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9"/></svg>
+          {{ sending ? '寄送中...' : '寄出' }}
+        </linshe-button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useMailboxStore } from '../stores/mailbox.js'
 import { getWriteFontFamily } from '../composables/useHandwritingFont.js'
+import { ttsApi } from '../api/tts.js'
 import LinsheButton from './ui/LinsheButton.vue'
+import LinsheSwitch from './ui/LinsheSwitch.vue'
 
 const WRITE_FONT = getWriteFontFamily()
 
@@ -59,13 +70,26 @@ const content = ref('')
 const sending = ref(false)
 const textareaRef = ref(null)
 const paperUrl = '/letter-paper.avif'
+const ttsEnabled = ref(false)
+const autoRead = ref(false)
+
+onMounted(async () => {
+  try {
+    const settings = await ttsApi('/settings')
+    ttsEnabled.value = !!settings?.enabled
+  } catch {
+    ttsEnabled.value = false
+  }
+})
 
 async function send() {
   const text = content.value.trim()
   if (!text || sending.value) return
   sending.value = true
   try {
-    const result = await store.sendLetter(props.char.id, '', text)
+    const result = await store.sendLetter(props.char.id, '', text, {
+      auto_read: ttsEnabled.value && autoRead.value,
+    })
     emit('sent', result)
   } catch (err) {
     console.error('[LetterWrite] send error:', err)
@@ -135,7 +159,10 @@ async function send() {
 
 /* ── Actions ── */
 .write-actions {
-  display: flex; justify-content: flex-end; gap: 10px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
   flex-shrink: 0; padding: 0 4px;
 }
+.write-actions-btns { display: flex; gap: 10px; }
+.auto-read-switch { flex-shrink: 0; }
+.auto-read-switch :deep(.ls-switch__text) { font-size: 13px; }
 </style>

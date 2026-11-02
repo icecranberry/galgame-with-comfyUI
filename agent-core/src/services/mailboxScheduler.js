@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { ensureFontForCharacter } from './handwritingFontService.js';
 import { createCharacterTownLifeContext } from './characterTownLifeContext.js';
 import { createTownActorRegistry } from './town/townActorRegistry.js';
+import { speakLetter } from './speechService.js';
 
 const CHECK_INTERVAL = 60 * 1000;
 
@@ -185,6 +186,18 @@ async function processReply(db, letter) {
       handwriting_font: fullLetter.handwriting_font || handwritingFont || '',
       is_read: 0,
     });
+
+    // 自动阅读：写信时勾选了「自动阅读」，回信生成后立即检测角色声音并开始合成 TTS
+    if (letter.auto_read) {
+      try {
+        speakLetter(letterId);
+        console.log(`[mailboxScheduler] letter #${letterId} auto-read speech queued`);
+      } catch (err) {
+        if (err?.code !== 'VOICE_NOT_CONFIGURED') {
+          console.warn(`[mailboxScheduler] letter #${letterId} speech failed:`, err?.message || err);
+        }
+      }
+    }
 
   } catch (err) {
     console.error(`[mailboxScheduler] letter #${letterId} failed:`, err.message);
