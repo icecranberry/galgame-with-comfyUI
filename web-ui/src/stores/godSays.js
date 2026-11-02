@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import * as api from '../api/index.js'
+import { createClientRequestId } from '../utils/clientRequestId.js'
 
 export function applyGodStreamEvent(state, event) {
   const { type, data } = event
@@ -91,11 +92,11 @@ export const useGodSaysStore = defineStore('god-says', () => {
     }
     submitting.value = true; error.value = ''
     const generation = epoch
-    const previous = readLocal('linshe.god.pending', null)
-    const samePending = previous?.text === text && JSON.stringify(previous?.images || []) === JSON.stringify(attachments)
-    const pending = samePending ? previous : { client_id: crypto.randomUUID(), text, images: attachments }
-    saveLocal('linshe.god.pending', pending)
     try {
+      const previous = readLocal('linshe.god.pending', null)
+      const samePending = previous?.text === text && JSON.stringify(previous?.images || []) === JSON.stringify(attachments)
+      const pending = samePending ? previous : { client_id: createClientRequestId(), text, images: attachments }
+      saveLocal('linshe.god.pending', pending)
       const { run } = await api.sendGodSaysMessage(pending.client_id, text, attachments)
       saveLocal('linshe.god.pending', null)
       if (draft.value.trim() === text) setDraft('')

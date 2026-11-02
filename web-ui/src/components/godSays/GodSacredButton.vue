@@ -32,7 +32,7 @@
 
 <script setup>
 const props = defineProps({
-  variant: { type: String, default: 'line' }, // line | ghost | link | icon | pill | primary | ritual | sigil
+  variant: { type: String, default: 'line' }, // line | ghost | link | icon | toolbar | pill | primary | ritual | sigil
   size: { type: String, default: 'md' },      // sm | md | lg
   tone: { type: String, default: 'gold' },    // gold | muted
   disabled: { type: Boolean, default: false },
@@ -218,6 +218,28 @@ function onClick(event) {
 }
 .tone-muted.gsb--link { color: var(--text-secondary); border-color: transparent; }
 .tone-muted.gsb--link:hover { color: color-mix(in srgb, var(--fun-gold) 50%, var(--text-primary)); }
+
+/* 紧凑页头：点击范围不缩小，只留下清晰、等大的线性图标。 */
+.gsb--toolbar {
+  width:44px;
+  height:44px;
+  flex-shrink:0;
+  padding:0;
+  border-color:transparent;
+  border-radius:var(--radius-md);
+  background:transparent;
+  box-shadow:none;
+  transition:color .3s var(--ease-standard), background .3s var(--ease-standard), transform .3s var(--ease-standard);
+}
+.gsb--toolbar::before,.gsb--toolbar::after { display:none; }
+.gsb--toolbar :slotted(.gsb-icon) { width:20px; height:20px; }
+.gsb--toolbar:hover,.gsb--toolbar.is-active {
+  color:var(--text-primary);
+  border-color:transparent;
+  background:color-mix(in srgb,var(--fun-gold) 9%,transparent);
+  box-shadow:none;
+}
+.gsb--toolbar:focus-visible { outline:2px solid var(--accent); outline-offset:-3px; box-shadow:none; }
 .tone-muted.gsb--ghost { color: var(--text-secondary); border-color: transparent; }
 
 /* ── 触摸热区 ── */

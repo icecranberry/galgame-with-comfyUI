@@ -142,6 +142,7 @@ import LinsheInput from './ui/LinsheInput.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import { testStyle } from '../api/index.js'
 import { appendMomentImageRequest } from '../utils/momentImageRequest.js'
+import { canSelectMultipleImages, isImageFile } from '../utils/imageUpload.js'
 
 const MAX_IMAGES = 3
 // 超过该大小的原图统一压到最长边 1600 的 JPEG（base64 传输体积 + GIF 动图例外保留）
@@ -155,18 +156,13 @@ const text = ref('')
 const images = ref([])
 const sending = ref(false)
 const fileInput = ref(null)
-const allowMultiple = ref(true)
+const allowMultiple = computed(() => canSelectMultipleImages(isMobile?.value))
 const avatarFailed = ref(false)
 const autoImagePrompt = ref('')
 const showAutoImageModal = ref(false)
 let unsubscribeVisionError = null
 
 onMounted(() => {
-  // 手机相册多选返回路径不稳定（部分 ROM 会回 RESULT_CANCELED，选完不派发 change），
-  // 移动端与安卓壳内一律退回单选（壳内多选解析失败时 WebView 连 change 都不会触发）
-  if (isMobile?.value || (typeof window !== 'undefined' && !!window.AndroidBridge)) {
-    allowMultiple.value = false
-  }
   unsubscribeVisionError = onEvent('user_moment_vision_error', (data) => {
     if (!data?.message) return
     toastFn?.(data.message, 'error', 6000, data.description)
@@ -193,12 +189,6 @@ function removeImage(i) {
 function clearAutoImagePrompt() {
   autoImagePrompt.value = ''
   showAutoImageModal.value = false
-}
-
-// 部分安卓 ROM 回传的 MIME 是 application/octet-stream 或空串，这里用扩展名兜底判断
-const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i
-function isImageFile(file) {
-  return !!file && (file.type?.startsWith('image/') || IMAGE_EXT_RE.test(file.name || ''))
 }
 
 function addFiles(list) {

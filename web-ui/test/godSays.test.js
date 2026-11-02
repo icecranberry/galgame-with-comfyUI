@@ -2,8 +2,63 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyGodStreamEvent, useGodSaysStore } from '../src/stores/godSays.js';
 import { createPinia, setActivePinia } from 'pinia';
+import { webcrypto } from 'node:crypto';
 import { godMessageImages } from '../src/utils/godSaysImages.js';
 import { splitAngelPersona, composeAngelPersona } from '../src/utils/angelPersonaEditor.js';
+
+function mockGlobal(t, name, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+  Object.defineProperty(globalThis, name, { configurable: true, value });
+  t.after(() => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+    else delete globalThis[name];
+  });
+}
+
+test('HTTP phone clients without randomUUID can send and reuse the request ID after a network failure', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  const stored = new Map();
+  mockGlobal(t, 'localStorage', {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => stored.set(key, value),
+  });
+  mockGlobal(t, 'crypto', { getRandomValues: bytes => webcrypto.getRandomValues(bytes) });
+  const bodies = [];
+  const run = { id: 'phone-message', session_id: 1, status: 'completed' };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options?.method === 'POST') {
+      bodies.push(JSON.parse(options.body));
+      if (bodies.length === 1) throw new Error('offline');
+      return Response.json({ run });
+    }
+    return Response.json({ session: { id: 1 }, current: true, runs: [run], messages: [], calls: [], worldEvents: [], cursor: 0 });
+  });
+  god.draft = '手机发送';
+  assert.equal(await god.send(), undefined);
+  assert.equal(god.error, 'offline');
+  assert.equal(god.submitting, false);
+  assert.equal(god.busy, false);
+  assert.equal(god.draft, '手机发送');
+  assert.equal((await god.send()).id, run.id);
+  assert.match(bodies[0].client_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(bodies[1].client_id, bodies[0].client_id);
+  assert.equal(god.submitting, false);
+  assert.equal(god.draft, '');
+  assert.equal(JSON.parse(stored.get('linshe.god.pending')), null);
+});
+
+test('request preparation errors release the sending state and allow retry', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  mockGlobal(t, 'crypto', { getRandomValues() { throw new Error('random source unavailable'); } });
+  god.draft = '保留待发送消息';
+  assert.equal(await god.send(), undefined);
+  assert.equal(god.error, 'random source unavailable');
+  assert.equal(god.submitting, false);
+  assert.equal(god.busy, false);
+  assert.equal(god.draft, '保留待发送消息');
+});
 
 test('successful sends expose the accepted run after a daily-session change; failed sends do not expose a new turn', async t => {
   setActivePinia(createPinia());

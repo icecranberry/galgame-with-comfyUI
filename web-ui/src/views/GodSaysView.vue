@@ -28,14 +28,19 @@
     </Transition>
     <div class="god-main">
     <header class="god-header">
-      <GodSacredButton v-if="isMobile" variant="icon" tone="muted" aria-label="返回角色列表" @click="toggleSidebar"><svg class="gsb-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10 4-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton>
-      <GodSacredButton v-if="isMobile" variant="icon" tone="muted" :aria-expanded="historyOpen" aria-label="切换对话列表" @click="historyOpen = !historyOpen"><svg class="gsb-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5h10M3 8h10M3 11h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg></GodSacredButton>
+      <GodSacredButton v-if="isMobile" variant="toolbar" tone="muted" touch-target aria-label="返回角色列表" @click="toggleSidebar"><svg class="gsb-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m14 6-6 6 6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton>
       <div class="header-emblem" role="button" tabindex="0" aria-label="查看天使角色详情" @click="openAngel" @keydown.enter.prevent="openAngel" @keydown.space.prevent="openAngel"><span class="header-emblem-halo" aria-hidden="true" /><AngelEmblem emblem /></div>
-      <div class="header-title"><h1>神说</h1><span :title="subtitle">{{ subtitle }}</span></div>
+      <div class="header-title">
+        <div v-if="isMobile" class="header-identity" role="button" tabindex="0" aria-label="天使介绍" title="天使介绍" @click="openAngel" @keydown.enter.prevent="openAngel" @keydown.space.prevent="openAngel">
+          <span class="header-identity-emblem" aria-hidden="true"><AngelEmblem emblem /></span><h1>神说</h1>
+        </div>
+        <h1 v-else>神说</h1>
+        <span :title="subtitle">{{ subtitle }}</span>
+      </div>
       <div class="header-actions">
-        <GodSacredButton variant="ghost" tone="muted" size="sm" @click="openSchedule">今日日程</GodSacredButton>
-        <GodSacredButton class="god-detail-btn" variant="ghost" tone="muted" size="sm" @click="openAngel">天使介绍</GodSacredButton>
-        <GodSacredButton variant="ghost" tone="muted" size="sm" @click="logsOpen = true">日志</GodSacredButton>
+        <GodSacredButton v-if="isMobile" variant="toolbar" tone="muted" touch-target :active="historyOpen" :aria-expanded="historyOpen" aria-label="切换对话列表" title="往日对话" @click="historyOpen = !historyOpen"><svg class="gsb-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" stroke="currentColor" stroke-width="1.7" /><path d="M9 5v14m4-9h4m-4 4h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg></GodSacredButton>
+        <GodSacredButton :variant="isMobile ? 'toolbar' : 'ghost'" tone="muted" size="sm" :touch-target="isMobile" aria-label="今日日程" title="今日日程" @click="openSchedule"><svg v-if="isMobile" class="gsb-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2.5" stroke="currentColor" stroke-width="1.7" /><path d="M8 3v4m8-4v4M4 10h16m-12 4h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" /></svg><template v-else>今日日程</template></GodSacredButton>
+        <GodSacredButton :variant="isMobile ? 'toolbar' : 'ghost'" tone="muted" size="sm" :touch-target="isMobile" aria-label="日志" title="日志" @click="logsOpen = true"><svg v-if="isMobile" class="gsb-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Zm0 0v7h7M8 14h8m-8 3h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg><template v-else>日志</template></GodSacredButton>
       </div>
     </header>
 
@@ -206,7 +211,7 @@
             </button>
           </figure>
         </div>
-        <linshe-auto-textarea ref="composer" embedded :model-value="god.draft" :min-height="56" :maxlength="20000" placeholder="「准备降下神谕让天使做什么？答什么？吃什么...？」" @update:model-value="god.setDraft" @enter="sendOnEnter" />
+        <linshe-auto-textarea ref="composer" embedded :model-value="god.draft" :min-height="isMobile ? 32 : 56" :maxlength="20000" placeholder="「准备降下神谕让天使做什么？答什么？吃什么...？」" @update:model-value="god.setDraft" @enter="sendOnEnter" />
         <div class="composer-tools">
           <div class="composer-left">
             <GodSacredButton variant="icon" tone="muted" size="md" :touch-target="isMobile" :disabled="draftImages.length >= maxImages" :aria-label="draftImages.length >= maxImages ? '最多添加四张图片' : '添加图片'" :title="draftImages.length >= maxImages ? '最多添加四张图片' : '添加图片'" @click="pickImages">
@@ -219,7 +224,7 @@
             <GodSacredButton v-else key="send" variant="primary" size="lg" :loading="god.submitting" :disabled="(!god.draft.trim() && !draftImages.length) || god.loading || god.deleting" aria-label="发送消息" title="发送消息" @click="send"><svg v-if="!god.submitting" class="composer-action-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 15V5m-4 4 4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton>
           </Transition>
         </div>
-        <input ref="fileInput" class="composer-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple @change="onFileChange" />
+        <input ref="fileInput" class="composer-file" type="file" accept="image/*" :multiple="allowMultipleImages" @change="onFileChange" />
       </div>
     </footer>
     </div>
@@ -258,6 +263,7 @@ import LinsheAutoTextarea from '../components/ui/LinsheAutoTextarea.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import CollapseTransition from '../components/CollapseTransition.vue'
 import AngelEmblem from '../components/godSays/AngelEmblem.vue'
+import { canSelectMultipleImages, isImageFile } from '../utils/imageUpload.js'
 import GodSacredButton from '../components/godSays/GodSacredButton.vue'
 import GodAngelScheduleModal from '../components/godSays/GodAngelScheduleModal.vue'
 import GodAngelSummon from '../components/godSays/GodAngelSummon.vue'
@@ -277,6 +283,7 @@ const isMobile = inject('isMobile', ref(false))
 const toggleSidebar = inject('toggleMobileSidebar', () => {})
 const composer = ref(null)
 const fileInput = ref(null)
+const allowMultipleImages = computed(() => canSelectMultipleImages(isMobile.value))
 const draftImages = ref([])
 const maxImages = 4
 const scrollArea = ref(null)
@@ -414,6 +421,7 @@ const pendingImageTasks = new Set()
 async function send() {
   if (sending || god.busy) return
   sending = true
+  if (isMobile.value) composer.value?.blur()
   try {
     // 选中/粘贴后压缩是异步的：必须等占位图拿到 dataURI 再发，否则这条消息会静默丢图。
     if (pendingImageTasks.size) await Promise.allSettled([...pendingImageTasks])
@@ -422,7 +430,8 @@ async function send() {
     const images = draftImages.value.map(image => image.url).filter(Boolean)
     const run = await god.send(images)
     if (run) { draftImages.value = []; acceptThinking(run.id) }
-    await goBottom(); composer.value?.focus()
+    await goBottom()
+    if (!isMobile.value) composer.value?.focus()
   } finally { sending = false }
 }
 function sendOnEnter(event) { if (!isMobile.value) { event.preventDefault(); void send() } }
@@ -447,17 +456,21 @@ function onComposerPaste(event) {
 async function addImages(files) {
   const room = maxImages - draftImages.value.length
   if (!room) return
-  const picked = files.filter(file => file && file.type.startsWith('image/')).slice(0, room)
-  if (!picked.length) return
+  const picked = files.filter(isImageFile).slice(0, room)
+  if (!picked.length) {
+    if (files.length) god.error = '没有读取到图片，请重新选择'
+    return
+  }
   for (const file of picked) {
     // 先占位再压缩：压缩完成前图片也必须算进草稿里，发送时才能等到它的 dataURI。
     const entry = reactive({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, url: null })
     draftImages.value.push(entry)
     const task = compressImageFile(file)
       .then(url => { entry.url = url })
-      .catch(() => {
+      .catch(err => {
         const index = draftImages.value.indexOf(entry)
         if (index >= 0) draftImages.value.splice(index, 1)
+        god.error = err.message || '图片读取失败，请重新选择'
       })
       .finally(() => pendingImageTasks.delete(task))
     pendingImageTasks.add(task)
@@ -627,7 +640,10 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .header-title h1 { font-size:var(--fs-xl); letter-spacing:2px; margin:0 0 4px; font-weight:700; }
 .header-title>span { display:block; color:var(--god-muted); font-size:var(--fs-sm); line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .header-actions { display:flex; gap:8px; flex-shrink:0; }
-.header-actions .god-detail-btn { display:none; }
+.header-identity { display:inline-flex; align-items:center; gap:8px; min-height:44px; cursor:pointer; text-align:left; border-radius:var(--radius-sm); transition:opacity .3s var(--ease-standard); }
+.header-identity:hover { opacity:.8; }
+.header-identity:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.header-identity-emblem { width:28px; height:28px; flex-shrink:0; overflow:hidden; border-radius:var(--radius-full); }
 @media(min-width:1200px) { .god-page { --god-col:860px; } }
 @media(min-width:1500px) { .god-page { --god-col:920px; } }
 .god-scroll { min-height:0; flex:1; overflow-y:auto; overscroll-behavior:contain; overflow-anchor:none; scroll-behavior:auto; }
@@ -768,12 +784,11 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .god-content-enter-from,.god-content-leave-to { opacity:0; transform:translateY(5px); }
 @keyframes god-breathe { 0%,100% { opacity:.45; } 50% { opacity:1; } }
 @media(max-width:767px) {
-  .god-header { padding:12px; gap:8px; flex-wrap:wrap; }
+  .god-header { padding:4px 8px 4px 4px; gap:2px; flex-wrap:nowrap; }
   .header-emblem { display:none; }
-  .header-title h1 { font-size:var(--fs-lg); }
-  .header-title>span { font-size:var(--fs-xs); }
-  .header-actions { gap:2px; }
-  .header-actions .god-detail-btn { display:inline-flex; }
+  .header-title h1 { margin:0; font-size:var(--fs-lg); letter-spacing:1px; white-space:nowrap; }
+  .header-title>span { display:none; }
+  .header-actions { gap:0; margin-left:8px; }
   .god-reading { padding:22px 12px; }
   .god-welcome { padding:52px 0 30px; min-height:340px; }
   .sacred-sky { inset:-10px -2% 0; }
@@ -795,5 +810,4 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
   .composer-hint { display:none; }
   .god-user { margin:0 0 24px; }
 }
-@media(max-width:380px) { .header-actions { margin-left:auto; } .header-title { flex-basis:calc(100% - 50px); } }
 </style>

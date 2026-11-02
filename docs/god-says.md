@@ -158,3 +158,7 @@ SSE 从持久化序号恢复。离开页面或断线只断开订阅，不终止�
 2026-11-02 用户气泡改为做旧撕边羊皮纸（按参考图「仿一下这种感觉」）：`.god-user-text` 改为透明底 + `isolation:isolate`，`::before` 铺土黄做旧纸（`--fun-gold` 26%→40% 混 `--bg-secondary` 渐变 + 顶部暖光 + 三处褐斑 + 横向纤维 + 左右 9% 卷边暗带），并以 `filter:url(#god-torn-paper) drop-shadow(0 5px 8px …)` 生成撕边与外投影；模板在 `<main class="god-page">` 顶部新增 0×0 内联 SVG `#god-torn-paper`（`feTurbulence type=fractalNoise baseFrequency="0.012 0.05" numOctaves=4 seed=9` + `feDisplacementMap scale 9`）；文字在主元素、不受滤镜影响。验证：`web-ui` ESLint 0 error（仅既有受控 `v-html` 警告）；vite HMR 已自动热更新。
 
 2026-11-02 用户气泡改用「月星楷」手写字体（天使回复保持默认字体）：复用信件/日记同一套手写字体库 `web-ui/src/composables/useHandwritingFont.js`（`loadFont(fontId)` 动态注入字体 CSS、`getFontFamily(fontId)` 返回 font-family 栈 + `STKaiti/KaiTi` 回退）。GodSaysView 选择 `moon_stars_kai`（月星楷，星空梦幻楷体、笔画带柔光）：`USER_BUBBLE_FONT_ID` 常量 + `userBubbleFontStyle`，`onMounted` 里 `loadFont('moon_stars_kai')`，`.god-user-text` 通过 `:style="userBubbleFontStyle"` 应用；`.god-reply-text`（天使回复）不设该字体、保持默认。验证：`web-ui` ESLint 0 error（仅既有受控 `v-html` 警告）；vite HMR 已自动热更新。
+
+## 手机选图兼容
+
+神说与朋友圈共用 `web-ui/src/utils/imageUpload.js` 的图片选择策略和文件识别：手机及 AndroidBridge 网页壳使用单选相册，逐张追加到草稿，神说仍最多附四张；桌面保留多选。此策略规避部分安卓 ROM 多选返回后不触发 WebView `change` 的问题，无需升级 APK。图片 MIME 缺失或为通用二进制类型时按扩展名识别；读取失败保留其他附件并显示错误。
