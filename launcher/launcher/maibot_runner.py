@@ -20,6 +20,7 @@ import shutil
 from PySide6.QtCore import QObject, QProcess, Signal, QThread, QTimer
 
 from .service_runner import ServiceWorker, _decode_output, find_bundled_python
+from .process_env import ensure_system_env
 
 MAIBOT_PORT = 8001
 SNOWLUMA_PORT = 5099
@@ -396,12 +397,7 @@ class MaiBotRunner(QObject):
         env = proc.processEnvironment()
         env.insert("PYTHONUTF8", "1")
         env.insert("PYTHONUNBUFFERED", "1")
-        for key in (
-            "USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
-            "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA",
-        ):
-            if key in os.environ and key not in env.keys():
-                env.insert(key, os.environ[key])
+        ensure_system_env(env)
         proc.setProcessEnvironment(env)
         proc.setWorkingDirectory(maibot_source_dir(self._project_path))
         proc.setProcessChannelMode(QProcess.SeparateChannels)

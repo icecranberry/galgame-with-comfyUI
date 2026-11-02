@@ -11,6 +11,8 @@ import sys
 from PySide6.QtCore import QObject, Signal, QProcess, QTimer, QUrl, QByteArray, QThread
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 
+from .process_env import ensure_system_env
+
 
 # ── 捆绑运行时发现 ──
 
@@ -239,11 +241,8 @@ class ServiceWorker(QObject):
         # 服务定义中的额外环境变量（如 MaiBot 的 PYTHONUTF8）
         for _key, _value in self._def.get("env", {}).items():
             env.insert(_key, _value)
-        # 确保路径和用户目录变量存在
-        for _key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
-                      "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
-            if _key in os.environ and _key not in env.keys():
-                env.insert(_key, os.environ[_key])
+        # 确保路径、用户目录和系统变量存在（收窄环境可能缺 PATHEXT 等）
+        ensure_system_env(env)
         # 捆绑 Git 目录前置进 PATH：子进程（如 MaiBot 插件安装）只通过
         # shutil.which("git") 按 PATH 找 git，不会走 launcher 的显式路径解析
         bundled_git = find_bundled_git(self._project_path)

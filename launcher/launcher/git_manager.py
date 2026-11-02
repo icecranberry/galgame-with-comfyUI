@@ -10,6 +10,8 @@ import sys
 import time
 from PySide6.QtCore import QObject, Signal, QProcess
 
+from .process_env import ensure_system_env
+
 # Windows 下隐藏 subprocess 弹出的命令行窗口
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if sys.platform == "win32" else 0
 _CACHE_TTL = 2.0  # 同一次初始化链内去重，2 秒内复用缓存
@@ -509,11 +511,9 @@ class GitManager(QObject):
 
         # 注入关键环境变量，避免 git 因找不到 HOME/.gitconfig 而崩溃
         env = self._proc.processEnvironment()
-        for key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH",
-                     "TEMP", "TMP", "SystemRoot", "PATH",
-                     "APPDATA", "LOCALAPPDATA", "SSH_AUTH_SOCK"):
-            if key in os.environ and key not in env.keys():
-                env.insert(key, os.environ[key])
+        ensure_system_env(env)
+        if "SSH_AUTH_SOCK" in os.environ and "SSH_AUTH_SOCK" not in env.keys():
+            env.insert("SSH_AUTH_SOCK", os.environ["SSH_AUTH_SOCK"])
         # 禁止 git 弹出交互式认证窗口（否则 QProcess 无法处理会导致挂死）
         env.insert("GIT_TERMINAL_PROMPT", "0")
 

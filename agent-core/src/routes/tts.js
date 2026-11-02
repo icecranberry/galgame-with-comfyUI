@@ -5,7 +5,7 @@ import { importAudio, cropAudio, audioPath, audioUrl } from '../services/voiceAs
 import { speechParams } from '../services/speechText.js';
 import { ttsHealth } from '../services/indexTtsClient.js';
 import { restartSpeechService } from '../services/speechServiceProcess.js';
-import { recoverSpeechGpu } from '../services/speechGpu.js';
+import { recoverSpeechGpu, speechGpuStatus } from '../services/speechGpu.js';
 import { getSpeechSettings, setSpeechSettings, requestSpeech, speakMessage, publicJob, getSpeechJob, cancelSpeech, clearSpeechCache } from '../services/speechService.js';
 import { getApiVoice, saveApiVoice, notifyStandingVoiceChanged } from '../services/speechConfig.js';
 import { listApiSamples, importApiSample, createApiClone, listLocalApiVoices, reuseLocalApiVoice } from '../services/speechApiAssets.js';
@@ -39,6 +39,7 @@ router.get('/bindings', route((req, res) => {
   res.json(getDb().prepare('SELECT c.character_id,c.voice_id,c.enabled,v.name FROM character_voices c JOIN voices v ON v.id=c.voice_id').all());
 }));
 router.post('/recover', route(async (req, res) => res.json(await recoverSpeechGpu())));
+router.get('/gpu', route(async (req, res) => res.json(await speechGpuStatus())));
 router.post('/restart', route(async (req, res) => res.json(await restartSpeechService())));
 router.get('/builtin-voices', route((req, res) => res.json(listBuiltinVoices())));
 router.get('/builtin-voices/:id/audio', route((req, res) => res.sendFile(builtinVoicePath(req.params.id))));

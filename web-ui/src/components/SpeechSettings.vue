@@ -47,7 +47,7 @@
       <div class="speech-actions">
         <linshe-button variant="link" size="sm" :loading="checking" :disabled="recovering || restarting || localModelBusy" @click="check">检查连接</linshe-button>
         <linshe-button variant="secondary" size="sm" :loading="restarting" :disabled="checking || recovering || localModelBusy" @click="restart">重启声音服务</linshe-button>
-        <linshe-button variant="ghost" size="sm" :aria-expanded="maintenanceOpen" @click="maintenanceOpen = !maintenanceOpen">
+        <linshe-button variant="ghost" size="sm" :aria-expanded="maintenanceOpen" @click="toggleMaintenance">
           服务维护
           <svg class="speech-chevron" :class="{ 'is-open': maintenanceOpen }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
         </linshe-button>
@@ -59,6 +59,7 @@
           <strong>释放语音显存</strong>
           <p>声音生成卡住时可尝试恢复，当前任务结束后会回收语音模型。</p>
           <span class="speech-endpoint">本地服务 · 127.0.0.1:7861</span>
+          <span v-if="gpuText" class="speech-endpoint">{{ gpuText }}</span>
         </div>
         <linshe-button size="sm" :loading="recovering" :disabled="checking || restarting" @click="recover">恢复显存调度</linshe-button>
       </div>
@@ -74,7 +75,7 @@
   </section>
 </template>
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheSwitch from './ui/LinsheSwitch.vue'
 import LinsheTabs from './ui/LinsheTabs.vue'
@@ -119,6 +120,23 @@ async function saveApi() {
 }
 const busy = ref(true), checking = ref(false), recovering = ref(false), restarting = ref(false), ready = ref(false)
 const maintenanceOpen = ref(false), error = ref(''), notice = ref('')
+const gpu = ref(null)
+const gpuText = computed(() => {
+  const info = gpu.value
+  if (!info) return ''
+  if (!info.local_image || !info.local_speech) return '显存调度 · 与本地显存无关'
+  const size = info.total_mb ? Math.round(info.total_mb / 1024) : null
+  const head = ['显存调度', [info.name, size && `${size} GB`].filter(Boolean).join(' ')].filter(Boolean).join(' · ')
+  if (info.mode === 'shared') return `${head} · 生图与语音同时运行`
+  if (size && size >= 12 && info.guard !== true) return `${head} · 单模型轮流运行 · 装 comfy_guard 可同时运行`
+  return `${head} · 单模型轮流运行`
+})
+async function toggleMaintenance() {
+  maintenanceOpen.value = !maintenanceOpen.value
+  if (!maintenanceOpen.value) return
+  // Status is advisory: a failed probe must never interrupt the panel.
+  try { gpu.value = await ttsApi('/gpu') } catch { gpu.value = null }
+}
 async function clearCache() {
   if (busy.value || clearingCache.value) return
   clearingCache.value = true; error.value = ''; notice.value = ''

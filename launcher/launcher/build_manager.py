@@ -13,6 +13,7 @@ import sys
 from PySide6.QtCore import QObject, Signal, QProcess, QTimer
 from PySide6.QtWidgets import QApplication
 from .env_manager import EnvManager
+from .process_env import ensure_system_env
 from .service_runner import find_bundled_node, find_bundled_python, find_bundled_npm
 
 
@@ -389,10 +390,7 @@ class BuildManager(QObject):
         env.insert("PYTHONUNBUFFERED", "1")
         env.insert("FORCE_COLOR", "0")
         env.insert("PIP_DISABLE_PIP_VERSION_CHECK", "1")  # embeddable Python 加速
-        for _key in ("USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH", "TEMP", "TMP",
-                      "SystemRoot", "PATH", "APPDATA", "LOCALAPPDATA"):
-            if _key in os.environ and _key not in env.keys():
-                env.insert(_key, os.environ[_key])
+        ensure_system_env(env)
 
         # 将捆绑的 Node.js 注入 PATH，确保 npm postinstall 脚本（esbuild 的
         # node install.js 等）能通过 cmd.exe 找到 node 命令

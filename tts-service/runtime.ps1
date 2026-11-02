@@ -25,6 +25,17 @@ $env:TORCH_HOME = Join-Path $ttsRoot 'cache\torch'
 $env:NUMBA_CACHE_DIR = Join-Path $ttsRoot 'cache\numba'
 $env:PATH = (Join-Path $bundleRoot 'tools\ffmpeg\bin') + ';' + $env:PATH
 
+# The GUI launcher hands child processes a narrowed environment that can lack
+# PATHEXT, SystemDrive, windir or ComSpec. Without PATHEXT, PowerShell on some
+# machines refuses to run an .exe as a command: no output, $LASTEXITCODE stays
+# $null, and callers only see a generic "cannot migrate" message. Restore the
+# system defaults here so every entry script (start/setup/restart/package)
+# works regardless of the launching environment.
+if (-not $env:PATHEXT) { $env:PATHEXT = '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC' }
+if (-not $env:ComSpec) { $env:ComSpec = Join-Path $env:SystemRoot 'System32\cmd.exe' }
+if (-not $env:SystemDrive) { $env:SystemDrive = [IO.Path]::GetPathRoot($env:SystemRoot) }
+if (-not $env:windir) { $env:windir = $env:SystemRoot }
+
 # Runs one deployment.py step and, on failure, surfaces python's real output
 # and exit code. With $ErrorActionPreference='Stop' (restart.ps1) a bare native
 # call turns its first stderr line into a NativeCommandError and callers only
@@ -37,12 +48,18 @@ function Invoke-TtsDeploymentStep {
     )
     $ErrorActionPreference = 'Continue'
     $output = & $Python -X utf8 (Join-Path $ttsRoot 'deployment.py') @StepArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $exitCode = $LASTEXITCODE
+    if ($null -eq $exitCode) {
+        # PowerShell never started the process (e.g. missing PATHEXT in a
+        # narrowed launcher environment); it leaves no output and no exit code.
+        throw "$FailMessage（命令未被执行：退出码为空）`n无法运行：$Python`n启动环境可能缺少 PATHEXT/ComSpec 等系统变量。"
+    }
+    if ($exitCode -ne 0) {
         $detail = (($output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
         if (-not $detail) {
-            $detail = 'python 没有任何输出：通常是杀软拦截/隔离了 runtime 内置的 python，或压缩包解压不完整。'
+            $detail = 'python 没有任何输出：可能是杀软拦截/隔离了 runtime 内置的 python，或压缩包解压不完整。'
         }
-        throw "$FailMessage（退出码 $LASTEXITCODE）`n$detail"
+        throw "$FailMessage（退出码 $exitCode）`n$detail"
     }
 }
 

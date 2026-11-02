@@ -28,8 +28,16 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
   let releaseError = false;
   let synchronized = false;
   let guardSynchronized = false;
+  // null = not probed yet; false = ComfyUI has no guard node (or it vanished).
+  // A missing node degrades to local sequencing instead of failing the task.
+  let guardAvailable = null;
   let activeSpeech = Promise.resolve();
   let activeImage = Promise.resolve();
+  const isGuardMissing = error => error?.code === 'GUARD_MISSING';
+  const noteGuard = error => { if (isGuardMissing(error)) guardAvailable = false; return isGuardMissing(error); };
+  // Without a guard node nothing may hold a lease, so shared mode would let both
+  // models pile onto one card. Treat the machine as sequential instead.
+  const effective = mode => guardAvailable === false ? { ...mode, shared: false, lease: false } : mode;
   // Reserve resources in FIFO order, but let admitted shared work run outside
   // the coordinator so image and speech inference can actually overlap.
   function dispatch(work, kind) {
@@ -51,7 +59,7 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
   function withImageGpu(work) {
     return dispatch(async () => {
       if (!speechUsed && !releaseError && !leaseToken) return work;
-      const mode = await policy({ loaded: speechUsed, image: true });
+      const mode = effective(await policy({ loaded: speechUsed, image: true }));
       // Never allow an image submission after an uncertain speech-worker exit.
       if (leaseToken || releaseError || !mode.shared) {
         await activeSpeech;
@@ -68,7 +76,13 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
       const result = await unload();
       if (result?.unloaded !== true) throw new Error('无法确认语音工作进程已退出，保留显存锁');
       if (leaseToken) {
-        if (!await guard('release', { token: leaseToken })) throw new Error('显存锁状态已变化，请恢复显存调度');
+        try {
+          if (!await guard('release', { token: leaseToken })) throw new Error('显存锁状态已变化，请恢复显存调度');
+        } catch (error) {
+          // The node was uninstalled mid-session; the worker is already gone, so
+          // dropping the stale token is safe and keeps sequencing usable.
+          if (!noteGuard(error)) throw error;
+        }
       }
       leaseToken = null;
       speechUsed = false;
@@ -109,17 +123,21 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
       }
       // Probe after startup cleanup so an old worker's allocation does not
       // incorrectly force exclusive mode for the newly freed GPU.
-      let mode = await policy({ loaded: health.loaded === true && speechUsed });
+      let mode = effective(await policy({ loaded: health.loaded === true && speechUsed }));
       if (mode.guard && !guardSynchronized) {
-        // Recovery is permitted only with a confirmed idle worker exit. A
-        // missing plugin is harmless for shared operation, not for handoff.
+        // Recovery is permitted only with a confirmed idle worker exit.
         if (speechUsed) await releaseSpeech();
         try {
           if (!await guard('recover', { worker_unloaded: true })) throw new Error('无法恢复语音显存锁');
           guardSynchronized = true;
+          guardAvailable = true;
         } catch (error) {
-          if (!mode.shared || error.code !== 'GUARD_MISSING') throw error;
-          guardSynchronized = true;
+          if (noteGuard(error)) {
+            // No guard node: fall back to one model at a time and stop probing.
+            guardSynchronized = true;
+            mode = effective(mode);
+          } else if (!mode.shared) throw error;
+          else guardSynchronized = true;
         }
       }
       clearTimeout(idleTimer);
@@ -127,14 +145,23 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
       if (!mode.shared && !leaseToken) {
         await activeImage;
         if (isCancelled()) throw new Error('任务已取消');
-        const token = randomUUID();
-        const deadline = now() + 120000;
-        while (!await guard('acquire', { token })) {
-          if (isCancelled()) throw new Error('任务已取消');
-          if (now() > deadline) throw new Error('等待生图释放显存超时，请稍后重试');
-          await sleep(1000);
+        if (mode.lease) {
+          const token = randomUUID();
+          const deadline = now() + 120000;
+          try {
+            while (!await guard('acquire', { token })) {
+              if (isCancelled()) throw new Error('任务已取消');
+              if (now() > deadline) throw new Error('等待生图释放显存超时，请稍后重试');
+              await sleep(1000);
+            }
+            leaseToken = token;
+            guardAvailable = true;
+          } catch (error) {
+            // Local sequencing still keeps the two models apart; a missing node
+            // is a degraded setup, not a task failure.
+            if (!noteGuard(error)) throw error;
+          }
         }
-        leaseToken = token;
       }
       speechUsed = true;
       return async () => {
@@ -171,8 +198,12 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
           result = await guard('recover', { worker_unloaded: true });
           if (!result) throw new Error('无法恢复语音显存锁');
           guardSynchronized = true;
+          guardAvailable = true;
         } catch (error) {
-          if (leaseToken || !mode.shared || error.code !== 'GUARD_MISSING') throw error;
+          // The worker has already exited; without a node there is no lease left
+          // to hold, so recovery still succeeds in sequential mode.
+          if (!noteGuard(error)) throw error;
+          guardSynchronized = true;
         }
       }
       leaseToken = null;
@@ -195,7 +226,23 @@ export function createSpeechGpuCoordinator({ queue = withGpu, unload = unloadTts
     });
   }
 
-  return { withImageGpu, withSpeechGpu, recoverSpeechGpu, restartSpeechGpu };
+  // Read-only summary for the voice settings panel: which side is local, how big
+  // the card is, whether both models may run together and whether the guard node
+  // answered. Never probes the ComfyUI host when either side is remote.
+  async function speechGpuStatus() {
+    const mode = effective(await policy());
+    return {
+      local_image: mode.local_image, local_speech: mode.local_speech,
+      name: mode.info?.name ?? null,
+      total_mb: mode.info?.total ?? null,
+      free_mb: mode.info?.free ?? null,
+      mode: mode.shared ? 'shared' : 'serial',
+      guard: guardAvailable,
+      sequenced_only: !mode.shared,
+    };
+  }
+
+  return { withImageGpu, withSpeechGpu, recoverSpeechGpu, restartSpeechGpu, speechGpuStatus };
 }
 
-export const { withImageGpu, withSpeechGpu, recoverSpeechGpu, restartSpeechGpu } = createSpeechGpuCoordinator();
+export const { withImageGpu, withSpeechGpu, recoverSpeechGpu, restartSpeechGpu, speechGpuStatus } = createSpeechGpuCoordinator();

@@ -7,7 +7,7 @@ function fixture(overrides = {}) {
   const events = [];
   let lease = 'orphan-from-previous-node';
   const gpu = createSpeechGpuCoordinator({ queue: createGpuQueue(),
-    policy: async () => ({ shared: false, guard: true }),
+    policy: async () => ({ shared: false, guard: true, lease: true }),
     ensureService: async () => { events.push('ensure'); return { online: true, compatible: true, ready: true, busy: false }; },
     unload: async options => { events.push(options?.idle_only ? 'idle-unload' : 'unload'); return { unloaded: true }; },
     guard: async (route, body) => {
@@ -184,9 +184,30 @@ test('maintenance waits for shared speech and speech jobs remain serialized', { 
   assert.ok(events.indexOf('second') < events.indexOf('restart'));
 });
 
-test('insufficient memory cannot bypass a missing guard', async () => {
-  const { gpu } = fixture({ guard: async () => { throw Object.assign(new Error('missing guard'), { code: 'GUARD_MISSING' }); } });
-  await assert.rejects(gpu.withSpeechGpu(() => assert.fail('must not run')), /missing guard/);
+test('a missing guard node degrades to local sequencing instead of failing', async () => {
+  const { gpu, events } = fixture({
+    guard: async () => { events.push('guard'); throw Object.assign(new Error('missing guard'), { code: 'GUARD_MISSING' }); },
+  });
+  await gpu.withSpeechGpu(async () => events.push('speech1'));
+  assert.ok(events.includes('speech1'));
+  await gpu.withImageGpu(async () => events.push('image1'));
+  assert.ok(events.indexOf('unload') < events.indexOf('image1'));
+  // The absent node is detected once; later calls stop asking it.
+  const asked = events.filter(route => route === 'guard').length;
+  await gpu.withSpeechGpu(async () => events.push('speech2'));
+  await gpu.withImageGpu(async () => events.push('image2'));
+  assert.equal(events.filter(route => route === 'guard').length, asked);
+  await gpu.recoverSpeechGpu();
+});
+
+test('a card that admits both models still sequences when the guard node is missing', async () => {
+  const { gpu, events } = fixture({
+    policy: async () => ({ shared: true, guard: true, lease: false }),
+    guard: async () => { throw Object.assign(new Error('missing guard'), { code: 'GUARD_MISSING' }); },
+  });
+  await gpu.withSpeechGpu(async () => events.push('speech'));
+  await gpu.withImageGpu(async () => events.push('image'));
+  assert.ok(events.indexOf('unload') < events.indexOf('image'));
 });
 
 test('cancelled queued speech preserves idle cleanup for an already warm shared model', async t => {
