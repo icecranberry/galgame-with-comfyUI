@@ -186,29 +186,79 @@ test('angel persona merges the god custom requirement', async t => {
   assert.equal(requests[0].custom, '希望她戴金色发饰，说话轻声细语');
 });
 
-test('resummon opens a new same-day session only when the day already has dialogue', t => {
+test('resummon defers saving a new same-day session until its first message', t => {
   const { db, repo } = fixture(t);
   repo.ensureAngel();
-  const first = repo.today();
+  const first = repo.snapshot().session;
   assert.equal(first.seq, 0);
-  // 空对话：重新召唤复用当天会话，不新增空条目
+  // 空对话：重新召唤仍是未保存的草稿。
   assert.equal(repo.summonSession().id, first.id);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 0);
   // 当天已有对话：重新召唤另开一条同日新会话
   const { run } = repo.start('resummon-001', '今天的第一句');
   repo.message(run, 'assistant', '好');
   repo.finish(run.id, 'completed');
   const next = repo.summonSession();
-  assert.notEqual(next.id, first.id);
+  assert.equal(next.id, null);
   assert.equal(next.day, first.day);
   assert.equal(next.seq, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 1);
+  assert.equal(repo.snapshot().session.id, null);
+  assert.equal(repo.summonSession().seq, 1, 'repeated summons do not create more sessions');
+  assert.equal(repo.snapshot(run.session_id).current, false);
+  const second = repo.start('resummon-002', '新天使的第一句').run;
+  assert.notEqual(second.session_id, run.session_id);
+  assert.equal(repo.snapshot().session.seq, 1);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 2);
 });
 const summaryJson = JSON.stringify({ summary: '神安排天空出现彩虹，事件已建立，群聊仍在等待。', memories: [{ kind: 'preference', text: '神喜欢彩虹。' }] });
+
+test('reading empty days does not save history; legacy empty archives are excluded and cleaned', async t => {
+  const { repo, db, setTime } = fixture(t);
+  const memory = createGodMemory(repo, async () => assert.fail('empty days must not request a summary'));
+  const empty = repo.snapshot();
+  assert.equal(empty.session.id, null);
+  assert.equal(empty.current, true);
+  assert.deepEqual(empty.runs, []);
+  repo.snapshot();
+  repo.summonSession();
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 0);
+  const legacy = repo.today();
+  db.prepare("UPDATE god_sessions SET summary='当天没有对话。',summary_status='done' WHERE id=?").run(legacy.id);
+  setTime('2026-10-31T02:00:00Z');
+  assert.deepEqual(repo.listSessions(), []);
+  assert.deepEqual(repo.listMemories(), []);
+  assert.deepEqual(memory.pastSummaries(), { summary: '' });
+  assert.deepEqual(memory.recallContext('对话'), { summary: '', memories: '' });
+  await memory.archive();
+  assert.equal(repo.snapshot().session.id, null);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 0);
+  const run = repo.start('first-real-message', '你好').run;
+  assert.equal(repo.snapshot().session.id, run.session_id);
+  assert.deepEqual(repo.listSessions().map(s => s.preview), ['你好']);
+  repo.finish(run.id, 'failed');
+  assert.equal(repo.listSessions().length, 1, 'a failed reply still preserves the user message');
+});
+
+test('deleting the final turn removes history and skips archiving without losing idempotency', async t => {
+  const { repo, db, setTime } = fixture(t);
+  const run = repo.start('delete-only-message', '删除的对话').run;
+  repo.finish(run.id, 'completed');
+  repo.deleteTurn(run.id);
+  assert.deepEqual(repo.listSessions(), []);
+  setTime('2026-10-31T02:00:00Z');
+  const memory = createGodMemory(repo, async () => assert.fail('deleted conversations must not be archived'));
+  await memory.archive();
+  assert.deepEqual(repo.listMemories(), []);
+  assert.deepEqual(memory.pastSummaries(), { summary: '' });
+  assert.equal(db.prepare('SELECT summary FROM god_sessions WHERE id=?').get(run.session_id).summary, '');
+  assert.throws(() => repo.start('delete-only-message', '删除的对话'), { status: 409 });
+});
+
 async function* chunks(values) { yield* values; }
 const delta = (data, finish_reason = null) => ({ choices: [{ delta: data, finish_reason }] });
 
-test('one daily session, singleton angel, idempotent sends, conflict rejection and midnight attribution', t => {
+test('one daily session, singleton angel, idempotent sends, conflict rejection and midnight attribution', async t => {
   const { db, repo, setTime } = fixture(t);
   assert.equal(repo.ensureAngel().id, repo.ensureAngel().id);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM characters').get().n, 3, 'angel never enters ordinary character pool');
@@ -217,6 +267,11 @@ test('one daily session, singleton angel, idempotent sends, conflict rejection a
   assert.throws(() => repo.start('request-001', '别的消息'), /另一条/);
   assert.throws(() => repo.start('request-002', '你好'), /仍在回应/);
   setTime('2026-10-30T16:01:00.000Z');
+  assert.equal(repo.today().id, run.session_id);
+  assert.throws(() => repo.start('during-rollover', '等待回复'), /仍在回应/);
+  repo.message(run, 'assistant', '旧日回复');
+  repo.finish(run.id, 'completed');
+  await createGodMemory(repo, async () => summaryJson).archive();
   const next = repo.start('request-003', '新的一天').run;
   assert.notEqual(run.session_id, next.session_id);
   const late = repo.message(run, 'assistant', '旧日回复');
@@ -292,6 +347,8 @@ test('daily history grows beyond the former window, ignores legacy compaction an
   db.prepare("UPDATE god_sessions SET context_summary='旧版压缩摘要',context_last_message=99999 WHERE id=?").run(sessionId);
   assert.deepEqual(await memory.contextHistory(sessionId), { messages: expected });
   setTime('2026-10-30T16:01:00.000Z');
+  assert.equal(repo.today().id, sessionId);
+  await createGodMemory(repo, async () => summaryJson).archive();
   const next = repo.start('new-day-full-history', '新的一天').run;
   assert.notEqual(next.session_id, sessionId);
   assert.deepEqual(await memory.contextHistory(next.session_id), { messages: [{ role: 'user', content: '新的一天' }] });
@@ -304,6 +361,8 @@ test('automatic past context contains chronological summaries only, excluding to
   const expected = [];
   for (let day = 20; day <= 29; day++) {
     setTime(`2026-10-${day}T02:00:00Z`);
+    const run = repo.start(`summary-day-${day}`, `第${day}天对话`).run;
+    repo.finish(run.id, 'completed');
     const session = repo.today();
     db.prepare("UPDATE god_sessions SET summary=?,summary_status='done',memories_json=? WHERE id=?")
       .run(`第${day}天摘要`, JSON.stringify([{ kind: 'preference', text: '不自动注入的长期记忆' }]), session.id);
@@ -313,11 +372,9 @@ test('automatic past context contains chronological summaries only, excluding to
   const pending = repo.start('pending-summary', '未归档原文不应自动注入').run;
   repo.finish(pending.id, 'completed');
   setTime('2026-10-31T02:00:00Z');
-  const today = repo.today();
-  db.prepare("UPDATE god_sessions SET summary='今日摘要',summary_status='done' WHERE id=?").run(today.id);
-  expected.push('2026-10-30：摘要尚未完成。');
-  assert.deepEqual(memory.pastSummaries(), { summary: expected.join('\n\n') });
-  assert.deepEqual(memory.pastSummaries('2026-10-30'), { summary: expected.slice(0, -1).join('\n\n') });
+  assert.equal(repo.today().id, pending.session_id, 'unfinished summary keeps current conversation');
+  assert.deepEqual(memory.pastSummaries(), { summary: expected.slice(-2).join('\n\n') });
+  assert.deepEqual(memory.pastSummaries('2026-10-29'), { summary: expected.slice(-3, -1).join('\n\n') });
 });
 
 test('daily archive waits for in-flight turn, retries failed summaries, preserves transcript, and stores private memories', async t => {
@@ -330,6 +387,7 @@ test('daily archive waits for in-flight turn, retries failed summaries, preserve
   repo.message(run, 'assistant', '记住了。'); repo.finish(run.id, 'completed');
   await memory.archive();
   assert.equal(db.prepare('SELECT summary_status FROM god_sessions WHERE id=?').get(run.session_id).summary_status, 'failed');
+  assert.equal(repo.snapshot().session.id, run.session_id, 'failed summary keeps the old conversation active');
   setTime('2026-10-30T16:07:00.000Z');
   await memory.archive(); await memory.archive();
   assert.equal(attempts, 2, 'completed archive is idempotent');
@@ -432,4 +490,35 @@ test('read tools observe fresh state while committed encounter receipts recover 
   const receipt = db.prepare("SELECT status,result_json FROM god_tool_calls WHERE id='saved'").get();
   assert.equal(receipt.status, 'done');
   assert.deepEqual(JSON.parse(receipt.result_json), { ok: true, value: { id: 12, status: 'opened', href: '/events?event=12' } });
+});
+
+
+test('rollover keeps the conversation writable while summarizing and includes new turns', async t => {
+  const { repo, db, setTime } = fixture(t);
+  const first = repo.start('rollover-first', '午夜之前').run;
+  repo.finish(first.id, 'completed');
+  setTime('2026-10-30T16:01:00Z');
+  let resolveSummary;
+  let calls = 0;
+  const memory = createGodMemory(repo, async messages => {
+    calls++;
+    if (calls === 1) return await new Promise(resolve => { resolveSummary = resolve; });
+    assert.match(messages[1].content, /整理期间的新消息/);
+    return summaryJson;
+  });
+  const job = memory.archive();
+  assert.equal(repo.snapshot().session.id, first.session_id);
+  const second = repo.start('rollover-second', '整理期间的新消息').run;
+  assert.equal(second.session_id, first.session_id);
+  repo.finish(second.id, 'completed');
+  resolveSummary(summaryJson);
+  await job;
+  assert.equal(calls, 2);
+  assert.equal(db.prepare('SELECT summary_status FROM god_sessions WHERE id=?').get(first.session_id).summary_status, 'done');
+  assert.notEqual(repo.today().id, first.session_id);
+});
+
+test('summary length is strictly limited to 300 characters', () => {
+  assert.equal(validateSummary(JSON.stringify({ summary: '字'.repeat(300), memories: [] })).summary.length, 300);
+  assert.throws(() => validateSummary(JSON.stringify({ summary: '字'.repeat(301), memories: [] })), /格式无效/);
 });

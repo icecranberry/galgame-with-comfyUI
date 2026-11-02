@@ -39,7 +39,10 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
   const openSession = key => db.prepare("SELECT * FROM god_sessions WHERE day=? AND status='open' ORDER BY seq DESC, id DESC LIMIT 1").get(key);
   function today({ persist = true } = {}) {
     const key = day();
-    db.prepare("UPDATE god_sessions SET status='closing' WHERE day < ? AND status='open'").run(key);
+    // 跨天仍沿用当前会话，只有摘要成功才允许切换；兼容旧版本的 closing 状态。
+    const latest = db.prepare('SELECT * FROM god_sessions ORDER BY day DESC,seq DESC,id DESC LIMIT 1').get();
+    if (latest?.day < key && latest.summary_status !== 'done' &&
+      db.prepare("SELECT 1 FROM god_messages WHERE session_id=? AND role='user'").get(latest.id)) return latest;
     const open = openSession(key);
     if (open) return open;
     // 当天首次建立会话；同一天的后续对话由 summonSession 以 seq+1 追加。

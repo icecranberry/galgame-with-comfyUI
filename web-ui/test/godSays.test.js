@@ -25,6 +25,25 @@ test('successful sends expose the accepted run after a daily-session change; fai
   assert.equal(god.error, 'offline');
 });
 
+test('unsaved empty session can send its first message and does not request unscoped world events', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  god.state = { session: { id: null }, current: true, runs: [], messages: [], calls: [], worldEvents: [] };
+  const run = { id: 'first-message', session_id: 7, input: '你好', status: 'completed' };
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.ok(!url.includes('world-events'), 'draft must not request events belonging to other sessions');
+    return new Response(JSON.stringify(options?.method === 'POST' ? { run } : {
+      session: { id: 7 }, current: true, runs: [run], messages: [], calls: [], worldEvents: [], cursor: 0,
+    }), { headers: { 'Content-Type': 'application/json' } });
+  });
+  await god.refreshWorld();
+  god.draft = '你好';
+  assert.equal((await god.send()).id, run.id);
+  assert.equal(god.state.session.id, 7);
+  assert.equal(god.archiveId, null);
+  assert.equal(god.turns[0].input, '你好');
+});
+
 test('attached images reach the request body instead of being dropped on the way to the store', async t => {
   setActivePinia(createPinia());
   const god = useGodSaysStore();

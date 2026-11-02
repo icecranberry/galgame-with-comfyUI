@@ -10,7 +10,7 @@ import { generateSchedule } from '../scheduleGenerator.js';
 import { generateEvent } from '../eventGenerator.js';
 import { runGroupRound, isGroupRoundRunning } from '../groupChatEngine.js';
 import { broadcast } from '../unifiedStreamBus.js';
-import { createGodRepository, parseJson } from './repository.js';
+import { createGodRepository } from './repository.js';
 import { createGodMemory } from './memory.js';
 import { createWorldEventService, worldEventContext } from './worldEvents.js';
 import { createGodTools } from './tools.js';
@@ -128,7 +128,7 @@ export function getGodRuntime() {
     const history = await memory.contextHistory(session.id, { includeIds: true });
     signal?.throwIfAborted();
     const worldSetting = getWorldSetting();
-    const schedule = config.features.schedule === false ? [] : session.day === repo.day() ? angel.schedule : parseJson(session.schedule_json, []);
+    const schedule = config.features.schedule === false ? [] : angel.schedule;
     const context = buildGodChatContext({
       systemRules: getSystemRules({ roleplay: false }), worldSetting,
       worldIntegrationRule: worldSetting ? getWorldIntegrationRule('interaction') : '', agentRules: AGENT_RULES,
@@ -173,12 +173,23 @@ export function startGodSays() {
   const runtime = getGodRuntime();
   const deliveries = () => runtime.world.tick().catch(err => console.warn('[神谕投递]', err.message));
   const maintenance = async () => {
-    runtime.repo.db.prepare("UPDATE god_sessions SET status='closing' WHERE day<? AND status='open'").run(runtime.repo.day());
-    await runtime.memory.archive();
+    while (await runtime.memory.archive()) { /* 补齐离线期间积压的会话 */ }
     const session = runtime.repo.db.prepare('SELECT * FROM god_sessions WHERE day=?').get(runtime.repo.day());
     if (session) await runtime.ensureSchedule(session);
   };
-  timers = [setInterval(deliveries, 3000), setInterval(() => maintenance().catch(err => console.warn('[神说归档]', err.message)), 60000)];
+  // 北京时间零点触发一次；启动时补处理离线期间错过的跨天。
+  const scheduleMidnight = () => {
+    const now = runtime.repo.now();
+    const next = Date.parse(`${runtime.repo.day()}T00:00:00+08:00`) + 86400000;
+    timers[1] = setTimeout(() => {
+      scheduleMidnight();
+      void maintenance().catch(err => console.warn('[神说归档]', err.message));
+    }, Math.max(1, next - now.getTime()));
+    timers[1].unref();
+  };
+  timers = [setInterval(deliveries, 3000)];
+  scheduleMidnight();
+  void maintenance().catch(err => console.warn('[神说归档]', err.message));
   timers.forEach(t => t.unref());
   void deliveries();
 }

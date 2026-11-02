@@ -8,6 +8,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { GOD_TOOLS } from '../src/services/godSays/tools.js';
 import { createGodRepository } from '../src/services/godSays/repository.js';
+import { TIME_RULE } from '../src/services/godSays/promptBuilder.js';
 
 test('HTTP native-tool loop streams, reconnects, and deduplicates without contacting external services', async t => {
   const logs = [];
@@ -91,6 +92,12 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   config.port = server.address().port;
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}/api/god-says`;
+  const draftState = await fetch(`${base}/state`).then(r => r.json());
+  assert.equal(draftState.session.id, null);
+  assert.equal(draftState.current, true);
+  assert.deepEqual(draftState.worldEvents, []);
+  assert.deepEqual(await fetch(`${base}/sessions`).then(r => r.json()), []);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 0);
   const send = () => fetch(`${base}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: 'http-run-001', text: '建立彩虹茶话会，让天空出现巨大的彩虹' }) }).then(r => r.json());
   const first = await send();
   assert.equal(first.duplicate, false);
@@ -110,7 +117,8 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.match(currentInput.content, /^<dynamic_context>[\s\S]*<schedule_context>[\s\S]*整理星图/);
   assert.ok(currentInput.content.endsWith('</dynamic_context>\n\n建立彩虹茶话会，让天空出现巨大的彩虹'));
   assert.ok(requests[0].messages.some(m => m.role === 'system' && m.content.includes('<dialogue_rules>')));
-  assert.ok(requests[0].messages.filter(m => m.role === 'system').every(m => !m.content.includes('当前日期时间') && !m.content.includes('"startTime"')));
+  // 静态时间规则会引用“当前日期时间”这个词，不能把规则本身误判为当次时间数据。
+  assert.ok(requests[0].messages.filter(m => m.role === 'system').every(m => !m.content.replace(TIME_RULE, '').includes('当前日期时间') && !m.content.includes('"startTime"')));
   assert.equal(personaRequests.length, 1, 'tool rounds reuse the saved angel persona');
   assert.match(logs.join('\n'), new RegExp(`${first.run.id}/round-1`));
   assert.match(logs.join('\n'), /思考链/);
@@ -165,7 +173,8 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.equal((await fetch(`${base}/angel/image-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"kind":"bad"}' })).status, 400);
   assert.equal((await fetch(`${base}/runs/${first.run.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await fetch(`${base}/runs/${first.run.id}/stream`)).status, 404);
-  assert.equal((await fetch(`${base}/sessions`).then(r => r.json()))[0].preview, null);
+  assert.deepEqual(await fetch(`${base}/sessions`).then(r => r.json()), []);
+  assert.deepEqual(await fetch(`${base}/memories`).then(r => r.json()), []);
   assert.equal(repo.snapshot().runs.length, 0);
   assert.equal(repo.snapshot().messages.length, 0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM god_world_events').get().n, 1);

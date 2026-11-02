@@ -103,6 +103,7 @@ test('deletion removes request fragments and midnight starts an independent pref
   assert.ok(replay.messages.some(m => JSON.stringify(m) === JSON.stringify(saved.messages.at(-1))));
   f.repo.finish(third.id, 'completed');
   f.setTime('2026-11-03T01:00:00Z');
+  await createGodMemory(f.repo, async () => JSON.stringify({ summary: '昨日摘要', memories: [] })).archive();
   const tomorrow = f.repo.start('tomorrow', '新一天').run;
   const next = await f.prepare(tomorrow, { systemRules: '次日规则' });
   assert.match(next.messages[0].content, /次日规则/);
