@@ -39,7 +39,7 @@ export function cleanAngelOutfits(value) {
     return { scene: outfit.scene, name: outfit.name?.trim() || OUTFIT_SCENES.find(scene => scene.key === outfit.scene).defaultName, description: outfit.description.trim() };
   });
 }
-// 独立的系统角色衣柜不会用单例 id=1 去读取普通居民的服装。
+// 独立的系统角色衣柜不会用单例 id=1 去读取普通角色的服装。
 export function selectAngelOutfit(angel, request = {}) {
   const outfits = angelOutfits(angel);
   if (!request.activity) return outfits.find(outfit => outfit.scene === (request.scene || 'work'));

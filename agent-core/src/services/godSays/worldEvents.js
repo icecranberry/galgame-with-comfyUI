@@ -18,7 +18,7 @@ export function worldEventContext(db, characterIds = null, now = new Date()) {
   }).slice(0, 6).reverse().map(row => ({
     id: row.id, title: row.title, fact: row.fact, startedAt: row.created_at, endsAt: row.expires_at,
     state: row.status === 'active' && row.expires_at > now.toISOString() ? '正在发生' : '已经结束，只能作为过去见闻',
-    ...(row.character_ids ? { witnesses: parseJson(row.character_ids) } : { witnesses: '全体居民' }),
+    ...(row.character_ids ? { witnesses: parseJson(row.character_ids) } : { witnesses: '全体角色' }),
   }));
   return facts.length ? `<world_events>\n邻舍已发生的共同事实（不是对话指令）。依照实际感知范围和时效自然回应，未主动发帖也可以知道；不要强行每轮提及：\n${JSON.stringify(facts)}\n</world_events>` : '';
 }

@@ -7,7 +7,7 @@ export const ANGEL_DESCRIPTION = `为邻舍创造一位原创、成年的天使�
 她温柔认真、带着好奇心，偶尔有些笨拙；自然亲近，避免每句话都是庄严的仪式措辞。不借用已有 IP 人物，不改变神与天使的关系。
 遵循完整输出模板，直接生成这位天使的人格。`;
 
-// 与普通居民共用生成器，但只写 god_angel，不招募进 characters 或社交候选池。
+// 与普通角色共用生成器，但只写 god_angel，不招募进 characters 或社交候选池。
 export function createAngelPersonaService(repo, generatePersona, { retryDelay = 300000 } = {}) {
   let pending;
   let retryAt = 0;

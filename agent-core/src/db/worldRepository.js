@@ -1,7 +1,7 @@
 // 世界观 / 全局规则 / 系统规则仓储（独立模块，缩小 db/index.js 体积）。
 // 依赖方向（单向）：db/index.js 打开数据库后注入句柄并再导出本模块的函数。
 import { config } from '../config.js';
-import { SYSTEM_RULES_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { SYSTEM_RULES_CONTENT, THINKING_CHAIN_ZH_PLACEHOLDER, THINKING_CHAIN_ZH_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let _db = null;
 
@@ -104,7 +104,13 @@ export function getGlobalRule(key) {
  *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
  */
 export function getSystemRules({ roleplay = true } = {}) {
-  const content = SYSTEM_RULES_CONTENT;
+  // 思考链强制用简体中文：仅当 API 选择了「思考模式开」（thinkingMode === 'enabled'）时注入，
+  // 未开启思考（disabled / omit）时占位符替换为空，保持与旧口径逐字节一致。
+  const thinkingOn = config.llm.thinkingMode === 'enabled';
+  const content = SYSTEM_RULES_CONTENT.replace(
+    THINKING_CHAIN_ZH_PLACEHOLDER,
+    thinkingOn ? THINKING_CHAIN_ZH_CONTENT : ''
+  );
 
   // 基础内容
   let base = '';
@@ -112,7 +118,7 @@ export function getSystemRules({ roleplay = true } = {}) {
   if (!rpMatch) {
     base = content;  // 无标签（旧数据），向下兼容
   } else {
-    const before = content.slice(0, rpMatch.index).trim();
+    const before = content.slice(0, rpMatch.index).replace(/\n{3,}/g, '\n\n').trim();
     // 基础上下文始终保留，roleplay 指令按需包含
     base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
   }

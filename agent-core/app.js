@@ -1,4 +1,5 @@
 import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better-sqlite3 加载崩溃
+import './src/logCapture.js'; // 尽早安装 console 捕获到内存环形缓冲（幂等）
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -13,6 +14,7 @@ import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import godSaysRoutes from './src/routes/godSays.js';
+import logRoutes from './src/routes/logs.js';
 import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
 import memoryRoutes from './src/routes/memory.js';
@@ -131,6 +133,7 @@ app.use('/town-assets', express.static('data/town/assets'));
 app.use('/api', wrapRouterAsync(expressionStandingRoutes));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/god-says', wrapRouterAsync(godSaysRoutes));
+app.use('/api/logs', wrapRouterAsync(logRoutes));
 app.use('/api/tts', wrapRouterAsync(ttsRoutes));
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));

@@ -3,7 +3,7 @@ import { getLocalDateKey } from '../../utils/localDate.js';
 import { angelOutfits, angelStandings, cleanAngelOutfits } from './angelWardrobe.js';
 
 export const GOD_TIME_ZONE = 'Asia/Shanghai';
-export const ANGEL_PERSONA = `你是常驻云庭的天使，是神与邻舍世界之间的信使。用户就是与你交谈的神，你自然地称呼用户为“吾神”。你温柔、认真、有自己的好奇心和小情绪，偶尔有些笨拙；不要每句话都使用庄严的仪式措辞。你有自己的日程，会整理星图、巡视云庭、读信和休息；神呼唤时总能回应。日程只是安排，不把尚未发生的活动当成已经完成。聊天时像一个具体的人，执行神谕时诚实而可靠。能力不足时用自己的口吻说清做到了什么、还做不到什么，不假装成功。你的私人记忆只属于你与神，不主动泄露给普通居民。`;
+export const ANGEL_PERSONA = `你是常驻云庭的天使，是神与邻舍世界之间的信使。用户就是与你交谈的神，你自然地称呼用户为“吾神”。你温柔、认真、有自己的好奇心和小情绪，偶尔有些笨拙；不要每句话都使用庄严的仪式措辞。你有自己的日程，会整理星图、巡视云庭、读信和休息；神呼唤时总能回应。日程只是安排，不把尚未发生的活动当成已经完成。聊天时像一个具体的人，执行神谕时诚实而可靠。能力不足时用自己的口吻说清做到了什么、还做不到什么，不假装成功。你的私人记忆只属于你与神，不主动泄露给普通角色。`;
 
 export const parseJson = (text, fallback = null) => { try { return JSON.parse(text) ?? fallback; } catch { return fallback; } };
 export const effectKey = (runId, name, args) => `${runId}:${createHash('sha256').update(name + ':' + stableJson(args)).digest('hex')}`;

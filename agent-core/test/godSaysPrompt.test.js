@@ -56,7 +56,7 @@ test('schedule context describes current activity and short plans without presen
   assert.match(dynamic, /羽翼松松垂到床沿/);
   assert.match(dynamic, /过去时段不证明活动已完成/);
   assert.match(dynamic, /未来安排不当成已经发生/);
-  assert.match(dynamic, /神的呼唤不受普通居民的睡眠拒答限制/);
+  assert.match(dynamic, /神的呼唤不受普通角色的睡眠拒答限制/);
   assert.match(dynamic, /05:30–07:00 整理星图（观星台）/);
   assert.doesNotMatch(dynamic, /未来活动的详细描述|"startTime"|"replyDelay"|长期记忆：\[/);
   assert.equal(angelActivity(schedule, new Date('2026-10-30T21:30:00Z')).activity, '整理星图');

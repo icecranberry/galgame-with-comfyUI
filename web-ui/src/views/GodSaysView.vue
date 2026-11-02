@@ -34,7 +34,8 @@
       <div class="header-title"><h1>神说</h1><span :title="subtitle">{{ subtitle }}</span></div>
       <div class="header-actions">
         <GodSacredButton variant="ghost" tone="muted" size="sm" @click="openSchedule">今日日程</GodSacredButton>
-        <GodSacredButton class="god-detail-btn" variant="ghost" tone="muted" size="sm" @click="openAngel">角色详情</GodSacredButton>
+        <GodSacredButton class="god-detail-btn" variant="ghost" tone="muted" size="sm" @click="openAngel">天使介绍</GodSacredButton>
+        <GodSacredButton variant="ghost" tone="muted" size="sm" @click="logsOpen = true">日志</GodSacredButton>
       </div>
     </header>
 
@@ -225,6 +226,7 @@
         <p v-if="panelError" class="modal-error" role="alert">{{ panelError }}</p>
       </div>
     </linshe-modal>
+    <GodLogsPanel v-model="logsOpen" />
   </main>
 </template>
 
@@ -241,6 +243,7 @@ import CollapseTransition from '../components/CollapseTransition.vue'
 import AngelEmblem from '../components/godSays/AngelEmblem.vue'
 import GodSacredButton from '../components/godSays/GodSacredButton.vue'
 import GodAngelScheduleModal from '../components/godSays/GodAngelScheduleModal.vue'
+import GodLogsPanel from '../components/godSays/GodLogsPanel.vue'
 import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
 import { godMessageImages } from '../utils/godSaysImages.js'
@@ -268,6 +271,7 @@ let angelRequest = 0
 const angelCharacter = ref({ system_role: 'angel' })
 const confirm = inject('confirm', async () => false)
 const memoryOpen = ref(false)
+const logsOpen = ref(false)
 const sessions = ref([])
 const memories = ref([])
 const panelLoading = ref(false)
@@ -305,7 +309,7 @@ const SUGGESTION_POOL = [
   '帮我把今晚的行程改到露台',
   '我想在午后出去走走',
   '提醒我今晚早点歇息',
-  '请居民分享今天的动态',
+  '请角色分享今天的动态',
   '让大家发一条此刻的心情',
   '替我发一条朋友圈',
   '今天有人分享了什么吗？',
@@ -345,7 +349,7 @@ function rollSuggestions() {
   while (picked.length < 3 && pool.length) picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0])
   suggestions.value = picked
 }
-const coreToolLabels = { inspect_neighbors: '看看邻舍的近况', read_character: '了解角色与日程', set_schedule: '安排日程', publish_moment: '请居民分享动态', discuss_in_group: '把话题带进群聊', create_encounter: '开启一段奇遇', create_world_event: '让神谕成为现实', inspect_work: '查看回应进展', recall_memory: '翻阅往日记忆', list_capabilities: '查看可用能力' }
+const coreToolLabels = { inspect_neighbors: '看看邻舍的近况', read_character: '了解角色与日程', set_schedule: '安排日程', publish_moment: '请角色分享动态', discuss_in_group: '把话题带进群聊', create_encounter: '开启一段奇遇', create_world_event: '让神谕成为现实', inspect_work: '查看回应进展', recall_memory: '翻阅往日记忆', list_capabilities: '查看可用能力' }
 const toolLabels = computed(() => ({ ...Object.fromEntries((god.state?.toolCatalog || []).map(t => [t.name, t.label])), ...coreToolLabels }))
 const toolStateText = { running: '处理中', done: '已处理', failed: '暂未完成', uncertain: '需要核对' }
 const userAvatarFailed = ref(false)

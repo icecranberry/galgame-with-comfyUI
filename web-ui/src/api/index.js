@@ -20,6 +20,9 @@ export const getGodAngelActivity = () => request('/god-says/activity')
 export const retryGodWorldEvent = id => request(`/god-says/world-events/${id}/retry`, { method: 'POST' })
 export const retryGodSummary = id => request(`/god-says/sessions/${id}/summarize`, { method: 'POST' })
 
+export const getLogs = after => request('/logs' + (after ? `?after=${after}` : ''))
+export const clearLogs = () => request('/logs', { method: 'DELETE' })
+
 export const getPromptPresets = () => request('/presets')
 export const createPromptPreset = body => request('/presets', { method: 'POST', body })
 export const updatePromptPreset = (id, body) => request(`/presets/${id}`, { method: 'PUT', body })

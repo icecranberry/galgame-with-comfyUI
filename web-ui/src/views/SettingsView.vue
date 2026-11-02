@@ -1188,7 +1188,7 @@ v-model="wfCustomDraft" :options="customWorkflowOptions"
         </div>
       </Transition>
       <div v-if="wfModeDraft !== 'custom'" class="wf-mode-downloads">
-        <p class="wf-mode-dl-hint">整合包内一般只有一个模型（检查路径ComfyUI-aki-v3\ComfyUI\models\diffusion_models），如需额外下载：</p>
+        <p class="wf-mode-dl-hint">邻舍需要Anima base或者turbo中的至少一个，如需额外下载：</p>
         <div class="wf-dl-item">
           <span class="wf-dl-label">Anima-turbo：</span>
           <a href="https://civitai.com/api/download/models/3108589?fileId=2988553" target="_blank" rel="noopener">Civitai 下载</a>

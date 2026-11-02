@@ -21,7 +21,7 @@ function scheduleContext(schedule, now, timeZone, enabled, error) {
   if (current) {
     lines.push(`当前时段：${current.startTime}–${current.endTime}；当前活动：${current.activity}${current.location ? `；地点：${current.location}` : ''}。`);
     if (current.description) lines.push(`当前活动情境：${current.description}`);
-    if (current.replyDelay === -1) lines.push('你原本在休息，可以带着刚被唤醒的状态回应吾神；神的呼唤不受普通居民的睡眠拒答限制。');
+    if (current.replyDelay === -1) lines.push('你原本在休息，可以带着刚被唤醒的状态回应吾神；神的呼唤不受普通角色的睡眠拒答限制。');
   } else lines.push('当前没有匹配的活动，不猜测此刻的位置和经历。');
   if (schedule.length) lines.push('今日计划概览：', ...schedule.map(a => `- ${a.startTime}–${a.endTime} ${a.activity}${a.location ? `（${a.location}）` : ''}`));
   return `<schedule_context>\n${lines.join('\n')}\n</schedule_context>`;
@@ -50,7 +50,7 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
   const wardrobe = angel.outfits?.some(item => item.scene !== 'work' && item.description)
     ? `<angel_wardrobe>可用服装：${angel.outfits.filter(item => item.description).map(item => `${item.sceneLabel}（${item.name}）`).join('、')}。\n当前按日程穿着：${outfit.name}；${outfit.description}</angel_wardrobe>` : '';
   if (worldSetting && worldIntegrationRule) stableBlocks.push(worldIntegrationRule);
-  stableBlocks.push(`${agentRules}\n\n<dialogue_format_rules>\n${getCoreDialogueRules({ userName: '吾神' })}\n日常交流遵循天使本人的语气；问到外貌时依据下方人设自然回答，不读取或编造居民资料。汇报神谕时可用简短列表清楚说明实际结果与未完成部分。\n</dialogue_format_rules>`);
+  stableBlocks.push(`${agentRules}\n\n<dialogue_format_rules>\n${getCoreDialogueRules({ userName: '吾神' })}\n日常交流遵循天使本人的语气；问到外貌时依据下方人设自然回答，不读取或编造角色资料。汇报神谕时可用简短列表清楚说明实际结果与未完成部分。\n</dialogue_format_rules>`);
   stableBlocks.push(angel.persona);
   const info = [user.nickname && `称呼：${user.nickname}`, user.gender && `性别：${user.gender}`,
     user.appearance && `外观特征：${user.appearance}`, user.persona && `其他说明：${user.persona}`].filter(Boolean);
