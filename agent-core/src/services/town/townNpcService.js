@@ -135,6 +135,11 @@ export function updateNpc(id, { displayName, persona, brief, job, routine, trait
 export function deleteNpc(id) {
   const db = getDb();
   return db.transaction(() => {
+    // 与「酒馆删除角色」同口径：显式清理该居民的朋友圈（帖/评论/点赞），不单纯依赖外键级联，
+    // 避免外键在个别环境未生效时出现「删了居民、朋友圈还在」。
+    db.prepare(`DELETE FROM moment_likes WHERE post_id IN (SELECT id FROM moment_posts WHERE npc_id = ?)`).run(id);
+    db.prepare(`DELETE FROM moment_comments WHERE post_id IN (SELECT id FROM moment_posts WHERE npc_id = ?)`).run(id);
+    db.prepare('DELETE FROM moment_posts WHERE npc_id = ?').run(id);
     const r = db.prepare('DELETE FROM town_npcs WHERE id = ?').run(id);
     createTownActorRegistry(db).synchronize();
     return { ok: r.changes > 0 };

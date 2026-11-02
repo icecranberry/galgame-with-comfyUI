@@ -570,11 +570,18 @@ router.put('/npcs/:id', (req, res) => {
   res.json({ npc });
 });
 
-router.delete('/npcs/:id', (req, res) => {
+router.delete('/npcs/:id', (req, res, next) => {
   const id = parseInt(req.params.id, 10);
-  deleteNpc(id);
-  setNpcEnabled(id, false); // 清理运行时（不存在时无副作用）
-  res.json({ ok: true });
+  if (!Number.isFinite(id)) return res.status(400).json({ error: '无效的居民 id' });
+  try {
+    const result = deleteNpc(id);
+    setNpcEnabled(id, false); // 清理运行时（不存在时无副作用）
+    if (!result.ok) return res.status(404).json({ error: '居民不存在或已删除' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[town] delete npc failed:', err.message);
+    next(err);
+  }
 });
 
 router.post('/npcs/:id/sprites', async (req, res) => {

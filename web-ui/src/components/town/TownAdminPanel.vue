@@ -465,7 +465,7 @@ v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
 </template>
 
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch, nextTick, inject } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'
 import LinsheButton from '../ui/LinsheButton.vue'
@@ -481,6 +481,7 @@ defineEmits(['close', 'new-town', 'changed'])
 
 const props = defineProps({ open: Boolean })
 const town = useTownStore()
+const toast = inject('toast', null)
 const tab = ref('npcs')
 const npcs = ref([])
 const sortedNpcs = computed(() => {
@@ -848,8 +849,10 @@ async function removeNpc(npc) {
     await api.deleteTownNpc(npc.id)
     detail.value = null
     await loadNpcs()
+    toast?.('已删除居民', 'success')
   } catch (err) {
     console.warn('[town-admin] delete failed:', err?.message)
+    toast?.(err?.message || '删除居民失败，请重试', 'error')
   }
 }
 

@@ -239,6 +239,14 @@ ${weatherHint}`;
     console.error(`[npcMoments] Image failed for ${npc.display_name}:`, err.message);
   }
 
+  // 4.5 居民可能在生成期间被删除：此时丢弃本条并清理残留，避免「删了居民还能发朋友圈」
+  const stillExists = db.prepare('SELECT 1 FROM town_npcs WHERE id = ?').get(npc.id);
+  if (!stillExists) {
+    try { db.prepare('DELETE FROM moment_posts WHERE id = ?').run(postId); } catch { /* 可能已被级联删除 */ }
+    console.log(`[npcMoments] NPC #${npc.id} 已在生成期间被删除，丢弃帖子 ${postId}`);
+    return null;
+  }
+
   // 5. 完成 + 下次发帖时间
   db.prepare(`UPDATE moment_posts SET content = ?, prompt = ?, images = ?, status = 'done' WHERE id = ?`)
     .run(text, imagePrompt, JSON.stringify(imageUrls), postId);

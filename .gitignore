@@ -94,3 +94,4 @@ agent-core/test/*
 !agent-core/test/imageCacheRevalidation.test.js
 !agent-core/test/godSays*.test.js
 !agent-core/test/itemInjectState.test.js
+!agent-core/test/townNpcDelete.test.js

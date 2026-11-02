@@ -168,7 +168,7 @@ async function tick() {
     // 镇民首次启动初始化：从未定时的镇民设定首帖时间（1~4 小时内），须在选候选前完成
     if (townNpcMomentsOn) {
       const pendingNpcs = db.prepare(
-        `SELECT id FROM town_npcs WHERE town_enabled = 1 AND moments_disabled = 0 AND next_moment_at IS NULL ${npcMapClause}`
+        `SELECT id FROM town_npcs WHERE town_enabled = 1 AND moments_disabled = 0 AND COALESCE(character_managed, 0) = 0 AND next_moment_at IS NULL ${npcMapClause}`
       ).all(...npcMapArgs);
       for (const n of pendingNpcs) {
         const delay = 3600_000 + Math.random() * 3 * 3600_000;
@@ -180,7 +180,7 @@ async function tick() {
     // 每个镇民 24 小时内最多一条（只数 done 帖，失败重试不受限）
     const npcCandidate = townNpcMomentsOn ? db.prepare(`
       SELECT n.* FROM town_npcs n
-      WHERE n.town_enabled = 1 AND n.moments_disabled = 0
+      WHERE n.town_enabled = 1 AND n.moments_disabled = 0 AND COALESCE(n.character_managed, 0) = 0
         ${npcMapClauseAliased}
         AND (n.next_moment_at IS NULL OR n.next_moment_at <= datetime('now'))
         AND n.id NOT IN (
@@ -288,7 +288,7 @@ function cleanupStuckPosts() {
         db.prepare(`
           UPDATE town_npcs
           SET next_moment_at = datetime('now', '+' || (ABS(RANDOM() % 300) + 30) || ' seconds')
-          WHERE town_enabled = 1 AND moments_disabled = 0
+          WHERE town_enabled = 1 AND moments_disabled = 0 AND COALESCE(character_managed, 0) = 0
             AND next_moment_at <= datetime('now')
         `).run();
       }
