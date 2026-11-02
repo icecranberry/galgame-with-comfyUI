@@ -24,13 +24,23 @@
 //    手动改它没有意义（下次 tag 会被覆盖），想让用户重新看到弹窗，
 //    改文案就行了 —— 哪怕只是加一个标点。
 // ────────────────────────────────────────────────────────────────────────
-export const CHANGELOG_FLAG = 'bb5218ad5f4c'
+export const CHANGELOG_FLAG = '20d0d835dc82'
 
 /** 弹窗标题 */
 export const CHANGELOG_TITLE = '更新说明'
 
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
+  {
+    version: 'v4.1.0',
+    date: '2026-11-2',
+    title: '上线“神说”功能',
+    summary: '「仪式召唤！」',
+    items: [
+      '聊天列表加一个“神说”入口，天使拥有整个邻舍的工具调用功能，释放你的想象力',
+      '修复TTS的环境问题，如果更新后还不能使用，那就重新下新的tts-service依赖包',
+    ],
+  },
   {
     version: 'v4.0.0',
     date: '2026-10-30',
