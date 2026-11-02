@@ -149,4 +149,7 @@ test('current angel wardrobe stays in dynamic context and sleep follows pajamas 
   const boundary = dressed.lorebookOptions.cacheBoundary;
   assert.deepEqual(dressed.messages.slice(0, boundary.index + 1), base.messages.slice(0, boundary.index + 1));
   assert.match(dressed.messages.at(-1).content, /<angel_wardrobe>[\s\S]*云朵睡衣[\s\S]*a blue nightdress, barefoot/);
+  const disabled = build({ angel: { ...angel, outfits, scene_outfits_json: JSON.stringify(outfits) }, scheduleEnabled: false });
+  assert.match(disabled.messages.at(-1).content, /当前穿着：[\s\S]*沿用天使人设中的默认外观/);
+  assert.doesNotMatch(disabled.messages.at(-1).content, /当前按日程穿着|a blue nightdress/);
 });

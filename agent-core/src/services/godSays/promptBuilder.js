@@ -35,7 +35,7 @@ function workContext(work) {
   return `<god_work>\n最近神谕的实际状态，优先于旧摘要中的推测；详情和最新结果用 inspect_work 核对：\n${lines.join('\n')}\n</god_work>`;
 }
 
-// 日程由 promptState 按已发送快照去重；每条 user 只记录自己的发送时刻，不改写旧时间。
+// 日程、着装、世界事件与任务状态由 promptState 按已发送快照去重；每条 user 保留自己的发送时刻。
 // 工具调用历史不能压成 active_chat_history 文本，否则会丢失工具关联和 thoughtSignature。
 export function buildGodChatContext({ systemRules, worldSetting = '', worldIntegrationRule = '', agentRules,
   angel, user = {}, history = { messages: [] }, recall = {}, schedule = [], scheduleEnabled = true,
@@ -45,7 +45,7 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
   const activity = scheduleEnabled ? angelActivity(schedule, now, timeZone) : null;
   const outfit = selectAngelOutfit({ ...angel, schedule }, { activity, activity_index: schedule.indexOf(activity) });
   const wardrobe = angel.outfits?.some(item => item.scene !== 'work' && item.description)
-    ? `<angel_wardrobe>可用服装：${angel.outfits.filter(item => item.description).map(item => `${item.sceneLabel}（${item.name}）`).join('、')}。\n当前按日程穿着：${outfit.name}；${outfit.description}</angel_wardrobe>` : '';
+    ? `<angel_wardrobe>可用服装：${angel.outfits.filter(item => item.description).map(item => `${item.sceneLabel}（${item.name}）`).join('、')}。\n当前${scheduleEnabled ? '按日程' : ''}穿着：${outfit.name}；${outfit.scene === 'work' ? '沿用天使人设中的默认外观。' : outfit.description}</angel_wardrobe>` : '';
   if (worldSetting && worldIntegrationRule) stableBlocks.push(worldIntegrationRule);
   stableBlocks.push(`${agentRules}\n\n<dialogue_format_rules>\n${getCoreDialogueRules({ userName: '吾神' })}\n日常交流遵循天使本人的语气；问到外貌时依据下方人设自然回答，不读取或编造角色资料。汇报神谕时可用简短列表清楚说明实际结果与未完成部分。\n</dialogue_format_rules>`);
   stableBlocks.push(angel.persona);
@@ -55,13 +55,14 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
   const rhythm = `${getChatRhythmRules()}\n以上节奏适用于日常交流；执行神谕时仍需清楚汇报结果、失败与待办，可以按需使用列表，不为了聊天语气省略重要状态。\n${TIME_RULE}`;
   const summaryBlock = recall.summary && `[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n${recall.summary}`;
   const scheduleBlock = scheduleContext(schedule, scheduleEnabled, angel.schedule_error);
+  const workBlock = workContext(work);
   const { messages, metadata } = buildChatContext({
     stableBlocks, preSummarySystem: rhythm, summaryBlock, history: history.messages,
     preserveStructuredHistory: true,
     dynamicBlocks: [
       scheduleBlock,
       wardrobe,
-      worldContext, workContext(work),
+      worldContext, workBlock,
       `<time_context>\n本条用户消息发送时间（${timeZone}）：${new Intl.DateTimeFormat('zh-CN', { timeZone, dateStyle: 'full', timeStyle: 'short' }).format(now)}\n</time_context>`,
     ],
   });
@@ -79,7 +80,7 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
       ...images.map(url => ({ type: 'image_url', image_url: { url } })),
     ];
   }
-  return { messages, metadata: { ...metadata, scheduleBlock }, lorebookOptions: {
+  return { messages, metadata: { ...metadata, scheduleBlock, contextBlocks: { world_events: worldContext, god_work: workBlock, angel_wardrobe: wardrobe } }, lorebookOptions: {
     userName: '吾神', characterName: angel.display_name, characterDescription: angel.persona,
     personaTexts: [angel.persona], staticTexts: [...stableBlocks, rhythm],
     cacheBoundary: { index: stableBlocks.length, offset: rhythm.length },

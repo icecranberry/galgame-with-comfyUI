@@ -1,6 +1,7 @@
 // 每个 user 保存一次最终请求片段（动态预设 system + user，含世界书与图片）。
 // 当天前缀只保存一次；后续回合重放片段并追加原生 assistant/tool，不回写旧片段。
 import { createHash } from 'node:crypto';
+import { appendContextUpdates } from './contextUpdates.js';
 
 // 只读取系统组装的开头区块，不匹配用户原话中引用的日程标签；兼容旧版图片消息。
 function storedSchedule(messages) {
@@ -58,13 +59,16 @@ export function createGodPromptState(repo, prepareNarrative) {
     if (sameSchedule) currentUser = withSchedule(currentUser, scheduleBlock, '');
     else if (scheduleBlock && previousSchedule) currentUser = withSchedule(currentUser, scheduleBlock,
       scheduleBlock.replace('<schedule_context>', '<schedule_context>\n日程更新：以下版本替代此前日程。'));
+    const incremental = appendContextUpdates(currentUser, context.metadata.contextBlocks,
+      history.messageIds.slice(0, -1).map(id => snapshots.get(id)).filter(Boolean));
+    currentUser = incremental.message;
     const sourceRules = context.messages.slice(0, context.lorebookOptions.cacheBoundary.index + 1);
     const sourceRuleHash = createHash('sha256').update(JSON.stringify(sourceRules)).digest('hex');
     const ruleUpdates = prefix && sourceRuleHash !== (previousTurn?.sourceRuleHash ?? prefix.sourceRuleHash)
       ? [{ role: 'system', content: `基础规则与角色资料已更新；从本轮起以下内容替代先前对应的规则与资料：\n\n${sourceRules.map(m => m.content).join('\n\n')}` }] : [];
     const messages = prefix
       ? [...prefix.messages, ...replay, ...ruleUpdates, currentUser]
-      : context.messages;
+      : [...context.messages.slice(0, -1), currentUser];
     const frozenLore = [...(prefix?.frozenLore || []), ...[...snapshots.values()].flatMap(s => s.frozenLore || [])];
     const options = { ...context.lorebookOptions, scope: `god:angel:${run.session_id}`, turnKey: run.id,
       step: db.prepare('SELECT COUNT(*) n FROM god_runs WHERE session_id=?').get(run.session_id).n,
@@ -83,6 +87,7 @@ export function createGodPromptState(repo, prepareNarrative) {
     const presetStableContent = prepared.presetReport?.stableContent || '';
     const presetActive = !!prepared.presetReport?.presetActive;
     const turn = { messages: prepared.messages.slice(tailStart), frozenLore: keys, presetStableContent, presetActive, sourceRuleHash,
+      contextUpdates: incremental.contextUpdates,
       ...(!sameSchedule && scheduleBlock ? { scheduleBlock } : {}) };
     // 旧版本会话没有快照，首次升级保留其原始历史；无法凭空还原过去的动态情境。
     const prefixEnd = prepared.messages.findIndex(m => m.role === 'user');
