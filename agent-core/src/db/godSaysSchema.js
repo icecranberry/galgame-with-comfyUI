@@ -122,4 +122,15 @@ export function migrateGodSaysSchema(db) {
       `);
     } finally { if (fkWasOn) db.pragma('foreign_keys = ON'); }
   }
+  // 请求快照独立保存，界面/归档仍读取用户原话，不暴露内部提示词或重复存整段历史。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS god_prompt_prefixes (
+      session_id INTEGER PRIMARY KEY REFERENCES god_sessions(id) ON DELETE CASCADE,
+      payload_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS god_prompt_turns (
+      message_id INTEGER PRIMARY KEY REFERENCES god_messages(id) ON DELETE CASCADE,
+      payload_json TEXT NOT NULL
+    );
+  `);
 }

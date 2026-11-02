@@ -57,7 +57,7 @@ export const GOD_MODULE_TOOLS = [
   tool('search_character_memory', '记忆', '搜索角色记忆', '仅在神要求了解某个角色往事时查询；不会把天使私有记忆写给角色。', { ...char, query: text('搜索内容', 200), limit: integer('返回条数', 1, 20) }, ['character_id', 'query'], 'GET', '/api/memory/search', { query: { query: 'q', limit: 'top_k' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('list_character_memories', '记忆', '读取角色记忆目录', '按角色读取已有记忆片段，支持分页。', { ...char, ...page }, ['character_id'], 'GET', '/api/memory/fragments', { query: { limit: 'limit', offset: 'offset' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('search_gallery', '相册', '查找邻舍图片', '可按角色和文件夹筛选已保存图片，返回图片地址。', { ...char, folder: text('先查询得到的文件夹键', 80), ...page }, [], 'GET', '/api/images/gallery', { query: { character_id: 'character', folder: 'folder', limit: 'limit', offset: 'offset' }, href: '/gallery' }),
-  tool('generate_image', '相册', '生成并发送图片', '直接使用图片实验室的自由画面接口，生成后保存并发送到当前神说对话。prompt 填中文画面描述；画自己时把天使人设中的外貌写完整，其他角色由原接口匹配资料。未指定宽高时沿用当前对话分辨率，宽高仅覆盖本次出图，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
+  tool('generate_image', '相册', '生成并发送图片', '直接使用图片实验室的无限制画面接口，生成后保存并发送到当前神说对话。prompt 填中文画面描述；画自己时把天使人设中的外貌写完整，其他角色由原接口匹配资料。未指定宽高时沿用当前对话分辨率，宽高仅覆盖本次出图，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
     prompt: text('完整画面描述，不填文件路径', 5000), width: integer('可选宽度像素；神指定尺寸或比例时设置，默认对话宽度', 256, 4096),
     height: integer('可选高度像素；默认对话高度', 256, 4096), artist: text('可选画师风格串；默认沿用对话画师设置', 2000),
   }, ['prompt'], 'POST', '/api/images/test-style', { body: a => ({ sceneDesc: a.prompt, mode: 'chat', saveToChat: true,

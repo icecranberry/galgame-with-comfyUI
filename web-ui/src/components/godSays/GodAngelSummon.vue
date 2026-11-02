@@ -29,7 +29,7 @@
     </header>
     <div class="summon-form">
       <div class="summon-chips" role="group" aria-label="天使性格">
-        <GodSacredButton v-for="opt in options" :key="opt.key" variant="sigil" :active="selected.includes(opt.key)" :aria-pressed="selected.includes(opt.key)" :disabled="busy" :title="opt.hint || opt.label" touch-target @click="toggle(opt.key)">
+        <GodSacredButton v-for="opt in options" :key="opt.key" variant="sigil" :active="selected.includes(opt.key)" :aria-pressed="selected.includes(opt.key)" :disabled="busy" touch-target @click="toggle(opt.key)">
           {{ opt.label }}
         </GodSacredButton>
         <GodSacredButton variant="sigil" :active="customOpen || !!customText.trim()" :aria-expanded="customOpen" :aria-controls="customId" :disabled="busy" touch-target @click="toggleCustom">自定义</GodSacredButton>

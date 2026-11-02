@@ -37,26 +37,41 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
   }
   const latestSession = key => db.prepare('SELECT * FROM god_sessions WHERE day=? ORDER BY seq DESC, id DESC LIMIT 1').get(key);
   const openSession = key => db.prepare("SELECT * FROM god_sessions WHERE day=? AND status='open' ORDER BY seq DESC, id DESC LIMIT 1").get(key);
-  function today() {
+  function today({ persist = true } = {}) {
     const key = day();
     db.prepare("UPDATE god_sessions SET status='closing' WHERE day < ? AND status='open'").run(key);
     const open = openSession(key);
     if (open) return open;
     // 当天首次建立会话；同一天的后续对话由 summonSession 以 seq+1 追加。
     const next = db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM god_sessions WHERE day=?').get(key).seq;
+    // 浏览页面和召唤只返回草稿，首条消息受理时才落库。
+    if (!persist) return { id: null, day: key, time_zone: timeZone, seq: next, status: 'open',
+      summary: '', memories_json: '[]', summary_status: 'pending', summary_error: null, schedule_json: '[]' };
     db.prepare('INSERT INTO god_sessions(day,time_zone,seq,created_at) VALUES (?,?,?,?)').run(key, timeZone, next, timestamp());
     return latestSession(key);
   }
-  // 重新召唤后，若当天最新会话已有内容，则再开一条当天新会话承载新天使的对话；
-  // 当天还没有任何对话、或最新会话仍是空对话时复用现有会话（空对话不出现在左侧列表）。
+  // 重新召唤结束旧会话；新会话等第一条消息再保存，重复召唤不积累空记录。
   function summonSession() {
     const key = day();
-    const latest = latestSession(key) || today();
-    const hasContent = Number(db.prepare('SELECT COUNT(*) AS n FROM god_messages WHERE session_id=?').get(latest.id).n) > 0;
-    if (!hasContent) return latest;
-    const next = db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM god_sessions WHERE day=?').get(key).seq;
-    db.prepare('INSERT INTO god_sessions(day,time_zone,seq,created_at) VALUES (?,?,?,?)').run(key, timeZone, next, timestamp());
-    return latestSession(key);
+    db.prepare("UPDATE god_sessions SET status='closing' WHERE day=? AND status='open'").run(key);
+    pruneEmptySessions();
+    return today({ persist: false });
+  }
+  function pruneEmptySessions() {
+    // 保留删除对话后的幂等墓碑及业务关联，仅清理从未产生任何内容的空壳。
+    db.prepare(`DELETE FROM god_sessions WHERE NOT EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=god_sessions.id)
+      AND NOT EXISTS(SELECT 1 FROM god_runs r WHERE r.session_id=god_sessions.id)`).run();
+  }
+  function listSessions(before = '9999-12-31') {
+    return db.prepare(`SELECT s.id,s.day,s.seq,s.created_at,s.status,s.summary,s.summary_status,s.summary_error,
+      (SELECT substr(r.input,1,160) FROM god_runs r WHERE r.session_id=s.id AND r.deleted_at IS NULL ORDER BY r.created_at,r.rowid LIMIT 1) AS preview
+      FROM god_sessions s WHERE s.day<? AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user')
+      ORDER BY s.day DESC,s.seq DESC LIMIT 60`).all(before);
+  }
+  function listMemories() {
+    return db.prepare(`SELECT id,day,summary,memories_json FROM god_sessions s WHERE summary_status='done'
+      AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user')
+      ORDER BY day DESC LIMIT 90`).all().map(s => ({ ...s, memories: parseJson(s.memories_json, []) }));
   }
   function message(run, role, content = '', extra = {}) {
     const id = Number(db.prepare(`INSERT INTO god_messages(session_id,run_id,role,content,reasoning,tool_calls,tool_call_id,provider_json,status,created_at)
@@ -152,7 +167,8 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     return { ...ensureAngel(), persona_changed: current.persona !== persona };
   }
   function snapshot(sessionId) {
-    const active = today();
+    pruneEmptySessions();
+    const active = today({ persist: false });
     const session = sessionId ? db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId) : active;
     if (!session) throw Object.assign(new Error('这一天的对话不存在'), { status: 404 });
     return {
@@ -164,5 +180,5 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
       today: day(),
     };
   }
-  return { db, now, day, timeZone, timestamp, today, summonSession, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
+  return { db, now, day, timeZone, timestamp, today, summonSession, pruneEmptySessions, listSessions, listMemories, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
 }

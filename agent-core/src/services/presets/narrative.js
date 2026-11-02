@@ -8,7 +8,10 @@ export function createNarrativeRuntime({ preset = preparePreset, lorebook = prep
   client = () => import('../../llm/llm-client.js') } = {}) {
   async function prepareNarrativePrompt(messages, lorebookOptions = {}, presetOptions = {}) {
     const compiled = await preset(messages, { ...presetOptions, lorebook:lorebookOptions });
-    const reservedTokens = compiled.report?.content ? estimateTokens(compiled.report.content) + 4 : 0;
+    const presetContent = presetOptions.presetPlacement === 'cache'
+      ? [!presetOptions.frozenPrefix && compiled.report?.stableContent, compiled.report?.tailContent].filter(Boolean).join('\n\n')
+      : compiled.report?.content;
+    const reservedTokens = presetContent ? estimateTokens(presetContent) + 4 : 0;
     // 添加 system1 前按原消息结构解析锚点，并先为预设预留 token 预算。
     const book = await lorebook(messages, lorebookOptions === false ? false : {
       ...lorebookOptions, reservedTokens:(lorebookOptions.reservedTokens || 0) + reservedTokens,

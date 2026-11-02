@@ -274,6 +274,52 @@ test('delivery recovery reconciles committed side effects without reposting', t 
   assert.equal(world.list(event.id)[0].deliveries.find(d => d.kind === 'group').result.partial, true);
 });
 
+test('daily history grows beyond the former window, ignores legacy compaction and resets at midnight', async t => {
+  const { repo, db, setTime } = fixture(t);
+  const memory = createGodMemory(repo, async () => assert.fail('today must not be summarized'));
+  const expected = [];
+  let sessionId;
+  for (let i = 0; i < 5; i++) {
+    const input = `第${i}轮：${'长对话'.repeat(5000)}`;
+    const run = repo.start(`full-day-${i}`, input).run;
+    sessionId = run.session_id;
+    expected.push({ role: 'user', content: input });
+    repo.message(run, 'assistant', `答复${i}`);
+    expected.push({ role: 'assistant', content: `答复${i}` });
+    repo.finish(run.id, 'completed');
+  }
+  assert.deepEqual((await memory.contextHistory(sessionId)).messages, expected);
+  db.prepare("UPDATE god_sessions SET context_summary='旧版压缩摘要',context_last_message=99999 WHERE id=?").run(sessionId);
+  assert.deepEqual(await memory.contextHistory(sessionId), { messages: expected });
+  setTime('2026-10-30T16:01:00.000Z');
+  const next = repo.start('new-day-full-history', '新的一天').run;
+  assert.notEqual(next.session_id, sessionId);
+  assert.deepEqual(await memory.contextHistory(next.session_id), { messages: [{ role: 'user', content: '新的一天' }] });
+  assert.deepEqual((await memory.contextHistory(sessionId)).messages, expected);
+});
+
+test('automatic past context contains chronological summaries only, excluding today and raw fallback', t => {
+  const { repo, db, setTime } = fixture(t);
+  const memory = createGodMemory(repo, async () => assert.fail('read only'));
+  const expected = [];
+  for (let day = 20; day <= 29; day++) {
+    setTime(`2026-10-${day}T02:00:00Z`);
+    const session = repo.today();
+    db.prepare("UPDATE god_sessions SET summary=?,summary_status='done',memories_json=? WHERE id=?")
+      .run(`第${day}天摘要`, JSON.stringify([{ kind: 'preference', text: '不自动注入的长期记忆' }]), session.id);
+    expected.push(`2026-10-${day}：第${day}天摘要`);
+  }
+  setTime('2026-10-30T02:00:00Z');
+  const pending = repo.start('pending-summary', '未归档原文不应自动注入').run;
+  repo.finish(pending.id, 'completed');
+  setTime('2026-10-31T02:00:00Z');
+  const today = repo.today();
+  db.prepare("UPDATE god_sessions SET summary='今日摘要',summary_status='done' WHERE id=?").run(today.id);
+  expected.push('2026-10-30：摘要尚未完成。');
+  assert.deepEqual(memory.pastSummaries(), { summary: expected.join('\n\n') });
+  assert.deepEqual(memory.pastSummaries('2026-10-30'), { summary: expected.slice(0, -1).join('\n\n') });
+});
+
 test('daily archive waits for in-flight turn, retries failed summaries, preserves transcript, and stores private memories', async t => {
   const { repo, db, setTime } = fixture(t);
   let attempts = 0;

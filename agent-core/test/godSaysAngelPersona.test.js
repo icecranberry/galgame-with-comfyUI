@@ -100,13 +100,26 @@ test('worldbook anchors locate actual creation identity/world and keep condition
   assert.ok(result.placements.every(p => p.actualAnchor && Number.isInteger(p.index) && Number.isInteger(p.offset)));
 });
 
-test('personality hints describe traits without assigning concrete targets, places or routines', () => {
-  const text = ANGEL_PERSONALITIES.map(p => p.hint).join('\n');
-  assert.doesNotMatch(text, /你|吾神|云庭|封印之境|小太阳|别过脸|整理星图/);
-  const prompt = personalityPrompt(['chunibyo', 'mesugaki']);
-  assert.match(prompt, /中二：想象力旺盛/);
-  assert.match(prompt, /雌小鬼：顽皮好胜/);
-  assert.match(prompt, /不预设具体对象、经历或场景/);
+test('personality tags carry only selected names, without preset supplementary descriptions', () => {
+  for (const option of ANGEL_PERSONALITIES) {
+    assert.deepEqual(Object.keys(option).sort(), ['key', 'label']);
+    assert.equal(personalityPrompt([option.key]), `【本次选中的核心性格】\n${option.label}`);
+  }
+  assert.equal(personalityPrompt(['chunibyo', 'mesugaki', 'chunibyo', 'unknown']), '【本次选中的核心性格】\n中二、雌小鬼');
+  assert.equal(personalityPrompt([]), '【本次选中的核心性格】\n温柔');
+});
+
+test('selected personalities drive the whole character card and the final task', () => {
+  for (const env of [environment, {}]) {
+    const { messages } = buildAngelPersonaRequest({ personalities: ['sharp', 'scheming'] }, env);
+    assert.equal(messages.at(-2).content, '【本次选中的核心性格】\n毒舌、腹黑');
+    assert.match(messages.at(-1).content, /以本次选中的性格为核心/);
+    const text = messages.map(message => message.content).join('\n');
+    assert.match(text, /围绕这些性格塑造身份经历、说话方式、内在动机、情绪反应、行为习惯与好恶/);
+    assert.match(text, /每一种所选性格都有明确表现/);
+    assert.match(text, /不得把不同选择统一写成温柔、包容的通用天使/);
+    assert.doesNotMatch(text, /性格标签用于补充|这些描述只约束|观察敏锐，表达犀利|心思缜密，情绪隐蔽/);
+  }
 });
 
 test('angel output is the complete persona itself; no name prelude, baseline JSON or empty section is accepted', () => {

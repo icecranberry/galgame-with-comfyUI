@@ -29,7 +29,9 @@ export function buildAngelImageRequest(angel, kind, request, { systemRules, worl
     { id: 'god:angel', base_prompt: angel.persona }, { outfits: { limited: [outfit], exclusive: null } }) });
   const activity = request.activity;
   const task = [activity && `日程日期：${request.day}；时段：${activity.startTime}–${activity.endTime}；活动：${activity.activity}；地点：${activity.location || '云庭'}；情境：${activity.description || ''}${activity.replyDelay === -1 ? '；正在睡眠，必须闭眼' : ''}`,
-    outfit?.description && `本次服装：${outfit.sceneLabel || outfit.scene} · ${outfit.name}；使用上方对应外观，不混穿默认服装。`,
+    outfit?.description && (outfit.scene === 'work'
+      ? '本次服装：默认服饰；使用上方角色默认外观中描述的服饰。'
+      : `本次服装：${outfit.sceneLabel || outfit.scene} · ${outfit.name}；使用上方对应外观，不混穿默认服饰。`),
     request.requirement && `额外要求：${request.requirement}`, `为「${angel.display_name}」生成${kind === 'avatar' ? '头像' : kind === 'standing' ? '全身形象' : '这一日程瞬间的照片'}，只输出英文提示词。`].filter(Boolean).join('\n\n');
   messages.push({ role: 'user', content: task });
   return { messages, lorebook: { scope: `god:angel:image:${kind}`, userName: '吾神', characterName: angel.display_name, characterDescription: persona,

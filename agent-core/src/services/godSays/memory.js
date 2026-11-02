@@ -48,7 +48,9 @@ export function createGodMemory(repo, summarize) {
     if (archiving) return;
     archiving = true;
     try {
+      repo.pruneEmptySessions();
       const session = db.prepare(`SELECT s.* FROM god_sessions s WHERE day<? AND summary_status IN ('pending','failed')
+        AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user')
         AND summary_attempts<3 AND (summary_attempt_at IS NULL OR summary_attempt_at<?)
         AND NOT EXISTS(SELECT 1 FROM god_runs r WHERE r.session_id=s.id AND r.status='running') ORDER BY day LIMIT 1`)
         .get(repo.day(), new Date(repo.now().getTime() - 300000).toISOString());
@@ -56,30 +58,20 @@ export function createGodMemory(repo, summarize) {
       const rows = db.prepare('SELECT * FROM god_messages WHERE session_id=? ORDER BY id').all(session.id);
       db.prepare("UPDATE god_sessions SET status='archived',summary_status='running',summary_attempts=summary_attempts+1,summary_attempt_at=? WHERE id=?").run(repo.timestamp(), session.id);
       try {
-        const summary = rows.length ? await summarizeRows(rows) : { summary: '当天没有对话。', memories: [] };
+        const summary = await summarizeRows(rows);
         db.prepare("UPDATE god_sessions SET summary=?,memories_json=?,summary_status='done',summary_error=NULL WHERE id=?").run(summary.summary, JSON.stringify(summary.memories), session.id);
       } catch (err) {
         db.prepare("UPDATE god_sessions SET summary_status='failed',summary_error=? WHERE id=?").run(err.message, session.id);
       }
     } finally { archiving = false; }
   }
-  async function contextHistory(sessionId) {
-    const session = db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId);
-    const all = db.prepare('SELECT * FROM god_messages WHERE session_id=? AND id>? ORDER BY id').all(sessionId, session.context_last_message);
-    // 以完整 run 为边界压缩，始终保留最近两轮；工具调用/结果不被拆断。
-    const runIds = [...new Set(all.map(m => m.run_id))];
-    if (transcript(all).length > 60000 && runIds.length > 2) {
-      const olderIds = new Set(runIds.slice(0, -2));
-      const older = all.filter(m => olderIds.has(m.run_id));
-      const result = await summarizeRows(older, session.context_summary);
-      session.context_summary = result.summary;
-      session.context_last_message = older.at(-1).id;
-      db.prepare('UPDATE god_sessions SET context_summary=?,context_last_message=? WHERE id=?').run(result.summary, session.context_last_message, sessionId);
-    }
-    const rows = all.filter(m => m.id > session.context_last_message);
+  async function contextHistory(sessionId, { includeIds = false } = {}) {
+    // 每日独立会话完整累积；忽略旧版压缩游标，从原始记录恢复当天全部历史。
+    const rows = db.prepare('SELECT * FROM god_messages WHERE session_id=? ORDER BY id').all(sessionId);
     const toolIds = new Set(rows.filter(m => m.role === 'tool' && m.status === 'done').map(m => `${m.run_id}:${m.tool_call_id}`));
     const acceptedToolIds = new Set();
     const messages = [];
+    const messageIds = [];
     for (const row of rows) {
       if (row.status !== 'done') continue;
       const calls = parseJson(row.tool_calls, []);
@@ -92,11 +84,21 @@ export function createGodMemory(repo, summarize) {
         ...(calls.length ? { tool_calls: calls } : {}),
         ...(row.role === 'tool' ? { tool_call_id: row.tool_call_id } : {}),
       });
+      messageIds.push(row.id);
     }
-    return { summary: session.context_summary, messages };
+    return { messages, ...(includeIds ? { messageIds } : {}) };
+  }
+  function pastSummaries(day = repo.day()) {
+    // 主聊天只注入往日摘要，按日期固定排序，不随本轮输入重新召回或拼接原文。
+    const sessions = db.prepare(`SELECT day,summary,summary_status FROM god_sessions s WHERE day<?
+      AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user') ORDER BY day,seq,id`).all(day);
+    return { summary: sessions.map(s => s.summary_status === 'done' && s.summary
+      ? `${s.day}：${s.summary}`
+      : `${s.day}：摘要尚未完成。`).join('\n\n') };
   }
   function recallContext(query) {
-    const sessions = db.prepare("SELECT id,day,summary,memories_json,summary_status FROM god_sessions WHERE day<? ORDER BY day DESC").all(repo.day());
+    const sessions = db.prepare(`SELECT id,day,summary,memories_json,summary_status FROM god_sessions s WHERE day<?
+      AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user') ORDER BY day DESC`).all(repo.day());
     const words = String(query).match(/[\p{L}\p{N}]{2,12}/gu) || [];
     const terms = [...new Set(words.flatMap(word => /\p{Script=Han}/u.test(word)
       ? [word, ...Array.from({ length: word.length - 1 }, (_, i) => word.slice(i, i + 2))] : [word]))];
@@ -117,5 +119,5 @@ export function createGodMemory(repo, summarize) {
     const context = recallContext(query);
     return [context.summary, context.memories && `长期记忆：\n${context.memories}`].filter(Boolean).join('\n\n');
   }
-  return { archive, contextHistory, recall, recallContext, summarizeRows };
+  return { archive, contextHistory, pastSummaries, recall, recallContext, summarizeRows };
 }

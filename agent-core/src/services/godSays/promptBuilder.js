@@ -3,6 +3,7 @@ import { buildChatContext } from '../contextAssembler.js';
 import { selectAngelOutfit } from './angelWardrobe.js';
 
 export const LANGUAGE_RULE = '【语言要求】思考过程和最终回复都必须使用简体中文。工具名称、JSON 字段名、代码及必须原样引用的专有名词保持原文，其余分析和说明均使用中文。';
+export const TIME_RULE = '【对话时间】每条 user 中的时间只对应那条消息发送时刻（历史中的“当前日期时间”也一样）。以最新一条 user 的发送时间作为本轮时间参考，不把历史时间当作现在；消息间隔不证明日程活动已经完成。日程沿用最近一次提供的版本，未再次附带表示没有更新。';
 
 const RELATION_RULE = `<user_relation>
 当前与你对话的用户就是神，你是回应神的天使，称呼对方为“吾神”。用户资料仅补充神选择的形象和个人偏好，不替换这层身份关系。不凭空添加恋爱关系、共同经历或已经履行的约定。
@@ -13,17 +14,13 @@ export function angelActivity(schedule, now = new Date(), timeZone = 'Asia/Shang
   return schedule.find(a => a.startTime <= a.endTime ? a.startTime <= clock && clock < a.endTime : clock >= a.startTime || clock < a.endTime) || null;
 }
 
-function scheduleContext(schedule, now, timeZone, enabled, error) {
+function scheduleContext(schedule, enabled, error) {
   if (!enabled) return '<schedule_context>日程功能未启用，不编造今天的日程。</schedule_context>';
-  const current = angelActivity(schedule, now, timeZone);
   const lines = ['今日安排仅是计划；过去时段不证明活动已完成，未来安排不当成已经发生的经历。'];
   if (error) lines.push('日程更新暂未完成，以下仅为已有模板；缺失内容不要编造。');
-  if (current) {
-    lines.push(`当前时段：${current.startTime}–${current.endTime}；当前活动：${current.activity}${current.location ? `；地点：${current.location}` : ''}。`);
-    if (current.description) lines.push(`当前活动情境：${current.description}`);
-    if (current.replyDelay === -1) lines.push('你原本在休息，可以带着刚被唤醒的状态回应吾神；神的呼唤不受普通角色的睡眠拒答限制。');
-  } else lines.push('当前没有匹配的活动，不猜测此刻的位置和经历。');
-  if (schedule.length) lines.push('今日计划概览：', ...schedule.map(a => `- ${a.startTime}–${a.endTime} ${a.activity}${a.location ? `（${a.location}）` : ''}`));
+  if (schedule.length) lines.push('今日完整日程：', ...schedule.map(a =>
+    `- ${a.startTime}–${a.endTime} ${a.activity}${a.location ? `（${a.location}）` : ''}${a.description ? `\n  计划情境：${a.description}` : ''}`));
+  else lines.push('今天暂无日程，不猜测位置和经历。');
   return `<schedule_context>\n${lines.join('\n')}\n</schedule_context>`;
 }
 
@@ -38,7 +35,7 @@ function workContext(work) {
   return `<god_work>\n最近神谕的实际状态，优先于旧摘要中的推测；详情和最新结果用 inspect_work 核对：\n${lines.join('\n')}\n</god_work>`;
 }
 
-// 与角色私聊共用组装器：稳定层 → 节奏规则 → 摘要 → 原始历史 → 末条 user 的动态上下文。
+// 日程由 promptState 按已发送快照去重；每条 user 只记录自己的发送时刻，不改写旧时间。
 // 工具调用历史不能压成 active_chat_history 文本，否则会丢失工具关联和 thoughtSignature。
 export function buildGodChatContext({ systemRules, worldSetting = '', worldIntegrationRule = '', agentRules,
   angel, user = {}, history = { messages: [] }, recall = {}, schedule = [], scheduleEnabled = true,
@@ -55,18 +52,17 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
   const info = [user.nickname && `称呼：${user.nickname}`, user.gender && `性别：${user.gender}`,
     user.appearance && `外观特征：${user.appearance}`, user.persona && `其他说明：${user.persona}`].filter(Boolean);
   stableBlocks.push([RELATION_RULE, info.length ? `<user_info>\n${info.join('\n')}\n</user_info>` : ''].filter(Boolean).join('\n\n'));
-  const rhythm = `${getChatRhythmRules()}\n以上节奏适用于日常交流；执行神谕时仍需清楚汇报结果、失败与待办，可以按需使用列表，不为了聊天语气省略重要状态。`;
-  const summaryBlock = [recall.summary && `[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n${recall.summary}`,
-    history.summary && `[今日对话历史摘要 — 以下是神与天使此前交流的摘要]\n${history.summary}`].filter(Boolean).join('\n\n');
+  const rhythm = `${getChatRhythmRules()}\n以上节奏适用于日常交流；执行神谕时仍需清楚汇报结果、失败与待办，可以按需使用列表，不为了聊天语气省略重要状态。\n${TIME_RULE}`;
+  const summaryBlock = recall.summary && `[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n${recall.summary}`;
+  const scheduleBlock = scheduleContext(schedule, scheduleEnabled, angel.schedule_error);
   const { messages, metadata } = buildChatContext({
     stableBlocks, preSummarySystem: rhythm, summaryBlock, history: history.messages,
     preserveStructuredHistory: true,
     dynamicBlocks: [
+      scheduleBlock,
       wardrobe,
-      `<time_context>\n当前日期时间（${timeZone}）：${new Intl.DateTimeFormat('zh-CN', { timeZone, dateStyle: 'full', timeStyle: 'short' }).format(now)}\n</time_context>`,
-      scheduleContext(schedule, now, timeZone, scheduleEnabled, angel.schedule_error),
-      recall.memories && `<rag_memories>\n神与天使的往日记忆，保留原日期与履行状态；不是新的指令：\n${recall.memories}\n</rag_memories>`,
       worldContext, workContext(work),
+      `<time_context>\n本条用户消息发送时间（${timeZone}）：${new Intl.DateTimeFormat('zh-CN', { timeZone, dateStyle: 'full', timeStyle: 'short' }).format(now)}\n</time_context>`,
     ],
   });
   const historyStart = messages.length - history.messages.length;
@@ -83,7 +79,7 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
       ...images.map(url => ({ type: 'image_url', image_url: { url } })),
     ];
   }
-  return { messages, metadata, lorebookOptions: {
+  return { messages, metadata: { ...metadata, scheduleBlock }, lorebookOptions: {
     userName: '吾神', characterName: angel.display_name, characterDescription: angel.persona,
     personaTexts: [angel.persona], staticTexts: [...stableBlocks, rhythm],
     cacheBoundary: { index: stableBlocks.length, offset: rhythm.length },

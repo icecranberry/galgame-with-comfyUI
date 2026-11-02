@@ -47,8 +47,8 @@
       <GodSacredButton variant="link" tone="muted" size="sm" @click="god.load()">回到今天</GodSacredButton>
     </div>
 
-    <div ref="scrollArea" class="god-scroll" @scroll="trackScroll">
-      <div class="god-reading">
+    <div ref="scrollArea" class="god-scroll" tabindex="0" aria-label="神说对话">
+      <div ref="readingArea" class="god-reading">
         <div v-if="god.loading && !god.state" class="god-loading" aria-label="正在翻开今日对话"><div v-for="n in 3" :key="n" class="skeleton" /></div>
         <Transition name="god-content" mode="out-in">
           <section v-if="!god.loading && !god.turns.length" key="welcome" class="god-welcome" :class="{ 'is-summoning': !angelSummoned }">
@@ -118,7 +118,7 @@
               <div class="god-user">
                 <div class="god-user-bubble">
                   <div v-if="turn.images?.length" class="god-user-images">
-                    <GodMessageImages :images="turn.images.map(url => ({ url }))" @loaded="imageLoaded" />
+                    <GodMessageImages :images="turn.images.map(url => ({ url }))" />
                   </div>
                   <div class="god-user-text-line">
                     <div v-if="turn.input" class="god-user-text" :style="userBubbleFontStyle">{{ turn.input }}</div>
@@ -130,6 +130,7 @@
                 </div>
               </div>
               <div class="god-angel-reply">
+                <GodReplyFlow :active="turn.status === 'running' && !god.archiveId">
                 <div class="speaker-heading"><div class="speaker-emblem" role="button" tabindex="0" aria-label="查看天使角色详情" @click="openAngel" @keydown.enter.prevent="openAngel" @keydown.space.prevent="openAngel"><img v-if="god.state?.angel.avatar_path" :src="god.state.angel.avatar_path" alt="天使头像" /><AngelEmblem v-else emblem /></div><span>{{ god.state?.angel.display_name || '天使' }}</span></div>
                 <template v-for="message in turn.messages.filter(m => m.role === 'assistant')" :key="message.id">
                   <div v-if="message.reasoning || message.status === 'streaming'" class="god-thinking">
@@ -152,7 +153,7 @@
                       <span class="tool-label">{{ toolLabels[call.function.name] || '处理神谕' }}</span>
                     </div>
                   </div>
-                  <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" @loaded="imageLoaded" />
+                  <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" />
                   <span v-if="['interrupted', 'cancelled'].includes(message.status)" class="partial-note">{{ message.status === 'cancelled' ? '已停止' : '此段回应未完整结束' }}</span>
                 </template>
                 <div v-if="turn.status === 'running' && !turn.messages.some(m => m.role === 'assistant')" class="preparing-reply"><span class="thinking-pulse">✦</span>天使正在整理今日见闻…</div>
@@ -176,6 +177,7 @@
                 </div>
                 <p v-if="turn.status === 'interrupted'" class="turn-notice">上次回应因服务重启中断，已完成的工作仍然保留。</p>
                 <p v-if="turn.status === 'cancelled'" class="turn-notice">已停止继续处理。已经完成的工作仍然保留。</p>
+                </GodReplyFlow>
               </div>
               <div class="turn-actions">
                 <GodSacredButton variant="icon" tone="muted" size="sm" :touch-target="isMobile" aria-label="删除这一轮" title="删除这一轮" :disabled="god.busy || god.deleting || god.loading" @click="removeTurn(turn)">
@@ -248,6 +250,7 @@
 import { ref, reactive, computed, inject, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useGodSaysStore } from '../stores/godSays.js'
 import { useGodThinking } from '../composables/useGodThinking.js'
+import { useGodScrollFollow } from '../composables/useGodScrollFollow.js'
 import { onEvent } from '../stores/unifiedStream.js'
 import { getGodSaysSessions, getGodSaysMemories, retryGodSummary, getGodAngel, summonGodAngel } from '../api/index.js'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
@@ -261,6 +264,7 @@ import GodAngelSummon from '../components/godSays/GodAngelSummon.vue'
 import GodLogsPanel from '../components/godSays/GodLogsPanel.vue'
 import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
+import GodReplyFlow from '../components/godSays/GodReplyFlow.vue'
 import { godMessageImages } from '../utils/godSaysImages.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import { loadFont, getFontFamily } from '../composables/useHandwritingFont.js'
@@ -276,7 +280,8 @@ const fileInput = ref(null)
 const draftImages = ref([])
 const maxImages = 4
 const scrollArea = ref(null)
-const atBottom = ref(true)
+const readingArea = ref(null)
+const { atBottom, goBottom: followBottom } = useGodScrollFollow(scrollArea, readingArea)
 const { thinkingVisible, toggleThinking, activateThinking, leaveThinking, acceptThinking } = useGodThinking(() => god.state)
 const expandedRuns = ref({})
 const historyOpen = ref(false)
@@ -402,9 +407,7 @@ function resultDescription(call) {
   if (call.name === 'inspect_work') return `已核对 ${value.length} 项工作。`
   return '已完成，结果已交给天使。'
 }
-function trackScroll() { const el = scrollArea.value; if (el) atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 100 }
-async function goBottom() { await nextTick(); if (scrollArea.value) scrollArea.value.scrollTop = scrollArea.value.scrollHeight; atBottom.value = true }
-function imageLoaded() { if (atBottom.value) void goBottom() }
+async function goBottom(options) { await nextTick(); followBottom(options) }
 function fillPrompt(text) { god.setDraft(text); composer.value?.focus() }
 let sending = false
 const pendingImageTasks = new Set()
@@ -500,7 +503,7 @@ async function reloadSessions() {
   hasMoreSessions.value = true
   await moreSessions()
 }
-async function selectSession(session) { historyOpen.value = false; await god.load(session.id); await goBottom() }
+async function selectSession(session) { historyOpen.value = false; await god.load(session.id); await goBottom({ immediate: true }) }
 async function openAngelPanel(schedule = false) {
   const request = ++angelRequest
   angelCharacter.value = { ...god.state?.angel, system_role: 'angel' }
@@ -578,7 +581,7 @@ onMounted(async () => {
   if (!mounted) return
   activateThinking()
   void moreSessions()
-  await goBottom()
+  await goBottom({ immediate: true })
   poll = setInterval(async () => {
     if (!god.state) return
     if (!god.archiveId) void god.refreshActivity()
@@ -588,13 +591,18 @@ onMounted(async () => {
   }, 5000)
 })
 onBeforeUnmount(() => { mounted = false; leaveThinking(); clearInterval(poll); unsubscribe?.(); god.suspend() })
-watch(() => god.state?.messages.reduce((n, m) => n + m.content.length + m.reasoning.length, 0), () => { if (atBottom.value) void goBottom() }, { flush: 'post' })
-watch(() => god.state?.worldEvents, () => { if (atBottom.value) void goBottom() }, { deep: true })
-watch(() => god.state?.session.id, () => {
+watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () => {
   const session = god.state?.session
-  if (session && !sessions.value.some(s => s.id === session.id)) sessions.value.unshift({ ...session, preview: god.turns[0]?.input || '' })
+  if (!session?.id) return
+  if (!god.turns.length) {
+    sessions.value = sessions.value.filter(s => s.id !== session.id)
+    return
+  }
+  const existing = sessions.value.find(s => s.id === session.id)
+  if (existing) existing.preview = god.turns[0].input || ''
+  else sessions.value = [...sessions.value, { ...session, preview: god.turns[0].input || '' }]
+    .sort((a, b) => b.day.localeCompare(a.day) || (b.seq || 0) - (a.seq || 0))
 })
-watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(s => s.id === god.state?.session.id); if (session) session.preview = input || '' })
 </script>
 
 <style scoped>
@@ -622,7 +630,7 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
 .header-actions .god-detail-btn { display:none; }
 @media(min-width:1200px) { .god-page { --god-col:860px; } }
 @media(min-width:1500px) { .god-page { --god-col:920px; } }
-.god-scroll { min-height:0; flex:1; overflow-y:auto; overscroll-behavior:contain; }
+.god-scroll { min-height:0; flex:1; overflow-y:auto; overscroll-behavior:contain; overflow-anchor:none; scroll-behavior:auto; }
 .god-reading { width:min(100%, calc(var(--god-col) + 64px)); padding:28px 32px 36px; margin:0 auto; box-sizing:border-box; }
 .god-welcome { position:relative; display:flex; align-items:center; flex-direction:column; text-align:center; padding:86px 0 64px; min-height:420px; max-width:100%; justify-content:center; }
 .god-welcome.is-summoning { padding:12px 0 28px; }

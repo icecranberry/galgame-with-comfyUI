@@ -14,6 +14,28 @@ import { config } from '../src/config.js';
 
 const document = (contents, extra = {}) => ({prompts:contents.map((content,i) => ({identifier:String(i),name:`Entry ${i}`,role:'user',content})),...extra});
 
+test('cache placement keeps stable prefix and moves dynamic assignments and their entire dependent suffix to the tail', () => {
+  const doc = document(['固定规则', '{{setvar::fixed::固定变量}}', '{{getvar::fixed}}',
+    '{{setvar::turn::{{lastusermessage}}}}', '{{getvar::turn}}', '后续规则', '{{unknown_macro}}']);
+  const a = compilePreset(doc, { lastUserMessage: '甲' });
+  const b = compilePreset(doc, { lastUserMessage: '乙' });
+  assert.equal(a.stableContent, '固定规则\n\n固定变量');
+  assert.equal(a.stableContent, b.stableContent);
+  assert.equal(a.dynamicContent, '甲\n\n后续规则\n\n{{unknown_macro}}');
+  const messages = [{ role: 'system', content: 'base' }, { role: 'user', content: '旧问题' },
+    { role: 'assistant', content: '旧回复' }, { role: 'user', content: [{ type: 'text', text: '新问题' }, { type: 'image_url', image_url: { url: 'test:image' } }] }];
+  const result = injectPreset(messages, a, { placement: 'cache' });
+  assert.equal(result[1].content, a.stableContent);
+  assert.equal(result.at(-2).content, a.dynamicContent);
+  assert.deepEqual(result.at(-1), messages.at(-1));
+  const frozen = injectPreset(messages, b, { placement: 'cache', frozenPrefix: true });
+  assert.deepEqual(frozen.slice(0, -2), messages.slice(0, -1));
+  assert.equal(frozen.at(-2).content, b.dynamicContent);
+  const broken = compilePreset(document(['safe', '{{broken']));
+  assert.equal(broken.stableContent, 'safe');
+  assert.equal(broken.dynamicContent, '{{broken');
+});
+
 test('preview traces variable sources through append, nested references and repeated reads without changing injection', () => {
   const input=document(['{{setvar::a::甲😀}}','{{addvar::a::乙}}','{{setvar::b::前{{getvar::a}}后}}','重复甲😀：{{getvar::b}} / {{getvar::a}}']);
   const traced=compilePreset(input,{},undefined,{trace:true});

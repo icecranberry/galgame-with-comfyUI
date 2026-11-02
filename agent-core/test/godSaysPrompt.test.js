@@ -9,7 +9,7 @@ const world = '<world_setting>云庭与邻舍</world_setting>';
 const angel = { display_name: '天使', persona: '## 你的身份\n你是送信的天使。\n## 你的外观\n你有白羽和光环。' };
 const schedule = [
   { startTime: '23:00', endTime: '05:30', activity: '安眠', location: '云庭卧房', description: '羽翼松松垂到床沿。', replyDelay: -1 },
-  { startTime: '05:30', endTime: '07:00', activity: '整理星图', location: '观星台', description: '未来活动的详细描述不必全部注入。', replyDelay: 0 },
+  { startTime: '05:30', endTime: '07:00', activity: '整理星图', location: '观星台', description: '逐一核对星图上的方位。', replyDelay: 0 },
 ];
 const nativeHistory = [
   { role: 'user', content: '看看工作' },
@@ -39,30 +39,46 @@ test('private-style layers keep language after jailbreak, exact persona, summary
   assert.match(messages[personaIndex - 1].content, /<dialogue_format_rules>/);
   assert.match(messages[personaIndex + 1].content, /<user_relation>[\s\S]*<user_info>[\s\S]*银色眼睛/);
   assert.match(messages[options.historyStart - 2].content, /<dialogue_rules>/);
-  assert.match(messages[options.historyStart - 1].content, /往日对话摘要[\s\S]*今日对话历史摘要/);
+  assert.match(messages[options.historyStart - 1].content, /往日对话摘要/);
+  assert.doesNotMatch(JSON.stringify(messages), /今日对话历史摘要|今天已核对一次工作|rag_memories|神喜欢彩虹/);
   assert.deepEqual(messages.slice(options.historyStart, -1), nativeHistory.slice(0, -1));
   const current = messages.at(-1);
   assert.equal(current.role, 'user');
-  assert.match(current.content, /^<dynamic_context>[\s\S]*<time_context>[\s\S]*<schedule_context>[\s\S]*<rag_memories>/);
+  assert.match(current.content, /^<dynamic_context>\n<schedule_context>[\s\S]*<time_context>/);
   assert.ok(current.content.endsWith('</dynamic_context>\n\n你长什么样子'));
   assert.equal(messages.filter(m => m.role === 'user').length, 2);
   assert.equal(options.characterDescription, angel.persona);
   assert.deepEqual(options.history, nativeHistory.filter(m => m.role !== 'tool'));
 });
 
-test('schedule context describes current activity and short plans without presenting future plans as completed', () => {
+test('full schedule starts user context without current activity claims and the clock precedes user input', () => {
   const dynamic = build().messages.at(-1).content;
-  assert.match(dynamic, /当前活动：安眠；地点：云庭卧房/);
+  assert.match(dynamic, /^<dynamic_context>\n<schedule_context>[\s\S]*今日完整日程/);
+  assert.match(dynamic, /23:00–05:30 安眠（云庭卧房）/);
   assert.match(dynamic, /羽翼松松垂到床沿/);
   assert.match(dynamic, /过去时段不证明活动已完成/);
   assert.match(dynamic, /未来安排不当成已经发生/);
-  assert.match(dynamic, /神的呼唤不受普通角色的睡眠拒答限制/);
-  assert.match(dynamic, /05:30–07:00 整理星图（观星台）/);
-  assert.doesNotMatch(dynamic, /未来活动的详细描述|"startTime"|"replyDelay"|长期记忆：\[/);
+  assert.match(dynamic, /05:30–07:00 整理星图（观星台）\n  计划情境：逐一核对星图上的方位/);
+  assert.doesNotMatch(dynamic, /当前时段|当前活动|你原本在休息|刚被唤醒|"startTime"|"replyDelay"|长期记忆：\[/);
+  assert.match(dynamic, /本条用户消息发送时间（Asia\/Shanghai）：2026年10月31日星期六 02:25\n<\/time_context>\n<\/dynamic_context>\n\n你长什么样子$/);
+  const later = build({ now: new Date('2026-10-30T21:45:00Z') }).messages.at(-1).content;
+  assert.equal(dynamic.split('<time_context>')[0], later.split('<time_context>')[0]);
   assert.equal(angelActivity(schedule, new Date('2026-10-30T21:30:00Z')).activity, '整理星图');
   assert.equal(angelActivity(schedule, new Date('2026-10-30T23:00:00Z')), null);
-  assert.doesNotMatch(build({ scheduleEnabled: false }).messages.at(-1).content, /当前活动：|计划概览|安眠/);
-  assert.match(build({ schedule: [], angel: { ...angel, schedule_error: 'offline' } }).messages.at(-1).content, /日程更新暂未完成[\s\S]*当前没有匹配的活动/);
+  assert.doesNotMatch(build({ scheduleEnabled: false }).messages.at(-1).content, /当前活动：|今日完整日程|安眠/);
+  assert.match(build({ schedule: [], angel: { ...angel, schedule_error: 'offline' } }).messages.at(-1).content, /日程更新暂未完成[\s\S]*今天暂无日程/);
+});
+
+test('new turns append complete native history and refresh context only on the last user', () => {
+  const first = build();
+  const messages = [...nativeHistory, { role: 'assistant', content: '我有白色羽翼。' }, { role: 'user', content: '现在在干嘛' }];
+  const next = build({ history: { messages }, now: new Date('2026-10-30T21:45:00Z'),
+    worldContext: '<world_events>彩虹生效中</world_events>',
+    work: [{ id: 1, title: '彩虹', kind: 'world', active: true }] });
+  assert.deepEqual(next.messages.slice(next.lorebookOptions.historyStart, -1), messages.slice(0, -1));
+  assert.deepEqual(first.messages.slice(0, first.lorebookOptions.historyStart), next.messages.slice(0, next.lorebookOptions.historyStart));
+  assert.match(next.messages.at(-1).content, /^<dynamic_context>\n<schedule_context>[\s\S]*<world_events>[\s\S]*<god_work>[\s\S]*<time_context>[\s\S]*05:45\n<\/time_context>\n<\/dynamic_context>\n\n现在在干嘛$/);
+  assert.equal(next.messages.filter(m => typeof m.content === 'string' && m.content.includes('<dynamic_context>')).length, 1);
 });
 
 test('clock, schedule, summaries, memory, and current input cannot change the certified stable prefix', () => {

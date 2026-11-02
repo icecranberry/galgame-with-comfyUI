@@ -39,7 +39,7 @@ import { config } from '../config.js';
  * `getSceneOutfitForNow` 也按名称回查。所以留一组稳定的默认名，界面自动写入、用户不用管。
  */
 export const OUTFIT_SCENES = [
-  { key: 'work', label: '工装', defaultName: '日常装', desc: '上班、出勤、执行职务时穿（角色的招牌/常态形象）' },
+  { key: 'work', label: '默认服饰', defaultName: '日常装', desc: '角色默认外观中描述的服饰（角色的招牌/常态形象）' },
   { key: 'casual', label: '私服', defaultName: '便装', desc: '上街、社交、休闲外出时穿的便装' },
   { key: 'home', label: '居家', defaultName: '居家服', desc: '在家中休息、做家务时穿的宽松舒适衣物' },
   { key: 'sleep', label: '睡衣', defaultName: '睡衣', desc: '睡觉时穿的睡衣或内衣，**赤脚、不穿鞋袜**。**睡眠时段强制使用这一套**' },

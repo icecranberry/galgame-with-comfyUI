@@ -7,7 +7,7 @@
   >
     <div ref="charListEl" class="char-list stagger">
       <router-link to="/god-says" class="char-item god-entry" :class="{ active: route.path === '/god-says' }" @click="emit('charSelected')">
-        <div class="god-entry-emblem"><AngelEmblem /></div>
+        <div class="god-entry-emblem"><GodEntryEmblem /></div>
         <div class="char-info"><div class="char-name">神说 <span class="god-entry-star" aria-hidden="true">✦</span></div><div class="char-preview">{{ godEntrySubtitle }}</div></div>
         <span class="god-entry-arrow" aria-hidden="true">↗</span>
       </router-link>
@@ -351,7 +351,7 @@ import { useCharacterFoldersStore, groupCharactersByFolder } from '../stores/cha
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import GearIcon from './GearIcon.vue'
-import AngelEmblem from './godSays/AngelEmblem.vue'
+import GodEntryEmblem from './godSays/GodEntryEmblem.vue'
 import { useGodSaysStore } from '../stores/godSays.js'
 import { selectStandingCharacter } from '../utils/standingDisplay.js'
 
@@ -564,7 +564,9 @@ function formatTime(iso) {
 
 <style scoped>
 .god-entry { text-decoration:none; color:var(--text-primary); margin-bottom:10px; }
-.god-entry-emblem { width:42px; height:42px; margin-right:10px; flex-shrink:0; }
+.god-entry-emblem { width:42px; height:42px; margin-right:10px; flex-shrink:0; transition:transform var(--dur-interaction) var(--ease-standard); }
+.god-entry:hover .god-entry-emblem,
+.god-entry:focus-visible .god-entry-emblem { transform:scale(1.06); }
 .god-entry-star { color:var(--fun-gold); font-size:11px; margin-left:5px; }
 .god-entry-arrow { color:var(--text-secondary); font-size:16px; }
 .sidebar {

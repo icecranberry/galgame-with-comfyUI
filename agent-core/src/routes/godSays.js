@@ -16,7 +16,7 @@ router.get('/state', (req, res) => {
   const schedule = state.session.day === r.repo.day() ? state.angel.schedule : parseJson(state.session.schedule_json, []);
   state.scheduleEnabled = config.features.schedule !== false;
   state.activity = state.scheduleEnabled ? angelActivity(schedule, r.repo.now(), r.repo.timeZone) : null;
-  state.worldEvents = r.world.list(null, state.session.id);
+  state.worldEvents = state.session.id ? r.world.list(null, state.session.id) : [];
   state.toolCatalog = godToolCatalog();
   state.angelPersonalities = ANGEL_PERSONALITIES;
   res.json(state);
@@ -27,15 +27,11 @@ router.get('/state', (req, res) => {
 router.get('/sessions', (req, res) => {
   const { repo } = getGodRuntime();
   const before = typeof req.query.before === 'string' ? req.query.before : '9999-12-31';
-  res.json(repo.db.prepare(`SELECT s.id,s.day,s.seq,s.created_at,s.status,s.summary,s.summary_status,s.summary_error,
-    (SELECT substr(r.input,1,160) FROM god_runs r WHERE r.session_id=s.id AND r.deleted_at IS NULL ORDER BY r.created_at,r.rowid LIMIT 1) AS preview
-    FROM god_sessions s WHERE s.day<?
-      AND (s.seq=0 OR EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id) OR s.summary_status='done')
-    ORDER BY s.day DESC, s.seq DESC LIMIT 60`).all(before));
+  res.json(repo.listSessions(before));
 });
 router.get('/memories', (req, res) => {
   const { repo } = getGodRuntime();
-  res.json(repo.db.prepare("SELECT id,day,summary,memories_json FROM god_sessions WHERE summary_status='done' ORDER BY day DESC LIMIT 90").all().map(s => ({ ...s, memories: parseJson(s.memories_json, []) })));
+  res.json(repo.listMemories());
 });
 router.post('/sessions/:id/summarize', (req, res) => {
   const r = getGodRuntime();
@@ -92,7 +88,7 @@ router.get('/angel/image-jobs', (req, res) => res.json(getGodRuntime().images.li
 router.post('/angel/image-jobs', (req, res, next) => {
   if (!['avatar', 'standing', 'peek', 'outfits'].includes(req.body?.kind)) return res.status(400).json({ error: '图片任务类型无效' });
   const r = getGodRuntime();
-  const prepare = req.body?.kind === 'peek' ? r.ensureSchedule(r.repo.today()) : r.ensurePersona();
+  const prepare = req.body?.kind === 'peek' ? r.ensureSchedule(r.repo.today({ persist: false })) : r.ensurePersona();
   Promise.resolve(prepare).then(() => res.status(202).json(r.images.start(req.body))).catch(next);
 });
 router.get('/angel/image-jobs/:id', (req, res) => {

@@ -181,7 +181,8 @@ export function evaluateBook(document, settingsInput, context = {}, state = {}, 
  * when neither side of the requested boundary can carry text. Never rewrite
  * business message roles, history envelopes or attachments.
  */
-export function injectBook(messages, activation, { anchors = {}, stableAnchors = {}, exampleTarget, historyStart, historyEnd, depthTargets, fallbackTarget, stableTarget, protectedPrefix = 0, regexRules = [], cachePlacement = false } = {}) {
+export function injectBook(messages, activation, { anchors = {}, stableAnchors = {}, exampleTarget, historyStart, historyEnd, depthTargets, fallbackTarget, stableTarget, protectedPrefix = 0, regexRules = [], cachePlacement = false, appendOnly = false, immutablePrefix = 0, frozenLore = [] } = {}) {
+  if (appendOnly) cachePlacement = true;
   if (!activation.entries.length) return { messages, placements: [], warnings: activation.warnings || [], stablePrefixHash: hash(messages.slice(0, protectedPrefix)) };
   const warnings = [...(activation.warnings || [])];
   const placements = []; const groups = new Map(); const outlets = new Map();
@@ -228,6 +229,8 @@ export function injectBook(messages, activation, { anchors = {}, stableAnchors =
   for (const entry of activation.entries) {
     if (!entry.content.trim()) continue; // Stateful macro-only entries have no prompt payload.
     const profile = entry.cacheProfile || classifyCacheEntry(entry);
+    const frozenKey = hash([entry.uid, entry.content]);
+    if (appendOnly && profile.tier === 'stable' && frozenLore.includes(frozenKey)) continue;
     let references;
     if (entry.position === 7) {
       const targets = messages.flatMap((message, index) => canCarry(message) && outletNames(message.content).includes(entry.outletName)
@@ -256,6 +259,10 @@ export function injectBook(messages, activation, { anchors = {}, stableAnchors =
       target = name ? anchors[name] : undefined;
       if (target == null) { target = fallback; mapped = true; }
     }
+    if (appendOnly && (profile.tier !== 'stable' || immutablePrefix > 0)) {
+      target = { ...fallback, label: '严格追加：本轮 user 动态尾部' };
+      mapped = true;
+    }
     const location = locate(target);
     if (!cachePlacement && location.index < tail && profile.tier === 'dynamic') warnings.push(`条目 ${entry.uid} 按原位置注入动态内容，可能缩短缓存前缀`);
     let content = resolveOutlets(replaceBody(entry.content));
@@ -264,7 +271,7 @@ export function injectBook(messages, activation, { anchors = {}, stableAnchors =
     const key = `${location.mode}:${location.index}:${location.offset ?? ''}`;
     if (!groups.has(key)) groups.set(key, { ...location, entries: [] });
     groups.get(key).entries.push({ ...entry, content, cacheProfile: profile });
-    placements.push({ uid: entry.uid, requested: POSITIONS[entry.position], depth: entry.position === 4 ? entry.depth : null, requestedRole: entry.role, ...location, actualAnchor:target.label || (cachePlacement ? profile.tier === 'stable' ? '稳定区末尾（深度/缺失锚点适配）' : '末条 user 任务之前' : '历史深度/指定边界'), mapped, cacheTier: profile.tier, cacheReasons: profile.reasons, ...(references ? { outlet: entry.outletName, used: true, references } : {}) });
+    placements.push({ uid: entry.uid, requested: POSITIONS[entry.position], depth: entry.position === 4 ? entry.depth : null, requestedRole: entry.role, ...location, actualAnchor:target.label || (cachePlacement ? profile.tier === 'stable' ? '稳定区末尾（深度/缺失锚点适配）' : '末条 user 任务之前' : '历史深度/指定边界'), mapped, cacheTier: profile.tier, cacheReasons: profile.reasons, ...(appendOnly && profile.tier === 'stable' ? { frozenKey } : {}), ...(references ? { outlet: entry.outletName, used: true, references } : {}) });
   }
   const additions = [...groups.values()].map(group => ({ ...group, content: block(group.entries
     .sort((a, b) => (cachePlacement ? Number(b.cacheProfile.tier === 'stable') - Number(a.cacheProfile.tier === 'stable') : (b.position === 4 ? b.depth : 0) - (a.position === 4 ? a.depth : 0)) || (a.position===5?1:a.position===6?2:0)-(b.position===5?1:b.position===6?2:0) || a.order - b.order || String(a.uid).localeCompare(String(b.uid), 'en', { numeric: true }))

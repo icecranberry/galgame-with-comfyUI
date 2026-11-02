@@ -138,6 +138,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
   }
   async function refreshWorld() {
     const session = state.value?.session.id
+    if (!session) return
     try { const events = await api.getGodWorldEvents(session); if (state.value?.session.id === session) state.value.worldEvents = events }
     catch { /* SSE/下次刷新会恢复，保留已有结果 */ }
   }

@@ -129,7 +129,7 @@ function macroRenderer(context, warnings, trace) {
         else if (text.startsWith('}}', end)) { level--; if (level) end += 2; }
         else end++;
       }
-      if (level) { warnings.add('存在未闭合的宏，已保留原文'); output += text.slice(start); break; }
+      if (level) { warnings.add('存在未闭合的宏，已保留原文'); dynamic = true; output += text.slice(start); break; }
       const raw = text.slice(start + 2, end); cursor = end + 2;
       const [command, ...args] = macroArguments(raw); const key = command.trim().toLowerCase();
       let value = '', valueRanges = [];
@@ -193,6 +193,7 @@ export function compilePreset(input, context = {}, orderId, { trace = false } = 
   const prompts = new Map(document.prompts.map(p => [p.identifier, p]));
   const warnings = new Set(); const renderer = macroRenderer(context, warnings, trace);
   const entries = []; const chunks = []; const outputRanges = []; let size = 0;
+  const stableChunks = [], dynamicChunks = [];
   for (const item of profile.order) {
     const prompt = prompts.get(item.identifier);
     const row = { identifier: item.identifier, name: prompt?.name || item.identifier, actualRole: 'system', actualAnchor: 'after-system0' };
@@ -209,6 +210,10 @@ export function compilePreset(input, context = {}, orderId, { trace = false } = 
     if (content.trim()) {
       for (const r of expanded.ranges) outputRanges.push({...r,start:r.start + size,end:r.end + size});
       row.start = size; row.end = size + content.length; chunks.push(content); size += content.length + 2;
+      // 从首个动态宏起整个后缀后置，保留变量赋值/引用与条目输出的先后语义。
+      // 不把后续看似纯文本的条目搬回前方，也不重新执行随机宏。
+      row.cacheTier = renderer.isDynamic() ? 'dynamic' : 'stable';
+      (renderer.isDynamic() ? dynamicChunks : stableChunks).push(content);
     }
     if (size > MAX_OUTPUT) throw new Error('预设展开超过 2 MiB');
   }
@@ -234,11 +239,22 @@ export function compilePreset(input, context = {}, orderId, { trace = false } = 
       if (variables.length) outputSuggestions.push({identifier:prompt.identifier,name:prompt.name || prompt.identifier,variables});
     }
   }
-  return { content, entries, ...(trace ? {outputSuggestions} : {}), warnings: [...warnings], dynamic: renderer.isDynamic(), estimatedTokens: estimateTokens(content), orderId: profile.character_id };
+  return { content, stableContent: stableChunks.join('\n\n'), dynamicContent: dynamicChunks.join('\n\n'), entries, ...(trace ? {outputSuggestions} : {}), warnings: [...warnings], dynamic: renderer.isDynamic(), estimatedTokens: estimateTokens(content), orderId: profile.character_id };
 }
 
-export function injectPreset(messages, compiled) {
-  if (!compiled?.content?.trim()) return messages;
+export function injectPreset(messages, compiled, { placement = 'prefix', frozenPrefix = false } = {}) {
+  if (!compiled?.content?.trim() && !compiled?.tailContent?.trim()) return messages;
+  if (placement === 'cache') {
+    let result = messages;
+    if (!frozenPrefix && compiled.stableContent) result = injectPreset(result, { content: compiled.stableContent });
+    const tailContent = compiled.tailContent ?? compiled.dynamicContent;
+    if (tailContent) {
+      const index = result.findLastIndex(m => m.role === 'user');
+      if (index < 0) throw new Error('动态预设需要末条 user 作为任务边界');
+      result = [...result.slice(0, index), { role: 'system', content: tailContent }, ...result.slice(index)];
+    }
+    return result;
+  }
   const systemIndex = messages.findIndex(m => m.role === 'system');
   const index = systemIndex < 0 ? 0 : systemIndex + 1;
   return [...messages.slice(0, index), { role: 'system', content: compiled.content }, ...messages.slice(index)];

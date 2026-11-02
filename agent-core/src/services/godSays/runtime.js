@@ -21,6 +21,7 @@ import { createAngelPersonaService } from './angelPersona.js';
 import { normalizePersonalities } from './angelPersonalities.js';
 import { beginTurn } from '../llmTelemetry.js';
 import { buildGodChatContext } from './promptBuilder.js';
+import { createGodPromptState } from './promptState.js';
 import { createAngelImageService } from './angelImages.js';
 import { generateImageRaw } from '../imageSkill.js';
 import { chatSync as describeAngelImage } from '../lorebook/runtime.js';
@@ -51,6 +52,7 @@ export function getGodRuntime() {
     settings: () => config.comfyui, scheduleEnabled: () => config.features.schedule !== false });
   repo.recover();
   const memory = createGodMemory(repo, chatSync);
+  const promptState = createGodPromptState(repo, prepareNarrativePrompt);
   const world = createWorldEventService(repo, {
     broadcast, groupBusy: isGroupRoundRunning,
     async publishMoment(id, instruction, key) {
@@ -123,21 +125,19 @@ export function getGodRuntime() {
     await ensureSchedule(session);
     signal?.throwIfAborted();
     const angel = repo.ensureAngel();
-    const history = await memory.contextHistory(session.id);
+    const history = await memory.contextHistory(session.id, { includeIds: true });
     signal?.throwIfAborted();
     const worldSetting = getWorldSetting();
     const schedule = config.features.schedule === false ? [] : session.day === repo.day() ? angel.schedule : parseJson(session.schedule_json, []);
-    const { messages, lorebookOptions } = buildGodChatContext({
+    const context = buildGodChatContext({
       systemRules: getSystemRules({ roleplay: false }), worldSetting,
       worldIntegrationRule: worldSetting ? getWorldIntegrationRule('interaction') : '', agentRules: AGENT_RULES,
-      angel, user: config.user, history, recall: memory.recallContext(run.input), schedule,
-      scheduleEnabled: config.features.schedule !== false, now: repo.now(), timeZone: repo.timeZone,
+      angel, user: config.user, history, recall: memory.pastSummaries(session.day), schedule,
+      scheduleEnabled: config.features.schedule !== false, now: new Date(run.created_at), timeZone: repo.timeZone,
       worldContext: worldEventContext(repo.db), work: world.list(null, session.id),
       images: run.imageDataUris || [],
     });
-    return prepareNarrativePrompt(messages, { scope: 'god:angel', turnKey: run.id, step: repo.db.prepare('SELECT COUNT(*) n FROM god_runs').get().n,
-      ...lorebookOptions,
-    });
+    return promptState.prepare(run, context, history, signal);
   }
   const running = new Map();
   function start(clientId, text, { urls = [], dataUris = [] } = {}) {
