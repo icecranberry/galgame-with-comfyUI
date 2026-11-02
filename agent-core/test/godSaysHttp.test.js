@@ -33,7 +33,7 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   provider.post('/chat/completions', (req, res) => {
     if (!req.body.stream) {
       personaRequests.push(req.body);
-      return res.json({ choices: [{ message: { content: `天使\nAngel\n{"valence":0.5,"arousal":0.4,"dominance":0.5}\n${persona}` }, finish_reason: 'stop' }] });
+      return res.json({ choices: [{ message: { content: persona }, finish_reason: 'stop' }] });
     }
     requests.push(req.body);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -54,21 +54,30 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   Object.assign(config.llm, { freeEgg: false, connectionType: 'openai', baseURL: `http://127.0.0.1:${modelServer.address().port}`, apiKey: 'local-test', model: 'deepseek-test', thinkingMode: 'disabled', extraBody: { thinking: { type: 'disabled' } } });
   const { getDb, getSystemRules, getWorldSetting } = await import('../src/db/index.js');
   const db = getDb();
+  db.prepare('UPDATE world_settings SET is_active=0').run();
+  db.prepare("INSERT INTO world_settings(name,content,is_active,sort_order) VALUES ('天使创作测试','世界由浮岛组成，居民以星砂记录往事。',1,0)").run();
   db.prepare("INSERT INTO characters(id,name,display_name,base_prompt) VALUES (2,'a','阿晴','温柔'),(3,'b','小雨','好奇')").run();
   const repo = createGodRepository(db);
   repo.ensureAngel();
   config.features.schedule = true;
   db.prepare('UPDATE god_angel SET schedule_json=?,schedule_generated_at=? WHERE id=1').run(JSON.stringify([{ startTime: '00:00', endTime: '23:59', activity: '整理星图' }]), `${repo.day()}T00:00:00`);
+  db.prepare("UPDATE god_angel SET summoned_at='2026-01-01T00:00:00.000Z' WHERE id=1").run();
   const { resetClient } = await import('../src/llm/llm-client.js');
   resetClient();
   const { default: router } = await import('../src/routes/godSays.js');
-  // 即使关闭日程，也必须经同一角色生成器创建持久人格。
+  // 即使关闭日程，也必须经天使专用生成器创建持久人格。
   config.features.schedule = false;
   const { getGodRuntime } = await import('../src/services/godSays/runtime.js');
   await getGodRuntime().ensureSchedule(repo.today());
   assert.equal(personaRequests.length, 1);
-  assert.ok(personaRequests[0].messages.some(m => m.content.includes('你是一个角色人格生成器')));
+  assert.ok(personaRequests[0].messages.some(m => m.content.includes('角色人格设计师')));
+  assert.match(personaRequests[0].messages[0].content, /<world_setting>[\s\S]*世界由浮岛组成/);
+  assert.match(personaRequests[0].messages[1].content, /<world_integration[\s\S]*人格卡的身份经历/);
+  assert.match(personaRequests[0].messages.at(-1).content, /严格遵循 <world_setting> 的设定/);
+  assert.doesNotMatch(JSON.stringify(personaRequests[0].messages), /VAD|valence|arousal|dominance|第一手素材/);
+  assert.equal(personaRequests[0].messages.filter(m => m.role === 'user').length, 1);
   assert.equal(repo.ensureAngel().persona, persona);
+  assert.equal(repo.ensureAngel().emotion_baseline, null);
   assert.ok(repo.ensureAngel().persona_generated_at);
   config.features.schedule = true;
   db.prepare('UPDATE god_angel SET schedule_json=?,schedule_generated_at=? WHERE id=1').run(JSON.stringify([{ startTime: '00:00', endTime: '23:59', activity: '整理星图' }]), `${repo.day()}T00:00:00`);

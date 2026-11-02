@@ -7,12 +7,14 @@ export function migrateGodSaysSchema(db) {
       schedule_generated_at TEXT, schedule_error TEXT
     );
     CREATE TABLE IF NOT EXISTS god_sessions (
-      id INTEGER PRIMARY KEY, day TEXT NOT NULL UNIQUE, time_zone TEXT NOT NULL,
+      id INTEGER PRIMARY KEY, day TEXT NOT NULL, time_zone TEXT NOT NULL,
+      seq INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'open', summary TEXT NOT NULL DEFAULT '',
       memories_json TEXT NOT NULL DEFAULT '[]', summary_status TEXT NOT NULL DEFAULT 'pending',
       summary_error TEXT, summary_attempt_at TEXT, summary_attempts INTEGER NOT NULL DEFAULT 0,
       context_summary TEXT NOT NULL DEFAULT '', context_last_message INTEGER NOT NULL DEFAULT 0,
-      schedule_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL
+      schedule_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+      UNIQUE(day, seq)
     );
     CREATE TABLE IF NOT EXISTS god_runs (
       id TEXT PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES god_sessions(id),
@@ -67,12 +69,15 @@ export function migrateGodSaysSchema(db) {
       standing_url: 'TEXT',
       scene_outfits_json: "TEXT NOT NULL DEFAULT '[]'",
       scene_standings_json: "TEXT NOT NULL DEFAULT '[]'",
+      personalities_json: "TEXT NOT NULL DEFAULT '[]'",
+      summoned_at: 'TEXT',
     },
     god_sessions: {
       summary_attempts: 'INTEGER NOT NULL DEFAULT 0',
       context_summary: "TEXT NOT NULL DEFAULT ''",
       context_last_message: 'INTEGER NOT NULL DEFAULT 0',
       schedule_json: "TEXT NOT NULL DEFAULT '[]'",
+      seq: 'INTEGER NOT NULL DEFAULT 0',
     },
     god_world_events: { kind: "TEXT NOT NULL DEFAULT 'world'" },
   };
@@ -88,5 +93,33 @@ export function migrateGodSaysSchema(db) {
       db.exec(`ALTER TABLE ${table} ADD COLUMN god_delivery_key TEXT`);
     }
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ${table}_god_delivery ON ${table}(god_delivery_key) WHERE god_delivery_key IS NOT NULL`);
+  }
+  // 早期版本一天只能存一条会话（day UNIQUE）。重新召唤需要同一天保留多条对话，
+  // 唯一约束升级为 (day, seq)；已落地的旧表须重建才能去掉内联 UNIQUE。
+  const sessionTable = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='god_sessions'").get();
+  if (sessionTable && /day\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(sessionTable.sql)) {
+    const fkWasOn = db.pragma('foreign_keys', { simple: true });
+    if (fkWasOn) db.pragma('foreign_keys = OFF');
+    try {
+      db.exec(`
+        CREATE TABLE god_sessions_rebuild (
+          id INTEGER PRIMARY KEY, day TEXT NOT NULL, time_zone TEXT NOT NULL,
+          seq INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'open', summary TEXT NOT NULL DEFAULT '',
+          memories_json TEXT NOT NULL DEFAULT '[]', summary_status TEXT NOT NULL DEFAULT 'pending',
+          summary_error TEXT, summary_attempt_at TEXT, summary_attempts INTEGER NOT NULL DEFAULT 0,
+          context_summary TEXT NOT NULL DEFAULT '', context_last_message INTEGER NOT NULL DEFAULT 0,
+          schedule_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+          UNIQUE(day, seq)
+        );
+        INSERT INTO god_sessions_rebuild
+          (id,day,time_zone,seq,status,summary,memories_json,summary_status,summary_error,summary_attempt_at,
+           summary_attempts,context_summary,context_last_message,schedule_json,created_at)
+        SELECT id,day,time_zone,COALESCE(seq,0),status,summary,memories_json,summary_status,summary_error,summary_attempt_at,
+           summary_attempts,context_summary,context_last_message,schedule_json,created_at FROM god_sessions;
+        DROP TABLE god_sessions;
+        ALTER TABLE god_sessions_rebuild RENAME TO god_sessions;
+      `);
+    } finally { if (fkWasOn) db.pragma('foreign_keys = ON'); }
   }
 }

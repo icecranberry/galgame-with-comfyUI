@@ -225,6 +225,7 @@
           <!-- 操作栏 sticky footer -->
           <div class="modal-footer">
             <div class="detail-actions">
+              <slot name="footer-leading" />
               <linshe-button v-if="!profileAdapter" variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
               <linshe-button v-if="!profileAdapter" variant="secondary" :title="`声音 · ${voiceLabel}`" @click="showVoiceModal = true">声音设置</linshe-button>
               <linshe-button variant="secondary" :disabled="profileSaving || outfitBatchRunning" @click="openRefineModal">
@@ -235,8 +236,7 @@
                 外观 tag 参考
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank" :title="character?.name">animadex · {{ character?.display_name || character?.name }}</a>
               </div>
-              <linshe-button v-if="profileAdapter" variant="secondary" :disabled="profileSaving" @click="requestClose">关闭</linshe-button>
-              <linshe-button variant="primary" :loading="profileSaving" :disabled="!detail.dirty || outfitBatchRunning" @click="saveCharDetail">保存</linshe-button>
+              <linshe-button variant="primary" :class="{ 'detail-save-right': profileAdapter }" :loading="profileSaving" :disabled="!detail.dirty || outfitBatchRunning" @click="saveCharDetail">保存</linshe-button>
             </div>
           </div>
         </div>
@@ -1923,6 +1923,8 @@ const displayStandingPanel = computed(() => props.profileAdapter?.standing || st
    不撑满会把「删除角色」和「保存」挤到右下角；撑满后由 .recruit-appearance-hint 的
    margin-left:auto 把「说明 + 保存」推到右端，与左侧「删除角色」分列两端 */
 .detail-actions { flex: 1; min-width: 0; display: flex; align-items: center; margin-top: 0; gap: 10px; }
+/* 系统角色（天使等）无外观 tag 提示，保存按钮自行靠右，保持左操作右保存 */
+.detail-save-right { margin-left: auto; }
 .recruit-appearance-hint {
   margin-left: auto;
   font-size: 11px;

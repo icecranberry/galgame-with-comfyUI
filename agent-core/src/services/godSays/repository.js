@@ -24,13 +24,39 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
   function ensureAngel() {
     db.prepare('INSERT OR IGNORE INTO god_angel(id,display_name,persona) VALUES (1,?,?)').run('天使', ANGEL_PERSONA);
     const row = db.prepare('SELECT * FROM god_angel WHERE id=1').get();
-    return { ...row, schedule: parseJson(row.schedule_json, []), outfits: angelOutfits(row), standings: angelStandings(row) };
+    // 旧库若已有生成人格或自定义人格，视为已经召唤，不再走召唤引导。
+    const summoned = !!(row.summoned_at || row.persona_generated_at) || (!!row.persona?.trim() && row.persona !== ANGEL_PERSONA);
+    return {
+      ...row, schedule: parseJson(row.schedule_json, []), outfits: angelOutfits(row), standings: angelStandings(row),
+      personalities: parseJson(row.personalities_json, []), summoned,
+    };
   }
+  function setPersonalities(keys) {
+    db.prepare('UPDATE god_angel SET personalities_json=? WHERE id=1').run(JSON.stringify(Array.isArray(keys) ? keys : []));
+    return ensureAngel();
+  }
+  const latestSession = key => db.prepare('SELECT * FROM god_sessions WHERE day=? ORDER BY seq DESC, id DESC LIMIT 1').get(key);
+  const openSession = key => db.prepare("SELECT * FROM god_sessions WHERE day=? AND status='open' ORDER BY seq DESC, id DESC LIMIT 1").get(key);
   function today() {
     const key = day();
     db.prepare("UPDATE god_sessions SET status='closing' WHERE day < ? AND status='open'").run(key);
-    db.prepare('INSERT OR IGNORE INTO god_sessions(day,time_zone,created_at) VALUES (?,?,?)').run(key, timeZone, timestamp());
-    return db.prepare('SELECT * FROM god_sessions WHERE day=?').get(key);
+    const open = openSession(key);
+    if (open) return open;
+    // 当天首次建立会话；同一天的后续对话由 summonSession 以 seq+1 追加。
+    const next = db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM god_sessions WHERE day=?').get(key).seq;
+    db.prepare('INSERT INTO god_sessions(day,time_zone,seq,created_at) VALUES (?,?,?,?)').run(key, timeZone, next, timestamp());
+    return latestSession(key);
+  }
+  // 重新召唤后，若当天最新会话已有内容，则再开一条当天新会话承载新天使的对话；
+  // 当天还没有任何对话、或最新会话仍是空对话时复用现有会话（空对话不出现在左侧列表）。
+  function summonSession() {
+    const key = day();
+    const latest = latestSession(key) || today();
+    const hasContent = Number(db.prepare('SELECT COUNT(*) AS n FROM god_messages WHERE session_id=?').get(latest.id).n) > 0;
+    if (!hasContent) return latest;
+    const next = db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM god_sessions WHERE day=?').get(key).seq;
+    db.prepare('INSERT INTO god_sessions(day,time_zone,seq,created_at) VALUES (?,?,?,?)').run(key, timeZone, next, timestamp());
+    return latestSession(key);
   }
   function message(run, role, content = '', extra = {}) {
     const id = Number(db.prepare(`INSERT INTO god_messages(session_id,run_id,role,content,reasoning,tool_calls,tool_call_id,provider_json,status,created_at)
@@ -126,10 +152,11 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     return { ...ensureAngel(), persona_changed: current.persona !== persona };
   }
   function snapshot(sessionId) {
-    const session = sessionId ? db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId) : today();
+    const active = today();
+    const session = sessionId ? db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId) : active;
     if (!session) throw Object.assign(new Error('这一天的对话不存在'), { status: 404 });
     return {
-      session, angel: ensureAngel(),
+      session, current: session.id === active.id, angel: ensureAngel(),
       messages: db.prepare('SELECT * FROM god_messages WHERE session_id=? ORDER BY id').all(session.id).map(publicMessage),
       runs: db.prepare('SELECT * FROM god_runs WHERE session_id=? AND deleted_at IS NULL ORDER BY created_at,rowid').all(session.id).map(r => ({ ...r, images: parseJson(r.images_json, []) })),
       calls: db.prepare('SELECT c.* FROM god_tool_calls c JOIN god_runs r ON r.id=c.run_id WHERE r.session_id=? ORDER BY c.created_at,c.rowid').all(session.id).map(c => ({ ...c, args: parseJson(c.args_json, {}), result: parseJson(c.result_json) })),
@@ -137,5 +164,5 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
       today: day(),
     };
   }
-  return { db, now, day, timeZone, timestamp, today, ensureAngel, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
+  return { db, now, day, timeZone, timestamp, today, summonSession, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
 }

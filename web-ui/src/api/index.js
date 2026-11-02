@@ -8,6 +8,7 @@ export const stopGodSaysRun = id => request(`/god-says/runs/${id}/stop`, { metho
 export const deleteGodSaysTurn = id => request(`/god-says/runs/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const getGodAngel = () => request('/god-says/angel')
 export const updateGodAngel = body => request('/god-says/angel', { method: 'PUT', body })
+export const summonGodAngel = ({ personalities, custom } = {}) => request('/god-says/angel/summon', { method: 'POST', body: { personalities, custom } })
 export const getGodAngelImageJobs = () => request('/god-says/angel/image-jobs')
 export const getGodAngelImageJob = id => request(`/god-says/angel/image-jobs/${encodeURIComponent(id)}`)
 export const generateGodAngelImage = body => request('/god-says/angel/image-jobs', { method: 'POST', body })

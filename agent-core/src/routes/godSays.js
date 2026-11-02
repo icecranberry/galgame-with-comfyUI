@@ -5,6 +5,7 @@ import { parseJson } from '../services/godSays/repository.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { config } from '../config.js';
 import { godToolCatalog } from '../services/godSays/tools.js';
+import { ANGEL_PERSONALITIES } from '../services/godSays/angelPersonalities.js';
 
 const router = Router();
 router.get('/state', (req, res) => {
@@ -17,16 +18,20 @@ router.get('/state', (req, res) => {
   state.activity = state.scheduleEnabled ? angelActivity(schedule, r.repo.now(), r.repo.timeZone) : null;
   state.worldEvents = r.world.list(null, state.session.id);
   state.toolCatalog = godToolCatalog();
+  state.angelPersonalities = ANGEL_PERSONALITIES;
   res.json(state);
-  if (!sessionId) void r.ensureSchedule(state.session).catch(err => console.warn('[天使日程]', err.message));
+  // 尚未召唤天使时，先由前端引导选性格；不自动生成默认人格与日程。
+  if (!sessionId && state.angel.summoned) void r.ensureSchedule(state.session).catch(err => console.warn('[天使日程]', err.message));
   void r.memory.archive().catch(err => console.warn('[神说归档]', err.message));
 });
 router.get('/sessions', (req, res) => {
   const { repo } = getGodRuntime();
   const before = typeof req.query.before === 'string' ? req.query.before : '9999-12-31';
-  res.json(repo.db.prepare(`SELECT s.id,s.day,s.status,s.summary,s.summary_status,s.summary_error,
+  res.json(repo.db.prepare(`SELECT s.id,s.day,s.seq,s.created_at,s.status,s.summary,s.summary_status,s.summary_error,
     (SELECT substr(r.input,1,160) FROM god_runs r WHERE r.session_id=s.id AND r.deleted_at IS NULL ORDER BY r.created_at,r.rowid LIMIT 1) AS preview
-    FROM god_sessions s WHERE day<? ORDER BY day DESC LIMIT 60`).all(before));
+    FROM god_sessions s WHERE s.day<?
+      AND (s.seq=0 OR EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id) OR s.summary_status='done')
+    ORDER BY s.day DESC, s.seq DESC LIMIT 60`).all(before));
 });
 router.get('/memories', (req, res) => {
   const { repo } = getGodRuntime();
@@ -71,6 +76,17 @@ router.post('/runs', (req, res) => {
 router.post('/runs/:id/stop', (req, res) => res.json(getGodRuntime().cancel(req.params.id)));
 router.delete('/runs/:id', (req, res) => res.json(getGodRuntime().repo.deleteTurn(req.params.id)));
 router.get('/angel', (req, res) => res.json(getGodRuntime().repo.ensureAngel()));
+router.post('/angel/summon', async (req, res, next) => {
+  try {
+    const raw = req.body?.personalities;
+    if (raw !== undefined && !Array.isArray(raw)) return res.status(400).json({ error: '请选择天使的性格' });
+    const custom = req.body?.custom;
+    if (custom !== undefined && typeof custom !== 'string') return res.status(400).json({ error: '自定义要求格式无效' });
+    if (typeof custom === 'string' && custom.trim().length > 800) return res.status(400).json({ error: '自定义要求最多 800 字' });
+    const angel = await getGodRuntime().summon({ personalities: raw, custom });
+    res.json({ ...angel, system_role: 'angel' });
+  } catch (err) { next(err); }
+});
 router.put('/angel', (req, res) => res.json(getGodRuntime().repo.updateAngel(req.body)));
 router.get('/angel/image-jobs', (req, res) => res.json(getGodRuntime().images.list()));
 router.post('/angel/image-jobs', (req, res, next) => {

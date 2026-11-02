@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { migrateGodSaysSchema } from '../src/db/godSaysSchema.js';
 import { createGodRepository, effectKey, ANGEL_PERSONA } from '../src/services/godSays/repository.js';
 import { createAngelPersonaService } from '../src/services/godSays/angelPersona.js';
+import { normalizePersonalities } from '../src/services/godSays/angelPersonalities.js';
 import { createWorldEventService, worldEventContext } from '../src/services/godSays/worldEvents.js';
 import { createGodMemory, validateSummary } from '../src/services/godSays/memory.js';
 import { createGodTools, validateToolArgs, GOD_TOOLS } from '../src/services/godSays/tools.js';
@@ -99,11 +100,12 @@ test('upgrading early god tables adds missing columns without losing conversatio
 });
 
 const generatedPersona = `你是天使。\n## 你的身份\n你守着云庭的信件，记得每封信的折角和每个愿望的来处。\n## 你的性格\n你说话轻快而认真，喜欢先听完再回答；嘴上抱怨星图太乱，还是会把每条线都理好。遇到不知道的事情会坦白承认。\n## 你的好恶\n你喜欢热茶和日出，讨厌空口许诺，也怕错过神的呼唤。\n## 你的外观\n你有浅金短发、白色羽翼和一圈柔光的光环，衣袖边别着收信用的小银夹。`;
-test('angel persona uses shared generation once, survives reload and invalidates only the current schedule template', async t => {
+test('angel persona generates once without emotion baseline, survives reload and invalidates only the current schedule template', async t => {
   const { db, repo } = fixture(t);
   repo.ensureAngel();
+  db.prepare("UPDATE god_angel SET summoned_at='2026-01-01T00:00:00.000Z' WHERE id=1").run();
   const session = repo.today();
-  db.prepare("UPDATE god_angel SET schedule_json='[{}]',schedule_generated_at='2026-10-30' WHERE id=1").run();
+  db.prepare("UPDATE god_angel SET schedule_json='[{}]',schedule_generated_at='2026-10-30',emotion_baseline='legacy' WHERE id=1").run();
   db.prepare("UPDATE god_sessions SET schedule_json='[{}]' WHERE id=?").run(session.id);
   let release;
   const ready = new Promise(resolve => { release = resolve; });
@@ -111,11 +113,13 @@ test('angel persona uses shared generation once, survives reload and invalidates
   const ensure = createAngelPersonaService(repo, async options => { requests.push(options); await ready; return { basePrompt: generatedPersona, emotionBaseline: '{"valence":0.5}' }; });
   const first = ensure(); const second = ensure();
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].skipWebSearch, true);
-  assert.equal(requests[0].extraContext, ANGEL_PERSONA);
+  assert.deepEqual(requests[0].personalities, ['gentle']);
+  assert.equal(requests[0].custom, '');
+  assert.equal(requests[0].extraContext, undefined);
   release();
   const [a, b] = await Promise.all([first, second]);
   assert.equal(a.persona, generatedPersona); assert.equal(b.persona, generatedPersona);
+  assert.equal(a.emotion_baseline, null);
   assert.equal(a.schedule_generated_at, null);
   assert.equal(a.schedule_json, '[{}]');
   assert.equal(db.prepare('SELECT schedule_json FROM god_sessions WHERE id=?').get(session.id).schedule_json, '[{}]');
@@ -125,7 +129,9 @@ test('angel persona uses shared generation once, survives reload and invalidates
 });
 
 test('angel persona failure keeps the seed, rejects incomplete output and retries after cooldown', async t => {
-  const { repo, setTime } = fixture(t);
+  const { db, repo, setTime } = fixture(t);
+  repo.ensureAngel();
+  db.prepare("UPDATE god_angel SET summoned_at='2026-01-01T00:00:00.000Z' WHERE id=1").run();
   let attempts = 0;
   const ensure = createAngelPersonaService(repo, async () => {
     attempts++;
@@ -149,6 +155,54 @@ test('existing custom angel persona is preserved without generation', async t =>
   const ensure = createAngelPersonaService(repo, async () => assert.fail('custom persona must not be overwritten'));
   assert.equal((await ensure()).persona, generatedPersona);
   assert.ok(repo.ensureAngel().persona_generated_at);
+});
+
+test('summon stores selected personalities and forces persona regeneration', async t => {
+  const { db, repo } = fixture(t);
+  repo.ensureAngel();
+  db.prepare('UPDATE god_angel SET persona=?,persona_generated_at=? WHERE id=1').run(generatedPersona, '2026-01-01T00:00:00.000Z');
+  const requests = [];
+  const ensure = createAngelPersonaService(repo, async options => {
+    requests.push(options);
+    return { basePrompt: generatedPersona.replace('你说话轻快而认真', '你说话傲娇又嘴硬、还爱装作不在意'), emotionBaseline: '{"valence":0.5}' };
+  });
+  const angel = await ensure({ force: true, personalities: ['tsundere', 'clumsy'] });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].personalities, ['tsundere', 'clumsy']);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT personalities_json FROM god_angel WHERE id=1').get().personalities_json), ['tsundere', 'clumsy']);
+  assert.equal(angel.summoned, true);
+  assert.deepEqual(normalizePersonalities([]), ['gentle']);
+  assert.deepEqual(normalizePersonalities(['ghost', 'tsundere']), ['tsundere']);
+});
+
+test('angel persona merges the god custom requirement', async t => {
+  const { db, repo } = fixture(t);
+  repo.ensureAngel();
+  db.prepare('UPDATE god_angel SET persona=?,persona_generated_at=? WHERE id=1').run(generatedPersona, '2026-01-01T00:00:00.000Z');
+  const requests = [];
+  const ensure = createAngelPersonaService(repo, async options => { requests.push(options); return { basePrompt: generatedPersona }; });
+  await ensure({ force: true, personalities: ['gentle'], custom: '希望她戴金色发饰，说话轻声细语' });
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].custom, '希望她戴金色发饰，说话轻声细语');
+});
+
+test('resummon opens a new same-day session only when the day already has dialogue', t => {
+  const { db, repo } = fixture(t);
+  repo.ensureAngel();
+  const first = repo.today();
+  assert.equal(first.seq, 0);
+  // 空对话：重新召唤复用当天会话，不新增空条目
+  assert.equal(repo.summonSession().id, first.id);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 1);
+  // 当天已有对话：重新召唤另开一条同日新会话
+  const { run } = repo.start('resummon-001', '今天的第一句');
+  repo.message(run, 'assistant', '好');
+  repo.finish(run.id, 'completed');
+  const next = repo.summonSession();
+  assert.notEqual(next.id, first.id);
+  assert.equal(next.day, first.day);
+  assert.equal(next.seq, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 2);
 });
 const summaryJson = JSON.stringify({ summary: '神安排天空出现彩虹，事件已建立，群聊仍在等待。', memories: [{ kind: 'preference', text: '神喜欢彩虹。' }] });
 async function* chunks(values) { yield* values; }

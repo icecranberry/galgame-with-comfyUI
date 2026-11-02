@@ -16,8 +16,9 @@ import { createWorldEventService, worldEventContext } from './worldEvents.js';
 import { createGodTools } from './tools.js';
 import { runGodAgent } from './agent.js';
 import { createGodLocalApi } from './localApi.js';
-import { runPersonaGeneration } from '../characterGenerator.js';
+import { runAngelPersonaGeneration } from './angelPersonaGenerator.js';
 import { createAngelPersonaService } from './angelPersona.js';
+import { normalizePersonalities } from './angelPersonalities.js';
 import { beginTurn } from '../llmTelemetry.js';
 import { buildGodChatContext } from './promptBuilder.js';
 import { createAngelImageService } from './angelImages.js';
@@ -44,7 +45,7 @@ export function getGodRuntime() {
   if (singleton?.repo.db === getDb()) return singleton;
   const repo = createGodRepository(getDb());
   repo.ensureAngel();
-  const ensurePersona = createAngelPersonaService(repo, runPersonaGeneration);
+  const ensurePersona = createAngelPersonaService(repo, runAngelPersonaGeneration);
   const images = createAngelImageService(repo, { describe: describeAngelImage, render: generateImageRaw,
     promptEnvironment: kind => ({ systemRules: getSystemRules({ roleplay: false }), worldSetting: getWorldSetting(), worldRule: getWorldIntegrationRule(kind === 'outfits' ? 'world_outfit' : kind === 'clothing' ? 'interaction' : 'photo') }),
     settings: () => config.comfyui, scheduleEnabled: () => config.features.schedule !== false });
@@ -77,7 +78,22 @@ export function getGodRuntime() {
     api: createGodLocalApi({ port: () => config.port }) });
   let schedulePromise;
   let scheduleRetryAt = 0;
+  // 用户为天使选好性格后召唤：先落所选性格，再强制重生成人格；失败抛出带 502 的错误供前端提示重试。
+  async function summon(input = {}) {
+    const keys = normalizePersonalities(input?.personalities);
+    const custom = typeof input?.custom === 'string' ? input.custom.trim().slice(0, 800) : '';
+    repo.setPersonalities(keys);
+    try {
+      const angel = await ensurePersona({ force: true, personalities: keys, custom });
+      // 重新召唤不覆盖当天已有对话：若当天已有内容，另开一条当天新会话承载新天使。
+      repo.summonSession();
+      return angel;
+    } catch (err) {
+      throw Object.assign(new Error(`召唤天使没有完成：${err.message}`), { status: 502 });
+    }
+  }
   async function ensureSchedule(session) {
+    if (!repo.ensureAngel().summoned) return [];
     await ensurePersona();
     if (config.features.schedule === false) return [];
     const angel = repo.ensureAngel();
@@ -147,7 +163,7 @@ export function getGodRuntime() {
     repo.db.prepare("UPDATE god_world_deliveries SET status='cancelled' WHERE status='pending' AND event_id IN (SELECT id FROM god_world_events WHERE run_id=?)").run(id);
     return { ok: true };
   }
-  singleton = { repo, world, memory, images, start, cancel, ensurePersona, ensureSchedule };
+  singleton = { repo, world, memory, images, start, cancel, ensurePersona, ensureSchedule, summon };
   return singleton;
 }
 

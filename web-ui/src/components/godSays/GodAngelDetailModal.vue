@@ -1,5 +1,9 @@
 <template>
-  <ResidentCharacterDetailModal ref="profile" :visible="visible" :character="residentCharacter" :profile-adapter="profileAdapter" @close="close" @saved="publish" @open-avatar-editor="avatarOpen = true" />
+  <ResidentCharacterDetailModal ref="profile" :visible="visible" :character="residentCharacter" :profile-adapter="profileAdapter" @close="close" @saved="publish" @open-avatar-editor="avatarOpen = true">
+    <template #footer-leading>
+      <linshe-button variant="secondary" @click="emit('resummon')">重新召唤</linshe-button>
+    </template>
+  </ResidentCharacterDetailModal>
   <Teleport to="body"><Transition name="angel-overlay"><AvatarCropper v-if="visible && avatarOpen" themed title="天使头像" character-id="god:angel" :show-generate-tab="true" :recent-images="recentImages" :recent-loading="mediaLoading" :generate-handler="generateAvatar" :save-handler="saveAvatar" @switch-to-recent="refreshMedia" @close="cancelAvatar" /></Transition></Teleport>
   <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="lightboxVisible" :imgs="lightboxImage" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="lightboxVisible = false" /></div></Teleport>
 </template>
@@ -7,13 +11,14 @@
 <script setup>
 import { ref, computed, inject, watch } from 'vue'
 import ResidentCharacterDetailModal from '../ResidentCharacterDetailModal.vue'
+import LinsheButton from '../ui/LinsheButton.vue'
 import AvatarCropper from '../AvatarCropper.vue'
 import ImageLightbox from '../ImageLightbox.vue'
 import { updateGodAngel, getGodAngel, getGodAngelImageJobs, generateGodAngelClothingDraft } from '../../api/index.js'
 import { useGodAngelMedia } from '../../composables/useGodAngelMedia.js'
 
 const props = defineProps({ visible: Boolean, character: { type: Object, default: null } })
-const emit = defineEmits(['close', 'saved'])
+const emit = defineEmits(['close', 'saved', 'resummon'])
 const confirm = inject('confirm', async () => false)
 const toast = inject('toast', () => {})
 const profile = ref(null)

@@ -14,7 +14,7 @@
         <nav class="history-days" aria-label="对话日期">
           <div v-for="session in sessions" :key="session.id" class="history-day" :class="{ selected: session.id === god.state?.session.id }">
             <div role="button" tabindex="0" class="history-choice" :aria-current="session.id === god.state?.session.id ? 'page' : undefined" @click="selectSession(session)" @keydown.enter.prevent="selectSession(session)" @keydown.space.prevent="selectSession(session)">
-              <span class="history-date">{{ session.day === god.state?.today ? '今天' : session.day }}</span><span v-if="session.day === god.state?.today" class="history-day-label">{{ session.day }}</span>
+              <span class="history-date">{{ session.day === god.state?.today ? '今天' : session.day }}</span><span v-if="session.day === god.state?.today" class="history-day-label">{{ (session.seq || 0) > 0 ? '重新召唤' : session.day }}</span>
               <span class="history-preview">{{ session.preview || session.summary || '这一日的对话' }}</span>
             </div>
             <GodSacredButton v-if="session.summary_status === 'failed'" variant="link" tone="muted" size="sm" @click="retrySummary(session.id)">重新整理记忆</GodSacredButton>
@@ -51,8 +51,8 @@
       <div class="god-reading">
         <div v-if="god.loading && !god.state" class="god-loading" aria-label="正在翻开今日对话"><div v-for="n in 3" :key="n" class="skeleton" /></div>
         <Transition name="god-content" mode="out-in">
-          <section v-if="!god.loading && !god.turns.length" key="welcome" class="god-welcome">
-            <div class="sacred-sky" aria-hidden="true">
+          <section v-if="!god.loading && !god.turns.length" key="welcome" class="god-welcome" :class="{ 'is-summoning': !angelSummoned }">
+            <div v-if="angelSummoned" class="sacred-sky" aria-hidden="true">
               <svg class="sky-beam" viewBox="0 0 800 460" preserveAspectRatio="xMidYMax meet">
                 <defs>
                   <linearGradient id="godBeam" x1="0" y1="0" x2="0" y2="1">
@@ -89,7 +89,16 @@
                 </g>
               </svg>
             </div>
-            <div class="welcome-angel"><AngelEmblem /></div>
+            <div v-if="angelSummoned" class="welcome-angel"><AngelEmblem /></div>
+            <Transition name="god-content" mode="out-in">
+            <GodAngelSummon
+              v-if="!angelSummoned"
+              :options="personalityOptions"
+              :busy="summoning"
+              :error="summonError"
+              @submit="summonAngel"
+            />
+            <div v-else class="welcome-message">
             <span class="welcome-kicker"><span class="kicker-rule" aria-hidden="true" />云 庭 来 信<span class="kicker-rule" aria-hidden="true" /></span>
             <h2>{{ god.archiveId ? '这一日的静谧，已珍藏。' : '吾神，今天想说些什么？' }}</h2>
             <p>{{ god.archiveId ? god.state?.session.summary || '这一天没有留下对话。' : '我在这里听您说。关于人间，也关于我们。' }}</p>
@@ -99,6 +108,8 @@
                 {{ prompt }}
               </GodSacredButton>
             </div>
+            </div>
+            </Transition>
           </section>
           <div v-else :key="`conversation-${god.state?.session.id}`" class="god-conversation">
             <div class="god-date"><span>✦</span>{{ god.state?.session.day }}<span>✦</span></div>
@@ -178,7 +189,7 @@
       </div>
     </div>
 
-    <footer v-if="!god.archiveId" class="god-composer-area">
+    <footer v-if="!god.archiveId && (angelSummoned || !!god.turns.length)" class="god-composer-area">
       <Transition name="god-content">
         <GodSacredButton v-if="!atBottom && god.turns.length" class="god-latest" variant="line" size="sm" @click="goBottom">回到最新 ↓</GodSacredButton>
       </Transition>
@@ -211,7 +222,7 @@
     </footer>
     </div>
 
-    <CharacterDetailModal :visible="angelOpen" :character="angelCharacter" @close="angelOpen = false" @saved="angelSaved" />
+    <CharacterDetailModal :visible="angelOpen" :character="angelCharacter" @close="angelOpen = false" @saved="angelSaved" @resummon="openResummon" />
     <GodAngelScheduleModal :visible="scheduleOpen" :loading="scheduleLoading" :character="angelCharacter" @close="scheduleOpen = false" @saved="angelSaved" />
     <linshe-modal v-model="memoryOpen" title="天使记忆" :transition-ms="300">
       <div class="god-modal-content">
@@ -226,6 +237,9 @@
         <p v-if="panelError" class="modal-error" role="alert">{{ panelError }}</p>
       </div>
     </linshe-modal>
+    <linshe-modal v-model="summonOpen" title="仪式召唤" :transition-ms="300" wide>
+      <GodAngelSummon :options="personalityOptions" :initial="summonInitial" :busy="resummoning" :error="resummonError" compact @submit="doResummon" />
+    </linshe-modal>
     <GodLogsPanel v-model="logsOpen" />
   </main>
 </template>
@@ -235,7 +249,7 @@ import { ref, reactive, computed, inject, onMounted, onActivated, onBeforeUnmoun
 import { useGodSaysStore } from '../stores/godSays.js'
 import { useGodThinking } from '../composables/useGodThinking.js'
 import { onEvent } from '../stores/unifiedStream.js'
-import { getGodSaysSessions, getGodSaysMemories, retryGodSummary, getGodAngel } from '../api/index.js'
+import { getGodSaysSessions, getGodSaysMemories, retryGodSummary, getGodAngel, summonGodAngel } from '../api/index.js'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import LinsheAutoTextarea from '../components/ui/LinsheAutoTextarea.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -243,6 +257,7 @@ import CollapseTransition from '../components/CollapseTransition.vue'
 import AngelEmblem from '../components/godSays/AngelEmblem.vue'
 import GodSacredButton from '../components/godSays/GodSacredButton.vue'
 import GodAngelScheduleModal from '../components/godSays/GodAngelScheduleModal.vue'
+import GodAngelSummon from '../components/godSays/GodAngelSummon.vue'
 import GodLogsPanel from '../components/godSays/GodLogsPanel.vue'
 import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
@@ -269,6 +284,14 @@ const angelOpen = ref(false)
 const scheduleOpen = ref(false), scheduleLoading = ref(false)
 let angelRequest = 0
 const angelCharacter = ref({ system_role: 'angel' })
+const summoning = ref(false)
+const summonError = ref('')
+const summonOpen = ref(false)
+const summonInitial = ref(null)
+const resummoning = ref(false)
+const resummonError = ref('')
+const angelSummoned = computed(() => god.state?.angel?.summoned !== false)
+const personalityOptions = computed(() => god.state?.angelPersonalities || [])
 const confirm = inject('confirm', async () => false)
 const memoryOpen = ref(false)
 const logsOpen = ref(false)
@@ -465,13 +488,19 @@ async function moreSessions() {
   sessionsLoading.value = true; sessionsError.value = ''
   try {
     const page = await getGodSaysSessions(sessionsLoaded ? sessions.value.at(-1)?.day : undefined)
-    sessions.value = [...new Map([...sessions.value, ...page].map(s => [s.id, s])).values()].sort((a, b) => b.day.localeCompare(a.day))
+    sessions.value = [...new Map([...sessions.value, ...page].map(s => [s.id, s])).values()].sort((a, b) => b.day.localeCompare(a.day) || (b.seq || 0) - (a.seq || 0))
     sessionsLoaded = true; hasMoreSessions.value = page.length === 60
   }
   catch (err) { sessionsError.value = err.message }
   finally { sessionsLoading.value = false }
 }
-async function selectSession(session) { historyOpen.value = false; await god.load(session.day === god.state?.today ? null : session.id); await goBottom() }
+async function reloadSessions() {
+  sessions.value = []
+  sessionsLoaded = false
+  hasMoreSessions.value = true
+  await moreSessions()
+}
+async function selectSession(session) { historyOpen.value = false; await god.load(session.id); await goBottom() }
 async function openAngelPanel(schedule = false) {
   const request = ++angelRequest
   angelCharacter.value = { ...god.state?.angel, system_role: 'angel' }
@@ -484,6 +513,37 @@ async function openAngelPanel(schedule = false) {
 }
 function openAngel() { return openAngelPanel() }
 function openSchedule() { return openAngelPanel(true) }
+
+async function summonAngel(payload) {
+  if (summoning.value) return
+  summoning.value = true; summonError.value = ''
+  try {
+    const angel = await summonGodAngel(payload)
+    angelSaved({ ...angel, system_role: 'angel' })
+    await god.load()
+    void reloadSessions()
+    await nextTick(); goBottom()
+  } catch (err) { summonError.value = err.message || '召唤失败，请重试' }
+  finally { summoning.value = false }
+}
+function openResummon() {
+  angelOpen.value = false
+  summonInitial.value = Array.isArray(god.state?.angel?.personalities) ? [...god.state.angel.personalities] : null
+  resummonError.value = ''
+  summonOpen.value = true
+}
+async function doResummon(payload) {
+  if (resummoning.value) return
+  resummoning.value = true; resummonError.value = ''
+  try {
+    const angel = await summonGodAngel(payload)
+    angelSaved({ ...angel, system_role: 'angel' })
+    summonOpen.value = false
+    await god.load()
+    void reloadSessions()
+  } catch (err) { resummonError.value = err.message || '重新召唤失败，请重试' }
+  finally { resummoning.value = false }
+}
 
 function angelSaved(angel) { angelCharacter.value = angel; if (god.state) god.state.angel = angel }
 async function removeTurn(turn) {
@@ -565,6 +625,8 @@ watch(() => god.turns[0]?.input, input => { const session = sessions.value.find(
 .god-scroll { min-height:0; flex:1; overflow-y:auto; overscroll-behavior:contain; }
 .god-reading { width:min(100%, calc(var(--god-col) + 64px)); padding:28px 32px 36px; margin:0 auto; box-sizing:border-box; }
 .god-welcome { position:relative; display:flex; align-items:center; flex-direction:column; text-align:center; padding:86px 0 64px; min-height:420px; max-width:100%; justify-content:center; }
+.god-welcome.is-summoning { padding:12px 0 28px; }
+.welcome-message { display:flex; flex-direction:column; align-items:center; }
 .sacred-sky { position:absolute; inset:-28px -2% 0; pointer-events:none; overflow:hidden; -webkit-mask-image:linear-gradient(to bottom, transparent, #000 14%, #000 78%, transparent); mask-image:linear-gradient(to bottom, transparent, #000 14%, #000 78%, transparent); }
 .sky-beam,.sky-arch { position:absolute; inset:0; width:100%; height:100%; }
 .sky-beam { z-index:0; }

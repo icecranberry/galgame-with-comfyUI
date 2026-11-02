@@ -103,6 +103,7 @@ SillyTavern 预设仅由需要文风的业务请求显式接入 `services/preset
 |---|---|---|---|---|
 | 私聊主聊天/规划复用/重试 | 规则+世界观 → 人设+buff/世界状态 → 格式关系 → 摘要/历史 → dynamic_context user | 人设原文前/后；深度/示例在人设原文后、buff 与世界状态之前 | 第一个 system 内世界观前/后 | 最后 user 的 dynamic_context 结束标签之前 |
 | 神说 | 破甲词+中文要求+世界观 → 强化 → 工具/聊天规范 → 天使原文 → 神与天使关系/用户资料 → 聊天节奏 → 摘要 → 原生 user/assistant/tool 历史 | 人设原文前/后；稳定深度/示例在聊天节奏末尾、摘要之前；按位置模式的历史深度按完整神谕轮次定位，不插入调用与结果之间 | 第一个 system 内世界观前/后 | 最后 user 的 dynamic_context 结束标签之前；扫描原始 user/assistant 历史，不混入时间与工具 JSON |
+| 天使人格创建 | 规则+世界观 → character_persona 强化（可选）→ 固定创作规范与四段输出模板 → 固定天使身份/形象基准 → 本次性格/自定义 → 唯一 user（有世界观时重申遵循） | `personaTexts` 为实际身份层；稳定边界截止其末尾，选择与自定义不认证为静态；常驻示例/深度在边界前注入 | system0 的真实世界观文本边界 | 最后 user 开头；history 扫描当次性格、自定义和收尾任务，不伪造对话或插入空消息；scope 为 god:angel:persona |
 | 天使头像／形象／日程快照 | 规则+世界观 → 强化（可选）→ 固定摄影／立绘与英文输出要求 → characterPersona 完整天使人格 → 本次服装注入（可选）→ user | 实际组装的人格前/后；稳定深度／示例在人格末尾，活动、日期、额外要求都在 user，本次服装在稳定人格之后，不认证为静态 | 第一个 system 内世界观前/后 | 最后 user 开头；扫描选中活动与额外要求，按图片种类隔离 scope 与任务 turnKey |
 | 天使场景服装／衣服库 | 复用 sceneOutfitPrompt / clothingLibrary：规则+世界观 → 强化（可选）→ 固定规范及完整 JSON 示例 → 人设 → 默认外观设计基准或所选词条 → user | 实际发送的人设层前/后；稳定区截止人设末尾，后续基准、场景和词条不认证为静态 | 第一个 system 内世界观前/后 | 最后 user 开头；扫描实际基准/词条/额外要求，独立 god:angel:outfits / clothing scope 与任务 turnKey |
 | 群聊 | 规则世界观 → 协议 → group_info 群名片 → 摘要 → transcript user → directive user | group_info 前/后；深度/示例在群名片后、摘要和 transcript 之前 | 舞台 system 内世界观前/后 | directive user 开头；动态示例另用其前方 system 槽 |

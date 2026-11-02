@@ -72,7 +72,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
       if (generation !== epoch) return
       state.value = result
       cursor = result.cursor
-      archiveId.value = session
+      archiveId.value = result.current ? null : session
       if (activeRun.value) connect(activeRun.value)
     } catch (err) { if (generation === epoch) error.value = err.message }
     finally { if (generation === epoch) loading.value = false }

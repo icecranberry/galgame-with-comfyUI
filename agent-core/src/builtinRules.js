@@ -286,6 +286,8 @@ const WORLD_INTEGRATION_PREAMBLE = `<world_setting>不是可有可无的背景�
 const WORLD_INTEGRATION_TASK_RULES = Object.freeze({
   interaction: `<world_setting>不是可有可无的背景说明——它是这个虚构世界的基本法则。以下所有创作必须在<world_setting>的框架内展开。`,
 
+  character_persona: `人格卡的身份经历、价值判断、好恶、外观与服饰都必须在<world_setting>中成立。将世界规则内化为角色的常识与行为逻辑，不抄写世界观原文；通用角色模板、默认形象或额外要求与世界观冲突时，以<world_setting>为准。未规定的细节才由创作者补全，不另造相冲突的世界规则。`,
+
   moments: `${WORLD_INTEGRATION_PREAMBLE}朋友圈的正文与配图都必须遵循<world_setting>：
 
 1. 地点、活动、社会关系，以及角色对"正常"与"异常"的判断，都以当前世界为准。涉及世界观明确规定的事情时，必须落实这些规则，不能退回与之冲突的现实常识或原 IP 设定。
@@ -345,15 +347,18 @@ const WORLD_INTEGRATION_TASK_RULES = Object.freeze({
 
 /**
  * 构建世界观最高优先级注入。
- * @param {'interaction'|'moments'|'momentReply'|'relationships'|'photo'|'schedule'|'event'|'eventConclusion'|'world_outfit'|'town_asset'} scope
+ * @param {'interaction'|'character_persona'|'moments'|'momentReply'|'relationships'|'photo'|'schedule'|'event'|'eventConclusion'|'world_outfit'|'town_asset'} scope
  * @returns {string}
  */
 export function getWorldIntegrationRule(scope = 'interaction') {
   const taskRule = WORLD_INTEGRATION_TASK_RULES[scope];
   if (!taskRule) throw new Error(`Unknown world integration scope: ${scope}`);
 
+  const core = scope === 'character_persona'
+    ? '<world_setting>是最高优先级的基本法则。指定 IP 角色时，保留其可辨识的个人身份、核心性格、说话习惯，以及与当前世界观兼容的关系和经历；只对冲突的职业、组织、地点、能力规则或经历作必要适配，不因承担新职责就抹去原来的角色。自定义要求与世界观冲突时，以<world_setting>为准。'
+    : WORLD_INTEGRATION_CORE;
   return `<world_integration priority="highest">
-${WORLD_INTEGRATION_CORE}
+${core}
 
 ${taskRule}
 </world_integration>`;
