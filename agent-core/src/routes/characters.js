@@ -1488,20 +1488,42 @@ async function renderSceneStandingImage(char, promptText, scene) {
   const stageBase = path.join(getPendingDir(), `standing-${char.id}-${scene}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(path.dirname(stageBase), { recursive: true });
   const staged = await runStandingGeneration(char, promptText, { stageBase });
+  return commitSceneStandingImage(char.id, scene, promptText, path.join(getPendingDir(), staged.filename), staged.sourceFilename);
+}
 
+function commitSceneStandingImage(characterId, scene, promptText, pendingPath, sourceFilename) {
+  if (!getDb().prepare('SELECT id FROM characters WHERE id = ?').get(characterId)) {
+    throw new Error('角色已不存在，无法替换形象');
+  }
   // 该场景原本**显式**存的图（兜底的默认立绘不算 —— 那是 standing_url，不能动）
-  const oldRow = getSceneStandingRow(char.id, scene);
+  const oldRow = getSceneStandingRow(characterId, scene);
 
-  const filename = `standing_${char.id}_${scene}_${Date.now()}_${staged.sourceFilename || 'comfy.png'}`;
+  const filename = `standing_${characterId}_${scene}_${Date.now()}_${sourceFilename || 'comfy.png'}`;
   const destPath = path.join(getImageDir('standing'), filename);
   fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.renameSync(path.join(getPendingDir(), staged.filename), destPath);
+  fs.renameSync(pendingPath, destPath);
   const url = buildImageUrl('standing', filename);
 
-  upsertSceneStanding(char.id, scene, { imageUrl: url, promptText });
+  upsertSceneStanding(characterId, scene, { imageUrl: url, promptText });
   if (oldRow?.image_url) { try { deleteImageFileByUrl(oldRow.image_url); } catch {} }
   invalidateGalleryCache();
   return url;
+}
+
+function startSceneStandingTask(char, scene, promptText, beforeUrl) {
+  let sourceFilename;
+  return startEditTask({
+    action: 'standing',
+    url: beforeUrl,
+    meta: { characterId: char.id, characterName: char.display_name, scene, promptText },
+    run: async ({ stageBase, onProgress }) => {
+      const staged = await runStandingGeneration(char, promptText, { stageBase, onProgress });
+      sourceFilename = staged.sourceFilename;
+      return staged;
+    },
+    finalize: task => commitSceneStandingImage(char.id, scene, promptText, task.pendingPath, sourceFilename),
+    restart: () => startSceneStandingTask(char, scene, promptText, beforeUrl),
+  });
 }
 
 // GET /api/characters/:id/standings — 四套场景立绘（work 槽用 standing_url 兜底）
@@ -1552,6 +1574,11 @@ router.post('/:id/standings/generate', async (req, res) => {
 
   try {
     const promptText = await generateSceneStandingPrompt(char, scene, requirement, mode, req.body?.prompt);
+    const beforeUrl = listSceneStandings(char.id).find(item => item.scene === scene)?.image_url;
+    if (beforeUrl) {
+      const task = startSceneStandingTask(char, scene, promptText, beforeUrl);
+      return res.json({ ok: true, task_id: task.id, scene });
+    }
     const url = await renderSceneStandingImage(char, promptText, scene);
     res.json({ ok: true, scene, image_url: url, prompt_text: promptText, standings: listSceneStandings(char.id) });
   } catch (err) {

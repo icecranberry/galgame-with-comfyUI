@@ -10,7 +10,7 @@
   </TransitionGroup>
   <Teleport to="body">
     <div style="--vel-z-index: 11000">
-      <ImageLightbox :visible="visible" :imgs="images.map(image => image.url)" :index="index" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="visible = false" />
+      <ImageLightbox :visible="visible" :imgs="images.map(image => image.url)" :index="index" :show-regenerate="editable" :show-upscale="editable" :show-download="true" :show-delete="false" @hide="visible = false" />
     </div>
   </Teleport>
 </template>
@@ -20,7 +20,7 @@ import { ref } from 'vue'
 import ImageLightbox from '../ImageLightbox.vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 
-const props = defineProps({ images: { type: Array, default: () => [] } })
+const props = defineProps({ images: { type: Array, default: () => [] }, editable: Boolean })
 defineEmits(['loaded'])
 const visible = ref(false)
 const index = ref(0)

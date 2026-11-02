@@ -20,7 +20,7 @@
         </svg>
       </div>
       <!-- 四套形象（工装/私服/居家/睡衣）左右切换 -->
-      <div v-if="ctl.hasScenes" class="standing-switch">
+      <div v-if="ctl.hasScenes" class="standing-switch" @wheel="onSceneWheel">
         <linshe-button
 variant="icon" size="sm"
           :disabled="ctl.busy || sceneSwitching || (ctl.scenes?.length || 0) <= 1"
@@ -45,10 +45,11 @@ variant="icon" size="sm"
         class="standing-stage"
         role="button"
         tabindex="0"
-        :title="ctl.funcOpen && character?.standing_url ? '再点一次查看大图' : '点击展开立绘操作'"
+        :title="ctl.funcOpen ? (ctl.displayUrl ? '点击查看大图' : '尚未生成形象') : '点击展开立绘操作'"
         @click="ctl.onStageClick"
         @keydown.enter.prevent="ctl.onStageClick"
         @keydown.space.prevent="ctl.onStageClick"
+        @wheel="onSceneWheel"
       >
         <Transition name="standing-slide" @after-enter="sceneSwitching = false" @enter-cancelled="sceneSwitching = false">
           <div :key="sceneKey" class="standing-frame">
@@ -135,11 +136,23 @@ const slideDirection = ref(1)
 const sceneSwitching = ref(false)
 const sceneKey = computed(() => `${props.character?.id ?? ''}:${props.ctl.sceneIndex ?? props.ctl.sceneLabel ?? ''}`)
 function switchScene(direction) {
-  if (props.ctl.busy || sceneSwitching.value || (props.ctl.scenes?.length || 0) <= 1) return
+  if (props.ctl.busy || props.ctl.uploading || sceneSwitching.value || (props.ctl.scenes?.length || 0) <= 1) return
   slideDirection.value = direction
   sceneSwitching.value = true
   if (direction < 0) props.ctl.prevScene()
   else props.ctl.nextScene()
+}
+
+// 滚轮只作用于形象与切换条；每次切换留出 0.3 秒，避免连续滚动跳过多套形象。
+let lastWheelSwitchAt = -Infinity
+function onSceneWheel(event) {
+  if (event.ctrlKey || event.metaKey || event.shiftKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+  if (props.ctl.busy || props.ctl.uploading || (props.ctl.scenes?.length || 0) <= 1) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (sceneSwitching.value || event.timeStamp - lastWheelSwitchAt < 300) return
+  lastWheelSwitchAt = event.timeStamp
+  switchScene(event.deltaY > 0 ? 1 : -1)
 }
 
 // 收起操作时每两秒轮播已有图片；手动切换后重新计时，展开、关闭或卸载时清理。
@@ -348,8 +361,8 @@ function onFileChange(e) {
 /* 上传 / 删除立绘并排各占一半 */
 .standing-manage-btns { display: flex; align-items: center; gap: 8px; }
 .standing-manage-btns > * { flex: 1; min-width: 0; }
-.standing-func-enter-active { transition: all 0.32s cubic-bezier(0.3, 1.35, 0.55, 1); overflow: hidden; }
-.standing-func-leave-active { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
+.standing-func-enter-active { transition: all 0.3s cubic-bezier(0.3, 1.35, 0.55, 1); overflow: hidden; }
+.standing-func-leave-active { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); overflow: hidden; }
 .standing-func-enter-from, .standing-func-leave-to { opacity: 0; max-height: 0; transform: translateY(-8px); }
 .standing-func-enter-to, .standing-func-leave-from { opacity: 1; max-height: 150px; transform: translateY(0); }
 

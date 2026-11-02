@@ -158,7 +158,7 @@
                       <span class="tool-label">{{ toolLabels[call.function.name] || '处理神谕' }}</span>
                     </div>
                   </div>
-                  <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" />
+                  <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" editable />
                   <span v-if="['interrupted', 'cancelled'].includes(message.status)" class="partial-note">{{ message.status === 'cancelled' ? '已停止' : '此段回应未完整结束' }}</span>
                 </template>
                 <div v-if="turn.status === 'running' && !turn.messages.some(m => m.role === 'assistant')" class="preparing-reply"><span class="thinking-pulse">✦</span>天使正在整理今日见闻…</div>

@@ -17,7 +17,7 @@ function normalizeTask(data, existing = null) {
     progress: data.progress ?? null,
     error: data.error || '',
     createdAt: data.createdAt || Date.now(),
-    characterId: data.characterId ?? existing?.characterId ?? null,
+    characterId: data.characterId ?? data.meta?.characterId ?? existing?.characterId ?? null,
     // 被动型后台任务（如 diary）：meta 带角色/日期等上下文，result 带完成后的产物标识
     meta: data.meta ?? existing?.meta ?? null,
     result: data.result ?? existing?.result ?? null,
@@ -97,7 +97,7 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
     _remove(task.id)
     if (task.action === 'standing') {
       window.dispatchEvent(new CustomEvent('standing-overwritten', {
-        detail: { characterId: task.characterId, url: res.url },
+        detail: { characterId: task.characterId, url: res.url, scene: task.meta?.scene, promptText: task.meta?.promptText },
       }))
       return res
     }

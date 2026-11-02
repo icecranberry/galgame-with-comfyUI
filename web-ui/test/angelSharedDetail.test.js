@@ -12,14 +12,14 @@ const code = script.content
   .replace(/^import .* from .*$/gm, '')
   .replace('export default', 'return')
 
-function fixture(t, save = async body => body) {
+function fixture(t, save = async body => body, apiResults = {}) {
   const calls = [], events = [], notices = []
-  const residentApi = new Proxy({}, { get: (_, name) => (...args) => { calls.push([name, args]); return Promise.resolve({}) } })
+  const residentApi = new Proxy({}, { get: (_, name) => (...args) => { calls.push([name, args]); return Promise.resolve(apiResults[name] || {}) } })
   const deps = Object.fromEntries(bindings.map(name => [name, {}]))
   Object.assign(deps, {
     api: residentApi, ttsApi: residentApi.tts,
     useChatStore: () => ({ characters: [] }),
-    useImageEditTasksStore: () => Vue.reactive({ tasks: [] }),
+    useImageEditTasksStore: () => Vue.reactive({ tasks: [], refresh: async () => { calls.push(['refreshImageTasks']) } }),
     overwriteBustTick: Vue.ref(0), bustUrlIfOverwritten: url => url,
   })
   let allowed = false, state
@@ -46,6 +46,62 @@ function fixture(t, save = async body => body) {
   })
   return { state, props, calls, events, notices, allowDiscard: () => { allowed = true } }
 }
+
+test('resident scene images open on the second click without a legacy standing URL and keep controls expanded', t => {
+  const { state, props } = fixture(t)
+  assert.equal(props.character.standing_url, undefined)
+  state.standingScenes.value = [
+    { scene: 'work', image_url: '/images/standing/default.png' },
+    { scene: 'casual', image_url: '/images/standing/casual.png' },
+  ]
+  state.onStandingStageClick()
+  assert.equal(state.standingFuncOpen.value, true)
+  assert.equal(state.standingLightboxVisible.value, false)
+  state.onStandingStageClick()
+  assert.equal(state.standingLightboxVisible.value, true)
+  assert.equal(state.standingDisplayUrl.value, '/images/standing/default.png')
+  assert.equal(state.standingFuncOpen.value, true)
+  state.standingLightboxVisible.value = false
+  state.standingSceneIdx.value = 1
+  state.onStandingStageClick()
+  assert.equal(state.standingLightboxVisible.value, true)
+  assert.equal(state.standingDisplayUrl.value, '/images/standing/casual.png')
+  assert.equal(state.standingFuncOpen.value, true)
+})
+
+test('clicking an empty standing slot keeps controls expanded without opening an empty lightbox', t => {
+  const { state, props } = fixture(t)
+  props.character.standing_url = '/images/standing/legacy.png'
+  state.standingScenes.value = [{ scene: 'sleep', image_url: '' }]
+  state.onStandingStageClick()
+  state.onStandingStageClick()
+  assert.equal(state.standingFuncOpen.value, true)
+  assert.equal(state.standingLightboxVisible.value, false)
+  state.toggleStandingFunc()
+  assert.equal(state.standingFuncOpen.value, false)
+})
+
+test('regenerated scene remains unchanged until confirmation and applies only to its own outfit', async t => {
+  const h = fixture(t, undefined, { generateSceneStanding: { task_id: 'pending-image' } })
+  h.props.character.standing_url = '/default.png'
+  h.state.standingScenes.value = [
+    { scene: 'work', image_url: '/default.png', prompt_text: 'default prompt' },
+    { scene: 'casual', image_url: '/casual.png', prompt_text: 'old casual prompt' },
+  ]
+  h.state.nextStandingScene()
+  await Vue.nextTick()
+  await h.state.generateSceneStanding()
+  assert.equal(h.state.standingDisplayUrl.value, '/casual.png')
+  assert.equal(h.state.standingPrompt.value, 'old casual prompt')
+  assert.ok(h.calls.some(([name]) => name === 'refreshImageTasks'))
+  h.state.standingSceneIdx.value = 0
+  h.state.onStandingOverwritten({ detail: { characterId: h.props.character.id, scene: 'casual', url: '/new-casual.png', promptText: 'new casual prompt' } })
+  assert.equal(h.props.character.standing_url, '/default.png')
+  assert.equal(h.state.standingDisplayUrl.value, '/default.png')
+  assert.equal(h.state.standingScenes.value[1].image_url, '/new-casual.png')
+  assert.equal(h.state.standingScenes.value[1].prompt_text, 'new casual prompt')
+  assert.equal(h.state.standingPrompt.value, 'default prompt')
+})
 
 test('shared angel detail initializes and saves through its adapter without resident APIs or VAD fields', async t => {
   const saved = []

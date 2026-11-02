@@ -206,7 +206,7 @@ export function listSceneStandings(characterId) {
   return request(`/characters/${characterId}/standings`)
 }
 
-/** 生成某场景的立绘（LLM 出提示词 → 出图 → 落库；传 prompt 则直接复用，不再请求 LLM） */
+/** 生成场景立绘；已有图时返回 task_id，后台出图并在对比确认后落库。传 prompt 时复用提示词。 */
 export function generateSceneStanding(characterId, scene, requirement = '', prompt = '') {
   return request(`/characters/${characterId}/standings/generate`, { method: 'POST', body: { scene, requirement, prompt } })
 }

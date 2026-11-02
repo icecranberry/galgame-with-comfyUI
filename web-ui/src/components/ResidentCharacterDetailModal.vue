@@ -285,13 +285,17 @@
         <!-- 角色立绘（宽视口）：主面板左侧的悬浮窗；窄视口改为正文末尾的内联卡（见 modal-body-detail 末尾） -->
         <CharacterStandingPanel v-if="!inlineLayout" :character="character" :ctl="displayStandingPanel" />
 
-        <!-- ── 立绘大图查看（重新生成 / HiresFix 放大 / 下载；不放删除，面板里有）── 放在 overlay 内以复用其 10000 层级，盖过主面板 ── -->
-        <ImageLightbox
-          :visible="standingLightboxVisible"
-          :imgs="standingDisplayUrl"
-          :show-delete="false"
-          @hide="standingLightboxVisible = false"
-        />
+        <!-- 立绘灯箱独立传送到 body，盖过详情与其他浮层。 -->
+        <Teleport to="body">
+          <div style="--vel-z-index: 14000">
+            <ImageLightbox
+              :visible="standingLightboxVisible"
+              :imgs="standingDisplayUrl"
+              :show-delete="false"
+              @hide="standingLightboxVisible = false"
+            />
+          </div>
+        </Teleport>
       </div>
     </Transition>
 
@@ -1416,7 +1420,7 @@ const standingTaskRunning = computed(() => {
   const base = (c.standing_url || '').replace(/\?.*$/, '')
   return imageEditTasks.tasks.some(t =>
     t.action === 'standing' && t.status === 'running' &&
-    (t.characterId === c.id || (t.characterId == null && !!base && (t.url || '').replace(/\?.*$/, '') === base))
+    (t.characterId === c.id || t.meta?.characterId === c.id || (t.characterId == null && !!base && (t.url || '').replace(/\?.*$/, '') === base))
   )
 })
 const standingBusy = computed(() => props.profileAdapter ? !!props.profileAdapter.standing?.busy :
@@ -1529,10 +1533,8 @@ function onStandingStageClick() {
     standingFuncOpen.value = true
     return
   }
-  if (props.character?.standing_url) {
+  if (standingDisplayUrl.value) {
     standingLightboxVisible.value = true
-  } else {
-    standingFuncOpen.value = false
   }
 }
 
@@ -1582,12 +1584,17 @@ function nextStandingScene() { shiftStandingScene(1) }
 async function generateSceneStanding(prompt = '') {
   const c = props.character
   const scene = currentSceneKey.value
-  if (!c || !scene || sceneGenerating.value) return
+  if (!c || !scene || standingBusy.value) return
   standingFuncOpen.value = true
   sceneGenerating.value = true
   try {
     const reuse = String(prompt || '').trim()
     const res = await api.generateSceneStanding(c.id, scene, standingRequirement.value.trim(), reuse)
+    if (res?.task_id) {
+      await imageEditTasks.refresh()
+      toastFn('已转入后台执行，完成后在右下角对比确认', 'info')
+      return
+    }
     if (Array.isArray(res?.standings)) standingScenes.value = res.standings
     else await loadSceneStandings(c.id)
     if (res?.prompt_text) standingPrompt.value = res.prompt_text
@@ -1604,6 +1611,13 @@ async function generateSceneStanding(prompt = '') {
 function onStandingOverwritten(e) {
   const c = props.character
   if (!c || !e?.detail || c.id !== e.detail.characterId) return
+  if (e.detail.scene) {
+    standingScenes.value = standingScenes.value.map(item => item.scene === e.detail.scene
+      ? { ...item, image_url: e.detail.url, prompt_text: e.detail.promptText, is_fallback: false }
+      : item)
+    syncPromptFromScene()
+    return
+  }
   c.standing_url = e.detail.url
 }
 
