@@ -11,6 +11,8 @@ process.env.AGENT_CORE_LOG_PERSIST = '0';
 const {
   createLogBuffer,
   installConsoleCapture,
+  getLogs,
+  __resetForTest,
   CAP_BYTES,
 } = await import('../src/services/logBuffer.js');
 
@@ -208,18 +210,88 @@ test('clearLogs 清空 entries/pending', () => {
 test('installConsoleCapture 幂等，且捕获后仍执行原 console', () => {
   const saved = { log: console.log, warn: console.warn, error: console.error, info: console.info };
   try {
+    __resetForTest();
+    const printed = [];
+    console.log = (...args) => printed.push(args);
     const first = installConsoleCapture();
     const second = installConsoleCapture();
     assert.equal(first, true);
     assert.equal(second, false);
-    // 不抛错即证明原函数仍被调用（输出到真实 stdout/stderr）
-    assert.doesNotThrow(() => console.log('capture-smoke-test'));
+    const messages = [{ role: 'system', content: '完整系统规则' }, { role: 'user', content: '本次输入' }];
+    const input = JSON.stringify(messages, null, 2);
+    console.log(START('p', '神说'));
+    console.log(input);
+    console.log(`────────────────────\n[p ← 神说 正文]\n完整输出\n${END}`);
+    assert.equal(printed[1][0], input, '原 console 收到未经精简的全部消息');
+    assert.doesNotMatch(getLogs().entries[0].text, /完整系统规则/);
+    assert.match(getLogs().entries[0].text, /本次输入/);
+    assert.match(getLogs().entries[0].text, /完整输出/);
   } finally {
     console.log = saved.log;
     console.warn = saved.warn;
     console.error = saved.error;
     console.info = saved.info;
   }
+});
+
+test('神说聊天流落盘仅保留最后一个 user，工具续轮与输出保持原样，重启读取一致', async () => {
+  const dir = makeTmpDir();
+  try {
+    const file = path.join(dir, 'runtime-log.jsonl');
+    const b = createLogBuffer({ persist: true, filePath: file });
+    const label = '神说 [run-1/round-2]';
+    const lastUser = { role: 'user', content: [{ type: 'text', text: '本次输入' }, { type: 'image_url', image_url: { url: '[image base64 omitted: 100 chars]' } }] };
+    const messages = [
+      { role: 'system', content: '系统规则' },
+      { role: 'user', content: '历史输入' },
+      { role: 'assistant', content: '历史回复' },
+      lastUser,
+      { role: 'assistant', content: '', tool_calls: [{ id: 'call-1' }] },
+      { role: 'tool', tool_call_id: 'call-1', content: '历史工具结果' },
+    ];
+    const tail = [
+      `[${label}] model=test, tools=1, max_tokens=1000`,
+      `[${label} 可用工具] inspect_neighbors`,
+      '────────────────────',
+      `[p ← ${label} end] interrupted`,
+      `[p ← ${label}（流中断，已收到的部分） 思考链]`,
+      '完整思考',
+      `[p ← ${label} 正文]`,
+      '完整正文',
+      `[p ← ${label} 工具调用]`,
+      '[{"id":"call-2"}]',
+      `[usage] ${label}: prompt 80 | 输出 30`,
+      END,
+    ].join('\n');
+    b.push(START('p', label));
+    b.push(JSON.stringify(messages, null, 2));
+    b.push(tail);
+    await b.flushPersistence();
+    const expected = `${START('p', label)}\n${JSON.stringify([lastUser], null, 2)}\n${tail}`;
+    assert.equal(b.getLogs().entries[0].text, expected);
+    assert.equal(b.getLogs().totalBytes, Buffer.byteLength(expected, 'utf8'));
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).text, expected);
+    const restored = createLogBuffer({ persist: true, filePath: file });
+    assert.equal(restored.getLogs().entries[0].text, expected);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('神说记忆归档等其他调用保留全量输入；聊天流无 user 或输入未完整时不保存历史', () => {
+  const messages = JSON.stringify([{ role: 'system', content: '系统规则' }], null, 2);
+  for (const label of ['神说记忆归档', 'chat', '写手']) {
+    const b = createLogBuffer();
+    pushLlmBlock(b, 'p', label, messages);
+    assert.ok(b.getLogs().entries[0].text.includes(messages));
+  }
+  const b = createLogBuffer();
+  pushLlmBlock(b, 'p', '神说', messages);
+  assert.ok(b.getLogs().entries[0].text.startsWith(`${START('p', '神说')}\n[]\n`));
+  b.push(START('p', '神说'));
+  b.push('[{"role":"system","content":"截断的历史');
+  b.flushPending();
+  assert.equal(b.getLogs().entries[1].text, `${START('p', '神说')}\n[]`);
 });
 
 // ─────────────────────────────────────────────────────────────

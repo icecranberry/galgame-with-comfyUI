@@ -158,6 +158,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   .linshe-modal.modal-full { height: 100%; }
   /* 内衬留白收紧；底部安全区已由遮罩内边距让出，不再叠加 */
   .linshe-modal-lining { margin: var(--modal-lining-margin-mobile); }
+  /* 神说日志在窄屏压缩两侧留白，正文只由日志列表承载总滚动。 */
+  .god-logs-modal {
+    --modal-lining-margin-mobile: 0 6px 6px;
+    --modal-lining-pad: 8px 6px;
+  }
+  .god-logs-modal .god-logs-body {
+    display: flex;
+    overflow: hidden;
+  }
 }
 
 /* 操作区自带底部留白；有 footer 时不再叠加内衬的底部间距。 */

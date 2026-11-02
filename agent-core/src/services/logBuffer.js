@@ -40,6 +40,26 @@ const START_RE = /^\s*═{5,}\s*\[\s*(.+?)\s*→\s*(.+?)\s*\]\s*═{5,}\s*$/;
 // 收尾行：只由 ≥30 个 ═ 组成
 const END_RE = /^\s*═{30,}\s*$/;
 
+/** 神说聊天流仅在日志缓冲/落盘时精简输入；console 原始参数不改写。 */
+function storedBlockText({ label, provider, lines }) {
+  if (!/^神说(?: \[[^\n]*\])?$/.test(label)) return lines.join('\n');
+  const boundary = lines.findIndex((line, i) => i > 0 && (
+    line.startsWith(`[${label}] model=`)
+    || /^\s*─{5,}\s*$/.test(line)
+    || line.startsWith(`[${provider} ←`)
+    || END_RE.test(line)
+  ));
+  const inputEnd = boundary < 0 ? lines.length : boundary;
+  let lastUser;
+  try {
+    const messages = JSON.parse(lines.slice(1, inputEnd).join('\n'));
+    if (Array.isArray(messages)) lastUser = messages.findLast(message => message?.role === 'user');
+  } catch {
+    // 强制 flush 时输入可能尚未完整；不把截断的历史内容写入持久化日志。
+  }
+  return [lines[0], JSON.stringify(lastUser ? [lastUser] : [], null, 2), ...lines.slice(inputEnd)].join('\n');
+}
+
 /** 默认日志文件：基于本文件位置解析到 agent-core/data/runtime-log.jsonl，不依赖 cwd。 */
 function resolveDefaultLogFile() {
   const here = path.dirname(fileURLToPath(import.meta.url)); // agent-core/src/services
@@ -256,7 +276,7 @@ export function createLogBuffer(options = {}) {
     pending = null;
     clearTimer();
     // 即使没有收尾行也保存
-    pushEntry({ kind: 'llm', label: p.label, provider: p.provider, level: null, text: p.lines.join('\n') });
+    pushEntry({ kind: 'llm', label: p.label, provider: p.provider, level: null, text: storedBlockText(p) });
   }
 
   function beginPending(provider, label, firstLine) {

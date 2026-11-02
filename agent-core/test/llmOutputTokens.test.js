@@ -266,12 +266,21 @@ test('native tool stream logs requests, tool calls, usage and partial failures w
   const telemetry = await import(imports['../services/llmTelemetry.js']);
   const before = telemetry.calls.length;
   const tools = [{ type: 'function', function: { name: 'inspect_neighbors', parameters: { type: 'object', properties: {} } } }];
+  const lastUser = { role: 'user', content: '本轮用户输入' };
+  const agentMessages = [
+    ...messages,
+    { role: 'assistant', content: '历史回复' },
+    lastUser,
+    { role: 'assistant', content: '', tool_calls: [{ id: 'previous-call', type: 'function', function: { name: 'inspect_neighbors', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'previous-call', content: '历史工具结果' },
+  ];
   const events = [];
-  for await (const event of client.chatAgentStream(messages, { tools, requestId: 'run-1/round-1' })) events.push(event);
-  assert.deepEqual(bodies[0].messages, messages);
+  for await (const event of client.chatAgentStream(agentMessages, { tools, requestId: 'run-1/round-1' })) events.push(event);
+  assert.deepEqual(bodies[0].messages, agentMessages);
   assert.deepEqual(bodies[0].tools, tools);
   assert.equal(events.at(-1).message.tool_calls[0].id, 'call-1');
   assert.match(logs.join('\n'), /run-1\/round-1/);
+  assert.deepEqual(JSON.parse(logs[1]), agentMessages, '控制台仍打印完整输入上下文');
   assert.match(logs.join('\n'), /stable rules/);
   assert.match(logs.join('\n'), /工具调用/);
   assert.match(logs.join('\n'), /命中 40\/80/);
