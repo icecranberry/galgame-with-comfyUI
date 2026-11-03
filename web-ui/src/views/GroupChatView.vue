@@ -1230,7 +1230,12 @@ async function clearGroupAvatar() {
   border-radius:inherit; display:block;
 }
 .msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
-.avatar-fallback { color:#fff; font-size:14px; font-weight:700; user-select:none; }
+.msg-avatar > .avatar-fallback {
+  width: 100%; height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  font-size: 14px;
+}
 .avatar-clickable { cursor:pointer; transition:filter 0.15s ease, transform 0.15s ease; }
 .avatar-clickable:hover { filter:brightness(0.93); }
 .avatar-clickable:active { transform:scale(0.96); }

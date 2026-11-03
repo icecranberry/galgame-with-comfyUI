@@ -1908,7 +1908,12 @@ function renderContent(text) {
   box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
 }
 .msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
-.avatar-fallback { color:#fff; font-size:14px; font-weight:700; user-select:none; }
+.msg-avatar > .avatar-fallback {
+  width: 100%; height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  font-size: 14px;
+}
 
 /* ── 睡眠 Zzz：三个 Z 从头像右上角逐个冒出（渐入→上飘→渐出） ── */
 .sleep-zzz {
