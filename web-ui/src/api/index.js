@@ -1570,6 +1570,10 @@ export async function getNewspaperByDate(date) {
   return request(`/newspaper/by-date/${date}`)
 }
 
+export async function deleteNewspaperEdition(date) {
+  return request(`/newspaper/editions/${encodeURIComponent(date)}`, { method: 'DELETE' })
+}
+
 export async function generateNewspaper() {
   return request(`/newspaper/generate`, { method: 'POST' })
 }

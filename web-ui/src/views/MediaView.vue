@@ -604,6 +604,7 @@
       v-model="showNewspaper"
       :initial-date="newspaperDate"
       @read="onNewspaperRead"
+      @deleted="newspaperStore.fetchToday()"
       @close="newspaperRefreshKey++"
     />
   </div>

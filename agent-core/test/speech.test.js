@@ -2,7 +2,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { createAudioTestDirectory } from './helpers/audioTemp.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -110,7 +110,7 @@ test('legacy migration retains owners and unused recordings without allowing sha
   db.close();
 });
 
-const root = await fs.mkdtemp(path.join(os.tmpdir(), 'linshe-tts-test-'));
+const root = await createAudioTestDirectory('linshe-tts-test-');
 process.env.DB_PATH = ':memory:';
 process.env.TTS_AUDIO_DIR = root;
 // Handoff assertions below deliberately cover the legacy exclusive contract;

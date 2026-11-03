@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import os from 'node:os';
+import { createAudioTestDirectory } from './helpers/audioTemp.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { apiConnection, apiVoiceParams, apiSpeechBody, apiSpeechCacheKey, fetchApiSpeech } from '../src/services/speechApiClient.js';
@@ -111,7 +111,7 @@ for (const table of ['speech_jobs', 'message_speech']) {
 }
 
 test('HTTP API voices synthesize without samples, retain local profiles and support cancellation/retry', async t => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'linshe-api-tts-'));
+  const dir = await createAudioTestDirectory('linshe-api-tts-');
   process.env.DB_PATH = path.join(dir, 'test.db');
   process.env.TTS_AUDIO_DIR = path.join(dir, 'audio');
   const { getDb, closeDb } = await import('../src/db/index.js');

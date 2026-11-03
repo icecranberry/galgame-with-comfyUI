@@ -41,7 +41,8 @@ globalThis.fetch = async (url, opts) => {
   if (u.includes('/history/p1')) {
     return jsonResponse({ p1: { status: { completed: true }, outputs: { 9: { images: [{ filename: 'x.png', subfolder: '', type: 'output' }] } } } });
   }
-  if (u.includes('/view')) return new Response(FAKE_PNG, { status: 200, headers: { 'content-type': 'image/png' } });
+  // sharp may return shared memory; HTTP Response requires an ordinary ArrayBuffer.
+  if (u.includes('/view')) return new Response(Buffer.from(FAKE_PNG), { status: 200, headers: { 'content-type': 'image/png' } });
   throw new Error(`wizard claim route fixture forbids network: ${u}`);
 };
 

@@ -228,12 +228,23 @@
             variant="link"
             size="sm"
             :loading="regenerating"
-            :disabled="regenerating"
+            :disabled="regenerating || deleting"
             @click="regeneratePaper"
           >{{ regenerating ? '正在重新生成…' : '重新生成今日日报' }}</linshe-button>
         </div>
         <span class="np-colophon-hint">点击任意新闻，读全文、看大图</span>
-        <span class="np-colophon-motto">今日事，早知道</span>
+        <div class="np-colophon-end">
+          <span class="np-colophon-motto">今日事，早知道</span>
+          <linshe-button
+            v-if="isToday"
+            variant="link"
+            tone="danger"
+            size="sm"
+            :loading="deleting"
+            :disabled="regenerating || navLoading || dismissing || Object.values(regenLoading).some(Boolean)"
+            @click="deleteTodayPaper"
+          >删除今日报纸</linshe-button>
+        </div>
       </footer>
 
       <!-- 新闻详情：盖在版面上的「摊开的一页」 -->
@@ -325,9 +336,10 @@ const props = defineProps({
   modelValue: { type: Boolean, default: false },
   initialDate: { type: String, default: '' },
 })
-const emit = defineEmits(['update:modelValue', 'close', 'read'])
+const emit = defineEmits(['update:modelValue', 'close', 'read', 'deleted'])
 
 const toastFn = inject('toast', null)
+const confirmFn = inject('confirm', async () => false)
 
 const visible = computed({
   get: () => props.modelValue,
@@ -342,6 +354,7 @@ const navLoading = ref(false)
 const loading = ref(false)
 const urging = ref(false)
 const regenerating = ref(false)
+const deleting = ref(false)
 const dismissing = ref(false)
 const detail = ref(null)   // { kind: 'lead' | 'world' } | { kind: 'item', index }
 const zoomSrc = ref('')
@@ -531,6 +544,7 @@ function closeWindow() {
 // Esc 分层关：大图 → 详情页 → 整份报纸（原 LinsheModal 的职责收编到这里）
 function onWindowKeydown(e) {
   if (e.key !== 'Escape') return
+  if (deleting.value) return
   if (zoomSrc.value) { zoomSrc.value = ''; return }
   if (detail.value) { closeDetail(); return }
   closeWindow()
@@ -598,7 +612,7 @@ async function urgePrint() {
 }
 
 async function regeneratePaper() {
-  if (regenerating.value || !isToday.value) return
+  if (regenerating.value || deleting.value || !isToday.value) return
   regenerating.value = true
   try {
     const data = await api.regenerateTodayNewspaper()
@@ -612,6 +626,31 @@ async function regeneratePaper() {
     toastFn?.(err.message || '日报重新生成失败，请稍后再试', 'error')
   } finally {
     regenerating.value = false
+  }
+}
+
+async function deleteTodayPaper() {
+  if (deleting.value || regenerating.value || navLoading.value || dismissing.value ||
+      Object.values(regenLoading).some(Boolean) || !isToday.value || !todayPaper.value) return
+  const date = todayPaper.value.publish_date
+  deleting.value = true
+  try {
+    const confirmed = await confirmFn({
+      title: '删除今日报纸',
+      message: '确定删除今日报纸及其配图吗？删除后无法恢复。',
+      okText: '删除',
+      danger: true,
+    })
+    if (!confirmed) return
+    await api.deleteNewspaperEdition(date)
+    // 保留纸面直到原有的 0.3 秒关闭动画结束，列表由父级刷新。
+    closeWindow()
+    emit('deleted', date)
+    toastFn?.('今日报纸已删除', 'success')
+  } catch (err) {
+    toastFn?.(err.message || '报纸删除失败，请稍后再试', 'error')
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -1195,6 +1234,14 @@ onBeforeUnmount(() => {
 .np-colophon-motto {
   font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', 'SimSun', serif;
   font-size: 13px;
+}
+.np-colophon-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-left: auto;
 }
 
 /* ── 新闻详情（盖在版面上的摊开一页） ── */

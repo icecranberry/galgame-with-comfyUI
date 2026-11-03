@@ -56,6 +56,9 @@ krea2-posters/
 
 # Isolated M1 UI build (screenshots and verification report remain reviewable)
 agent-core/test/*
+!agent-core/test/helpers/
+agent-core/test/helpers/*
+!agent-core/test/helpers/audioTemp.js
 !agent-core/test/logBuffer.test.js
 !agent-core/test/lorebook*.test.js
 !agent-core/test/dialogueTranscript.test.js

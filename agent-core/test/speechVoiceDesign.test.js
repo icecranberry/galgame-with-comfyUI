@@ -164,7 +164,8 @@ test('bundled Chinese samples have verified hashes, PCM metadata and stable sour
       assert.equal(voice.source_type, 'official_reference_audio');
       assert.equal(voice.source_voice, 'examples/voice_11.wav');
       assert.equal(voice.source_sha256, '82730e38498413d4371a76e841cd91fa2f74843b79ad3b606d45ad8a7b7a736c');
-      assert.match(voice.description, /IndexTTS 2.0 官方/);
+      // Verify provenance independently of the optional display description.
+      assert.equal(voice.source_model, 'IndexTeam/IndexTTS-2 official reference sample');
       assert.equal(voice.transcript, '', 'upstream synthesis test text must not be presented as the reference transcript');
     } else {
       assert.match(voice.transcript, /你好，今天过得怎么样/);

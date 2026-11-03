@@ -14,6 +14,62 @@ class LocalDate extends Date {
   constructor(...args) { super(...(args.length ? args : [2026, 9, 16, 0, 30])) }
 }
 
+for (const outcome of ['confirmed', 'cancelled', 'failed']) {
+  test(`删除今日日报：${outcome}，仅成功时关闭并通知列表刷新`, async t => {
+    const today = { publish_date: '2026-10-16', edition: 2, items: [] }
+    const requests = [], events = [], toasts = []
+    let finishDelete
+    const api = {
+      deleteNewspaperEdition: async date => {
+        requests.push(date)
+        await new Promise(resolve => { finishDelete = resolve })
+        if (outcome === 'failed') throw new Error('删除失败')
+        return { ok: true }
+      },
+    }
+    const component = new Function('Vue', 'api', 'LinsheButton', 'ImageLightbox',
+      'useArticleClip', 'playNewspaperFlipSound', 'window', 'Date', code)(
+      Vue, api, {}, {}, () => {}, () => {},
+      { addEventListener() {}, removeEventListener() {} }, LocalDate,
+    )
+    let state
+    const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+    const app = renderer.createApp({ setup() {
+      state = component.setup({ modelValue: true, initialDate: '' }, { expose() {}, emit: (...args) => events.push(args) })
+      return () => null
+    } })
+    app.provide('confirm', async () => outcome !== 'cancelled')
+    app.provide('toast', (...args) => toasts.push(args))
+    app.mount({})
+    t.after(() => app.unmount())
+    state.todayPaper.value = today
+
+    // 历史期没有今日删除行为。
+    state.viewDate.value = '2026-10-15'
+    await state.deleteTodayPaper()
+    assert.deepEqual(requests, [])
+    state.viewDate.value = ''
+    const pending = state.deleteTodayPaper()
+    await Promise.resolve()
+    if (outcome !== 'cancelled') {
+      assert.equal(state.deleting.value, true)
+      await state.deleteTodayPaper()
+      assert.deepEqual(requests, [today.publish_date])
+      finishDelete()
+    }
+    await pending
+
+    assert.equal(state.deleting.value, false)
+    assert.equal(events.some(([name]) => name === 'close'), outcome === 'confirmed')
+    assert.deepEqual(events.filter(([name]) => name === 'deleted'),
+      outcome === 'confirmed' ? [['deleted', today.publish_date]] : [])
+    assert.deepEqual(requests, outcome === 'cancelled' ? [] : [today.publish_date])
+    assert.equal(toasts[0]?.[1], outcome === 'cancelled' ? undefined : outcome === 'failed' ? 'error' : 'success')
+    // 成功也保留纸面供淡出动画使用；失败/取消则继续阅读。
+    assert.equal(state.paper.value.publish_date, today.publish_date)
+  })
+}
+
 for (const initialDate of ['', '2026-10-16', '2026-10-15']) {
   test(`打开日报：${initialDate || '默认今天'}，加载正确期次且无 watcher 异常`, async t => {
     const today = { publish_date: '2026-10-16', edition: 2, items: [] }

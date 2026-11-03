@@ -7,6 +7,7 @@ import path from 'node:path';
 process.env.DB_PATH = ':memory:';
 globalThis.fetch = async () => { throw new Error('image lab test forbids network'); };
 const { filterGlobalLoras } = await import('../src/services/imageSkill.js');
+const { studioDimensions } = await import('../src/services/studioChatImages.js');
 
 const source = readFileSync(new URL('../src/routes/images.js', import.meta.url), 'utf8');
 const image = { base64: 'data:image/png;base64,dGVzdA==', filename: 'test.png' };
@@ -27,9 +28,15 @@ function loadHandler(route, dependencies) {
     Buffer,
     path,
     lastStyleTest: null,
-    config: { comfyui: {} },
+    studioDimensions,
     RAG_TIMEOUT_FAST_MS: 100,
     ...dependencies,
+    config: { comfyui: {
+      width: 1024, height: 1024,
+      momentsWidth: 1024, momentsHeight: 1024,
+      eventWidth: 1024, eventHeight: 1024,
+      ...dependencies.config?.comfyui,
+    } },
   });
   return handler;
 }
