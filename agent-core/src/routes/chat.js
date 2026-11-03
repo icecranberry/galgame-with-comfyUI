@@ -747,8 +747,12 @@ ${coreRules}
 
     const formatContextBlock = userInfoParts.length > 0 ? userInfoParts.join('\n\n') : '';
 
-    // ── 稳定块集合 ──
-    const stableBlocks = [stageContent, charBaseContent, formatContextBlock].filter(Boolean);
+    // 世界事件只在生效期内复用，置于跨角色变化之前；不认证为永久静态世界书边界。
+    const godWorldContext = getGodWorldContext([Number(characterId)]);
+    const stableBlocks = [stageContent, godWorldContext, charBaseContent, formatContextBlock].filter(Boolean);
+    const chatCacheBoundary = godWorldContext
+      ? { index: stableBlocks.indexOf(godWorldContext), offset: 0 }
+      : { index: stableBlocks.indexOf(charBaseContent), offset: (character?.base_prompt || getDefaultPrompt()).length };
 
     // Memory v3 阶段二：@memory 主动回想协议（仅 1v1 聊天，群聊明确排除）。
     // 放 stableBlocks 尾部：稳定前缀之外，开关关闭时不进 prompt（零影响，方案 §5.1）。
@@ -822,8 +826,6 @@ ${coreRules}
 
     // 4. 日程上下文（当前在做什么 / 睡醒等）
     const scheduleCtx = (config.features.schedule !== false) ? formatScheduleContext(characterId) : null;
-    const godWorldContext = getGodWorldContext([Number(characterId)]);
-    if (godWorldContext) dynamicBlocks.push(godWorldContext);
     if (scheduleCtx) {
       dynamicBlocks.push(`<schedule_context>\n${scheduleCtx}\n</schedule_context>`);
     }
@@ -1076,7 +1078,7 @@ ${coreRules}
       ...buildConversationLorebookContext(db, {conversationId, character, kind:'chat', userName:chatUserName, throughId:userRawMsgId, turnKey:String(userRawMsgId)}),
       protectedPrefix:stableBlocks.length, maxOutputTokens:4096,
       personaTexts:[character?.base_prompt || getDefaultPrompt()],
-      cacheBoundary:{index:stageContent ? 1 : 0,offset:(character?.base_prompt || getDefaultPrompt()).length},
+      cacheBoundary:chatCacheBoundary,
       activeSegments, historyStart:originalBaseMsgs.length-checkpointHistory.length, historyEnd:originalBaseMsgs.length,
     });
     const baseMsgs = lorebookTurn.messages;

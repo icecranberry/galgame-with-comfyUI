@@ -926,11 +926,17 @@ ${dynamicRules}`;
     ? `${timeTag}${scheduleContext}${styleDirective}${focusDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。发一条朋友圈。`
     : `${timeTag}${scheduleContext}${styleDirective}${focusDirective} 发一条朋友圈。`;
 
-  // 舞台（含基础世界观）→ 世界观强化（有世界观时）→ 任务 → 角色 → 交互(多人) → user
+  // 共用固定规则 → 生效中的世界事件 → 本次输出要求 → 人设 → 场景 → user。
+  // 世界事件在生效期内逐字稳定，放在随机格式、天气与跨角色变化之前复用前缀。
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });
   const postingTaskIndex = msgs.length;
-  msgs.push({ role: 'system', content: postingTask });
+  const godWorldContext = getGodWorldContext([Number(character.id)]);
+  msgs.push({ role: 'system', content: godWorldContext ? postingStablePrefix : postingTask });
+  if (godWorldContext) {
+    msgs.push({ role: 'system', content: godWorldContext });
+    msgs.push({ role: 'system', content: postingTask.slice(postingStablePrefix.length) });
+  }
   // 整卡人格（统一入口，含生效外观注入；输出含 imagePrompt，配图需体现当前外观）
   const lorePersona = buildCharacterPersona(character, { variant: 'full' });
   msgs.push({ role: 'system', content: lorePersona });
@@ -965,8 +971,6 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   if (selectedTopic) {
     msgs.push({ role: 'system', content: `【用户指定的朋友圈话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
   }
-  const godWorldContext = getGodWorldContext([Number(character.id)]);
-  if (godWorldContext) msgs.push({ role: 'system', content: godWorldContext });
   msgs.push({ role: 'user', content: selectedTopic
     ? `${userMsg} 本次围绕用户指定话题生成图文，严格按 JSON 格式输出。`
     : userMsg });

@@ -5,6 +5,7 @@
  * 上下文布局按变更频率升序排列，最大化 DeepSeek 前缀缓存命中：
  *   [system] 舞台块（破限词 + 世界观）        ← 全局不变，与 1 对 1 同串
  *   [system] 输出协议（行协议/活人感规则）  ← 全局不变，所有群共享前缀
+ *   [system] 生效中的世界事件              ← 生效期内复用，到期移除
  *   [system] 群信息（成员资料/关系/用户）    ← 每群稳定，改群设置才变
  *   [system] 群滚动摘要                       ← 每 N 轮群聊推进（用户/主动/冷场都算一轮，默认 4）
  *   [user]   群聊天记录 transcript             ← append-only
@@ -22,6 +23,7 @@
 import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/index.js';
 import { chatStream } from '../llm/llm-client.js';
 import { prepareNarrativePrompt } from './presets/narrative.js';
+import { getGodWorldContext } from './godSays/worldContext.js';
 import { config } from '../config.js';
 import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
@@ -423,6 +425,8 @@ export function buildGroupContext(group, directiveBlocks = []) {
   const messages = [];
   if (stage) messages.push({ role: 'system', content: stage });
   messages.push({ role: 'system', content: buildProtocolBlock() });
+  const godWorldContext = getGodWorldContext(group.members.map(m => m.id));
+  if (godWorldContext) messages.push({ role: 'system', content: godWorldContext });
   messages.push({ role: 'system', content: groupCard });
 
   const summaries = getRecentSummaries(conversationId, 1);
@@ -876,9 +880,6 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   // ── 动态指令块 ──
   const directiveBlocks = [];
   directiveBlocks.push(`<time_context>${getTimeTag(new Date())}</time_context>`);
-  const { getGodWorldContext } = await import('./godSays/worldContext.js');
-  const godWorldContext = getGodWorldContext(group.members.map(m => m.id));
-  if (godWorldContext) directiveBlocks.push(godWorldContext);
   if (trigger === 'world_event' || trigger === 'god_command') {
     directiveBlocks.push(trigger === 'world_event'
       ? `以下是刚刚感知到的世界事件，请至少一位成员主动提起，其他人按人格自然回应、接续现有群聊上文。不是用户发言，不要假装用户在群里发了指令。\n${directive}`
@@ -974,7 +975,10 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   const loreHistory = db.prepare('SELECT id,role,content FROM (SELECT id,role,content FROM raw_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1000) ORDER BY id').all(conversationId);
   const groupPersonaIndex = originalMsgs.findIndex(m=>m.role==='system' && m.content.startsWith('<group_info>'));
   const groupPersona = originalMsgs[groupPersonaIndex]?.content || '';
-  const lorebookTurn = await prepareNarrativePrompt(originalMsgs, { scope:conversationId, turnKey:`${trigger}:${loreHistory.at(-1)?.id || 0}`, step:db.prepare('SELECT COUNT(*) AS n FROM raw_messages WHERE conversation_id=?').get(conversationId).n, history:loreHistory, transcriptSegments:buildTranscript(db,conversationId).segments, characterNames:group.members.flatMap(m=>[m.name,m.display_name]).filter(Boolean), characterDescription:groupPersona, personaTexts:[groupPersona], cacheBoundary:groupPersonaIndex>=0 ? {index:groupPersonaIndex,offset:groupPersona.length} : undefined, trigger:trigger==='lull' ? 'continue' : 'normal', protectedPrefix:3 });
+  const worldEventIndex = originalMsgs.findIndex(m => m.role === 'system' && m.content.startsWith('<world_events>'));
+  const groupCacheBoundary = worldEventIndex >= 0 ? { index: worldEventIndex, offset: 0 }
+    : groupPersonaIndex >= 0 ? { index: groupPersonaIndex, offset: groupPersona.length } : undefined;
+  const lorebookTurn = await prepareNarrativePrompt(originalMsgs, { scope:conversationId, turnKey:`${trigger}:${loreHistory.at(-1)?.id || 0}`, step:db.prepare('SELECT COUNT(*) AS n FROM raw_messages WHERE conversation_id=?').get(conversationId).n, history:loreHistory, transcriptSegments:buildTranscript(db,conversationId).segments, characterNames:group.members.flatMap(m=>[m.name,m.display_name]).filter(Boolean), characterDescription:groupPersona, personaTexts:[groupPersona], cacheBoundary:groupCacheBoundary, trigger:trigger==='lull' ? 'continue' : 'normal', protectedPrefix:groupPersonaIndex + 1 });
   const msgs = lorebookTurn.messages;
 
   // ── 先插 raw 占位（messages.raw_id FK 需要），流结束后回填完整剧本 ──

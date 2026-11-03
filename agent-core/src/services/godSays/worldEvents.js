@@ -9,9 +9,14 @@ export function sampleTargets(rows, count, random = Math.random) {
   return pool.slice(0, count);
 }
 
-export function worldEventContext(db, characterIds = null, now = new Date()) {
+export function worldEventContext(db, characterIds = null, now = new Date(), { activeOnly = false } = {}) {
+  // 普通角色仅注入生效区间内的事实，不依赖定时清理；神说保留最近事件及过去见闻。
   const since = new Date(now.getTime() - 7 * 86400000).toISOString();
-  const rows = db.prepare("SELECT * FROM god_world_events WHERE kind='world' AND created_at>=? ORDER BY id DESC LIMIT 30").all(since);
+  const rows = activeOnly ? db.prepare(`SELECT * FROM god_world_events
+    WHERE kind='world' AND status='active'
+      AND julianday(created_at)<=julianday(?) AND julianday(expires_at)>julianday(?)
+    ORDER BY id DESC`).all(now.toISOString(), now.toISOString())
+    : db.prepare("SELECT * FROM god_world_events WHERE kind='world' AND created_at>=? ORDER BY id DESC LIMIT 30").all(since);
   const facts = rows.filter(row => {
     const scope = parseJson(row.character_ids);
     return !characterIds || !scope || characterIds.some(id => scope.includes(Number(id)));
