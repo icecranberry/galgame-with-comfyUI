@@ -300,8 +300,19 @@ export async function buildApk() {
   // npm run apk 与 Android Studio 两条构建路径均自动生效
 
   // ── gradle assembleRelease ──
+  // 工具链的临时文件与 Android 用户配置也放在构建缓存内，避免依赖
+  // 用户目录的权限（Kotlin 的 .alive 文件创建失败会直接中断编译）。
+  const tempDir = resolve(TOOLCHAIN, "tmp");
+  const androidPrefsRoot = resolve(TOOLCHAIN, "android-user-home");
+  const androidUserHome = resolve(androidPrefsRoot, ".android");
+  ensureDir(tempDir);
+  ensureDir(androidUserHome);
   log("  gradle assembleRelease（首次构建需下载依赖，约 5-20 分钟）...");
-  const r = await exec(resolve(GRADLE_DIR, "bin", "gradle.bat"), ["assembleRelease", "--no-daemon"], {
+  // 发布构建直接在 Gradle 进程内编译 Kotlin，避免额外后台进程读写
+  // %LOCALAPPDATA%/kotlin/daemon，导致权限错误后再回退编译。
+  const r = await exec(resolve(GRADLE_DIR, "bin", "gradle.bat"), [
+    "assembleRelease", "--no-daemon", "-Pkotlin.compiler.execution.strategy=in-process",
+  ], {
     cwd: ANDROID_DIR,
     print: true,
     timeout: 1800000,
@@ -309,7 +320,12 @@ export async function buildApk() {
       JAVA_HOME: JDK_DIR,
       ANDROID_HOME: SDK_DIR,
       ANDROID_SDK_ROOT: SDK_DIR,
+      ANDROID_USER_HOME: androidUserHome,
+      // 旧 analytics 库读取根目录；AGP 则在根目录下追加 .android。
+      ANDROID_PREFS_ROOT: androidPrefsRoot,
       GRADLE_USER_HOME: resolve(TOOLCHAIN, "gradle-home"),
+      TEMP: tempDir,
+      TMP: tempDir,
     },
   });
   if (!r.ok) { warn(`APK 构建失败 (exit: ${r.code})`); return null; }
