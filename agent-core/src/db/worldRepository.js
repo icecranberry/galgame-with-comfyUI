@@ -100,7 +100,7 @@ export function getGlobalRule(key) {
  * 获取系统规则（破限词：system_context + core_rules），统一各场景的 jailbreak。
  *
  * @param {object} [options]
- * @param {boolean} [options.roleplay=true] - 是否包含 `<roleplay>` 内的角色扮演激活指令。
+ * @param {boolean} [options.roleplay=true] - 是否包含完整的 `<roleplay>` 身份规则块（保留标签）。
  *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
  */
 export function getSystemRules({ roleplay = true } = {}) {
@@ -119,8 +119,8 @@ export function getSystemRules({ roleplay = true } = {}) {
     base = content;  // 无标签（旧数据），向下兼容
   } else {
     const before = content.slice(0, rpMatch.index).replace(/\n{3,}/g, '\n\n').trim();
-    // 基础上下文始终保留，roleplay 指令按需包含
-    base = roleplay ? before + '\n\n' + rpMatch[1].trim() : before;
+    // 启用时原样保留身份规则及其标签；禁用时整块排除，基础上下文不变。
+    base = roleplay ? before + '\n\n' + rpMatch[0] : before;
   }
 
   return base;

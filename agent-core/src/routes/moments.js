@@ -799,7 +799,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   const multiPersonImageNote = multiPersons.length > 0 ? `
 - **多人画面**：包含你和${multiPersons.map(p => p.otherName).join('、')}，另指定同框的用户也计入人数；每人独立描述，参与同一活动。` : '';
 
-  const postingTaskIntro = '你正在发朋友圈。请根据你的人设，像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。';
+  const postingTaskIntro = '你正在发朋友圈。你就是下方人格在当前世界中的本人，现在正打开自己的账号，把此刻想分享的生活片段发给熟人。以下从你的生活处境出发，用你自己的所见、所感和说话习惯完成这条动态。';
 
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
@@ -882,7 +882,7 @@ ${imageFormatRule}
   const postingTask = (() => {
     const textShape = isSpecialMode
       ? '中文口语，第一人称，按本次内容主次决定写日程感想或梦境片段，分清梦与现实'
-      : '中文口语，只围绕一个具体中心，用角色自己的语气表达';
+      : '中文口语，只围绕一个具体中心，用你自己的语气表达';
     const jsonFmt = buildMomentOutputFormat({
       imageCount,
       textRequirement: textShape,
@@ -923,8 +923,8 @@ ${dynamicRules}`;
       );
 
   const userMsg = multiPersons.length > 0
-    ? `${timeTag}${scheduleContext}${styleDirective}${focusDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。发一条朋友圈。`
-    : `${timeTag}${scheduleContext}${styleDirective}${focusDirective} 发一条朋友圈。`;
+    ? `${timeTag}${scheduleContext}${styleDirective}${focusDirective} ${multiPersons.map(p => p.relDesc).join('，')}——和${multiPersons.map(p => p.otherName).join('、')}在一起。同行者只作为同一场景里的互动对象，不要另写人物介绍或关系感想。现在，你是当前世界里的${character.display_name}本人。思考中的“我”和发帖者都是你自己，从“我此刻的感受和分享欲”开始斟酌；把你想发的原话和画面按上述字数要求与 JSON 格式提交。`
+    : `${timeTag}${scheduleContext}${styleDirective}${focusDirective} 现在，你是当前世界里的${character.display_name}本人。思考中的“我”和发帖者都是你自己，从“我此刻的感受和分享欲”开始斟酌；把你想发的原话和画面按上述字数要求与 JSON 格式提交。`;
 
   // 共用固定规则 → 生效中的世界事件 → 本次输出要求 → 人设 → 场景 → user。
   // 世界事件在生效期内逐字稳定，放在随机格式、天气与跨角色变化之前复用前缀。
@@ -969,10 +969,10 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     }
   }
   if (selectedTopic) {
-    msgs.push({ role: 'system', content: `【用户指定的朋友圈话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
+    msgs.push({ role: 'system', content: `【本次分享话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
   }
   msgs.push({ role: 'user', content: selectedTopic
-    ? `${userMsg} 本次围绕用户指定话题生成图文，严格按 JSON 格式输出。`
+    ? `${userMsg} 这次就围绕上方指定话题，说出你自己的感受并分享画面，严格按 JSON 格式输出。`
     : userMsg });
 
   let text = '', imagePrompt = '', imageUrls = [];
@@ -1150,7 +1150,7 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
     .filter(Boolean).join('；');
 
   // 静态规则（含生图格式）在前，随本次变化的字段（同框人物、誓约、天气）压到后面。
-  const postingTask = `你正在发朋友圈。像刷手机时随手发一条那样发出一条真实的朋友圈动态——不是写作品。
+  const postingTask = `你正在发朋友圈。你就是下方人格在当前世界中的本人，现在正打开自己的账号，把此刻想分享的生活片段发给熟人。以下从你的生活处境出发，用你自己的所见、所感和说话习惯完成这条动态。
 
 通用规则：
 - 只输出 JSON，不要解释
@@ -1174,7 +1174,8 @@ ${weatherHint}`;
   const descPart = activity.description ? `（${activity.description}）` : '';
   const userMsg = `${timeTag}
 **【此刻正在做】${character.display_name}此刻正在${doing}${descPart}**
-**【本次发朋友圈动因】这是你与${userName}约好的事情——就是上面【此刻正在做】的内容，只围绕它发一条朋友圈。**`;
+**【本次发朋友圈动因】这是你与${userName}约好的事情——就是上面【此刻正在做】的内容，只围绕它发一条朋友圈。**
+现在，你是当前世界里的${character.display_name}本人。思考中的“我”和发帖者都是你自己，从“我此刻的感受和分享欲”开始斟酌；把你想发的原话和画面按上述字数要求与 JSON 格式提交。`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });

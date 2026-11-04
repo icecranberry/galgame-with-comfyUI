@@ -13,7 +13,8 @@ config.features.town = false;
 config.features.serializeBackgroundLLM = false;
 const { resetClient } = await import('../llm/llm-client.js');
 resetClient();
-const { getDb, closeDb } = await import('../db/index.js');
+const { getDb, closeDb, getSystemRulesWithWorld } = await import('../db/index.js');
+const { getWorldIntegrationRule } = await import('../builtinRules.js');
 const { default: router, generateMomentPost } = await import('../routes/moments.js');
 const { invalidateAllCache } = await import('./scheduleManager.js');
 afterEach(() => { invalidateAllCache(); closeDb(); });
@@ -66,11 +67,11 @@ test('指定话题：未勾选、同名不同来源和空描述均按所选 id �
     const result = await generate({ character_id: characterId, topic_id: id });
     assert.equal(result.payload.error, 'TEST_PROMPT_CAPTURED');
     const { messages } = requests.at(-1);
-    const selected = messages.find(m => m.content.startsWith('【用户指定的朋友圈话题】'));
+    const selected = messages.find(m => m.content.startsWith('【本次分享话题】'));
     assert.equal(selected.role, 'system');
     assert.ok(selected.content.includes(`名称：${name}\n描述：${desc}`));
     assert.equal(messages.at(-1).role, 'user');
-    assert.match(messages.at(-1).content, /围绕用户指定话题/);
+    assert.match(messages.at(-1).content, /围绕上方指定话题/);
     assert.ok(!messages.at(-1).content.includes('【此刻正在做】'));
     assert.ok(!JSON.stringify(messages).includes('不应选到的系统描述'));
     const post = db.prepare('SELECT style, status FROM moment_posts ORDER BY id DESC LIMIT 1').get();
@@ -182,6 +183,11 @@ test('random topic source and focus determine schedule detail in the actual LLM 
 
 test('发朋友圈 system2：生图格式留在静态区，随本次变化的字段只在输出格式之后', async t => {
   const characterId = seedCharacter();
+  const db = getDb();
+  db.prepare('UPDATE world_settings SET content = ? WHERE is_active = 1').run('居民们在海边过普通生活。');
+  const otherId = Number(db.prepare("INSERT INTO characters (name, display_name, base_prompt) VALUES ('other', '另一位居民', '喜欢看书')").run().lastInsertRowid);
+  const sharedSystem0 = getSystemRulesWithWorld();
+  const momentsSystem1 = getWorldIntegrationRule('moments');
   const requests = [];
   t.mock.method(OpenAI.Chat.Completions.prototype, 'create', async params => {
     requests.push(params);
@@ -193,8 +199,13 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
   // 模式、话题、形态、张数；张数取三段不同区间，验证静态区不随张数变化。
   for (const [index, countRoll] of [0.5, 0.75, 0.95].entries()) {
     rolls = [0.5, 0.5, 0.5, countRoll];
-    assert.equal((await generate({ character_id: characterId })).payload.error, 'TEST_PROMPT_CAPTURED');
-    const task = requests.at(-1).messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
+    assert.equal((await generate({ character_id: index === 1 ? otherId : characterId })).payload.error, 'TEST_PROMPT_CAPTURED');
+    const messages = requests.at(-1).messages;
+    assert.deepEqual(messages[0], { role: 'system', content: sharedSystem0 });
+    assert.deepEqual(messages[1], { role: 'system', content: momentsSystem1 });
+    assert.equal(messages.filter(m => m.role === 'user').length, 1);
+    assert.equal(messages.at(-1).role, 'user');
+    const task = messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
     const [prefix, tail] = task.split('输出格式（严格 JSON）：\n');
     prefixes.push(prefix);
     // 静态区含生图格式，且不含任何按本次调用变化的字段。
@@ -205,4 +216,13 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
     assert.equal(Object.keys(JSON.parse(tail.split('\n')[0])).length, index + 2);
   }
   assert.ok(prefixes.every(prefix => prefix === prefixes[0]), 'image count must not enter the static prefix');
+  // 无世界观不新增强化消息，沿用原有任务层与唯一 user。
+  db.prepare("UPDATE world_settings SET content = '' WHERE is_active = 1").run();
+  rolls = [0.5, 0.5, 0.5, 0.5];
+  assert.equal((await generate({ character_id: characterId })).payload.error, 'TEST_PROMPT_CAPTURED');
+  const noWorld = requests.at(-1).messages;
+  assert.deepEqual(noWorld[0], { role: 'system', content: getSystemRulesWithWorld() });
+  assert.match(noWorld[1].content, /^你正在发朋友圈。/);
+  assert.equal(noWorld.filter(m => m.role === 'user').length, 1);
+  assert.equal(noWorld.at(-1).role, 'user');
 });
