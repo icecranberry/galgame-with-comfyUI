@@ -55,7 +55,7 @@ test('system topics use the exact 50 percent boundary when a schedule exists', (
 
 test('restored form ranges keep the original lower bounds and double only upper bounds', () => {
   assert.deepEqual(MOMENT_FORMS.map(f => f.len), [
-    '5-40字', '1-30字', '15-90字', '10-90字', '15-90字', '1-40字', '1-24字', '5-60字',
+    '5-80字', '1-60字', '15-180字', '10-180字', '15-180字', '1-80字', '1-48字', '5-120字',
   ]);
 });
 

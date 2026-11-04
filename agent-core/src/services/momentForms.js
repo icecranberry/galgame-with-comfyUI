@@ -2,14 +2,14 @@
  * （services/town/townNpcMomentGenerator.js）共用，避免两端口径漂移。 */
 
 export const MOMENT_FORMS = [
-  { name: '短句流',  desc: '可以直接说出最想说的感想，保留让意思成立的细节', len: '5-40字', weight: 2.0, nightBoost: false },
-  { name: '纯图党',  desc: '照片能传达主要信息时，可以用简短感想或表情回应，不必复述画面', len: '1-30字', weight: 0.5, nightBoost: true },
-  { name: '括号吐槽', desc: '有顺口的补充或自我拆台时可以放进括号，不必专门安排反差', len: '15-90字', weight: 0.8, nightBoost: false },
-  { name: '发疯文学', desc: '符合角色和当下心情时，可以夸张回应眼前的小刺激，不强行搞笑或堆砌标点', len: '10-90字', weight: 0.5, nightBoost: false },
-  { name: '抛个问题', desc: '确实有疑问或需要帮助时可以提问，带够场景让人能回答，不为互动强凑问题', len: '15-90字', weight: 0.9, nightBoost: false },
-  { name: '颜文字体', desc: '符合角色习惯时可以用颜文字表达情绪，不用也可以，不挤掉具体感想', len: '1-40字', weight: 1.4, nightBoost: true },
-  { name: '只发个语气词', desc: '确实只想给个反应时，可以只用语气词或表情；已有具体感想时保留它', len: '1-24字', weight: 0.2, nightBoost: true },
-  { name: '话说一半', desc: '念头自然停住时可以留白，不故意截断意思或强加省略号', len: '5-60字', weight: 0.8, nightBoost: false },
+  { name: '短句流',  desc: '可以直接说出最想说的感想，保留让意思成立的细节', len: '5-80字', weight: 2.0, nightBoost: false },
+  { name: '纯图党',  desc: '照片能传达主要信息时，可以用简短感想或表情回应，不必复述画面', len: '1-60字', weight: 0.5, nightBoost: true },
+  { name: '括号吐槽', desc: '有顺口的补充或自我拆台时可以放进括号，不必专门安排反差', len: '15-180字', weight: 0.8, nightBoost: false },
+  { name: '发疯文学', desc: '符合角色和当下心情时，可以夸张回应眼前的小刺激，不强行搞笑或堆砌标点', len: '10-180字', weight: 0.5, nightBoost: false },
+  { name: '抛个问题', desc: '确实有疑问或需要帮助时可以提问，带够场景让人能回答，不为互动强凑问题', len: '15-180字', weight: 0.9, nightBoost: false },
+  { name: '颜文字体', desc: '符合角色习惯时可以用颜文字表达情绪，不用也可以，不挤掉具体感想', len: '1-80字', weight: 1.4, nightBoost: true },
+  { name: '只发个语气词', desc: '确实只想给个反应时，可以只用语气词或表情；已有具体感想时保留它', len: '1-48字', weight: 0.2, nightBoost: true },
+  { name: '话说一半', desc: '念头自然停住时可以留白，不故意截断意思或强加省略号', len: '5-120字', weight: 0.8, nightBoost: false },
 ];
 
 /** 图文保持一个中心，日程与动因的主次由请求组装时确定。 */
@@ -143,7 +143,7 @@ export const MOMENT_IMAGE_FIELDS = ['imagePrompt', 'imagePrompt2', 'imagePrompt3
 export const CHINESE_NUM = ['', '一', '两', '三'];
 
 /** 用合法 JSON 展示完整字段结构，动态文本中的引号、换行、反斜杠不能破坏示例。 */
-export function buildMomentOutputFormat({ imageCount = 1, textRequirement = '中文口语，只围绕一个具体中心，用你自己的语气表达', textLength = '30-160字', imageRequirement = '' } = {}) {
+export function buildMomentOutputFormat({ imageCount = 1, textRequirement = '中文口语，只围绕一个具体中心，用你自己的语气表达', textLength = '30-320字', imageRequirement = '' } = {}) {
   if (!Number.isInteger(imageCount) || imageCount < 1 || imageCount > MOMENT_IMAGE_FIELDS.length) {
     throw new RangeError('Moment image count must be an integer from 1 to 3');
   }

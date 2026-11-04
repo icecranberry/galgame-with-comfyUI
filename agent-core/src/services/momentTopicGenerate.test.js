@@ -107,7 +107,7 @@ test('随机梦境：单图与多图请求均强化梦内画面，普通朋友�
     assert.match(task, /日程为主时，仅在梦境动因自然契合日程时采用/);
     assert.match(task, /动因为主时可以直接分享梦境/);
     const example = JSON.parse(task.split('输出格式（严格 JSON）：\n')[1].split('\n')[0]);
-    assert.match(example.text, /80-400字/);
+    assert.match(example.text, /100-400字/);
     assert.equal(Object.keys(example).length, imageCount + 1);
     for (const [field, value] of Object.entries(example)) {
       if (field === 'text') continue;

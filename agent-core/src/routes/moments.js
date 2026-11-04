@@ -710,7 +710,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   //     其余（自由模式与主路径）→ 按时段加权抽取（深夜偏爱纯图党/自言自语，模拟真人深夜状态）
   let pickedForm = null;
   if (isSpecialMode) {
-    pickedForm = { name: '叙事长文', desc: '采用梦境或幻想动因时，可以把最想分享的梦内经历讲清；否则围绕当前日程表达真实感想，不凑长文', len: '梦境叙事80-400字，否则按日程写30-160字的短文' };
+    pickedForm = { name: '叙事长文', desc: '采用梦境或幻想动因时，可以把最想分享的梦内经历讲清；否则围绕当前日程表达真实感想，不凑长文', len: '梦境叙事100-400字，否则按日程写30-320字的短文' };
   } else {
     const _hour = (opts.postedAt || new Date()).getHours();
     const _isNight = _hour >= 22 || _hour < 5;
@@ -889,7 +889,7 @@ ${imageFormatRule}
     const jsonFmt = buildMomentOutputFormat({
       imageCount,
       textRequirement: textShape,
-      textLength: pickedForm?.len || '30-160字',
+      textLength: pickedForm?.len || '30-320字',
       imageRequirement: isSpecialMode ? MOMENT_DREAM_IMAGE_REQUIREMENT : '',
     });
 
@@ -897,7 +897,7 @@ ${imageFormatRule}
 
     // 主次判断放在动态尾部，不改变共用静态前缀。
     // 张数、形态、天气等每次不同的内容全部压在这里，静态前缀到输出格式为止。
-    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文字数范围：${pickedForm?.len || '30-160字'}，不凑字，保留关键意思
+    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文字数范围：${pickedForm?.len || '30-320字'}，不凑字，保留关键意思
 ${multiImageRule}
 ${pickedForm ? `- **发布形态参考（可不用）**：${pickedForm.desc}。` : ''}
 ${isSpecialMode ? '- **梦境采纳条件**：动因为主时可以直接分享梦境，简要日程只作背景，不必解释梦与日程的联系；日程为主时，仅在梦境动因自然契合日程时采用，否则忽略梦境及其配图建议。采用后正文分清梦与现实，配图只取梦内同一场景。' : ''}
