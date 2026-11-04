@@ -3,7 +3,7 @@ import { isMomentBackfillRunning } from './momentBackfill.js';
  * 回复队列调度器
  *
  * 每 5 分钟扫描一次，处理两件事：
- *   1. 日程分散刷新：检查是否有角色 next_schedule_refresh_at 到期，每次只刷 1 个
+ *   1. 整轮日程刷新：到期后启动共同生活规划和日程生成后台任务
  *   2. 回复队列处理：取出到期 waiting 条目，同一角色所有 waiting 消息合并为一条回复
  *
  * 合并逻辑对所有延迟类型通用（exam/shopping/sleeping 等），不仅限于睡觉。
@@ -17,7 +17,7 @@ import { buildConversationLorebookContext } from './lorebook/conversationContext
 import { config } from '../config.js';
 import { getCurrentActivity, syncSleepingState } from './scheduleManager.js';
 import { getTimeLight } from './timeLight.js';
-import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from './scheduleGenerator.js';
+import { maybeStartScheduledBatch, maybeInitializeSchedule } from './scheduleBatch.js';
 import { splitText } from '../utils/sentenceSplitter.js';
 import {
   loadEmotionState, getCompositeEmotion,
@@ -78,8 +78,8 @@ async function tick() {
     // dev 启动时已初始化等待间隔；配图只由新批次或前端按需触发。
     maybeAutoGenerateMedia();
 
-    // 1. 日程分散刷新（每次 tick 最多 1 个角色）
-    await maybeRefreshOneSchedule();
+    // 1. 仅启动到期的整轮后台任务，不等待 LLM，继续处理回复
+    await maybeRefreshSchedules();
 
     // 2. 回复队列处理（每次 tick 最多 1 个角色）
     await processReplyQueue();
@@ -92,44 +92,9 @@ async function tick() {
 
 // ── 日程刷新 ──
 
-async function maybeRefreshOneSchedule() {
+function maybeRefreshSchedules() {
   if (isMomentBackfillRunning()) return;
-  const db = getDb();
-  const candidate = db.prepare(`
-    SELECT id, display_name, base_prompt FROM characters
-    WHERE schedule_enabled = 1
-      AND (
-        next_schedule_refresh_at IS NULL
-        OR next_schedule_refresh_at <= datetime('now')
-        OR NOT EXISTS (
-          SELECT 1 FROM schedule_templates st WHERE st.character_id = characters.id
-        )
-      )
-    ORDER BY
-      CASE WHEN next_schedule_refresh_at IS NULL THEN 0 ELSE 1 END,
-      next_schedule_refresh_at ASC
-    LIMIT 1
-  `).get();
-
-  if (!candidate) return;
-
-  console.log(`[replyQueue] Refreshing schedule for ${candidate.display_name}...`);
-  try {
-    await generateSchedule(candidate);
-    snapshotTodaySchedule(candidate.id);
-    syncSleepingState(candidate.id);
-    assignNextRefreshTime(candidate.id);
-    broadcast('schedule_state_change', {
-      character_id: candidate.id,
-      reason: 'schedule_refreshed',
-    });
-    console.log(`[replyQueue] Schedule refreshed for ${candidate.display_name}`);
-  } catch (err) {
-    console.error(`[replyQueue] Schedule refresh failed for ${candidate.display_name}:`, err.message);
-    // 失败也重置刷新时间（1 小时后重试）
-    const retryAt = new Date(Date.now() + 3600_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '').replace(/Z$/, '');
-    db.prepare('UPDATE characters SET next_schedule_refresh_at = ? WHERE id = ?').run(retryAt, candidate.id);
-  }
+  if (!maybeStartScheduledBatch()) maybeInitializeSchedule();
 }
 
 // ── 回复队列处理 ──

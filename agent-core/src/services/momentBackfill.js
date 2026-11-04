@@ -43,15 +43,14 @@ async function runBackfill(task, generatePost, now, control) {
   let generated = 0, skipped = 0;
   const errors = [];
   const progress = (stage, value) => { if (!control.stopped) task.onProgress({ stage, progress: value }); };
-  // 先完成所有角色的到期日程，再进入发帖阶段。
+  // 补发只补齐缺失模板；到期整轮重排由日程调度器负责，不能在这里逐人绕过共同规划。
   for (const [index, character] of characters.entries()) {
     if (control.stopped) break;
     progress(`检查日程 ${index + 1}/${characters.length} · ${character.display_name}`, index / Math.max(1, characters.length) * 0.3);
     try {
       if (new Date() >= end) throw new Error('已跨日，请重新启动今日补发');
-      const needsRefresh = db.prepare(`SELECT 1 FROM characters c WHERE id = ? AND (
-        next_schedule_refresh_at IS NULL OR next_schedule_refresh_at <= ? OR
-        NOT EXISTS (SELECT 1 FROM schedule_templates st WHERE st.character_id = c.id))`).get(character.id, sqlTime(now));
+      const needsRefresh = db.prepare(`SELECT 1 FROM characters c WHERE id = ? AND
+        NOT EXISTS (SELECT 1 FROM schedule_templates st WHERE st.character_id = c.id)`).get(character.id);
       if (needsRefresh) {
         progress(`刷新日程 ${index + 1}/${characters.length} · ${character.display_name}`, index / characters.length * 0.3);
         await generateSchedule(character);

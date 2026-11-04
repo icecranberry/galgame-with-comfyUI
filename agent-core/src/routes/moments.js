@@ -1,3 +1,4 @@
+import { scheduleMomentCompanions } from '../services/scheduleParticipants.js';
 import { Router } from 'express';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule } from '../db/index.js';
@@ -736,6 +737,20 @@ async function generateMomentPostImpl(character, opts = {}) {
     ).run(character.id, combinedStyle, `${config.comfyui.momentsWidth}x${config.comfyui.momentsHeight}`, opts.godDeliveryKey || null).lastInsertRowid;
   }
 
+  // 场景已有同行者时直接复用；主题或动因不改变实际在场的人。
+  let currentActivity = null;
+  let multiPersons = [];
+  try {
+    if (opts.backfill || config.features.schedule !== false) {
+      const activity = opts.backfill ? opts.activity : getCurrentActivity(character.id);
+      multiPersons = scheduleMomentCompanions(character.id, activity);
+      if ((multiPersons.length || (!selectedTopic && !isFreeMode)) && activity && activity.activity !== '自由时间'
+          && buildMomentScheduleContext(character.display_name, activity, { includeDescription: false })) {
+        currentActivity = activity;
+      }
+    }
+  } catch { /* schedule not available, skip */ }
+
   // 2.5 Sigmoid 模型：根据角色关系网数量决定多人概率
   // P(多人) = P_min + (P_max - P_min) / (1 + e^(-k × (R - R_mid)))
   const MULTI_P_MIN = 0.50;  // 最低多人概率
@@ -743,7 +758,6 @@ async function generateMomentPostImpl(character, opts = {}) {
   const MULTI_K = 1.0;       // 陡峭度：越大曲线越陡，1.0 时 R≈4~6 为快速拉升区
   const MULTI_R_MID = 5;     // 拐点：R=5 时概率正好 = (P_min+P_max)/2 = 55%
 
-  let multiPersons = [];
   const relCount = db.prepare(`
     SELECT COUNT(*) AS cnt
     FROM character_relationships cr
@@ -752,7 +766,7 @@ async function generateMomentPostImpl(character, opts = {}) {
   `).get(character.id)?.cnt || 0;
 
   // R=0 时没有关系网对象，强制单人
-  if (relCount > 0) {
+  if (multiPersons.length === 0 && relCount > 0) {
     const multiProb = MULTI_P_MIN + (MULTI_P_MAX - MULTI_P_MIN) / (1 + Math.exp(-MULTI_K * (relCount - MULTI_R_MID)));
     console.log(`[moments] ${character.display_name} relCount=${relCount}, multiProb=${(multiProb * 100).toFixed(0)}%`);
 
@@ -816,17 +830,6 @@ async function generateMomentPostImpl(character, opts = {}) {
   const weatherNote = getLightNoteWithWeather(now);
   const weatherHint = weatherNote ? `Environment reference：${weatherNote}。` : '';
 
-  // 先确定主次，再序列化日程；动因为主时不传 description，也不据它推断同行者。
-  let currentActivity = null;
-  try {
-    if (!selectedTopic && (opts.backfill || (!isFreeMode && config.features.schedule !== false))) {
-      const activity = opts.backfill ? opts.activity : getCurrentActivity(character.id);
-      if (activity && activity.activity !== '自由时间'
-          && buildMomentScheduleContext(character.display_name, activity, { includeDescription: false })) {
-        currentActivity = activity;
-      }
-    }
-  } catch { /* schedule not available, skip */ }
   const momentFocus = pickMomentFocus({
     hasSchedule: Boolean(currentActivity),
     hasMotive: Boolean(pickedTopic || pickedSpecialMode),
