@@ -25,10 +25,10 @@ import {
   syncSleepingState, isTempWoken, isSleeping,
   scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
-import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
+import { generateSchedule, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
 import { updateScheduleActivity } from '../services/scheduleEditor.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
-import { charArtistOverride } from '../services/characterImageOpts.js';
+import { scheduleImageContext } from '../services/scheduleParticipants.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { broadcast } from '../services/unifiedStreamBus.js';
 import { chatSync } from '../services/lorebook/runtime.js';
@@ -37,6 +37,9 @@ import { saveBase64Image } from '../services/imagePaths.js';
 import { processWakeUp } from '../services/wakeService.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { createTownActorRegistry } from '../services/town/townActorRegistry.js';
+
+import { startScheduleBatch, getScheduleBatchStatus, cancelScheduleBatch } from '../services/scheduleBatch.js';
+import { assertScheduleEditable } from '../services/scheduleGenerationLock.js';
 
 const router = Router();
 
@@ -52,140 +55,26 @@ router.get('/', (req, res) => {
     res.json({ characters: overview });
   } catch (err) {
     console.error('[schedule] GET / error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
-// ── 重置世界线状态 ──
-let resetTask = null; // { cancelled, processing, current, total, currentName }
-
-// ── POST /api/schedule/regenerate-all — 重置世界线（重新生成所有角色日程）──
-router.post('/regenerate-all', async (req, res) => {
+// 整轮重排：共同生活规划 → 个人日程草稿 → 睡眠拆段 → 事务发布。
+router.post('/regenerate-all', (req, res) => {
   try {
-    if (resetTask?.processing) {
-      return res.status(409).json({ error: '重置世界线正在进行中', busy: true });
-    }
-
-    const db = getDb();
-    const characters = db.prepare("SELECT id, display_name, base_prompt FROM characters WHERE name != 'default' ORDER BY id").all();
-
-    if (!characters.length) {
-      return res.status(404).json({ error: '没有角色' });
-    }
-
-    const direction = (req.body && req.body.direction) ? String(req.body.direction).trim() : null;
-
-    resetTask = { cancelled: false, processing: true, current: 0, lastCompleted: 0, total: characters.length, currentName: '' };
-
-    // 立即返回，不阻塞
-    res.json({ started: true, total: characters.length });
-
-    // 异步逐个生成
-    for (let i = 0; i < characters.length; i++) {
-      if (resetTask.cancelled) break;
-
-      const character = characters[i];
-      resetTask.current = i + 1;
-      resetTask.currentName = character.display_name;
-
-      // 广播进度：开始生成
-      broadcast('schedule_reset_progress', {
-        phase: 'running',
-        character_name: character.display_name,
-        current: i + 1,
-        total: characters.length,
-        status: 'generating',
-      });
-
-      console.log(`[schedule] Reset worldline: generating for ${character.display_name} (${i + 1}/${characters.length})`);
-
-      try {
-        const result = await generateSchedule(character, direction);
-
-        // 生成期间已被取消 → 不保存、广播跳过
-        if (resetTask.cancelled) break;
-
-        assignNextRefreshTime(character.id);
-        snapshotTodaySchedule(character.id);
-        syncSleepingState(character.id);
-        invalidateCache(character.id);
-
-        resetTask.lastCompleted = i + 1;
-
-        broadcast('schedule_reset_progress', {
-          phase: 'running',
-          character_name: character.display_name,
-          current: i + 1,
-          total: characters.length,
-          status: 'done',
-          version: result.version,
-        });
-      } catch (genErr) {
-        // 生成失败但已被取消 → 直接跳出
-        if (resetTask.cancelled) break;
-
-        console.error(`[schedule] Reset worldline: failed for ${character.display_name}:`, genErr.message);
-        broadcast('schedule_reset_progress', {
-          phase: 'running',
-          character_name: character.display_name,
-          current: i + 1,
-          total: characters.length,
-          status: 'error',
-          error: genErr.message,
-        });
-      }
-
-      // 角色间短暂间隔，避免 LLM API 限流
-      if (i < characters.length - 1 && !resetTask.cancelled) {
-        await new Promise(r => setTimeout(r, 500));
-      }
-    }
-
-    const finalCurrent = resetTask.cancelled ? resetTask.lastCompleted : resetTask.current;
-
-    // 广播完成
-    broadcast('schedule_reset_progress', {
-      phase: resetTask.cancelled ? 'cancelled' : 'complete',
-      current: finalCurrent,
-      total: characters.length,
-      cancelled: resetTask.cancelled,
-    });
-
-    console.log(`[schedule] Reset worldline finished. Processed: ${finalCurrent}/${characters.length}, cancelled: ${resetTask.cancelled}`);
-    resetTask = null;
-  } catch (err) {
-    console.error('[schedule] POST /regenerate-all error:', err.message);
-    resetTask = null;
-    // 响应已发送，仅广播错误
-    broadcast('schedule_reset_progress', {
-      phase: 'error',
-      error: err.message,
-    });
-  }
+    const task = startScheduleBatch({ direction: String(req.body?.direction || '').trim(), resume: req.body?.resume === true });
+    task.promise.catch(error => console.error('[schedule] Batch failed:', error.message));
+    res.json({ started: true, total: task.plan.characters.length });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
 });
-
-// ── GET /api/schedule/reset-status — 查询当前重置任务状态（页面刷新恢复用）──
-router.get('/reset-status', (req, res) => {
-  if (!resetTask?.processing) {
-    return res.json({ active: false });
-  }
-  res.json({
-    active: true,
-    phase: 'running',
-    current: resetTask.current,
-    total: resetTask.total,
-    currentName: resetTask.currentName || '',
-  });
+router.get('/reset-status', (_req, res) => {
+  const status = getScheduleBatchStatus();
+  res.json({ ...status, active: status.processing });
 });
-
-// ── POST /api/schedule/regenerate-all/cancel — 取消重置世界线 ──
-router.post('/regenerate-all/cancel', (req, res) => {
-  if (!resetTask?.processing) {
-    return res.json({ cancelled: false, message: '没有正在进行的重置任务' });
-  }
-  resetTask.cancelled = true;
-  console.log('[schedule] Reset worldline cancellation requested');
-  res.json({ cancelled: true, message: '已请求取消' });
+router.post('/regenerate-all/cancel', (_req, res) => {
+  const status = getScheduleBatchStatus();
+  cancelScheduleBatch();
+  res.json({ cancelled: status.processing, message: status.processing ? '已请求取消' : '没有正在进行的重置任务' });
 });
 
 // ── GET /api/schedule/:characterId — 完整今日日程 ──
@@ -220,7 +109,7 @@ router.get('/:characterId', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] GET /:id error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -260,7 +149,7 @@ router.put('/:characterId/activity', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] PUT /:id/activity error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -282,7 +171,7 @@ router.get('/:characterId/current', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] GET /:id/current error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -309,7 +198,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
       return res.status(400).json({ error: 'invalid characterId' });
     }
 
-    const { prompt } = req.body;
+    const { prompt, participantIds } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'prompt is required' });
     }
@@ -319,6 +208,8 @@ router.post('/:characterId/peek/retake', async (req, res) => {
     if (!character) {
       return res.status(404).json({ error: 'character not found' });
     }
+
+    const sceneContext = scheduleImageContext(character, { participantIds: Array.isArray(participantIds) ? participantIds : undefined, description: prompt });
 
     console.log(`[schedule] Peek retake for ${character.display_name}: "${prompt.slice(0, 100)}..."`);
 
@@ -338,15 +229,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
         scene: 'schedule',
         priority: 'high',
         ragTimeoutMs: RAG_TIMEOUT_FAST_MS,
-        ...(() => {
-          const chLoras = _parseLoras(character.loras);
-          const opts = {};
-          if (character.custom_workflow) opts.customWorkflow = character.custom_workflow;
-          if (chLoras.length > 0) opts.loras = chLoras;
-          const charArtist = charArtistOverride(character);
-          if (charArtist !== null) opts.artist = charArtist;
-          return opts;
-        })(),
+        ...sceneContext.imageOptions,
         onProgress: (p) => {
           if (p.progress != null) {
             broadcast('schedule_peek_progress', {
@@ -369,6 +252,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
           character_id: character.id,
           display_name: character.display_name,
           prompt,
+          participant_ids: sceneContext.participantIds,
           images: imageUrl ? [imageUrl] : [img.base64],
         });
         console.log(`[schedule] Peek retake ready for ${character.display_name}`);
@@ -391,7 +275,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
     }
   } catch (err) {
     console.error('[schedule] POST /:id/peek/retake error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -422,6 +306,8 @@ router.post('/:characterId/peek', async (req, res) => {
         startTime: reqActivity.startTime || '',
         endTime: reqActivity.endTime || '',
         tags: reqActivity.tags || [],
+        participantIds: reqActivity.participantIds,
+        sharedEventId: reqActivity.sharedEventId,
       };
     } else {
       activity = getCurrentActivity(characterId);
@@ -445,6 +331,7 @@ router.post('/:characterId/peek', async (req, res) => {
 
     // ── 构建 LLM 消息生成专用人像 prompt ──
     const charName = character.display_name;
+    const sceneContext = scheduleImageContext(character, activity);
 
     // system0: 系统规则(角色扮演=no) + 世界观
     const systemRules = getSystemRules({ roleplay: false });
@@ -514,7 +401,7 @@ router.post('/:characterId/peek', async (req, res) => {
     `).get(characterId);
 
     // user: 拍摄指令
-    const userMsg = `牢记<world_setting>世界观里的环境描述和人物行为和着装，然后给「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}直接输出为英文prompt`;
+    const userMsg = `牢记<world_setting>世界观里的环境描述和人物行为和着装，然后给「${charName}」拍一张当前正在${activity.location}进行${effectiveActivity}的照片，具体照片表现是${effectiveDescription}。${timeLightInline}${sleepNote}${wakeNote}直接输出为英文prompt`;
 
     const llmMsgs = [
       { role: 'system', content: system0 },
@@ -528,6 +415,7 @@ router.post('/:characterId/peek', async (req, res) => {
         content: `【当前奇遇事件】角色正在经历一场奇遇事件——「${activeEvent.title}」。\n当前场景：${activeEvent.description}\n${branchCount > 0 ? `已推进了 ${branchCount} 步。` : '事件刚刚开始。'}\n人像照中角色的表情和神态应反映出当前奇遇事件带来的情绪。`,
       });
     }
+    if (sceneContext.crossReference) llmMsgs.push({ role: 'system', content: sceneContext.crossReference });
     llmMsgs.push(
       { role: 'system', content: system3 },
       { role: 'system', content: personaText },
@@ -554,6 +442,8 @@ router.post('/:characterId/peek', async (req, res) => {
         const rawResult = await chatSync(llmMsgs, {
           temperature: 0.7,
           label: '瞄一眼人像prompt生成',
+          lorebook: { personaTexts: [personaText], staticTexts: [system1, system3], cacheBoundary: { index: 1, offset: system1.length },
+            history: [{ role: 'user', content: userMsg }], characterName: charName },
         });
 
         // 提取 prompt：纯文本优先，JSON 格式向后兼容
@@ -588,15 +478,7 @@ router.post('/:characterId/peek', async (req, res) => {
         height: config.comfyui.eventHeight,
         scene: 'schedule',
         priority: 'high',
-        ...(() => {
-          const chLoras = _parseLoras(character.loras);
-          const opts = {};
-          if (character.custom_workflow) opts.customWorkflow = character.custom_workflow;
-          if (chLoras.length > 0) opts.loras = chLoras;
-          const charArtist = charArtistOverride(character);
-          if (charArtist !== null) opts.artist = charArtist;
-          return opts;
-        })(),
+        ...sceneContext.imageOptions,
         onProgress: (p) => {
           if (p.progress != null) {
             broadcast('schedule_peek_progress', {
@@ -622,6 +504,7 @@ router.post('/:characterId/peek', async (req, res) => {
           activity: activity.activity,
           location: activity.location,
           prompt: generatedPrompt,
+          participant_ids: sceneContext.participantIds,
           images: imageUrl ? [imageUrl] : [img.base64], // 落盘失败则仍然传 base64 兜底
         });
         console.log(`[schedule] Peek snapshot ready for ${charName}`);
@@ -643,7 +526,7 @@ router.post('/:characterId/peek', async (req, res) => {
     }
   } catch (err) {
     console.error('[schedule] POST /:id/peek error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -669,8 +552,7 @@ router.post('/:characterId/regenerate', async (req, res) => {
     // 生成新模板
     const result = await generateSchedule(character, direction);
 
-    // 分配下次刷新时间
-    assignNextRefreshTime(characterId);
+    // 单人重排不改变整轮刷新周期，也不触发共同活动规划。
 
     // 快照到今天
     snapshotTodaySchedule(characterId);
@@ -690,7 +572,7 @@ router.post('/:characterId/regenerate', async (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] POST /:id/regenerate error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -698,6 +580,7 @@ router.post('/:characterId/regenerate', async (req, res) => {
 
 router.post('/:characterId/clear', (req, res) => {
   try {
+    assertScheduleEditable();
     const characterId = parseInt(req.params.characterId, 10);
     if (isNaN(characterId)) {
       return res.status(400).json({ error: 'invalid characterId' });
@@ -730,7 +613,7 @@ router.post('/:characterId/clear', (req, res) => {
     res.json({ success: true, character_id: character.id, display_name: character.display_name });
   } catch (err) {
     console.error('[schedule] POST /:id/clear error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -773,7 +656,7 @@ router.get('/queue/status', (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] GET /queue/status error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -869,7 +752,7 @@ router.post('/:id/wake-up-phone', async (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] POST /wake-up-phone error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -937,17 +820,8 @@ router.post('/:id/wake-up-door', async (req, res) => {
     });
   } catch (err) {
     console.error('[schedule] POST /wake-up-door error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
-
-function _parseLoras(raw) {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
-    try { return JSON.parse(raw) } catch { return [] }
-  }
-  return [];
-}
 
 export default router;

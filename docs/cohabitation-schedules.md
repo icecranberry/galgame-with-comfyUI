@@ -1,0 +1,58 @@
+# 宿舍安排与整轮日程
+
+界面名称为「宿舍安排」，业务表示共同居住。酒馆中与「我的关系图」各占半行；管理窗使用 LinsheModal、Input、Button 和已有主题 token。左侧居室格支持命名、新建、跨格搬迁、删除，右侧只显示未安排角色。拖入新建格会在同一事务中建房并入住；触屏和键盘可先选角色，再选居室。成员以角色 ID 为主键，同一角色不能属于两个居室。弹窗与条目过渡均为 300ms。
+
+## 刷新与存储
+
+- `cohabitation_rooms` / `cohabitation_members` 保存居室归属；改动在下轮共同规划中使用，不立即消耗模型调用。
+- `cohabitation_plan` 仅有 `id=1` 一行，保存本轮冻结资料、随机房间顺序、共同活动与未发布草稿。启动新轮先清空再创建；同日失败重试沿用已有顺序和已完成结果。
+- `schedule_refresh_cycle` 保存整轮到期时间，跟随现有 1～3 天刷新设置。到期自动重排和「重置所有人」运行完整流水线；单人重排复用已发布约定，不重新规划居室，也不移动整轮刷新时间。
+- `schedule_refresh_cycle.applied_residences_json` 保留最近成功发布时使用的居室快照。名称或成员归属与当前安排不同，管理窗常驻提示「变更将在下一次自动/手动全体日程变更时生效」；刷新／重新打开仍保留，改回已生效安排则消失。失败、取消、单人重排不清除；全体日程成功后以本轮实际使用的快照更新，生成期间追加的修改继续等待下一轮。窗口打开时跟随全体完成通知刷新提示，不覆盖正在编辑的名称。
+- 新角色补齐和显式重新启用沿用单人初始化路径；后台每次只启动一人，失败退避一小时，不触发共同规划。
+- 自动重排遵守角色的自动日程开关。关闭者的 short 和关系仍作为室友资料加载，但不会被新增活动选中；与关闭者已经确认的共同活动继续保留，其清醒日程不改写。同睡注释按实际交集更新。
+
+## 生成流水线
+
+1. 冻结本轮角色、房间、关系与当天明确约定，只洗牌一次。
+2. 按房间串行请求模型。加载全体室友的 `short_prompt`（不附外观），及所有涉及室友的有向关系；室外联系人仅带姓名、ID、关系，不补人格。既有活动占用包含所有参与者与地点，传给后续房间。根据人数以 3～5 件为目标，允许少于目标或零件；不生成睡眠。
+3. 个人日程携带本人相关约定，保持共同活动的 ID、时间、地点和参与者一致。描述要求为 26～52 字；活动数量不设硬上限。
+4. 按同居室、同地点、睡眠重叠区间切分睡眠。保留每人的原始睡眠时长，外宿不算同睡；相邻睡眠片段的人员变化不触发提前醒来。
+5. 校验完整 24 小时、无时间冲突、所有共同活动均落实后，在一个事务中发布模板和当天快照。保留手动约定与奇遇占用；生成失败或取消时旧日程仍可使用。失败后至少退避一小时，避免调度器反复调用模型。
+
+新提示词按世界观、固定编排规则/完整 JSON 示例、室友 short、动态关系/已占用时段、最终 user 分层。`cohabitationPlanner` 提供实际 `personaTexts`、固定 `staticTexts`、动态资料前的 `cacheBoundary` 和扫描 `history`；关系、房名、活动不声明为静态。重试只补充末条 user 的校验反馈。
+
+瞄一眼和朋友圈先使用日程的 `participantIds`，旧日程回退到已有角色姓名检索。外观统一走 `characterPersona`；瞄一眼合并同行者 LoRA，重拍继续携带参与者 ID。朋友圈有明确同行者时复用既有多人注入链路并停止随机加人；单人时保留原随机同行逻辑。手动覆盖共同活动会被拒绝，避免只改一个人的约定。
+
+## 小规模验收
+
+真实验收不会启动 `app.js` 或后台调度。源 SQLite 只读，只复用 LLM 连接配置；新版本测试库为 `:memory:`，仅创建四名成年测试角色、两个居室和少量关系，不复制主库人物、聊天或日程。两次居室规划加四次个人日程通常为六次调用；包含校验重试时最多九次。默认 `npm test` 跳过付费实测。
+
+在 `agent-core` 目录执行：
+
+```powershell
+$env:LINSHE_COHABITATION_LIVE = '1'
+node --test test/cohabitationLive.test.js
+Remove-Item Env:LINSHE_COHABITATION_LIVE
+```
+
+可用 `LINSHE_SOURCE_DB` 指定只读源库，用 `LINSHE_COHABITATION_REPORT` 指定结果 JSON。默认报告写入忽略目录 `output/cohabitation-validation/live.json`，包括调用次数、token 用量、四人完整日程、跨居室约定传递和下游参与者。测试不会实际生成图片；它校验瞄一眼外观/LoRA和朋友圈同行资料组装。
+
+免费回归测试：
+
+```powershell
+node --test test/cohabitationBatch.test.js test/cohabitationSchedule.test.js
+```
+
+浏览器回归位于 `web-ui/test/cohabitationUi.test.js`，使用独立内存库和测试 HTTP 服务。已有 Playwright 时在 `web-ui` 目录执行：
+
+```powershell
+$env:LINSHE_BROWSER_TEST = '1'
+# 如 Playwright 不在本项目依赖中，填写其 index.mjs 的绝对路径。
+$env:PLAYWRIGHT_MODULE_PATH = 'C:/path/to/playwright-core/index.mjs'
+node --test test/cohabitationUi.test.js
+Remove-Item Env:LINSHE_BROWSER_TEST, Env:PLAYWRIGHT_MODULE_PATH
+```
+
+默认使用已安装 Edge，可通过 `PLAYWRIGHT_CHANNEL` 改为其他已安装浏览器。测试覆盖实际酒馆入口等宽、拖入新建格、搬迁唯一性、接口失败保留、键盘安置、移出、删除，以及桌面/手机的暖色/暗夜截图。房名编辑额外覆盖 Enter 和失焦保存、Esc 取消、中文输入法组合键、保存失败保留并重试、刷新读回。检查右栏约四成宽及 200% 等效阅读重排；界面截图写入 `output/cohabitation-ui/interaction/`。
+
+`web-ui/test/helpers/cohabitationUiFixture.js` 共用内存库和真实界面、真实居室 API。普通浏览器测试只建四名虚构角色，不要求正式服务启动；视觉评审模式可只读借用正式服务的头像，创建二十名临时角色和三个居室。所有分配、命名、删除均在内存库，不触发日程或 LLM。

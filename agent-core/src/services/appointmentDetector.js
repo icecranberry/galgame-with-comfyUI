@@ -119,7 +119,7 @@ async function requestScheduleChange(character, userText, replyText) {
   "location": "地点",
   "replyDelay": 0,
   "tags": ["标签1", "标签2"],
-  "description": "20-40字的第三人称场景描述"
+  "description": "26-52字的第三人称场景描述"
 }
 
 每个字段的要求：
@@ -129,7 +129,7 @@ async function requestScheduleChange(character, userText, replyText) {
 - "location"：具体地点；
 - "replyDelay"：固定填 0（约定期间可以回复消息）；
 - "tags"：1~3 个标签，如 ["约会","晚餐"]；
-- "description"：20-40 字，省略主语或用第三人称（角色名）描述这个场景，不出现「我」「你」。`;
+- "description"：26-52 字，省略主语或用第三人称（角色名）描述这个场景，不出现「我」「你」。`;
 
   const msgs = [
     // system0：破甲词 + 世界观

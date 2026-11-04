@@ -1,3 +1,4 @@
+import { continuousSleepEnd } from './cohabitationSchedule.js';
 /**
  * 日程运行时管理器
  *
@@ -12,6 +13,7 @@
 import { getDb } from '../db/index.js';
 import { config } from '../config.js';
 import { snapshotTodaySchedule } from './scheduleGenerator.js';
+import { refreshResidenceDailySleep } from './cohabitationPersistence.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { onCharacterWake } from './dreamService.js';
@@ -92,7 +94,7 @@ export function initialize() {
   const sleepingBlock = schedule.find(a => a.replyDelay === -1 && isInTimeSlot(a.startTime, a.endTime, now));
   if (sleepingBlock) {
     // 正在睡眠时段
-    const sleepUntil = calcSleepUntil(sleepingBlock.endTime, now);
+    const sleepUntil = calcSleepUntil(continuousSleepEnd(schedule, sleepingBlock), now);
     db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
       .run(sleepUntil, char.id);
     sleepers++;
@@ -208,6 +210,7 @@ function getTodayScheduleRaw(characterId) {
         VALUES (?, ?, ?)
       `).run(characterId, today, template.schedule_json);
       reapplyActiveEventSchedule(characterId, db);
+      for (const id of refreshResidenceDailySleep(db, characterId)) invalidateCache(id);
       // 清理阈值沿用本次快照的 today，不读取 SQLite 墙钟。
       db.prepare(
         `DELETE FROM daily_schedules WHERE character_id = ? AND schedule_date < DATE(?, '-2 days')`
@@ -252,20 +255,23 @@ export function getTodaySchedule(characterId) {
 export function getCurrentActivity(characterId, now = new Date()) {
   // 检查缓存
   const cached = activityCache.get(characterId);
-  if (cached && cached.expireAt > Date.now()) {
+  const queryMinute = Math.floor(now.getTime() / 60000);
+  if (cached && cached.queryMinute === queryMinute && cached.expireAt > Date.now()) {
     return cached.activity;
   }
 
   const schedule = getTodayScheduleRaw(characterId);
   if (!schedule) {
     // 无日程模板 → 缓存 null（短 TTL，因为可能正在生成中）
-    activityCache.set(characterId, { activity: null, expireAt: Date.now() + 10000 });
+    activityCache.set(characterId, { activity: null, queryMinute, expireAt: Date.now() + 10000 });
     return null;
   }
 
   for (const act of schedule) {
     if (isInTimeSlot(act.startTime, act.endTime, now)) {
       const result = {
+        ...act,
+        sleepEndTime: act.replyDelay === -1 ? continuousSleepEnd(schedule, act) : undefined,
         activity: act.activity,
         location: act.location,
         replyDelay: act.replyDelay,
@@ -275,7 +281,7 @@ export function getCurrentActivity(characterId, now = new Date()) {
         endTime: act.endTime,
         tags: normalizeTags(act.tags),
       };
-      activityCache.set(characterId, { activity: result, expireAt: Date.now() + CACHE_TTL });
+      activityCache.set(characterId, { activity: result, queryMinute, expireAt: Date.now() + CACHE_TTL });
       return result;
     }
   }
@@ -291,7 +297,7 @@ export function getCurrentActivity(characterId, now = new Date()) {
     endTime: '',
     tags: ['idle'],
   };
-  activityCache.set(characterId, { activity: idleResult, expireAt: Date.now() + CACHE_TTL });
+  activityCache.set(characterId, { activity: idleResult, queryMinute, expireAt: Date.now() + CACHE_TTL });
   return idleResult;
 }
 
@@ -489,7 +495,7 @@ function revertTempWake(characterId) {
 
   // 仍在睡眠时间块内 → 回退到睡眠
   if (activity && activity.replyDelay === -1) {
-    const sleepUntil = calcSleepUntil(activity.endTime, now);
+    const sleepUntil = calcSleepUntil(activity.sleepEndTime || activity.endTime, now);
     db.prepare(`UPDATE characters SET is_sleeping = 1, sleep_until = ?, temporary_wake_until = NULL, wake_mode = NULL, wake_attempts = 0 WHERE id = ?`)
       .run(sleepUntil, characterId);
     console.log(`[scheduleMgr] Temp wake expired for ${characterId}, back to sleep until ${sleepUntil}`);
@@ -559,7 +565,7 @@ export function isSleeping(characterId, now = new Date()) {
   // fallback: 直接查日程
   const activity = getCurrentActivity(characterId, now);
   if (activity && activity.replyDelay === -1) {
-    const sleepUntil = calcSleepUntil(activity.endTime, now);
+    const sleepUntil = calcSleepUntil(activity.sleepEndTime || activity.endTime, now);
     return { sleeping: true, sleepUntil };
   }
 
@@ -583,7 +589,7 @@ export function syncSleepingState(characterId, now = new Date()) {
   const prev = db.prepare('SELECT is_sleeping, sleep_until FROM characters WHERE id = ?').get(characterId);
 
   if (sleeping) {
-    const sleepUntil = calcSleepUntil(activity.endTime, now);
+    const sleepUntil = calcSleepUntil(activity.sleepEndTime || activity.endTime, now);
     const wasAlreadySleeping = prev && prev.is_sleeping === 1;
     db.prepare('UPDATE characters SET is_sleeping = 1, sleep_until = ? WHERE id = ?')
       .run(sleepUntil, characterId);
@@ -647,7 +653,7 @@ export function getAllOverview() {
     const activity = getCurrentActivity(char.id, now);
     // 动态计算睡眠状态（不依赖 characters 表中的缓存值，日程更新后该缓存可能过期）
     const sleeping = !!(activity && activity.replyDelay === -1);
-    const sleepUntil = sleeping ? calcSleepUntil(activity.endTime, now) : null;
+    const sleepUntil = sleeping ? calcSleepUntil(activity.sleepEndTime || activity.endTime, now) : null;
     const tempWoken = isTempWoken(char.id, now);
     return {
       id: char.id,
@@ -691,8 +697,10 @@ export function invalidateCache(characterId) {
 export function syncEventSchedule(event) {
   const changes = extendEventSchedule(event);
   if (!changes.length) return;
-  invalidateCache(event.character_id);
-  syncSleepingState(event.character_id);
+  for (const id of refreshResidenceDailySleep(getDb(), event.character_id)) {
+    invalidateCache(id);
+    syncSleepingState(id);
+  }
   const name = getDb().prepare('SELECT display_name FROM characters WHERE id = ?').get(event.character_id)?.display_name || '';
   const today = getLocalDateKey();
   const change = changes.find(item => item.date === today) || changes[0];

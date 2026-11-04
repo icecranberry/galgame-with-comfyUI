@@ -94,7 +94,7 @@
             </div>
             <div class="sidebar-scan-sub">
               <template v-if="sidebarScanContext === 'reset' && store.resetTask">
-                正在为 <b>{{ store.resetTask.currentName || '...' }}</b> 编排日程
+                {{ store.resetTask.stageLabel || '编排日程' }} <b>{{ store.resetTask.currentName || '...' }}</b>
                 <span class="sidebar-scan-count">({{ store.resetTask.current }}/{{ store.resetTask.total }})</span>
               </template>
               <template v-else>
@@ -352,13 +352,13 @@
             <!-- 当前任务 -->
             <div class="reset-current-task" v-if="store.resetTask.phase === 'running'">
               <div class="loader-ring-sm"></div>
-              <span>正在生成 <b>{{ store.resetTask.currentName }}</b> 的日程...</span>
+              <span>{{ store.resetTask.stageLabel || '正在生成日程' }} <b>{{ store.resetTask.currentName }}</b>…</span>
             </div>
             <div class="reset-current-task done" v-else-if="store.resetTask.phase === 'complete'">
               <span>✅ 全部 {{ store.resetTask.total }} 个角色日程已更新</span>
             </div>
             <div class="reset-current-task cancelled" v-else-if="store.resetTask.phase === 'cancelled'">
-              <span>⚠️ 已取消，完成了 {{ store.resetTask.current }} / {{ store.resetTask.total }} 个角色</span>
+              <span>本轮未发布，原日程保持不变</span>
             </div>
 
             <!-- 错误列表 -->
@@ -376,6 +376,7 @@
                 <linshe-button class="reset-btn-bg" variant="secondary" @click="dismissResetProgress" :disabled="resetCancelling">后台静默生成</linshe-button>
               </template>
               <template v-else>
+                <linshe-button v-if="store.resetTask.errors.length" variant="secondary" @click="retryReset">继续安排</linshe-button>
                 <linshe-button class="reset-btn-confirm" variant="primary" @click="finishReset">完成</linshe-button>
               </template>
             </div>
@@ -556,6 +557,7 @@ const peekLoading = ref(false)
 const peekImage = ref<string | null>(null)
 const peekError = ref<string | null>(null)
 const peekPrompt = ref<string | null>(null)
+const peekParticipantIds = ref<number[]>([])
 const peekChar = ref<any>(null)
 const peekAct = ref<any>(null)
 const shutterFire = ref(false) // 相机快门动画触发器
@@ -795,13 +797,19 @@ onMounted(async () => {
   try {
     const status = await api.getResetStatus()
     if (disposed) return
-    if (status.active) {
+    if (status.active || ['failed', 'running'].includes(status.status)) {
       store.startResetTask(status.total)
       // 用后端返回的当前进度更新
       if (store.resetTask) {
         store.resetTask.current = status.current
         store.resetTask.total = status.total
         store.resetTask.currentName = status.currentName || ''
+        store.resetTask.stageLabel = status.phase === 'cohabitation' ? '正在安排共同生活' : status.phase === 'sleep' ? '正在整理同睡时段' : '正在生成日程'
+        if (!status.active) {
+          store.resetTask.phase = 'cancelled'
+          store.resetTask.processing = false
+          store.resetTask.errors.push({ name: '本轮日程', error: status.error || '生成已中断，可继续已保存的进度' })
+        }
         // 刷新恢复后默认显示进度弹窗（非后台）
         store.resetTask.backgrounded = false
       }
@@ -812,6 +820,7 @@ onMounted(async () => {
   try {
     peekUnsubscribers.push(onEvent('schedule_peek_ready', (d: any) => {
       if (d.prompt) peekPrompt.value = d.prompt
+      if (d.participant_ids) peekParticipantIds.value = d.participant_ids
       if (d.images?.length) { peekImage.value = d.images[0]; peekError.value = null }
       else if (d.error) { peekError.value = d.error }
       peekLoading.value = false; peekBusy.value = false
@@ -882,6 +891,8 @@ function onPeekAt(act: any) {
     startTime: act.startTime,
     endTime: act.endTime,
     tags: act.tags,
+    participantIds: act.participantIds,
+    sharedEventId: act.sharedEventId,
   })
 }
 
@@ -1120,7 +1131,7 @@ async function retakePeek() {
   peekLoading.value = true; peekBusy.value = true
   startFakeProgress()
   try {
-    await api.retakePeekSnapshot(peekChar.value.id, peekPrompt.value)
+    await api.retakePeekSnapshot(peekChar.value.id, peekPrompt.value, peekParticipantIds.value)
   } catch (err: any) {
     peekError.value = err.message
     peekLoading.value = false
@@ -1210,18 +1221,19 @@ async function confirmResetAll() {
   }
 }
 
+async function retryReset() {
+  const total = store.resetTask?.total || 0
+  store.startResetTask(total)
+  try { await api.regenerateAllSchedules(undefined, true) }
+  catch (error: any) { toastFn(error.message, 'error'); store.finishResetTask() }
+}
+
 async function cancelReset() {
   if (resetCancelling.value) return
   resetCancelling.value = true
   try {
     await api.cancelRegenerateAll()
-    // 立即反馈取消结果，不等 SSE（后端可能还有 in-flight LLM 调用）
-    if (store.resetTask && store.resetTask.phase === 'running') {
-      store.resetTask.phase = 'cancelled'
-      store.resetTask.current = Math.max(0, store.resetTask.current - 1)
-      store.resetTask.processing = false
-      store.resetTask.backgrounded = false
-    }
+    // 等待后端当前请求结束并确认取消，期间继续显示取消中。
   } catch (err) {
     resetCancelling.value = false
     console.error('[ScheduleView] cancel reset failed:', err)

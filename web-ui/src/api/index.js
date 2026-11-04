@@ -1,5 +1,11 @@
 const BASE = '/api'
 
+export const getCohabitation = () => request('/cohabitation')
+export const createResidence = body => request('/cohabitation/rooms', { method: 'POST', body })
+export const renameResidence = (id, name) => request(`/cohabitation/rooms/${id}`, { method: 'PUT', body: { name } })
+export const deleteResidence = id => request(`/cohabitation/rooms/${id}`, { method: 'DELETE' })
+export const moveResidenceMember = (id, roomId) => request(`/cohabitation/members/${id}`, { method: 'PUT', body: { roomId } })
+
 export const getGodSaysState = session => request(`/god-says/state${session ? `?session=${session}` : ''}`)
 export const getGodSaysSessions = before => request(`/god-says/sessions${before ? `?before=${encodeURIComponent(before)}` : ''}`)
 export const getGodSaysMemories = () => request('/god-says/memories')
@@ -1444,8 +1450,8 @@ export function peekSnapshot(characterId, genImage = true, activityContext = nul
 }
 
 /** 瞄一眼再拍一张：使用已生成的 prompt 重新提交 ComfyUI 生图 */
-export function retakePeekSnapshot(characterId, prompt) {
-  return request(`/schedule/${characterId}/peek/retake`, { method: 'POST', body: { prompt } })
+export function retakePeekSnapshot(characterId, prompt, participantIds) {
+  return request(`/schedule/${characterId}/peek/retake`, { method: 'POST', body: { prompt, participantIds } })
 }
 
 export function regenerateSchedule(characterId, direction) {
@@ -1455,8 +1461,8 @@ export function regenerateSchedule(characterId, direction) {
 }
 
 /** 重置世界线：重新生成所有角色日程（后端 SSE 推送进度） */
-export function regenerateAllSchedules(direction) {
-  const body = {}
+export function regenerateAllSchedules(direction, resume = false) {
+  const body = { resume }
   if (direction) body.direction = direction
   return request(`/schedule/regenerate-all`, { method: 'POST', body })
 }

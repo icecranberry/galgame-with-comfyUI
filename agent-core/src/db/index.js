@@ -39,6 +39,7 @@ import { migrateMediaAvatarLibrary } from './mediaAvatarSchema.js';
 import { migrateMediaFavorites } from './mediaFavorites.js';
 import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
 import { migrateGodSaysSchema } from './godSaysSchema.js';
+import { migrateCohabitationSchema } from './cohabitationRepository.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1022,6 +1023,7 @@ function initSchema(db) {
 
   // 迁移: 日程系统 — characters 表新增 schedule 相关列
   migrateScheduleSchema(db);
+  migrateCohabitationSchema(db);
 
   // 迁移: moment_comments 新增 auto_trigger + thread_root_id（朋友圈关系网互动）
   migrateMomentAutoTrigger(db);

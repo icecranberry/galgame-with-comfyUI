@@ -2,11 +2,11 @@
  * 日程生成器
  *
  * 基于角色人格 + 职业生成每日时间表（schedule template）。
- * LLM 输出 8-15 个活动的 JSON 数组，覆盖完整 24 小时。
+ * LLM 输出完整 24 小时日程，共同活动与睡眠拆分可以增加条数。
  *
- * 生成时机（分散式）：
+ * 生成时机：
  *   - 角色创建时：立即生成 + 分配随机刷新时间
- *   - 每日刷新：replyQueueScheduler 每次 tick 检查是否有角色到期，每次只刷 1 个
+ *   - 整轮到期 / 手动全员重置：scheduleBatch 先串行规划居室，再生成个人草稿并统一发布
  *   - 手动强制：API POST /api/schedule/:id/regenerate
  */
 
@@ -15,8 +15,13 @@ import { chatSync } from './lorebook/runtime.js';
 import { config } from '../config.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { reapplyActiveEventSchedule } from './eventSchedule.js';
+import { reapplyActiveEventSchedule, reserveEventTime } from './eventSchedule.js';
 import { buildOutfitAnnotateLayer, buildOutfitAnnotation } from './outfitScene.js';
+import { publishedCohabitationContext } from '../db/cohabitationRepository.js';
+import { applySharedActivities, assertCompleteDay, intervals } from './cohabitationSchedule.js';
+import { persistIndividualSchedule, refreshResidenceDailySleep } from './cohabitationPersistence.js';
+import { enterSingleSchedule } from './scheduleGenerationLock.js';
+import { invalidateCache, syncSleepingState } from './scheduleManager.js';
 
 /**
  * 截取角色人格 prompt：从开头到 "##你的外观" 之前
@@ -51,12 +56,14 @@ const pendingSchedules = new Map();
 export function generateSchedule(character, direction, options = {}) {
   const key = options.persist === false ? `detached:${character.id}` : character.id;
   if (pendingSchedules.has(key)) return pendingSchedules.get(key);
-  const pending = generateScheduleImpl(character, direction, options).finally(() => pendingSchedules.delete(key));
+  const release = options.persist === false ? () => {} : enterSingleSchedule(key);
+  const pending = generateScheduleImpl(character, direction, options).finally(() => { pendingSchedules.delete(key); release(); });
   pendingSchedules.set(key, pending);
   return pending;
 }
 async function generateScheduleImpl(character, direction, options = {}) {
   const db = getDb();
+  const cohabitation = options.cohabitation || (options.persist === false ? { room: null, events: [] } : publishedCohabitationContext(db, character.id));
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
 
@@ -110,13 +117,18 @@ async function generateScheduleImpl(character, direction, options = {}) {
 - 正常活动都是 replyDelay=0（即时回复）
 - 只有睡觉 replyDelay=-1
 
+## 共同生活安排（提供时执行）
+如果后文提供本轮已确认的共同活动，必须完整保留每件活动的起止时间、地点和参与者，睡眠避开这些时间；其余时间独立安排。
+如果提供居室，通常在该居室睡眠：location逐字使用居室名称，并增加sleepAtHome:true；外宿或异地补觉使用实际地点和sleepAtHome:false。保持自己的作息，睡眠描述只写自身状态，不提前写独自或与谁同睡；系统在所有人完成后统一按睡眠交集拆分。
+带居室的睡眠条目完整示例：{"startTime":"23:00","endTime":"07:00","activity":"就寝","location":"输入中的居室原名","replyDelay":-1,"tags":["睡眠"],"description":"放松肩膀躺进柔软被褥，伴着窗外渐渐安静的夜色沉入安稳的睡眠。","sleepAtHome":true}。sleepAtHome必须为布尔值，不能用字符串；location必须替换为实际地点。
+
 ## 输出格式
-输出一个 JSON 对象，外层 key 为 "activities"，值为活动数组。8~15 个活动，按时间顺序覆盖完整 24 小时。
+输出一个 JSON 对象，外层 key 为 "activities"，值为活动数组。通常8~15个活动，可按共同活动和实际作息增减，不设条数硬上限；按时间顺序覆盖完整24小时。
 **绝对不允许出现时间空档**：上一个活动的 endTime 必须等于下一个活动的 startTime，
 不留任何空白分钟。所有时间必须被完整覆盖。如果日程从 03:00 开始，
 那么 00:00~03:00 也必须有一个活动覆盖（可以是睡眠或深夜活动）。
 
-每个活动对象格式（description 必填，20-40 字，禁止空字符串或只写标点）：
+每个活动对象格式（description 必填，26-52 字，禁止空字符串或只写标点）：
 {
   "startTime": "HH:MM",
   "endTime": "HH:MM",
@@ -124,10 +136,10 @@ async function generateScheduleImpl(character, direction, options = {}) {
   "location": "地点（比如「公寓书房」）",
   "replyDelay": 数字（0 / -1）,
   "tags": ["标签1", "标签2"],
-  "description": "简短描述（20-40 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
+  "description": "简短描述（26-52 字），省略主语或使用第三人称（角色名），如「在厨房煎蛋，香气飘满房间」或「芙宁娜在街头发呆」，不出现“我”，“你”，“她/他”"
 }
 
-完整 JSON 结构示例（示例仅 2 个活动，实际必须输出 8~15 个活动）：
+完整 JSON 结构示例（示例仅2个活动，实际需要覆盖完整24小时）：
 {"activities":[{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗——整理长发","location":"公寓浴室","replyDelay":0,"tags":["日常","晨间"],"description":"甘雨站在镜前慢慢理顺长发，水汽沾湿额发，动作安静而认真。"},{"startTime":"22:00","endTime":"07:00","activity":"就寝安眠","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"甘雨裹好被子沉入睡眠，角上铃兰微光映着窗帘，呼吸逐渐平稳。"}]}
 
 只输出 JSON 对象，不要输出任何解释、Markdown 代码块或 JSON 以外的文字。activities 数组必须按时间顺序排列，startTime 和 endTime 必须是 HH:MM 格式、24 小时制，数组里每个对象都必须严格包含上述全部字段（若上方系统消息另有额外字段要求，一并按那里的说明输出）。`;
@@ -153,8 +165,11 @@ ${direction}**
   // msgs[3.5]: 着装标注（仅当角色配了 ≥2 套场景服装时才有；没配则完全不加，原提示词不变）
   //   放在这里而非 scheduleInst：scheduleInst 是跨角色共享常量（吃 LLM 前缀缓存），
   //   服装列表每个角色都不同，塞进去会让缓存全部失效。
-  const outfitLayer = Array.isArray(options.outfits) ? buildOutfitAnnotation(options.outfits.filter(outfit => outfit.description)) : options.persist === false ? null : buildOutfitAnnotateLayer(character.id);
+  const outfitLayer = Array.isArray(options.outfits) ? buildOutfitAnnotation(options.outfits.filter(outfit => outfit.description)) : options.persist === false && !options.resident ? null : buildOutfitAnnotateLayer(character.id);
   if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
+  if (cohabitation.room || cohabitation.events.length) {
+    msgs.push({ role: 'system', content: `【本轮已确定的共同生活安排】\n${JSON.stringify(cohabitation)}` });
+  }
   // msgs[4]: 触发消息（融合用户指定的日程方向）
   let triggerContent = worldSetting
     ? `请遵循<world_setting>来安排日程，角色设定如果和<world_setting>有冲突，则以<world_setting>最高优先级，角色设定会因为<world_setting>改变,日程内容必须体现<world_setting>的设定。
@@ -167,43 +182,39 @@ ${directionMsg}`;
   msgs.push({ role: 'user', content: triggerContent });
 
   let rawResult = '';
+  let validationError = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      rawResult = await chatSync(msgs, {
+      const attemptMsgs = msgs.map(m => ({ ...m }));
+      if (validationError) attemptMsgs.at(-1).content += `\n上次日程校验失败：${validationError}，请修正时间安排。`;
+      rawResult = await (options.chat || chatSync)(attemptMsgs, {
         temperature: 0.5,
         response_format: { type: 'json_object' },
         label: `schedule-gen:${character.display_name}`,
         ...(options.thinking ? { thinking: options.thinking } : {}),
-        lorebook:{personaTexts:[personaMsg],staticTexts:[scheduleInst],characterName:character.display_name},
+        lorebook:{personaTexts:[personaMsg],staticTexts:[scheduleInst],characterName:character.display_name,
+          cacheBoundary: { index: msgs.findIndex(m => m.content === personaMsg), offset: personaMsg.length },
+          history: [{ role: 'user', content: `${JSON.stringify(cohabitation)}\n${triggerContent}` }] },
       });
 
-      const schedule = parseAndValidateSchedule(rawResult, character.display_name);
+      let schedule = parseAndValidateSchedule(rawResult, character.display_name);
       if (schedule) {
+        schedule = applySharedActivities(schedule, cohabitation.events, character.id);
+        if (cohabitation.room) schedule = schedule.map(a => a.replyDelay === -1 ? { ...a, residence: cohabitation.room } : a);
+        assertCompleteDay(schedule);
         const json = JSON.stringify(schedule);
         // 系统角色（天使）复用生成与校验，但由自己的存储负责，不混入普通居民表。
         if (options.persist === false) return { schedule_json: json, version: 1 };
-        const existing = db.prepare('SELECT id, version FROM schedule_templates WHERE character_id = ?').get(character.id);
-
-        if (existing) {
-          db.prepare(`
-            UPDATE schedule_templates
-            SET schedule_json = ?, version = version + 1, generated_at = CURRENT_TIMESTAMP
-            WHERE character_id = ?
-          `).run(json, character.id);
-          console.log(`[scheduleGen] Updated template for ${character.display_name} v${existing.version + 1}`);
-        } else {
-          db.prepare(`
-            INSERT INTO schedule_templates (character_id, schedule_json, version)
-            VALUES (?, ?, 1)
-          `).run(character.id, json);
-          console.log(`[scheduleGen] Created template for ${character.display_name}`);
-        }
-
-        return { schedule_json: json, version: (existing?.version || 0) + 1 };
+        const saved = persistIndividualSchedule(db, character, schedule, cohabitation.room);
+        const manager = await import('./scheduleManager.js');
+        for (const id of saved.changed) { manager.invalidateCache(id); manager.syncSleepingState(id); }
+        return { schedule_json: JSON.stringify(saved.schedule), version: db.prepare('SELECT version FROM schedule_templates WHERE character_id=?').get(character.id).version };
       }
 
       console.warn(`[scheduleGen] Validation failed for ${character.display_name}, attempt ${attempt + 1}/2`);
+      validationError = '请使用合法时间，完整覆盖24小时，无重叠无空档，并保留睡眠。';
     } catch (err) {
+      validationError = err.message;
       console.error(`[scheduleGen] Attempt ${attempt + 1} failed for ${character.display_name}:`, err.message);
       if (attempt === 1) throw err;
     }
@@ -242,7 +253,7 @@ export function parseAndValidateSchedule(raw, displayName) {
     }
   }
 
-  if (!Array.isArray(activities) || activities.length < 6) {
+  if (!Array.isArray(activities) || activities.length === 0) {
     console.warn(`[scheduleGen] Too few activities (${activities?.length || 0}) for ${displayName}`);
     return null;
   }
@@ -250,6 +261,7 @@ export function parseAndValidateSchedule(raw, displayName) {
   // 校验每个活动
   const required = ['startTime', 'endTime', 'activity', 'location', 'replyDelay', 'description'];
   for (const act of activities) {
+    if (!act || typeof act !== 'object' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(act.startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(act.endTime)) return null;
     for (const key of required) {
       if (!(key in act)) {
         console.warn(`[scheduleGen] Missing key "${key}" in activity for ${displayName}`);
@@ -266,22 +278,10 @@ export function parseAndValidateSchedule(raw, displayName) {
     }
   }
 
-  // 校验必有一个 sleeping block（replyDelay=-1）且覆盖 ≥5 小时
+  // 必须保留睡眠；具体长度和分段交给角色作息决定。
   const sleepingBlocks = activities.filter(a => a.replyDelay === -1);
   if (sleepingBlocks.length === 0) {
     console.warn(`[scheduleGen] No sleeping block found for ${displayName}`);
-    return null;
-  }
-
-  // 计算最长睡眠时长
-  let maxSleepDuration = 0;
-  for (const block of sleepingBlocks) {
-    const duration = timeToMinutes(block.endTime) - timeToMinutes(block.startTime);
-    const adjusted = duration < 0 ? duration + 24 * 60 : duration;
-    if (adjusted > maxSleepDuration) maxSleepDuration = adjusted;
-  }
-  if (maxSleepDuration < 15) {
-    console.warn(`[scheduleGen] Sleep too short (${maxSleepDuration}min) for ${displayName}, need ≥15min`);
     return null;
   }
 
@@ -475,6 +475,12 @@ function timeRangesOverlap(start1, end1, start2, end2) {
  */
 export function assignNextRefreshTime(characterId) {
   const db = getDb();
+  // 补齐单个角色沿用全局周期，不改变其他人的下次刷新。
+  const cycle = db.prepare('SELECT next_refresh_at FROM schedule_refresh_cycle WHERE id=1').get();
+  if (cycle?.next_refresh_at) {
+    db.prepare('UPDATE characters SET next_schedule_refresh_at=? WHERE id=?').run(cycle.next_refresh_at, characterId);
+    return new Date(cycle.next_refresh_at.replace(' ', 'T') + 'Z');
+  }
   const now = new Date();
   const refreshDays = Math.max(1, Math.min(3, config.features.scheduleRefreshDays || 1));
   // 第 refreshDays 天的 00:00（refreshDays=1 → 明天 00:00）
@@ -500,12 +506,18 @@ export function snapshotTodaySchedule(characterId) {
   if (!template) return null;
 
   const today = getLocalDateKey();
+  const old = db.prepare('SELECT schedule_json FROM daily_schedules WHERE character_id=? AND schedule_date=?').get(characterId, today);
+  let daily = JSON.parse(template.schedule_json);
+  if (old) for (const fixed of JSON.parse(old.schedule_json).filter(a => a.edited)) {
+    for (const [s, e] of intervals(fixed)) daily = reserveEventTime(daily, fixed, s, e);
+  }
 
   db.prepare(`
     INSERT OR REPLACE INTO daily_schedules (character_id, schedule_date, schedule_json)
     VALUES (?, ?, ?)
-  `).run(characterId, today, template.schedule_json);
+  `).run(characterId, today, JSON.stringify(daily));
   reapplyActiveEventSchedule(characterId, db);
+  for (const id of refreshResidenceDailySleep(db, characterId)) { invalidateCache(id); syncSleepingState(id); }
 
   // 从同一个 today 按日历减两天，避免 SQLite 墙钟与 JS 时钟不一致。
   db.prepare(

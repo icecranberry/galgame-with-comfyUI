@@ -167,7 +167,7 @@ SillyTavern 预设仅由需要文风的业务请求显式接入 `services/preset
 |---|---|
 | 聊天 | routes/chat.js、services/groupChatEngine.js、proactiveChatScheduler.js、replyQueueScheduler.js、wakeService.js |
 | 朋友圈 | routes/moments.js、services/momentCommentService.js、momentInteractionService.js、momentUserPostService.js、town/townNpcMomentGenerator.js |
-| 生活叙事 | services/eventGenerator.js、diaryGenerator.js、dreamService.js、mailboxScheduler.js、scheduleGenerator.js、itemGiftNarrative.js |
+| 生活叙事 | services/eventGenerator.js、diaryGenerator.js、dreamService.js、mailboxScheduler.js、scheduleGenerator.js、cohabitationPlanner.js（室友 short 前后锚点，关系与已确认活动放动态尾部，固定 JSON 规范位于人设前）、itemGiftNarrative.js |
 | 图片与角色 | routes/characters.js、images.js、schedule.js；services/characterGenerator.js（居民与天使共用；参考资料前为稳定边界，保留原 system/user 结构）、characterAppearanceService.js、characterReactionService.js、characterReactionPackService.js、dialogueBackground.js、emojiService.js、expressionStandingService.js、outfitScene.js；maibot-bridge/prompt.js |
 | 世界内容 | routes/relationships.js；services/itemService.js、libraryGenerator.js、mediaAvatarDesigner.js、mediaOutletDesigner.js、mediaService.js、newspaperService.js |
 | 小镇 | services/town/townBuildingFeatureGenerator.js、townBuildingFeatureRuntime.js、townInitService.js、townLayoutAI.js、townNpcEventGenerator.js、townNpcOfferService.js、townNpcService.js、townNpcServiceRuntime.js、townNpcStockService.js、townPromptBuilder.js、townService.js |

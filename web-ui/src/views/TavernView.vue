@@ -111,11 +111,11 @@
     </div>
 
     <!-- ═══════════════════════════════════════════
-         关系图整行；下方世界观 / SillyTavern 预设各占一半
+         关系图与宿舍安排并排；下方世界观 / SillyTavern 预设各占一半
          《邻舍日报》已并入「传媒」页（见 NavBar 的传媒标签）
          ═══════════════════════════════════════════ -->
     <div class="relation-entry-row">
-      <div class="relation-entry relation-entry-full card" role="button" tabindex="0" @click="showUserRelationGraph = true" @keydown.enter.prevent="showUserRelationGraph = true" @keydown.space.prevent="showUserRelationGraph = true">
+      <div class="relation-entry card" role="button" tabindex="0" @click="showUserRelationGraph = true" @keydown.enter.prevent="showUserRelationGraph = true" @keydown.space.prevent="showUserRelationGraph = true">
         <div class="relation-entry-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
@@ -129,6 +129,14 @@
         <span class="relation-entry-arrow">›</span>
       </div>
 
+      <div class="relation-entry card" role="button" tabindex="0" @click="showCohabitation = true" @keydown.enter.prevent="showCohabitation = true" @keydown.space.prevent="showCohabitation = true">
+        <div class="relation-entry-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7" /></svg></div>
+        <div class="relation-entry-text">
+          <span class="relation-entry-title">宿舍安排</span>
+          <span class="relation-entry-hint">{{ cohabitationHint }}</span>
+        </div>
+        <span class="relation-entry-arrow">›</span>
+      </div>
       <div class="relation-entry card" role="button" tabindex="0" @click="openWorldSetting" @keydown.enter.prevent="openWorldSetting" @keydown.space.prevent="openWorldSetting">
         <div class="relation-entry-icon world-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -708,6 +716,7 @@
     <!-- ═══════════════════════════════════════════
          用户关系图（独立全屏弹窗）
          ═══════════════════════════════════════════ -->
+    <CohabitationModal v-model="showCohabitation" @room-count-change="cohabitationRoomCount = $event" />
     <UserRelationshipGraph
       :visible="showUserRelationGraph"
       :all-characters="chat.characters"
@@ -765,6 +774,7 @@ import * as api from '../api/index.js'
 import AvatarCropper from '../components/AvatarCropper.vue'
 import RelationshipGraph from '../components/RelationshipGraph.vue'
 import UserRelationshipGraph from '../components/UserRelationshipGraph.vue'
+import CohabitationModal from '../components/CohabitationModal.vue'
 import RelationshipDeductionModal from '../components/RelationshipDeductionModal.vue'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import MailboxModal from '../components/MailboxModal.vue'
@@ -1284,6 +1294,21 @@ const detailChar = ref(null)
 
 const showRelationGraph = ref(false)
 const showUserRelationGraph = ref(false)
+const showCohabitation = ref(false)
+const cohabitationRoomCount = ref(null)
+const cohabitationHint = computed(() => {
+  if (cohabitationRoomCount.value === null) return '查看和安排邻舍'
+  return cohabitationRoomCount.value === 0
+    ? '邻舍现在空空如也'
+    : `已经安排了${cohabitationRoomCount.value}间邻舍`
+})
+onMounted(async () => {
+  try {
+    const data = await api.getCohabitation()
+    // 弹窗可能已载入或完成修改，首屏请求不覆盖更新后的数量。
+    if (cohabitationRoomCount.value === null) cohabitationRoomCount.value = data.rooms.length
+  } catch (error) { console.warn('读取邻舍数量失败', error) }
+})
 const showDeductionModal = ref(false)
 const deductionMode = ref('character')
 const deductionUserName = ref('')
@@ -1884,7 +1909,7 @@ onMounted(async () => {
 .relation-entry-row .relation-entry {
   margin-bottom: 0;
 }
-.relation-entry-row .relation-entry-full { grid-column:1 / -1; }
+
 .relation-entry {
   display: flex;
   align-items: center;
