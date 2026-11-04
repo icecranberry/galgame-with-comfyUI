@@ -2222,3 +2222,8 @@ export function regenerateMediaPostImages(ids) {
 export function generateMediaSection(postId, sectionKey) {
   return request(`/media/posts/${postId}/sections/${encodeURIComponent(sectionKey)}`, { method: 'POST' })
 }
+
+export const getGodWork = session => request(`/god-says/work?session=${session}`)
+export const decideGodChange = (id, version, decision) => request(`/god-says/changes/${id}/decision`, { method: 'POST', body: { version, decision } })
+
+export const stopGodBatch = id => request(`/god-says/batches/${id}/stop`, { method: 'POST' })

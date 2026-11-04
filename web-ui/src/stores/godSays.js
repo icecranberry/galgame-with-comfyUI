@@ -43,6 +43,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
   const turns = computed(() => (state.value?.runs || []).map(run => ({ ...run,
     messages: state.value.messages.filter(m => m.run_id === run.id),
     calls: state.value.calls.filter(c => c.run_id === run.id),
+    work: [...(state.value.changes || []), ...(state.value.batches || [])].filter(w => w.run_id === run.id),
     events: (state.value.worldEvents || []).filter(e => e.run_id === run.id),
   })))
   function detach() { source?.close(); source = null; reconnecting.value = false }
@@ -62,7 +63,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
       let data
       try { data = JSON.parse(event.data) } catch { return }
       applyGodStreamEvent(state.value, data)
-      if (data.type === 'run_end') { detach(); stopping.value = false; void refreshWorld() }
+      if (data.type === 'run_end') { detach(); stopping.value = false; void refreshWorld(); void refreshWork() }
     }
   }
   async function load(session = null) {
@@ -137,6 +138,12 @@ export const useGodSaysStore = defineStore('god-says', () => {
     } catch (err) { error.value = err.message; return false }
     finally { deleting.value = false }
   }
+  async function refreshWork() {
+    const session = state.value?.session.id
+    if (!session) return
+    try { const result = await api.getGodWork(session); if (state.value?.session.id === session) Object.assign(state.value, result) }
+    catch { /* 下次轮询恢复 */ }
+  }
   async function refreshWorld() {
     const session = state.value?.session.id
     if (!session) return
@@ -155,5 +162,5 @@ export const useGodSaysStore = defineStore('god-says', () => {
     if (index < 0) state.value.worldEvents.unshift(event)
     else state.value.worldEvents[index] = event
   }
-  return { state, loading, submitting, stopping, deleting, reconnecting, error, draft, archiveId, activeRun, busy, turns, load, send, stop, deleteTurn, setDraft, detach, suspend, refreshWorld, refreshActivity, updateWorld }
+  return { state, loading, submitting, stopping, deleting, reconnecting, error, draft, archiveId, activeRun, busy, turns, load, send, stop, deleteTurn, setDraft, detach, suspend, refreshWorld, refreshActivity, refreshWork, updateWorld }
 })

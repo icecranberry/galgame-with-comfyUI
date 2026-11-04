@@ -158,6 +158,9 @@
                       <span class="tool-label">{{ toolLabels[call.function.name] || '处理神谕' }}</span>
                     </div>
                   </div>
+                  <TransitionGroup name="god-content" tag="div" class="god-inline-work">
+                    <GodChangeCard v-for="work in godMessageWork(turn, message)" :key="work.id" :work="work" @updated="god.refreshWork" />
+                  </TransitionGroup>
                   <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" editable />
                   <span v-if="['interrupted', 'cancelled'].includes(message.status)" class="partial-note">{{ message.status === 'cancelled' ? '已停止' : '此段回应未完整结束' }}</span>
                 </template>
@@ -268,9 +271,11 @@ import GodSacredButton from '../components/godSays/GodSacredButton.vue'
 import GodAngelScheduleModal from '../components/godSays/GodAngelScheduleModal.vue'
 import GodAngelSummon from '../components/godSays/GodAngelSummon.vue'
 import GodLogsPanel from '../components/godSays/GodLogsPanel.vue'
+import GodChangeCard from '../components/godSays/GodChangeCard.vue'
 import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
 import GodReplyFlow from '../components/godSays/GodReplyFlow.vue'
+import { godMessageWork } from '../utils/godSaysWork.js'
 import { godMessageImages } from '../utils/godSaysImages.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import { loadFont, getFontFamily } from '../composables/useHandwritingFont.js'
@@ -597,6 +602,7 @@ onMounted(async () => {
   await goBottom({ immediate: true })
   poll = setInterval(async () => {
     if (!god.state) return
+    void god.refreshWork()
     if (!god.archiveId) void god.refreshActivity()
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: god.state.session.time_zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
     if (!god.archiveId && today !== god.state.session.day && !god.loading && !god.submitting) { await god.load(); await goBottom() }
@@ -700,6 +706,8 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .speaker-emblem { width:56px; height:56px; flex-shrink:0; box-sizing:border-box; border-radius:var(--radius-full); overflow:hidden; cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
 .speaker-emblem:hover { transform:scale(1.08); box-shadow:0 0 0 3px rgba(var(--accent-rgb), 0.25); }
 .speaker-emblem:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(var(--accent-rgb), 0.25); }
+.god-inline-work { max-width:640px; }
+.god-inline-work:empty { display:none; }
 .god-reply-text { max-width:640px; font-size:var(--fs-md); line-height:1.95; white-space:pre-wrap; overflow-wrap:anywhere; margin:18px 0 0; }
 .god-reply-text :deep(strong) { font-weight:650; color:var(--text-bright); }
 .god-reply-text :deep(code) { font-size:.92em; padding:2px 4px; background:var(--bg-tertiary); border-radius:var(--radius-sm); }
