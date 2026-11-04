@@ -22,7 +22,7 @@ import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import { cleanupProjectProcesses, label } from "./lib/projectProcesses.mjs";
+import { cleanupBeforeStartup } from "./lib/projectProcesses.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -176,12 +176,7 @@ async function main() {
   // 同样要清掉 —— 它们会继续跑 scheduler（朋友圈重复发帖），并在下次保存源码时
   // 再拉起一份新实例，与新会话形成同相位的双调度器。
   process.stdout.write(`  [0/4] Cleaning up leftover processes...\n`);
-  const cleanup = cleanupProjectProcesses({ excludePatterns: ["dev.mjs"], prefix: "        " });
-  if (cleanup.leftover && cleanup.leftover.length > 0) {
-    console.log(`        ${C.yellow}[WARN] ${cleanup.leftover.length} project process(es) survived cleanup:${C.reset}`);
-    for (const p of cleanup.leftover) console.log(`        ${C.yellow}       ${label(p.ProcessId, p.CommandLine)}${C.reset}`);
-    console.log(`        ${C.yellow}       Run \`npm run stop\` then retry — otherwise moments may duplicate.${C.reset}`);
-  }
+  await cleanupBeforeStartup({ excludePatterns: ["dev.mjs"], prefix: "        " });
   console.log(`        ${C.green}Done${C.reset}`);
 
   // [1/4] 环境检查
@@ -294,5 +289,7 @@ async function main() {
 
 main().catch((err) => {
   console.error(`${C.red}Fatal: ${err.message}${C.reset}`);
+  // 尚未启动子进程时直接失败退出，不能通过 shutdown 请求关闭旧实例。
+  if (children.size === 0) process.exit(1);
   shutdown();
 });

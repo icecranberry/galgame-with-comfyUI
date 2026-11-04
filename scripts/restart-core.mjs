@@ -12,7 +12,7 @@
 import { spawn } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanupProjectProcesses, AGENT_CORE_KEYWORDS } from "./lib/projectProcesses.mjs";
+import { cleanupBeforeStartup, AGENT_CORE_KEYWORDS } from "./lib/projectProcesses.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -65,15 +65,12 @@ async function main() {
   } catch { /* 已经挂了，无视 */ }
   await new Promise(r => setTimeout(r, 1500));
 
-  cleanupProjectProcesses({
+  await cleanupBeforeStartup({
     keywords: AGENT_CORE_KEYWORDS,
     ports: [3099],
     excludePatterns: ["restart-core.mjs"],
     prefix: "        ",
   });
-
-  // 等端口彻底释放
-  await new Promise(r => setTimeout(r, 1000));
 
   // 2. 拉起 agent-core
   console.log(`\n  [2/3] 启动 agent-core (:3099)...`);

@@ -83,6 +83,8 @@ agent-core/test/helpers/*
 !agent-core/test/novelaiClient.test.js
 !agent-core/test/vertexClient.test.js
 !agent-core/test/speechServiceProcess.test.js
+!agent-core/test/startupCleanup.test.js
+!agent-core/test/launcherStartupCleanup.test.js
 !agent-core/test/speechGpu.test.js
 !agent-core/test/speechApi.test.js
 !agent-core/test/speechConfig.test.js

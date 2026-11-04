@@ -146,25 +146,29 @@ export function killPid(pid, tree = true) {
 }
 
 /** 某端口全部 LISTENING 的 PID（同一个端口可能有多个监听者，不能只取第一行） */
-export function listeningPids(port) {
+export function listeningPids(port, { strict = false } = {}) {
   if (!isWindows) {
     try {
-      return exec(`lsof -ti tcp:${port}`).trim().split('\n').filter(Boolean);
-    } catch {
+      return exec(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`).trim().split('\n').filter(Boolean);
+    } catch (err) {
+      // lsof 用退出码 1 表示没有匹配项；命令缺失或权限错误不能当成端口空闲。
+      if (strict && !(err.status === 1 && !String(err.stdout || '').trim() && !String(err.stderr || '').trim())) throw err;
       return [];
     }
   }
   try {
-    const out = exec(`netstat -ano | findstr :${port}`);
+    const out = exec('netstat -ano');
     const pids = new Set();
     for (const line of out.split('\n')) {
       if (!line.includes('LISTENING')) continue;
       const parts = line.trim().split(/\s+/);
+      if (!parts[1]?.endsWith(`:${port}`)) continue;
       const pid = parts[parts.length - 1];
       if (/^\d+$/.test(pid) && pid !== '0') pids.add(pid);
     }
     return [...pids];
-  } catch {
+  } catch (err) {
+    if (strict) throw err;
     return [];
   }
 }
@@ -197,7 +201,7 @@ export function listProjectProcesses({ keywords = ALL_KEYWORDS, excludePatterns 
     }
   }
 
-  const ps = '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
+  const ps = "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; "
     + '@(Get-CimInstance Win32_Process '
     + "| Where-Object { $_.Name -eq 'node.exe' -or $_.Name -eq 'python.exe' } "
     + '| Select-Object ProcessId,ParentProcessId,Name,CommandLine '
@@ -307,4 +311,43 @@ export function cleanupProjectProcesses(opts = {}) {
     result.leftover = listProjectProcesses({ keywords, excludePatterns });
   }
   return result;
+}
+
+/** 启动门槛：清理完成后必须确认没有残留进程，且目标端口已释放。 */
+export function assertCleanupSucceeded(result, { ports = DEV_PORTS } = {}) {
+  if (!result.tableReadable || !Array.isArray(result.leftover)) {
+    throw new Error('无法确认旧进程已退出：进程表读取失败，已取消启动。请检查进程访问权限后重试。');
+  }
+  if (result.leftover.length > 0) {
+    const details = result.leftover.map(p => label(p.ProcessId, p.CommandLine)).join('\n');
+    throw new Error(`旧进程清理失败，已取消启动：\n${details}\n请停止这些进程后重试。`);
+  }
+  for (const port of ports) {
+    let pids;
+    try {
+      pids = listeningPids(port, { strict: true });
+    } catch (err) {
+      throw new Error(`无法确认端口 ${port} 已释放，已取消启动：${err.message}`);
+    }
+    if (pids.length > 0) {
+      throw new Error(`端口 ${port} 仍被占用（PID ${pids.join(', ')}），已取消启动。请释放端口后重试。`);
+    }
+  }
+}
+
+/** 清理只执行一次；给进程退出/端口释放留出短暂窗口，重查而不是沿用旧快照。 */
+export async function cleanupBeforeStartup({ waitTimeoutMs = 3000, ...opts } = {}) {
+  let result = cleanupProjectProcesses(opts);
+  const deadline = Date.now() + waitTimeoutMs;
+  while (true) {
+    try {
+      assertCleanupSucceeded(result, opts);
+      return result;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const leftover = listProjectProcesses(opts);
+      result = { ...result, tableReadable: leftover !== null, leftover };
+    }
+  }
 }

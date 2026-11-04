@@ -444,6 +444,9 @@ class MainWindow(QMainWindow):
 
         self._runner.output.connect(self._on_service_output)
         self._runner.status_summary.connect(self._on_service_status)
+        self._runner.startup_started.connect(
+            lambda: QTimer.singleShot(3000, self._maybe_start_maibot_with_core)
+        )
 
         self._maibot_page.start_clicked.connect(self._on_maibot_start)
         self._maibot_page.stop_clicked.connect(self._on_maibot_stop)
@@ -544,8 +547,6 @@ class MainWindow(QMainWindow):
         self._home_page.set_launch_state("starting")
         self._log_page.set_busy_state(True, "⏳ 启动中...")
         self._runner.start_all()
-        # 先启动邻舍主服务，3 秒后再拉起 MaiBot/SnowLuma
-        QTimer.singleShot(3000, self._maybe_start_maibot_with_core)
 
     # ==================================================================
     # 版本管理
@@ -753,7 +754,7 @@ class MainWindow(QMainWindow):
         if is_running:
             self._home_page.set_launch_state(True)
             self._log_page.set_busy_state(False)
-        elif overall == "all_stopped":
+        elif overall in ("all_stopped", "start_failed"):
             self._home_page.set_launch_state(False)
             self._log_page.set_busy_state(False)
 
