@@ -74,12 +74,16 @@ export const useScheduleStore = defineStore('schedule', () => {
   })
 
   onEvent('schedule_reset_progress', (data) => {
-    if (!resetTask.value) return
+    if (!resetTask.value) {
+      if (data.phase === 'complete') fetchOverview(true)
+      return
+    }
 
     // 已是终态，忽略后续进度更新（取消请求后后端可能还有 in-flight 事件）
     if (resetTask.value.phase === 'cancelled' || resetTask.value.phase === 'complete') return
 
-    if (data.phase === 'running') {
+    if (['running', 'cohabitation', 'sleep', 'schedules'].includes(data.phase)) {
+      resetTask.value.stageLabel = data.phase === 'cohabitation' ? '正在安排共同生活' : data.phase === 'sleep' ? '正在整理同睡时段' : '正在生成日程'
       resetTask.value.phase = 'running'
       resetTask.value.current = data.current || 0
       resetTask.value.total = data.total || resetTask.value.total
@@ -96,6 +100,7 @@ export const useScheduleStore = defineStore('schedule', () => {
       // 静默刷新概览（不触发 loading，避免 card-grid 闪烁）
       fetchOverview(true)
     } else if (data.phase === 'error') {
+      resetTask.value.errors.push({ name: data.character_name || '本轮日程', error: data.error || '生成失败，原日程保持不变' })
       resetTask.value.phase = 'cancelled'
       resetTask.value.processing = false
       resetTask.value.backgrounded = false
