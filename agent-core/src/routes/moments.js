@@ -974,9 +974,12 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   if (selectedTopic) {
     msgs.push({ role: 'system', content: `【本次分享话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
   }
-  msgs.push({ role: 'user', content: selectedTopic
+  const worldRulePrefix = worldSetting
+    ? '请遵循<world_setting>来发朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + (selectedTopic
     ? `${userMsg} 这次就围绕上方指定话题，说出你自己的感受并分享画面，严格按 JSON 格式输出。`
-    : userMsg });
+    : userMsg) });
 
   let text = '', imagePrompt = '', imageUrls = [];
   let imagePrompts = [];
@@ -1194,7 +1197,10 @@ ${userDesc || '信息未知，按普通人处理。'}
 imagePrompt 中${userName}的外观以上述描述为准。`,
   });
 
-  msgs.push({ role: 'user', content: userMsg });
+  const worldRulePrefix = worldSetting
+    ? '请遵循<world_setting>来发朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级。\n\n'
+    : '';
+  msgs.push({ role: 'user', content: worldRulePrefix + userMsg });
 
   // 创建 generating 记录（style 标记为日程赴约，与普通帖区分）
   const postResult = db.prepare(

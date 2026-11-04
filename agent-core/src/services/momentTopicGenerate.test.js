@@ -203,6 +203,8 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
     const messages = requests.at(-1).messages;
     assert.deepEqual(messages[0], { role: 'system', content: sharedSystem0 });
     assert.deepEqual(messages[1], { role: 'system', content: momentsSystem1 });
+    assert.match(messages.at(-1).content, /^请遵循<world_setting>来发朋友圈/);
+    assert.match(messages.at(-1).content, /则以<world_setting>最高优先级/);
     assert.equal(messages.filter(m => m.role === 'user').length, 1);
     assert.equal(messages.at(-1).role, 'user');
     const task = messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
@@ -225,4 +227,39 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
   assert.match(noWorld[1].content, /^你正在发朋友圈。/);
   assert.equal(noWorld.filter(m => m.role === 'user').length, 1);
   assert.equal(noWorld.at(-1).role, 'user');
+  assert.doesNotMatch(noWorld.at(-1).content, /<world_setting>/);
+});
+
+
+test('日程赴约朋友圈：末条 user 仅在有世界观时恢复强化提醒', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(2030, 0, 1, 12).getTime() });
+  const { runSpecialMomentCheck } = await import('./scheduleSpecialMoment.js');
+  const { getLocalDateKey } = await import('../utils/localDate.js');
+  const characterId = seedCharacter();
+  const db = getDb();
+  const schedule = [{ startTime: '11:00', endTime: '13:00', activity: '一起喝茶', location: '茶馆', replyDelay: 0, edited: 1, specialMomentStatus: 'pending' }];
+  db.prepare('INSERT INTO daily_schedules (character_id, schedule_date, schedule_json) VALUES (?, ?, ?)')
+    .run(characterId, getLocalDateKey(), JSON.stringify(schedule));
+  const requests = [];
+  t.mock.method(OpenAI.Chat.Completions.prototype, 'create', async params => {
+    requests.push(params);
+    throw Object.assign(new Error('TEST_PROMPT_CAPTURED'), { status: 400 });
+  });
+  for (const world of ['居民们在海边过普通生活。', '']) {
+    db.prepare('UPDATE world_settings SET content = ? WHERE is_active = 1').run(world);
+    const before = requests.length;
+    await runSpecialMomentCheck();
+    assert.equal(requests.length, before + 1);
+    const messages = requests.at(-1).messages;
+    assert.equal(messages.filter(m => m.role === 'user').length, 1);
+    assert.equal(messages.at(-1).role, 'user');
+    assert.match(messages.at(-1).content, /一起喝茶/);
+    if (world) {
+      assert.match(messages.at(-1).content, /^请遵循<world_setting>来发朋友圈/);
+      assert.match(messages.at(-1).content, /则以<world_setting>最高优先级/);
+      assert.deepEqual(messages[1], { role: 'system', content: getWorldIntegrationRule('moments') });
+    } else {
+      assert.doesNotMatch(messages.at(-1).content, /<world_setting>/);
+    }
+  }
 });

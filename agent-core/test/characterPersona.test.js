@@ -8,6 +8,7 @@ const { config } = await import('../src/config.js');
 const { getUserName, matchUser } = await import('../src/services/userSearch.js');
 const {
   buildCharacterPersona,
+  buildOutfitInjectionBlocks,
   buildImageCrossRefInfo,
   buildUserImageCrossRefInfo,
   extractAppearanceIdentityCorpus,
@@ -22,7 +23,7 @@ const {
 // 2) buildUserImageCrossRefInfo：用户自述资料块（图片实验室、私聊提到用户名时注入）
 // 3) AGENTS.md 强制的回归：无生效外观时 characterPersona 与收口前的旧口径逐字节一致
 //
-// 外观注入一律显式传 outfits: null —— 既绕开 DB，也保证断言只反映「没有外观可注入」这条路径。
+// 无外观回归用例显式传 outfits: null —— 既绕开 DB，也保证断言只反映「没有外观可注入」这条路径。
 
 /** 临时改写 config.user，返回还原函数（用例之间不串味） */
 function patchUser(patch) {
@@ -281,4 +282,28 @@ test('editable appearance extraction excludes following chapters and replacement
   assert.equal(extractEditableAppearanceBody('没有外观标题'), '');
   assert.equal(extractEditableAppearanceBody('## 你的外观\n## 你的约定\n不能吞掉'), '');
   assert.equal(replaceAppearanceSection('## 你的外观\n## 你的约定\n不能吞掉', '红发'), '## 你的外观\n红发\n## 你的约定\n不能吞掉');
+});
+
+
+test('三种生效外观组合均遵循世界观着装规定，同时保留外观来源优先级与整体替换', () => {
+  const limited = [{ name: '限时服饰', description: '银色短发，蓝色礼服' }];
+  const exclusive = { name: '专属形态', description: '黑色长发，白色制服' };
+  for (const [outfits, order] of [
+    [{ limited }, '限时服饰 > 基础外观'],
+    [{ exclusive }, '角色专属形态 > 基础外观'],
+    [{ limited, exclusive }, '限时服饰 > 角色专属形态 > 基础外观'],
+  ]) {
+    const blocks = buildOutfitInjectionBlocks(outfits);
+    assert.ok(blocks.tail.includes(`优先级：${order}`));
+    assert.match(blocks.tail, /若已提供<world_setting>，最终服装、饰品与鞋袜必须符合其中明确的着装规定/);
+    assert.match(blocks.tail, /仅调整与世界观冲突的服饰细节，保留其余设计/);
+    assert.match(blocks.tail, /不得借适配世界观恢复已被替换的基础服装、发型或发色/);
+    assert.match(blocks.tail, /世界观未规定的部分按上述外观优先级执行，不自行添加限制/);
+    assert.match(blocks.tail, /整体替换，不是叠加/);
+    assert.match(blocks.lead, /在符合世界观规定的前提下完整呈现/);
+    for (const variant of ['short', 'full']) {
+      assert.ok(buildCharacterPersona(CHAR, { variant, outfits }).endsWith(blocks.tail));
+    }
+  }
+  assert.equal(buildOutfitInjectionBlocks({ limited: [], exclusive: null }), null);
 });
