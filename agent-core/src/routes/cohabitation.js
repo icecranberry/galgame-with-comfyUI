@@ -20,7 +20,7 @@ router.get('/', run((_req, db) => ({
   characters: db.prepare("SELECT id,display_name,avatar_path FROM characters WHERE name!='default' ORDER BY id").all(),
 })));
 router.post('/rooms', run((req, db) => db.transaction(() => {
-  const name = roomName(req.body.name || '新房间');
+  const name = roomName(req.body.name || '宿舍');
   const member = req.body.characterId == null ? null : characterExists(db, req.body.characterId);
   const id = Number(db.prepare('INSERT INTO cohabitation_rooms(name) VALUES(?)').run(name).lastInsertRowid);
   if (member) db.prepare(`INSERT INTO cohabitation_members(character_id,room_id) VALUES(?,?)

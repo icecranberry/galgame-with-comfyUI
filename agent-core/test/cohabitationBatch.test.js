@@ -144,6 +144,57 @@ test('规划加载全体室友short及全部方向关系，但不注入室外人
   assert.equal(profile.cacheBoundary.index, a.messages.findIndex(m => m.content.includes('【本次共同生活资料】')) - 1);
 });
 
+test('共同活动最多三人，室外对象计入总人数，超限输出通过重试修正', async () => {
+  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const input = {
+    room: { id: 999, name: '人数校验', memberIds: [ids[0]] }, characters,
+    relationships: ids.slice(1).map(id => ({ from_character_id: ids[0], to_character_id: id, relationship_text: '同事' })),
+    events: [], batchId: 'participant-limit',
+  };
+  const request = buildCohabitationRequest(input);
+  const activity = { startTime: '14:00', endTime: '15:00', activity: '共同散步', location: '公园', participantIds: [...ids], description: '大家沿公园的小路散步，交流最近的见闻。' };
+  const validate = participantIds => validateCohabitationResult({ activities: [{ ...activity, participantIds }] }, { ...input, ...request });
+  assert.equal(validate(ids.slice(0, 2))[0].participantIds.length, 2);
+  assert.equal(validate(ids.slice(0, 3))[0].participantIds.length, 3);
+  assert.throws(() => validate(ids), /最多3人/);
+  assert.throws(() => validate([ids[0]]), /参与/);
+  let calls = 0;
+  const result = await planResidence(input, { chat: async messages => {
+    calls++;
+    assert.match(messages.find(m => m.content.includes('字段约束')).content, /participantIds为2～3个/);
+    if (calls === 1) return { activities: [activity] };
+    assert.match(messages.at(-1).content, /上次输出未通过校验：.*最多3人/);
+    return { activities: [{ ...activity, participantIds: ids.slice(0, 3) }] };
+  } });
+  assert.equal(calls, 2);
+  assert.deepEqual(result[0].participantIds, ids.slice(0, 3));
+});
+
+test('共同计划使用朋友圈句式表达有向关系，保留室外关系原文和动态缓存边界', () => {
+  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const input = {
+    room: { id: 999, name: '关系校验', memberIds: ids.slice(0, 2) }, characters, events: [], batchId: 'relation-text',
+    relationships: [
+      { from_character_id: ids[0], to_character_id: ids[2], relationship_text: '一直暗恋的学姐' },
+      { from_character_id: ids[2], to_character_id: ids[0], relationship_text: '互相看不顺眼的同事' },
+      { from_character_id: ids[0], to_character_id: ids[1], relationship_text: '从小一起长大的死党' },
+      { from_character_id: ids[2], to_character_id: ids[3], relationship_text: '不涉及室友的关系' },
+    ],
+  };
+  const request = buildCohabitationRequest(input);
+  const dynamic = request.messages[request.lorebook.cacheBoundary.index + 1].content;
+  assert.match(dynamic, /阿丙是阿甲的一直暗恋的学姐/);
+  assert.match(dynamic, /阿甲是阿丙的互相看不顺眼的同事/);
+  assert.match(dynamic, /阿乙是阿甲的从小一起长大的死党/);
+  assert.ok(!dynamic.includes('不涉及室友的关系'));
+  assert.ok(!dynamic.includes('"relationships":['));
+  assert.ok(request.lorebook.history[0].content.includes('阿丙是阿甲的一直暗恋的学姐'));
+  assert.ok(!request.messages.some(m => m.content.includes(characters[2].short_prompt)));
+  const changed = buildCohabitationRequest({ ...input, relationships: [] });
+  assert.deepEqual(request.messages.slice(0, request.lorebook.cacheBoundary.index + 1), changed.messages.slice(0, changed.lorebook.cacheBoundary.index + 1));
+  assert.match(changed.messages.at(-2).content, /未提供关系。/);
+});
+
 test('模型重复输出已确认约定时去重，新增非法参与者仍拒绝', async () => {
   const room = listResidences(db)[1];
   const event = { sharedEventId: 'previous:1', startTime: '14:00', endTime: '15:00', participantIds: [ids[0], ids[2]], activity: '共同讨论', location: '咖啡馆', description: '阿甲和阿丙讨论近期的问题。' };

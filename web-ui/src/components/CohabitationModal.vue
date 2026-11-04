@@ -195,7 +195,7 @@ async function mutate(action, { clearSelection = false } = {}) {
   finally { busy.value = false; dragTarget.value = null; if (pendingRefreshQueued) refreshPendingChanges() }
 }
 async function create(id = null) {
-  await mutate(() => api.createResidence({ name: '新房间', ...(id ? { characterId: id } : {}) }), { clearSelection: true })
+  await mutate(() => api.createResidence({ name: '宿舍', ...(id ? { characterId: id } : {}) }), { clearSelection: true })
 }
 async function moveSelected(roomId) {
   if (!selectedId.value) return
