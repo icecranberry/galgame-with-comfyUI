@@ -1,3 +1,6 @@
+import { createChangeSets } from './changeSets.js';
+import { createBatchTasks } from './batchTasks.js';
+import { CONFIRMED_TOOLS, createChangePolicy } from './changePolicy.js';
 import { effectKey, parseJson } from './repository.js';
 import { GOD_MODULE_TOOLS, moduleTool, moduleToolCatalog, executeModuleTool } from './moduleTools.js';
 
@@ -29,6 +32,16 @@ export const GOD_TOOLS = [
   definition('inspect_work', '读取神谕实际投递结果。event_id 不填时返回最近事件与任务；区分 pending、running、done、failed、uncertain。', object({ event_id: id('事件/任务编号') }, [])),
   definition('recall_memory', '查找神与天使往日对话的摘要和长期记忆；不包含其他角色私人记忆。', object({ query: string('要回忆的内容', 150) })),
   definition('list_capabilities', '按模块查看天使已接入的真实能力。module 可填聊天、群聊、朋友圈、信箱、日记、日程、奇遇、背包、关系、记忆、相册、角色、立绘、表情包、媒体、日报、世界观、预设、素材库、语音；省略返回全部。', object({ module: string('功能模块名', 30) }, [])),
+  definition('inspect_changes', '查询当前对话的批量任务与待确认变更，确认后的实际状态优先于历史工具结果。', object({}, [])),
+  definition('read_character_source', '读取角色完整原始资料，用于生成修改草稿，不使用摘要覆盖原文。', object({ character_id: id('角色编号') })),
+  definition('update_character', '准备角色资料修改，用户查看完整草稿并确认后才生效。保留未要求改动的原文。', object({ character_id: id('角色编号'), display_name: string('修改后的显示名', 100), base_prompt: string('完整修改后人设原文', 50000) }, ['character_id', 'base_prompt'])),
+  definition('apply_character_appearance', '按要求修订角色原始“你的外观”：提取原文、生成完整新版，卡片展示原文与新版供用户确认，仅确认后替换该段。批量时逐个角色按各自原文生成。', object({ character_id: id('角色编号'), instruction: string('具体修改要求，例如仅把发色改红，其他细节保留', 4000) })),
+  definition('rewrite_world_setting', '按要求修订指定世界观，读取完整原文并生成完整新版，确认卡展示前后全文，用户确认后才替换。', object({ world_id: id('世界观编号'), instruction: string('对世界观原文的修改要求', 4000) })),
+  definition('batch_characters', '对固定角色集合逐项执行同一工具。省略 character_ids 表示当前全体角色。长期修改先汇总内容供用户确认一次。arguments_json 是共用参数 JSON 对象，不含 character_id；可用 per_character_json 按角色编号覆盖具体内容。只支持含 character_id 的工具，禁止嵌套批量。', object({
+    tool_name: string('已注册的角色工具名称', 80), arguments_json: string('完整 JSON 对象，例如 {"instruction":"仅把发色改为红色"}', 50000),
+    per_character_json: string('按角色编号提供参数覆盖，例如 {"1":{"instruction":"改成深红色长发"}}', 100000),
+    character_ids: { type: 'array', items: id('角色编号'), minItems: 1, maxItems: 1000, uniqueItems: true }, title: string('任务标题', 100),
+  }, ['tool_name', 'arguments_json'])),
   ...GOD_MODULE_TOOLS.map(t => t.definition),
 ];
 
@@ -68,6 +81,13 @@ export function createGodTools(repo, world, memory, services) {
   }
   async function dispatch(name, args, ctx) {
     switch (name) {
+      case 'inspect_changes': { const session = db.prepare('SELECT session_id FROM god_runs WHERE id=?').get(ctx.runId); const summary = rows => rows.map(({ id, title, status, items }) => ({ id, title, status, count: items.length, completed: items.filter(i => i.status === 'done').length, unresolved: items.filter(i => !['done', 'pending'].includes(i.status)).map(i => ({ character_id: i.args.character_id, status: i.status, error: i.error })) })); return { changes: summary(changes.list(session.session_id)), batches: summary(batches.list(session.session_id)) }; }
+      case 'batch_characters': return batches.start(args, ctx);
+      case 'read_character_source': {
+        const c = character(args.character_id);
+        return { id: c.id, name: c.name, display_name: c.display_name, base_prompt: c.base_prompt };
+      }
+      case 'update_character': character(args.character_id); return services.api({ method: 'PUT', path: `/api/characters/${args.character_id}`, body: { base_prompt: args.base_prompt, ...(args.display_name ? { display_name: args.display_name } : {}) } }, ctx);
       case 'inspect_neighbors': {
         const q = `%${args.query || ''}%`;
         return { characters: db.prepare('SELECT id,display_name FROM characters WHERE display_name LIKE ? OR name LIKE ? ORDER BY id LIMIT 100').all(q, q),
@@ -122,7 +142,7 @@ export function createGodTools(repo, world, memory, services) {
       validateToolArgs(def.function.parameters, args);
       signal?.throwIfAborted();
     } catch (err) { return { ok: false, error: err.message }; }
-    const readOnly = ['inspect_neighbors', 'read_character', 'inspect_work', 'recall_memory', 'list_capabilities'].includes(call.function.name) || moduleTool(call.function.name)?.method === 'GET';
+    const readOnly = ['inspect_changes', 'inspect_neighbors', 'read_character', 'read_character_source', 'inspect_work', 'recall_memory', 'list_capabilities'].includes(call.function.name) || moduleTool(call.function.name)?.method === 'GET';
     const key = readOnly ? callId : effectKey(runId, call.function.name, args);
     const old = db.prepare('SELECT * FROM god_tool_calls WHERE effect_key=?').get(key);
     if (old) return parseJson(old.result_json) || { ok: false, error: '这项工作已发起但结果尚不确定，请查询执行记录，不要重复执行。' };
@@ -131,7 +151,10 @@ export function createGodTools(repo, world, memory, services) {
     repo.emit(runId, 'tool', row);
     let result;
     try {
-      const value = await dispatch(row.name, args, { runId, effectKey: key, callId, signal });
+      const ctx = { runId, effectKey: key, callId, signal };
+      const value = CONFIRMED_TOOLS.has(row.name)
+        ? await changes.create(runId, moduleTool(row.name)?.label || (row.name === 'rewrite_world_setting' ? '世界观修改' : row.name === 'apply_character_appearance' ? '外观修改' : '角色资料变更'), [{ name: row.name, args }], signal)
+        : await dispatch(row.name, args, ctx);
       result = { ok: true, value };
     } catch (err) {
       const saved = parseJson(db.prepare('SELECT result_json FROM god_tool_calls WHERE id=?').get(callId)?.result_json);
@@ -142,5 +165,22 @@ export function createGodTools(repo, world, memory, services) {
     repo.emit(runId, 'tool', { ...row, status, result });
     return result;
   }
-  return { definitions: GOD_TOOLS, execute };
+  const policy = createChangePolicy(db, services.api, services.generateReplacement);
+  const changes = createChangeSets(repo, { ...policy, apply: (item, ctx) => {
+    if (['apply_character_appearance', 'rewrite_world_setting'].includes(item.name)) {
+      if (!item.replacement || !item.preview?.length) throw new Error('旧版草稿未包含完整替换正文，请重新生成');
+      return services.api(item.replacement, ctx);
+    }
+    if (item.name === 'recruit_character') return services.api({ method: 'POST', path: '/api/characters', body: item.args }, ctx);
+    return dispatch(item.name, item.args, ctx);
+  } });
+  const batches = createBatchTasks(repo, { changes, needsConfirmation: name => CONFIRMED_TOOLS.has(name), execute: dispatchOperation,
+    validate(operation) {
+      const def = GOD_TOOLS.find(t => t.function.name === operation.name);
+      if (!def?.function.parameters.properties.character_id || operation.name === 'batch_characters') throw new Error('该工具不支持按角色批量执行');
+      validateToolArgs(def.function.parameters, operation.args);
+    },
+  });
+  function dispatchOperation(item, ctx) { return dispatch(item.name, item.args, ctx); }
+  return { definitions: GOD_TOOLS, execute, changes, batches };
 }

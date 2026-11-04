@@ -1,3 +1,4 @@
+import { godCommitGuard } from '../src/services/godSays/commitGuard.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -84,6 +85,7 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   db.prepare('UPDATE god_angel SET schedule_json=?,schedule_generated_at=? WHERE id=1').run(JSON.stringify([{ startTime: '00:00', endTime: '23:59', activity: '整理星图' }]), `${repo.day()}T00:00:00`);
   const app = express();
   app.use(express.json());
+  app.use(godCommitGuard);
   app.use('/api/god-says', router);
   app.use('/api/groups', (await import('../src/routes/groups.js')).default);
   app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message }));
@@ -130,9 +132,16 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.equal(requests[3].messages.at(-1).tool_call_id, 'world-1');
   assert.equal((await send()).duplicate, true);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM god_world_events').get().n, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 0, 'awaiting user confirmation');
   const state = await fetch(`${base}/state`).then(r => r.json());
   assert.equal(state.runs[0].status, 'completed');
+  assert.equal(state.changes.length, 1);
+  const draft = state.changes[0];
+  const approve = () => fetch(`${base}/changes/${draft.id}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: draft.version, decision: 'approve' }) }).then(r => r.json());
+  assert.equal((await approve()).status, 'done');
+  assert.equal((await approve()).status, 'done');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 1);
+
   assert.equal(state.worldEvents.length, 1);
   assert.match(state.session.schedule_json, /整理星图/);
   assert.equal(state.toolCatalog.length, GOD_TOOLS.length);

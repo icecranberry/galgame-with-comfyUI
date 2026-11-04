@@ -18,11 +18,24 @@ router.get('/state', (req, res) => {
   state.activity = state.scheduleEnabled ? angelActivity(schedule, r.repo.now(), r.repo.timeZone) : null;
   state.worldEvents = state.session.id ? r.world.list(null, state.session.id) : [];
   state.toolCatalog = godToolCatalog();
+  state.changes = r.tools.changes.list(state.session.id);
+  state.batches = r.tools.batches.list(state.session.id);
   state.angelPersonalities = ANGEL_PERSONALITIES;
   res.json(state);
   // 尚未召唤天使时，先由前端引导选性格；不自动生成默认人格与日程。
   if (!sessionId && state.angel.summoned) void r.ensureSchedule(state.session).catch(err => console.warn('[天使日程]', err.message));
   void r.memory.archive().catch(err => console.warn('[神说归档]', err.message));
+});
+router.get('/work', (req, res) => {
+  const r = getGodRuntime();
+  const session = Number(req.query.session);
+  if (!Number.isSafeInteger(session) || session < 1) return res.status(400).json({ error: '会话编号无效' });
+  res.json({ changes: r.tools.changes.list(session), batches: r.tools.batches.list(session) });
+});
+router.post('/batches/:id/stop', (req, res) => res.json(getGodRuntime().tools.batches.stop(req.params.id)));
+router.post('/changes/:id/decision', async (req, res, next) => {
+  try { res.json(await getGodRuntime().tools.changes.decide(req.params.id, req.body?.version, req.body?.decision)); }
+  catch (err) { next(err); }
 });
 router.get('/sessions', (req, res) => {
   const { repo } = getGodRuntime();
@@ -70,7 +83,14 @@ router.post('/runs', (req, res) => {
   res.json(getGodRuntime().start(client_id, text.trim(), { urls: imageUrls, dataUris: imageDataUris }));
 });
 router.post('/runs/:id/stop', (req, res) => res.json(getGodRuntime().cancel(req.params.id)));
-router.delete('/runs/:id', (req, res) => res.json(getGodRuntime().repo.deleteTurn(req.params.id)));
+router.delete('/runs/:id', (req, res) => {
+  const r = getGodRuntime();
+  const active = r.repo.db.prepare("SELECT 1 FROM god_changes WHERE run_id=? AND status='applying' UNION ALL SELECT 1 FROM god_batches WHERE run_id=? AND status='running' LIMIT 1").get(req.params.id, req.params.id);
+  if (active) return res.status(409).json({ error: '这轮仍有工作正在执行，请先停止批量任务或等待提交结束' });
+  const result = r.repo.deleteTurn(req.params.id);
+  r.repo.db.prepare("UPDATE god_changes SET status='rejected' WHERE run_id=? AND status='pending'").run(req.params.id);
+  res.json(result);
+});
 router.get('/angel', (req, res) => res.json(getGodRuntime().repo.ensureAngel()));
 router.post('/angel/summon', async (req, res, next) => {
   try {

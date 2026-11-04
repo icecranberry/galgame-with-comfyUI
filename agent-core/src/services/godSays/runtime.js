@@ -1,3 +1,4 @@
+import { generateReplacement } from './replacementGenerator.js';
 import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { config } from '../../config.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
@@ -28,6 +29,7 @@ import { chatSync as describeAngelImage } from '../lorebook/runtime.js';
 export { angelActivity } from './promptBuilder.js';
 
 export const AGENT_RULES = `你是神与邻舍世界之间的天使，既可以自然聊天，也可以使用提供的工具完成神谕。
+批量处理多位角色时使用 batch_characters，所有人由后端展开完整名单。长期资料、外观、世界观等修改会自动生成待确认草稿，awaiting_confirmation 只表示内容已准备好，必须让用户查看变更卡后确认，不能声称已修改。调整草稿时先让用户取消旧草稿，再准备新草稿。用户询问确认后的结果或批量进度时，用 inspect_changes 查询最新状态。部分失败后只处理明确失败的角色，不重做成功项，结果待核对的项先核对业务记录。读取完整人设使用 read_character_source。修改外观使用 apply_character_appearance，逐角色提取原始“你的外观”并生成完整新版，确认后只替换该段，不创建叠加效果；按要求修改世界观优先使用 rewrite_world_setting，确认前展示完整新版正文；只有明确临时效果才使用 inject_character_state。
 只有工具确实成功才能说已完成。排队、安排、开启奇遇和活动完成是不同状态；工具的错误与返回数据是事实，不能编造结果。
 先查询真实编号与相关状态，不猜角色、群聊或事件编号。指代有多个合理对象时简短询问。日常聊天无需勉强调用工具。
 世界改变使用 create_world_event，角色发帖使用 publish_moment，群聊接话使用 discuss_in_group，日程安排使用 set_schedule，角色互动用 create_encounter 承载，不替用户选择奇遇选项。
@@ -77,7 +79,7 @@ export function getGodRuntime() {
   world.recover();
   const tools = createGodTools(repo, world, memory, { localDate: getLocalDateKey, scheduleEnabled: () => config.features.schedule !== false,
     getSchedule: getTodaySchedule, getActivity: getCurrentActivity, changeSchedule: applyScheduleChange, queueSchedule: queueScheduleChange, encounter: generateEvent,
-    api: createGodLocalApi({ port: () => config.port }) });
+    generateReplacement, api: createGodLocalApi({ port: () => config.port }) });
   let schedulePromise;
   let scheduleRetryAt = 0;
   // 用户为天使选好性格后召唤：先落所选性格，再强制重生成人格；失败抛出带 502 的错误供前端提示重试。
@@ -163,7 +165,7 @@ export function getGodRuntime() {
     repo.db.prepare("UPDATE god_world_deliveries SET status='cancelled' WHERE status='pending' AND event_id IN (SELECT id FROM god_world_events WHERE run_id=?)").run(id);
     return { ok: true };
   }
-  singleton = { repo, world, memory, images, start, cancel, ensurePersona, ensureSchedule, summon };
+  singleton = { repo, world, memory, images, tools, start, cancel, ensurePersona, ensureSchedule, summon };
   return singleton;
 }
 

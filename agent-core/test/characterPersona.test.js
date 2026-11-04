@@ -13,6 +13,7 @@ const {
   extractAppearanceIdentityCorpus,
   replaceAppearanceSection,
   splitAppearanceSection,
+  extractEditableAppearanceBody,
   isAppearanceOnlyPromptChange,
 } = await import('../src/services/characterPersona.js');
 
@@ -270,4 +271,14 @@ test('isAppearanceOnlyPromptChange 容忍标题前收尾空白差异与完全一
   assert.equal(isAppearanceOnlyPromptChange(card, card.replace('\n\n## 你的外观', '\n## 你的外观')), true);
   assert.equal(isAppearanceOnlyPromptChange(card, card), true);
   assert.equal(isAppearanceOnlyPromptChange(card.replace('\n\n## 你的外观', '\n## 你的外观'), card), true);
+});
+
+
+test('editable appearance extraction excludes following chapters and replacement preserves surrounding prose', () => {
+  const source='身份原文\n\n## 你的外观\n黑发、蓝眼。\n## 你的约定\n尾部原文';
+  assert.equal(extractEditableAppearanceBody(source),'黑发、蓝眼。');
+  assert.equal(replaceAppearanceSection(source,'红发、蓝眼。'),'身份原文\n\n## 你的外观\n红发、蓝眼。\n## 你的约定\n尾部原文');
+  assert.equal(extractEditableAppearanceBody('没有外观标题'), '');
+  assert.equal(extractEditableAppearanceBody('## 你的外观\n## 你的约定\n不能吞掉'), '');
+  assert.equal(replaceAppearanceSection('## 你的外观\n## 你的约定\n不能吞掉', '红发'), '## 你的外观\n红发\n## 你的约定\n不能吞掉');
 });

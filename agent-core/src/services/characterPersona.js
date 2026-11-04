@@ -145,15 +145,25 @@ export function extractAppearanceIdentityCorpus(basePrompt, fallbackName = '') {
  * @param {string} basePrompt
  * @returns {{ before: string, after: string }}
  */
+function editableAppearanceRange(base) {
+  const heading = /^##[ \t]*你的外观[ \t]*(?:\r?\n|$)/m.exec(base);
+  if (!heading) return null;
+  const bodyStart = heading.index + heading[0].length;
+  const next = /(?:^|\r?\n)(?=#{1,2}[ \t]+)/.exec(base.slice(bodyStart));
+  return { start: heading.index, bodyStart, end: next ? bodyStart + next.index : base.length };
+}
+
+export function extractEditableAppearanceBody(basePrompt) {
+  const base = String(basePrompt || '');
+  const range = editableAppearanceRange(base);
+  return range ? base.slice(range.bodyStart, range.end).trim() : '';
+}
+
 export function splitAppearanceSection(basePrompt) {
   const base = String(basePrompt || '');
-  const m = base.match(APPEARANCE_HEADING_RE);
-  if (!m) return { before: `${base.trimEnd()}\n\n`, after: '' };
-  const next = base.indexOf('\n## ', m.index + 1);
-  return {
-    before: base.slice(0, m.index),
-    after: next >= 0 ? base.slice(next) : '',
-  };
+  const range = editableAppearanceRange(base);
+  return range ? { before: base.slice(0, range.start), after: (range.end === range.bodyStart && base[range.end] === '#' ? '\n' : '') + base.slice(range.end) }
+    : { before: `${base.trimEnd()}\n\n`, after: '' };
 }
 
 /**
@@ -165,13 +175,8 @@ export function splitAppearanceSection(basePrompt) {
  * @returns {string}
  */
 export function replaceAppearanceSection(basePrompt, newAppearanceBody) {
-  const base = String(basePrompt || '');
-  const section = `## 你的外观\n${String(newAppearanceBody || '').trim()}`;
-  const m = base.match(APPEARANCE_HEADING_RE);
-  if (!m) return `${base.trimEnd()}\n\n${section}`;
-  const next = base.indexOf('\n## ', m.index + 1);
-  const tail = next >= 0 ? base.slice(next) : '';
-  return base.slice(0, m.index) + section + tail;
+  const { before, after } = splitAppearanceSection(basePrompt);
+  return `${before}## 你的外观\n${String(newAppearanceBody || '').trim()}${after}`;
 }
 
 /**

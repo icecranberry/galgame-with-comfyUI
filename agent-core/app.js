@@ -1,3 +1,4 @@
+import { godCommitGuard } from './src/services/godSays/commitGuard.js';
 import './src/envCheck.js'; // 必须最先执行：Node ABI 预检，防 better-sqlite3 加载崩溃
 import './src/logCapture.js'; // 尽早安装 console 捕获到内存环形缓冲（幂等）
 import express from 'express';
@@ -138,6 +139,7 @@ app.use('/api/tts', wrapRouterAsync(ttsRoutes));
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
 app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
+app.use('/api', godCommitGuard);
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/config', wrapRouterAsync(lorebookRoutes));

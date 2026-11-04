@@ -1,3 +1,4 @@
+import { godCommitGuard } from '../src/services/godSays/commitGuard.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -93,6 +94,7 @@ test('real module routes create groups, letters, relations, library entries and 
   db.prepare("INSERT INTO characters(id,name,display_name,base_prompt) VALUES (2,'a','阿晴','温柔'),(3,'b','小雨','好奇'),(4,'c','晨星','安静')").run();
   const app = express();
   app.use(express.json());
+  app.use(godCommitGuard);
   const contracts = [];
   const mounts = { emoji: '/api/characters/emoji', expressionStandings: '/api', chat: '/api',
     groups: '/api/groups', mailbox: '/api/mailbox', relationships: '/api/relationships', library: '/api/library', characters: '/api/characters',
@@ -117,9 +119,16 @@ test('real module routes create groups, letters, relations, library entries and 
   const api = createGodLocalApi({ port: server.address().port });
   const repo = createGodRepository(db);
   const run = repo.start('module-integration', '安排邻舍的事情').run;
-  const tools = createGodTools(repo, createWorldEventService(repo), createGodMemory(repo, async () => ''), { api });
+  const tools = createGodTools(repo, createWorldEventService(repo), createGodMemory(repo, async () => ''), { api, generateReplacement: async ({ source }) => source.replace('黑发', '红发').replace('地方', '岛屿') });
   let index = 0;
-  const execute = async (name, args) => tools.execute({ id: `module-${index++}`, function: { name, arguments: JSON.stringify(args) } }, run.id, index);
+  const execute = async (name, args) => {
+    const result = await tools.execute({ id: `module-${index++}`, function: { name, arguments: JSON.stringify(args) } }, run.id, index);
+    if (result.value?.status !== 'awaiting_confirmation') return result;
+    const draft = tools.changes.get(result.value.change_id);
+    const applied = await tools.changes.decide(draft.id, draft.version, 'approve');
+    assert.equal(applied.status, 'done', JSON.stringify(applied));
+    return { ok: true, value: applied.items[0].result };
+  };
   const created = await execute('create_group', { name: '彩虹茶话会', topic: '一起看彩虹', member_ids: [2, 3] });
   assert.equal(created.ok, true, JSON.stringify(created));
   const groupId = created.value.data.group.id;
@@ -162,6 +171,18 @@ test('real module routes create groups, letters, relations, library entries and 
   for (const name of ['list_prompt_presets', 'list_world_settings', 'list_media_outlets', 'read_media_posts', 'list_emoji_categories']) {
     assert.equal((await execute(name, {})).ok, true, name);
   }
+  const originalPersona = '身份原文\n\n## 你的外观\n黑发、蓝眼、白裙。\n## 其他\n尾文不变';
+  db.prepare('UPDATE characters SET base_prompt=? WHERE id=2').run(originalPersona);
+  const proposal = await tools.execute({ id: 'appearance-replacement', function: { name: 'apply_character_appearance', arguments: JSON.stringify({ character_id: 2, instruction: '只改红发' }) } }, run.id, 99);
+  assert.equal(proposal.ok, true, JSON.stringify(proposal));
+  assert.equal(db.prepare('SELECT base_prompt FROM characters WHERE id=2').get().base_prompt, originalPersona);
+  const replacement = tools.changes.get(proposal.value.change_id);
+  assert.equal(replacement.items[0].preview[0].after, '红发、蓝眼、白裙。');
+  assert.equal((await tools.changes.decide(replacement.id, replacement.version, 'approve')).status, 'done');
+  assert.equal(db.prepare('SELECT base_prompt FROM characters WHERE id=2').get().base_prompt, originalPersona.replace('黑发', '红发'));
+  const rewrittenWorld = await execute('rewrite_world_setting', { world_id: world.value.data.item.id, instruction: '地方改为岛屿' });
+  assert.equal(rewrittenWorld.ok, true, JSON.stringify(rewrittenWorld));
+  assert.equal(db.prepare('SELECT content FROM world_settings WHERE id=?').get(world.value.data.item.id).content, '云庭是神与天使交谈的岛屿。');
   const capabilities = await execute('list_capabilities', { module: '信箱' });
   assert.ok(capabilities.value.tools.some(tool => tool.name === 'send_letter'));
 });

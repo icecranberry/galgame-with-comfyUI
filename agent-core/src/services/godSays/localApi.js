@@ -1,3 +1,4 @@
+import { registerGodCommitGuard } from './commitGuard.js';
 // 调用同进程服务监听的固定 loopback 地址；能力目录决定可访问的路由。
 export function publicToolData(value) {
   let remaining = 60000; let truncated = false;
@@ -84,12 +85,13 @@ export async function readChatStream(response) {
 }
 
 export function createGodLocalApi({ port, fetchImpl = fetch } = {}) {
-  return async function call(request, { signal, effectKey } = {}) {
+  return async function call(request, { signal, effectKey, assertCurrent } = {}) {
     const write = request.method !== 'GET';
     const base = `http://127.0.0.1:${typeof port === 'function' ? port() : port}`;
     const url = new URL(request.path, base);
     if (url.origin !== base || !url.pathname.startsWith('/api/') || url.username || url.password || url.hash) throw new Error('业务接口地址无效');
     signal?.throwIfAborted();
+    const releaseGuard = assertCurrent ? registerGodCommitGuard(effectKey, assertCurrent) : () => {};
     let started = false;
     try {
       started = true;
@@ -112,6 +114,6 @@ export function createGodLocalApi({ port, fetchImpl = fetch } = {}) {
       // 写请求断线/超时后，业务服务可能已经提交，不能声称明确失败或盲目重放。
       if (write && started && !error.knownResponse) error.uncertain = true;
       throw error;
-    }
+    } finally { releaseGuard(); }
   };
 }
