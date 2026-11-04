@@ -1,22 +1,28 @@
 <template>
   <section class="god-change" :aria-label="work.title">
     <div class="heading"><h3>{{ work.title }}</h3><span>{{ statusText[work.status] || work.status }} · {{ done }} / {{ work.items.length }}</span></div>
-    <p v-if="work.status === 'pending'" class="note">请核对原文与替换后的完整内容。确认后保存这一版。</p>
-    <linshe-button variant="link" size="sm" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起内容' : '查看具体内容' }}</linshe-button>
-    <CollapseTransition :show="expanded">
-      <div class="items">
-        <article v-for="(item, index) in work.items" :key="index" class="item">
-          <div class="heading"><strong>{{ item.label || item.before?.display_name || item.before?.target?.name || item.args?.name || '变更内容' }}</strong><span>{{ statusText[item.status] || item.status }}</span></div>
-          <div v-for="field in fields(item)" :key="field.key" class="field">
-            <span class="field-label">{{ field.label }}</span>
-            <p v-if="field.before != null" class="before">原文：{{ field.before }}</p>
-            <p class="after"><span v-if="field.before != null" class="replacement-label">替换后：</span>{{ field.after }}</p>
+    <p v-if="work.status === 'pending'" class="note">请核对以下内容。确认后保存这一版。</p>
+    <div class="items">
+      <article v-for="({ item, name, characterId, avatar }, index) in displayItems" :key="index" class="item">
+        <div class="heading">
+          <div class="item-identity">
+            <template v-if="characterId != null">
+              <img v-if="avatar && !failedAvatars.has(avatar)" :key="avatar" :src="avatar" class="avatar item-avatar" alt="" loading="lazy" @error="failedAvatars.add(avatar)" />
+              <span v-else class="avatar-fallback item-avatar" aria-hidden="true">{{ Array.from(name)[0] }}</span>
+            </template>
+            <strong>{{ name }}</strong>
           </div>
-          <p v-if="item.error" class="error">{{ item.error }}</p>
-          <p v-if="item.result?.note" class="note">{{ item.result.note }}</p>
-        </article>
-      </div>
-    </CollapseTransition>
+          <span>{{ statusText[item.status] || item.status }}</span>
+        </div>
+        <div v-for="field in godChangeFields(item)" :key="field.key" class="field">
+          <span class="field-label">{{ field.label }}</span>
+          <p v-if="field.before != null" class="before">原文：{{ field.before }}</p>
+          <p class="after"><span v-if="field.before != null" class="replacement-label">替换后：</span>{{ field.after }}</p>
+        </div>
+        <p v-if="item.error" class="error">{{ item.error }}</p>
+        <p v-if="item.result?.note" class="note">{{ item.result.note }}</p>
+      </article>
+    </div>
     <div v-if="work.version && work.status === 'pending'" class="actions">
       <linshe-button variant="primary" size="sm" :loading="busy" @click="decide('approve')">确认应用</linshe-button>
       <linshe-button size="sm" :disabled="busy" @click="decide('reject')">取消修改</linshe-button>
@@ -29,21 +35,29 @@
 <script setup>
 import { computed, ref } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
-import CollapseTransition from '../CollapseTransition.vue'
 import { decideGodChange, stopGodBatch } from '../../api/index.js'
+import { useChatStore } from '../../stores/chat.js'
+import { godChangeFields } from '../../utils/godChangeFields.js'
 const props = defineProps({ work: { type: Object, required: true } })
 const emit = defineEmits(['updated'])
-const expanded = ref(props.work.items.length <= 5)
+const chat = useChatStore()
+const failedAvatars = ref(new Set())
+const displayItems = computed(() => {
+  const characters = new Map(chat.characters.map(character => [String(character.id), character]))
+  return props.work.items.map(item => {
+    const characterId = item.args?.character_id
+    const character = characterId == null ? null : characters.get(String(characterId))
+    return {
+      item, characterId,
+      name: item.label || item.before?.display_name || character?.display_name || item.before?.target?.name || item.args?.name || '变更内容',
+      avatar: character?.avatar_path || '',
+    }
+  })
+})
 const busy = ref(false)
 const error = ref('')
 const statusText = { pending: '待确认', awaiting_confirmation: '待确认', applying: '正在应用', running: '处理中', done: '已完成', failed: '失败', partial: '部分完成', rejected: '已取消', cancelled: '已停止', conflict: '内容已变化', uncertain: '需要核对', interrupted: '已中断' }
 const done = computed(() => props.work.items.filter(i => i.status === 'done').length)
-const labels = { world_id: '世界观编号', outfit_id: '外观编号', set_id: '配置编号', group_id: '群聊编号', outlet_id: '媒体编号', name: '名称', display_name: '显示名称', base_prompt: '完整人设', description: '外观描述', content: '内容', relationship_text: '关系', topic: '话题', desc: '描述', prompt: '创作方向', tagline: '简介', enabled: '启用状态', emotion_baseline: '情绪基线', member_ids: '成员编号' }
-function fields(item) {
-  if (item.preview?.length) return item.preview.map((field, index) => ({ ...field, key: `replacement-${index}` }))
-  if (item.name === 'activate_world_setting') return [{ key: 'world', label: '将启用的世界观', after: item.before?.target?.name + '\n' + item.before?.target?.content }]
-  return Object.entries(item.args || {}).filter(([key]) => labels[key]).map(([key, value]) => ({ key, label: labels[key], before: item.before?.[key], after: typeof value === 'object' ? JSON.stringify(value) : typeof value === 'boolean' ? value ? '启用' : '停用' : value }))
-}
 async function stop() {
   if (busy.value) return
   busy.value = true
@@ -62,8 +76,11 @@ async function decide(decision) {
 <style scoped>
 .god-change { margin:16px 0; padding:14px 16px; border:1px solid var(--border); border-left:2px solid var(--fun-gold); border-radius:var(--radius-md); background:color-mix(in srgb, var(--bg-secondary) 45%, transparent); }
 .heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.item-identity { display:flex; align-items:center; gap:10px; min-width:0; flex:1; }
+.item-identity strong { overflow-wrap:anywhere; min-width:0; }
+.item-avatar { width:32px; height:32px; flex-shrink:0; }
 h3 { margin:0; font-size:var(--fs-base); color:var(--text-primary); }
-.heading span,.field-label { font-size:var(--fs-xs); color:var(--text-secondary); }
+.heading > span,.field-label { font-size:var(--fs-xs); color:var(--text-secondary); }
 .item { padding:12px 0; border-top:1px solid var(--border); }
 .items { margin-top:12px; }
 .field { margin-top:10px; }
