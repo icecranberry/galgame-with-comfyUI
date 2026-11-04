@@ -432,7 +432,7 @@ function compressLogMessages(messages) {
   });
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries } = {}) {
   throwIfSyncAborted(signal);
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   const limited = _limitEnabled();
@@ -464,6 +464,14 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   const extraBody = config.llm.extraBody;
   if (extraBody && Object.keys(extraBody).length > 0) {
     Object.assign(params, extraBody);
+  }
+  // 日程等业务明确要求关闭时，不能被全局自定义请求体重新开启。
+  if (forceDisableThinking) {
+    params.thinking = { type: 'disabled' };
+    if (params.generationConfig?.thinkingConfig) {
+      params.generationConfig = { ...params.generationConfig };
+      delete params.generationConfig.thinkingConfig;
+    }
   }
   applyOutputTokenLimit(params);
 

@@ -1,6 +1,7 @@
 import { getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { chatSync } from './lorebook/runtime.js';
+import { config } from '../config.js';
 import { intervals, overlaps } from './cohabitationSchedule.js';
 
 export const COHABITATION_RULES = `你是共同生活日程编排助手。为下方居室成员规划本轮作息中自然发生的共同活动，供稍后各角色编排完整日程时遵守。
@@ -76,6 +77,7 @@ export async function planResidence(input, { chat = chatSync } = {}) {
     if (error) messages.at(-1).content += `\n上次输出未通过校验：${error.message}。请修正后重新输出。`;
     try {
       const raw = await chat(messages, { temperature: 0.6, response_format: { type: 'json_object' },
+        ...(config.features.scheduleDisableThinking ? { thinking: { type: 'disabled' }, forceDisableThinking: true } : {}),
         label: `cohabitation-plan:${input.room.name}`, lorebook: request.lorebook });
       return validateCohabitationResult(raw, { ...request, ...input });
     } catch (err) { error = err; }

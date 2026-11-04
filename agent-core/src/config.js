@@ -141,6 +141,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     disturbMode: process.env.FEATURE_DISTURB_MODE === 'true', // 默认关：防打扰模式
     schedule: process.env.FEATURE_SCHEDULE !== 'false', // 默认开：日程系统
     scheduleRefreshDays: Math.max(1, Math.min(3, parseInt(process.env.SCHEDULE_REFRESH_DAYS, 10) || 1)), // 日程刷新周期（天），1~3
+    scheduleDisableThinking: false, // 默认跟随 LLM 设置；开启后日程编排强制关闭思考
     serializeBackgroundLLM: process.env.FEATURE_SERIALIZE_BG_LLM === 'true', // 默认关：后台LLM任务串行化
     backgroundLLMMaxConcurrency: parseInt(process.env.BG_LLM_MAX_CONCURRENCY, 10) || 3, // 后台最大并发数 (1-10)
     mergeMessages: process.env.FEATURE_MERGE_MESSAGES === 'true', // 默认关：合并连续同角色消息兼容Jinja模板

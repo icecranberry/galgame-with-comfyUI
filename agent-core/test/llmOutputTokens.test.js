@@ -136,6 +136,33 @@ test('all LLM request paths use the configured output allowance', async t => {
     await assert.rejects(client.testLlmConnection({ maxTokens: 0 }), /正整数/);
   });
 
+  await t.test('日程强制关闭优先于全局与自定义思考参数，后续普通请求保持原设置', async () => {
+    const previousMode = config.llm.thinkingMode;
+    const previousExtra = config.llm.extraBody;
+    try {
+      for (const mode of ['enabled', 'disabled', 'omit']) {
+        config.llm.thinkingMode = mode;
+        config.llm.extraBody = {};
+        await client.chatSync(messages);
+        assert.deepEqual(requests.at(-1).thinking, mode === 'omit' ? undefined : { type: mode });
+        await client.chatSync(messages, { forceDisableThinking: true });
+        assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
+      }
+      const extra = Object.freeze({ thinking: Object.freeze({ type: 'enabled' }),
+        generationConfig: Object.freeze({ thinkingConfig: Object.freeze({ thinkingBudget: 2048 }), temperature: 0.4 }) });
+      config.llm.extraBody = extra;
+      await client.chatSync(messages, { thinking: { type: 'enabled' }, forceDisableThinking: true });
+      assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
+      assert.deepEqual(requests.at(-1).generationConfig, { temperature: 0.4 });
+      await client.chatSync(messages);
+      assert.deepEqual(requests.at(-1).thinking, extra.thinking);
+      assert.deepEqual(requests.at(-1).generationConfig, extra.generationConfig);
+    } finally {
+      config.llm.thinkingMode = previousMode;
+      config.llm.extraBody = previousExtra;
+    }
+  });
+
   await t.test('sync and stream log complete reasoning separately without changing business output', async () => {
     reasoning = '模拟服务商思考内容。'.repeat(500);
     for (const run of [() => client.chatSync(messages, { label: '发朋友圈助手' }), () => stream({ label: '发朋友圈助手' })]) {

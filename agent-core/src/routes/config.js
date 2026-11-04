@@ -337,15 +337,19 @@ router.put('/moment-freq', (req, res) => {
   res.json({ ok: true, momentFreq: config.features.momentFreq, momentFreqMode: config.features.momentFreqMode });
 });
 
-// PUT /api/config/schedule-refresh-days — 更新日程刷新周期（天，1~3）
+// PUT /api/config/schedule-refresh-days — 更新日程设置（兼容只传刷新周期）
 router.put('/schedule-refresh-days', (req, res) => {
-  const { value } = req.body;
+  const { value, disableThinking } = req.body;
   const n = parseInt(value, 10);
   if (!Number.isInteger(n) || n < 1 || n > 3) {
     return res.status(400).json({ error: 'value must be an integer 1~3' });
   }
+  if (disableThinking !== undefined && typeof disableThinking !== 'boolean') {
+    return res.status(400).json({ error: 'disableThinking must be a boolean' });
+  }
   updateScheduleRefreshDays(n);
-  res.json({ ok: true, scheduleRefreshDays: config.features.scheduleRefreshDays });
+  if (disableThinking !== undefined) updateFeatureFlag('scheduleDisableThinking', disableThinking);
+  res.json({ ok: true, scheduleRefreshDays: config.features.scheduleRefreshDays, scheduleDisableThinking: config.features.scheduleDisableThinking });
 });
 
 // PUT /api/config/background-llm-concurrency — 更新后台 LLM 并发数 1~10

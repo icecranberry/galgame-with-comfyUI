@@ -191,7 +191,9 @@ ${directionMsg}`;
         temperature: 0.5,
         response_format: { type: 'json_object' },
         label: `schedule-gen:${character.display_name}`,
-        ...(options.thinking ? { thinking: options.thinking } : {}),
+        ...(config.features.scheduleDisableThinking
+          ? { thinking: { type: 'disabled' }, forceDisableThinking: true }
+          : options.thinking ? { thinking: options.thinking } : {}),
         lorebook:{personaTexts:[personaMsg],staticTexts:[scheduleInst],characterName:character.display_name,
           cacheBoundary: { index: msgs.findIndex(m => m.content === personaMsg), offset: personaMsg.length },
           history: [{ role: 'user', content: `${JSON.stringify(cohabitation)}\n${triggerContent}` }] },

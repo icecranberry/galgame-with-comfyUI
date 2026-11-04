@@ -707,9 +707,9 @@ export async function updateMomentFreq(value, mode) {
   await request(`/config/moment-freq`, { method: 'PUT', body: { value, mode } })
 }
 
-/** 更新日程刷新周期（天，1~3） */
-export async function updateScheduleRefreshDays(value) {
-  await request(`/config/schedule-refresh-days`, { method: 'PUT', body: { value } })
+/** 更新日程刷新周期（天，1~3）与独立思考设置 */
+export async function updateScheduleRefreshDays(value, disableThinking) {
+  await request(`/config/schedule-refresh-days`, { method: 'PUT', body: { value, disableThinking } })
 }
 
 /** 更新后台 LLM 并发数 1~10 */

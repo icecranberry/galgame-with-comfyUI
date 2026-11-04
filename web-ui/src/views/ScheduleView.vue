@@ -128,6 +128,18 @@
     <!-- ═══ 日程设置弹窗 ═══ -->
     <linshe-modal v-model="settingsOpen" title="日程设置">
       <div class="sched-settings-body">
+        <div class="sched-settings-slider-heading">
+          <label for="schedule-refresh-days">日程刷新周期</label>
+          <span class="sched-settings-value">每 {{ refreshDays }} 天刷新一次</span>
+        </div>
+        <linshe-slider
+          id="schedule-refresh-days"
+          v-model="refreshDays"
+          :min="1" :max="3" :step="1"
+          aria-label="日程刷新周期"
+        />
+        <p class="sched-settings-hint">每隔 {{ refreshDays }} 天自动为所有角色重新编排日程，更改在下次刷新时生效。</p>
+        <div class="sched-settings-divider"></div>
         <div class="sched-settings-toggle-row">
           <div class="sched-settings-toggle-text">
             <span class="sched-settings-toggle-label">停止所有角色生成日程</span>
@@ -141,17 +153,17 @@
           />
         </div>
         <div class="sched-settings-divider"></div>
-        <div class="sched-settings-slider-heading">
-          <label for="schedule-refresh-days">日程刷新周期</label>
-          <span class="sched-settings-value">每 {{ refreshDays }} 天刷新一次</span>
+        <div class="sched-settings-toggle-row">
+          <div class="sched-settings-toggle-text">
+            <span class="sched-settings-toggle-label">强制关闭思考</span>
+            <span class="sched-settings-hint">默认跟随 LLM 设置；开启后仅日程编排关闭思考。</span>
+          </div>
+          <linshe-switch
+            v-model="scheduleDisableThinking"
+            :disabled="savingRefreshDays"
+            aria-label="日程编排强制关闭思考"
+          />
         </div>
-        <linshe-slider
-          id="schedule-refresh-days"
-          v-model="refreshDays"
-          :min="1" :max="3" :step="1"
-          aria-label="日程刷新周期"
-        />
-        <p class="sched-settings-hint">每隔 {{ refreshDays }} 天自动为所有角色重新编排日程，更改在下次刷新时生效。</p>
       </div>
       <template #footer>
         <linshe-button variant="primary" :disabled="savingRefreshDays" :loading="savingRefreshDays" @click="onConfirmSettings">确定</linshe-button>
@@ -430,6 +442,7 @@ const cardGridEl = ref<HTMLElement | null>(null)
 // ── 日程设置（刷新周期） ──
 const settingsOpen = ref(false)
 const refreshDays = ref(1)
+const scheduleDisableThinking = ref(false)
 const savingRefreshDays = ref(false)
 
 // ── 批量停止日程生成（全量省 token） ──
@@ -463,6 +476,7 @@ async function openSettings() {
   try {
     const cfg = await api.getConfig()
     refreshDays.value = Math.max(1, Math.min(3, cfg?.features?.scheduleRefreshDays ?? 1))
+    scheduleDisableThinking.value = cfg?.features?.scheduleDisableThinking === true
   } catch {
     // 读取失败时沿用本地值打开弹窗
   }
@@ -473,8 +487,8 @@ async function onConfirmSettings() {
   if (savingRefreshDays.value) return
   savingRefreshDays.value = true
   try {
-    await api.updateScheduleRefreshDays(refreshDays.value)
-    toastFn(`日程刷新周期已设为每 ${refreshDays.value} 天一次`, 'success')
+    await api.updateScheduleRefreshDays(refreshDays.value, scheduleDisableThinking.value)
+    toastFn('日程设置已保存', 'success')
     settingsOpen.value = false
   } catch (err: any) {
     toastFn('保存失败: ' + (err.message || '未知错误'), 'error')

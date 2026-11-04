@@ -108,7 +108,7 @@ export function getGodRuntime() {
       if (!schedulePromise) schedulePromise = (async () => {
         try {
           const result = await generateSchedule({ id: 'god:angel', display_name: angel.display_name, base_prompt: angel.persona },
-            '这是常驻云庭、随时回应神的天使。安排天堂中的日常工作、闲暇与休息；观察邻舍世界也是职责之一。', { persist: false, outfits: angel.outfits, thinking: { type: 'enabled' } });
+            '这是常驻云庭、随时回应神的天使。安排天堂中的日常工作、闲暇与休息；观察邻舍世界也是职责之一。', { persist: false, outfits: angel.outfits });
           repo.db.prepare('UPDATE god_angel SET schedule_json=?,schedule_generated_at=?,schedule_error=NULL WHERE id=1 AND persona=? AND scene_outfits_json=?').run(result.schedule_json, `${repo.day()}T00:00:00`, angel.persona, angel.scene_outfits_json);
         } catch (err) {
           scheduleRetryAt = Date.now() + 300000;
