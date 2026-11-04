@@ -3,7 +3,7 @@ import { chatSync } from './lorebook/runtime.js';
 import { generateImageRaw } from './imageSkill.js';
 import { buildImageCrossRefInfo, buildCharacterAppearanceSection } from './characterPersona.js';
 import { saveBase64Image } from './imagePaths.js';
-import { invalidateGalleryCache } from '../routes/images.js';
+import { invalidateGalleryCache } from './galleryCache.js';
 import { resolveStandingOutfits, normalizeStandingOutfitScene, validateMissingOutfitPolicy, hasStandingOutfit, completeStandingOutfit } from './expressionStandingAppearance.js';
 
 export const DEFAULT_EMOJI_KEYS = [
