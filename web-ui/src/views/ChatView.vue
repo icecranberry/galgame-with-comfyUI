@@ -88,9 +88,6 @@
             </div>
 
             <!-- 深度思考块（可折叠） -->
-            <div v-else-if="item.msg.type === 'thinking'" class="thinking-row">
-              <ThinkingBlock :msg="item.msg" />
-            </div>
 
             <!-- Text bubble (user or assistant) -->
             <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
@@ -251,7 +248,7 @@
     </template>
 
     <Transition name="chat-mode" @after-enter="galgameEntering = false" @enter-cancelled="galgameEntering = false">
-      <GalgameDialogue v-if="galgameVisited && chat.activeChar" v-show="immersive" :active="immersive" :character="chat.activeChar" v-model:draft="inputText" :image-mode="imageGenMode" :deep-think="deepThinkMode" :sleeping="isCharSleeping" :wake-busy="wakeBusy" @wake="onWakeChar" @exit="chatMode = 'chat'" @open-standing="openStandingDisplayPage" />
+      <GalgameDialogue v-if="galgameVisited && chat.activeChar" v-show="immersive" :active="immersive" :character="chat.activeChar" v-model:draft="inputText" :image-mode="imageGenMode" :sleeping="isCharSleeping" :wake-busy="wakeBusy" @wake="onWakeChar" @exit="chatMode = 'chat'" @open-standing="openStandingDisplayPage" />
     </Transition>
 
     <ImageLightbox
@@ -619,7 +616,6 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from '
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
 import ImageGenBubble from '../components/ImageGenBubble.vue'
-import ThinkingBlock from '../components/ThinkingBlock.vue'
 import EventShareCard from '../components/EventShareCard.vue'
 import EventCard from '../components/EventCard.vue'
 import GearIcon from '../components/GearIcon.vue'
@@ -769,7 +765,7 @@ const isCharSleeping = computed(() => {
 const imageGenMode = computed(() => settings.imageGenMode)
 const imageGenModeLabel = computed(() => {
   if (imageGenMode.value === 'off') return '关闭配图'
-  if (imageGenMode.value === 'force') return '强制配图'
+  if (imageGenMode.value === 'force') return '导演模式'
   return '灵性配图'
 })
 const imageGenModeIcon = computed(() => {
@@ -790,7 +786,6 @@ function cycleImageGenMode() {
   showForceTip()
 }
 
-const deepThinkMode = computed(() => settings.deepThinkMode)
 
 function onGiftSent(result) {
   showGiftPanel.value = false
@@ -1493,7 +1488,7 @@ if (pieces.length === 0) pieces.push({ kind: 'text' })
     const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
     items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
     // 深度思考块不参与连发头像合并——否则它后面第一条回复的头像会被当作"同角色连发"隐藏
-    if (msg.type !== 'thinking') prevRole = msg.role
+    prevRole = msg.role
   }
 }
 }
@@ -1797,7 +1792,7 @@ async function send() {
   if (!text) return
   inputText.value = ''
   userScrolledUp = false  // 用户主动发送 → 强制跟随
-  await chat.sendMessage(text, imageGenMode.value, deepThinkMode.value)
+  await chat.sendMessage(text, imageGenMode.value)
   await scrollToBottom(true)
 }
 
@@ -1887,7 +1882,6 @@ function renderContent(text) {
 .message { display:flex; margin:3px 0; align-items:flex-start; gap:8px; }
 .message.user { flex-direction:row-reverse; }
 .message.assistant { flex-direction:row; }
-.thinking-row { margin:2px 0; }
 
 .msg-avatar {
   position: relative;

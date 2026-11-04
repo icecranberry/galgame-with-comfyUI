@@ -454,7 +454,7 @@ export async function deleteUserRelationship(id) {
   return request(`/user-relationships/${id}`, { method: 'DELETE' })
 }
 
-export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', deepThink = false, townContext, galgameMode = false) {
+export function chatStream(characterId, message, clientMsgId, imageMode = 'smart', townContext, galgameMode = false) {
   const controller = new AbortController()
   const stream = new ReadableStream({
     async start(outerController) {
@@ -475,7 +475,7 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
 
           res = await fetch(`${BASE}/characters/${characterId}/chat`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', deep_think: !!deepThink, ...(galgameMode === true ? { galgame_mode: true } : {}), ...(townContext === undefined ? {} : { townContext }) }),
+            body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', ...(galgameMode === true ? { galgame_mode: true } : {}), ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
           if (res.ok) break  // 成功

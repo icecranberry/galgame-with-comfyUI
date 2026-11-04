@@ -65,6 +65,7 @@ agent-core/test/helpers/*
 !agent-core/test/characterBackgrounds.test.js
 !agent-core/test/chatModePrompt.test.js
 !agent-core/test/chatImageRagQuery.test.js
+!agent-core/test/privateChatImageTools.test.js
 !agent-core/test/momentTiming.test.js
 !agent-core/test/momentIntervalScheduler.test.js
 !agent-core/test/mediaFavorites.test.js

@@ -40,7 +40,7 @@ export function useTownCharacterChat(characterId, { chat = useChatStore(), setti
     const current = generation
     try {
       // Same user settings, idempotency key, retry/parser, image and delayed-reply pipeline as ChatView.
-      await chat.sendMessage(text, settings?.imageGenMode ?? 'smart', settings?.deepThinkMode ?? false, { townContext: { ...townContext.value } })
+      await chat.sendMessage(text, settings?.imageGenMode ?? 'smart', { townContext: { ...townContext.value } })
     } catch (err) {
       if (current !== generation || disposed) return
       if ([400, 409].includes(err.status)) {

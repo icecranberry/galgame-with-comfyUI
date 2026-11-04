@@ -68,6 +68,8 @@ function _connect() {
   if (_conn && !_conn._closed) _conn.close()
 
   _conn = api.connectUnifiedStream({
+    private_chat_image: d => _dispatch('private_chat_image', d),
+    private_chat_aux: d => _dispatch('private_chat_aux', d),
     speech_cache_cleared: d => _dispatch('speech_cache_cleared', d),
     speech_update: d => _dispatch('speech_update', d),
     speech_preparing: d => _dispatch('speech_preparing', d),

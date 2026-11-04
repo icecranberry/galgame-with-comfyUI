@@ -5,6 +5,7 @@ import { dialogueCharacters, dialogueCharacterDelay, paginateDialogue, repaginat
 import { useGalgameTranscript } from '../src/composables/useGalgameTranscript.js'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '../src/stores/chat.js'
+import { startUnifiedStream, stopUnifiedStream } from '../src/stores/unifiedStream.js'
 import { chatSpeechAutoPlay } from '../src/utils/speechAutoPlay.js'
 
 test('pagination preserves full text and never splits emoji or combining characters', () => {
@@ -74,7 +75,7 @@ test('saved full reply and prediction identity arrive before image tasks release
   chat.activeCharId = 1
   const leaveSpeech = chatSpeechAutoPlay.enter('chat:1', () => true)
   t.after(leaveSpeech)
-  const send = chat.sendMessage('你好', 'smart', false, { galgameMode: true })
+  const send = chat.sendMessage('你好', 'smart', { galgameMode: true })
   assert.equal(requestBody.galgame_mode, true)
   assert.equal(requestBody.message, '你好', 'the mode preference must not be appended to the user message')
   assert.equal(chat.messages.find(message => message.role === 'user').content, '你好')
@@ -120,6 +121,43 @@ test('saved full reply and prediction identity arrive before image tasks release
   emit('response_end', {})
   controller.close()
   await normalSend
+})
+
+test('independent image accepted before speech stays after that reply and before the next user turn', async t => {
+  const originalFetch = globalThis.fetch
+  let chatController, busController
+  const emit = (controller, event, data) => controller.enqueue(new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+  globalThis.fetch = async (url) => {
+    if (url === '/api/stream') return new Response(new ReadableStream({ start(c) { busController = c } }))
+    if (url.endsWith('/chat')) return new Response(new ReadableStream({ start(c) { chatController = c } }))
+    return Response.json({ characters: [{ id: 1 }] })
+  }
+  t.after(() => { stopUnifiedStream(); busController?.close(); globalThis.fetch = originalFetch })
+  setActivePinia(createPinia())
+  const chat = useChatStore(); chat.activeCharId = 1
+  startUnifiedStream()
+  const sending = chat.sendMessage('给我看看')
+  const user = chat.messages.find(m => m.role === 'user')
+  emit(busController, 'private_chat_image', { event: 'generate_start', characterId: 1, taskId: 91, messageId: 20, clientMsgId: user.clientMsgId })
+  await new Promise(r => setTimeout(r, 10))
+  emit(chatController, 'token', { content: '给你看看！' })
+  emit(chatController, 'bubble_break', {})
+  emit(chatController, 'token', { content: '本小姐赢啦！' })
+  emit(chatController, 'response_end', {})
+  emit(chatController, 'msg_saved', { id: 21, raw_id: 10, role: 'assistant', content: '给你看看！' })
+  emit(chatController, 'msg_saved', { id: 22, raw_id: 10, role: 'assistant', content: '本小姐赢啦！' })
+  chatController.close(); await sending
+  assert.equal(chat.streaming, false)
+  assert.deepEqual(chat.messages.filter(m => m.role === 'assistant').map(m => m.type), ['text', 'text', 'image_gen'])
+  assert.equal(chat.messages.find(m => m.id === 21).raw_id, 10)
+  const next = chat.sendMessage('真可爱')
+  emit(busController, 'private_chat_image', { event: 'generate_done', characterId: 1, taskId: 91, messageId: 20, clientMsgId: user.clientMsgId, images: [{ url: '/photo.png' }] })
+  emit(chatController, 'token', { content: '那当然' }); emit(chatController, 'bubble_break', {}); emit(chatController, 'response_end', {})
+  chatController.close(); await next
+  const photo = chat.messages.findIndex(m => m.genId === 91)
+  assert.ok(photo < chat.messages.findIndex(m => m.content === '真可爱'))
+  assert.equal(chat.messages.filter(m => m.genId === 91).length, 1)
+  assert.equal(chat.messages[photo].genStatus, 'done')
 })
 
 test('failed or completed pictures do not leave an image waiting status behind', () => {

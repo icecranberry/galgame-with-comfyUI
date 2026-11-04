@@ -1,6 +1,7 @@
+import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
-import { chatStream, chatSync } from '../llm/llm-client.js';
+import { chatStream, chatSync, chatAgentStream } from '../llm/llm-client.js';
 import { chatSync as chatWithLorebook } from '../services/lorebook/runtime.js';
 import { prepareNarrativePrompt } from '../services/presets/narrative.js';
 import { createLorebookRepository } from '../db/lorebookRepository.js';
@@ -24,7 +25,7 @@ import {
   stateToPrompt, affinityToPrompt, affinityToReminder, saveEmotionSnapshot, emotionDashboard,
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
-import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
+import { generateImage, getLastWorkflowMode, captureImageGenerationConfig } from '../services/imageSkill.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
@@ -47,7 +48,7 @@ import { randomUUID as standingTurnId } from 'crypto';
 import { readDialogueTranscript } from '../services/dialogueTranscript.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
-import { getCoreDialogueRules, getChatRhythmRules, JUDGE_PROMPT, detectImageIntent } from '../builtinRules.js';
+import { getCoreDialogueRules, getChatRhythmRules, getWorldIntegrationRule } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { getUserName, matchUser } from '../services/userSearch.js';
 import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
@@ -58,10 +59,8 @@ import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../s
 import { buildPrivateMomentContext } from '../services/privateMomentContext.js';
 import { listRecentMailboxLetters } from '../services/privateMailboxContext.js';
 import { getTownState } from '../services/town/townService.js';
-import {
-  buildPlannerTaskBlock, buildPlannerTriggerLine, prependToLastUserMessage, appendToLastUserMessage,
-  runPlanner, sanitizePlan, buildPlanExecuteBlock, detectLastReplyMedia,
-} from '../services/replyPlanner.js';
+import { streamPrivateChatImages, queuePrivateImage, savePrivateChatReply, getPrivateChatImageResume } from '../services/privateChatImageTools.js';
+import { SHARED_IMAGE_PROMPT_RULE, buildSharedImageTask } from '../services/privateChatImagePrompt.js';
 
 const router = Router();
 
@@ -108,8 +107,6 @@ const TEMP_STYLE_POOL_HOSTILE = [
 // ── 回复猜想冷却：每个 conversation 生成一次后进入 20s 冷却，用户新消息到达时重置 ──
 const guessCooldowns = new Map();  // conversationId -> timestamp(ms)
 
-// ── 智能配图计数器（per-conversation）：每轮用户发言 -1，生图成功后重置为 3，归零时跳过 LLM 判断直接生图 ──
-const imageJudgeCounters = new Map();  // conversationId -> count
 
 // ── character_id → conversation_id 映射 ──
 function convId(charId) { return `char_${charId}`; }
@@ -286,14 +283,12 @@ router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
 
-  // LEFT JOIN raw_messages 带出深度思考原文；thinking 只挂在每个 raw 组的第一条消息上
   const messages = db.prepare(`
-    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id,
-           CASE WHEN ROW_NUMBER() OVER (PARTITION BY m.raw_id ORDER BY m.id) = 1 THEN r.thinking END AS thinking
+    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id
     FROM messages m
     LEFT JOIN raw_messages r ON r.id = m.raw_id
     WHERE m.conversation_id = ?
-    ORDER BY m.id ASC
+    ORDER BY COALESCE((SELECT MIN(part.id) FROM messages part WHERE part.raw_id=m.raw_id),m.id), m.seq, m.id
   `).all(conversationId).map(m => ({
     ...m,
     created_at: toISODate(m.created_at),
@@ -308,6 +303,10 @@ router.get('/characters/:id/messages', (req, res) => {
 
   res.json({
     messages,
+    imageTasks: db.prepare(`SELECT t.*, p.message_id, p.user_raw_id FROM private_chat_image_turns p JOIN image_tasks t ON t.id=p.task_id JOIN messages m ON m.id=p.message_id WHERE p.conversation_id=? AND t.status != 'done'`).all(conversationId).map(t => ({
+      ...t,
+      created_at: toISODate(t.created_at),
+    })),
     affinity: lastSnapshot ? {
       value: lastSnapshot.affinity,
       delta: lastSnapshot.affinity_delta ?? 0,
@@ -344,11 +343,8 @@ router.get('/messages/:id', (req, res) => {
 
 // POST /api/characters/:id/chat — 流式对话
 router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTownState }), async (req, res) => {
-  const { message, client_msg_id, force_image_gen, image_mode, deep_think, galgame_mode } = req.body;
-  const deepThink = deep_think === true || deep_think === 'true';
+  const { message, client_msg_id, force_image_gen, image_mode, galgame_mode } = req.body;
   const imageMode = ['off', 'smart', 'force'].includes(image_mode) ? image_mode : (force_image_gen ? 'force' : 'smart');
-  // 深度思考下的生图策略：off = planner 看不到图片工具；must = 强制生图（本轮必配图，形式由 planner 定）；auto = planner 按需决策
-  const imagePolicy = imageMode === 'off' ? 'off' : (deepThink && imageMode === 'force' ? 'must' : 'auto');
 
   if (typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({ error: 'message is required' });
@@ -545,6 +541,10 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
   res.setTimeout(0);
   const send = (event, data) => {
     if (event === 'token' && data?.emojiKeys?.length) publishStandingKeys(standingTurn, data.emojiKeys);
+    if (res.writableEnded || res.destroyed) {
+      if (['guesses', 'affinity_update'].includes(event)) broadcast('private_chat_aux', { event, characterId, clientMsgId: client_msg_id, ...data });
+      return;
+    }
     return res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
@@ -577,13 +577,6 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     // 1.5 用户发送新消息 → 重置回复猜想冷却，本轮的 assistant 回复可以触发一次猜想
     guessCooldowns.delete(conversationId);
 
-    // 1.6 智能配图计数器 -1（仅普通灵性模式使用；深度思考由 planner 决策，不消耗也不触发保底）
-    if (imageMode === 'smart' && !deepThink) {
-      const counter = imageJudgeCounters.get(conversationId) ?? 3;
-      imageJudgeCounters.set(conversationId, Math.max(0, counter - 1));
-      console.log(`[chat] imageJudgeCounter[${conversationId}] decreased to ${imageJudgeCounters.get(conversationId)}`);
-    }
-
     // 2. 加载角色
     const character = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
 
@@ -591,7 +584,6 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     if (isTempWoken(characterId)) extendTempWake(characterId);
 
     // 3. 生图意图（正则强匹配 → 提前检测，用于 msgs[2] 格式消息）
-    const explicitImageIntent = detectImageIntent(message);
 
     // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
     // 奇遇创建已超过一天的视为过期话题：私聊中不再提及（情绪联动与上下文注入一并失效）
@@ -777,7 +769,7 @@ ${coreRules}
       : null;
 
     // ── checkpoint 历史 + 活跃聊天历史（滑动窗口） ──
-    const { checkpoint, checkpointHistory, activeText: activeChatText, activeRounds, activeSegments } = getSplitHistory(db, conversationId, 10, 10, { userName: chatUserName, characterName: character.display_name });
+    const { checkpoint, checkpointHistory, activeText: activeChatText, activeRounds, activeSegments } = getSplitHistory(db, conversationId, 10, 10, { userName: chatUserName, characterName: character.display_name, throughId: userRawMsgId });
     // [DEBUG] 上下文拆分
     console.log('[DEBUG] afterId:', checkpoint?.end_msg_id || 0, '| checkpoint助手数: 10(固定) | active助手数:', activeRounds);
     if (checkpointHistory.length > 0) {
@@ -863,7 +855,6 @@ ${coreRules}
       try { soulLengthHint = soulReplyLengthHint(characterId); } catch { soulLengthHint = null; }
     }
     const sentenceHint = (() => {
-      if (explicitImageIntent) return '15个汉字以内';
       if (soulLengthHint) return soulLengthHint;
       if (affinity == null || affinity < 60) return '10~30个汉字';
       if (affinity < 80) return '10~40个汉字';
@@ -1045,8 +1036,9 @@ ${coreRules}
       if (reminder) dynamicBlocks.push(`<attitude_reminder>你对 ${chatUserName} 的态度以 <affinity_attitude> 为准（当前：${reminder}），优先级高于上方情绪状态、临时风格与重逢氛围。</attitude_reminder>`);
     }
 
-    // 生图仍由原有路径 A/B/C/D/E 决策；固定格式规则已在稳定前缀中，不额外改变主回复行为。
     // ── 阶段四：dynamicBlocks token 预算（默认关；降级顺序有日志，无静默截断）──
+    const imageStates = db.prepare(`SELECT p.scene,t.status,t.error_message FROM private_chat_image_turns p JOIN image_tasks t ON t.id=p.task_id WHERE p.conversation_id=? ORDER BY p.user_raw_id DESC LIMIT 3`).all(conversationId);
+    if (imageStates.length) dynamicBlocks.push('【最近图片任务真实状态】\n' + imageStates.map(t => `${t.scene || '最后一轮对话配图'}：${t.status === 'done' ? '图片已完成' : t.status === 'failed' ? '生成失败' : '已受理，图片尚未完成'}`).join('\n'));
     const budgetConfig = config.features.memory ? getContextBudgetConfig() : { enabled: false, dynamicTokens: 8000 };
     const budgetedBlocks = budgetConfig.enabled
       ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens)
@@ -1063,8 +1055,6 @@ ${coreRules}
       }
     }
     // ── 通过 buildChatContext 组装基础请求 ──
-    // 深度思考时 planner 与主回复共用这一完全相同的消息结构（稳定块+摘要+历史+含全部动态块的用户消息），
-    // 任务块合并到 user 消息头部（末尾另附触发提醒），盘算结果追加到 user 消息末尾，不新增独立 user 消息
     // 摘要之上另有一条独立 system：静态活人感规则 + <emoji_stickers> 清单（跨轮不变；长度条已降为动态块）
     const { messages: originalBaseMsgs, metadata } = buildChatContext({
       stableBlocks,
@@ -1084,68 +1074,7 @@ ${coreRules}
     const baseMsgs = lorebookTurn.messages;
     if (lorebookTurn.report) send('lorebook',lorebookTurn.report);
 
-    // ── 深度思考 Planner：先以角色视角盘算回复的媒介组合（text/sticker/image），再据此自然回复 ──
-    // 任何失败（超时/解析失败/清洗后无有效块）都静默回退到原有五路生图决策流程
-    let replyPlan = null;    // 清洗后的计划 { blocks, summary, plannedImage }
-    let planThinkText = '';  // 思考原文（持久化到 raw_messages.thinking，历史回看用）
     let msgs = baseMsgs;
-    let plannedImagePromptPromise = null;  // planner 图片需求的画面描述预生成（与回复流并行）
-    if (deepThink) {
-      try {
-        send('plan_start', {});
-        const planStartAt = Date.now();
-        const plannerResult = await runPlanner({
-          // 任务块合并进 user 消息头部；触发提醒贴在消息末尾（生成点前最后一次强化输出契约）
-          messages: appendToLastUserMessage(
-            prependToLastUserMessage(lorebookTurn.lorebookMessages, buildPlannerTaskBlock({
-              characterName: character.display_name,
-              userName: chatUserName,
-              stickerKeys: [...emojiMap.keys()],
-              imagePolicy,
-              lastReplyMedia: detectLastReplyMedia(conversationId, emojiMap),
-            })),
-            buildPlannerTriggerLine(imagePolicy)
-          ),
-          onDelta: (t) => { if (t) send('plan_delta', { text: t }); },
-        });
-        if (plannerResult) {
-          planThinkText = plannerResult.thinkText || '';
-          replyPlan = sanitizePlan(plannerResult.plan, {
-            emojiKeys: [...emojiMap.keys()],
-            allowImage: imagePolicy !== 'off',
-          });
-        }
-        send('plan_end', {
-          summary: replyPlan?.summary || '',
-          elapsedMs: Date.now() - planStartAt,
-          applied: !!replyPlan,
-        });
-        if (replyPlan) {
-          // 盘算结果追加到 user 消息末尾：只带刚刚的内心活动（有图时附一句"发出了什么照片"）；
-          // 无可写内容时不追加
-          const execBlock = buildPlanExecuteBlock(replyPlan, { thinkText: planThinkText });
-          if (execBlock) {
-            msgs = appendToLastUserMessage(baseMsgs, execBlock);
-          }
-          console.log(`[chat] 🧠 planner applied: ${replyPlan.blocks.map(b =>
-            b.type + (b.type === 'sticker' ? `(${b.key})` : b.type === 'image' ? `(${b.scene.slice(0, 20)})` : '')
-          ).join(' → ')}`);
-          // planner 规划了图片 → 立即并行预生成画面描述（与回复流重叠，省去回复完成后的串行等待）
-          if (replyPlan.plannedImage) {
-            const sceneHint = replyPlan.blocks.find(b => b.type === 'image')?.scene || '';
-            plannedImagePromptPromise = requestImagePromptContent(conversationId, character, sceneHint)
-              .catch(err => {
-                console.error('[chat] planned image prompt error:', err.message);
-                return '';
-              });
-          }
-        } else {
-          console.log('[chat] 🧠 planner produced no valid plan, falling back to default pipeline');
-        }
-      } catch (err) {
-        console.error('[chat] planner error:', err.message);
-      }
-    }
 
     // ── 副作用：首轮强调标记（event 已在 dynamicBlocks 中注入） ──
     if (activeEvent && !activeEvent.emphasis_delivered) {
@@ -1192,11 +1121,55 @@ ${coreRules}
       }
     };
 
+    const imageResume = getPrivateChatImageResume(db, userRawMsgId);
+    let hadToolCalls = !!imageResume;
+    const notifyImage = (event, data) => {
+      const binding = db.prepare(`SELECT p.message_id,p.user_raw_id,r.client_msg_id,t.created_at FROM private_chat_image_turns p JOIN raw_messages r ON r.id=p.user_raw_id JOIN messages m ON m.id=p.message_id JOIN image_tasks t ON t.id=p.task_id WHERE p.task_id=?`).get(data.taskId);
+      if (!binding) return;
+      broadcast('private_chat_image', { event, characterId, ...data, messageId: binding?.message_id,
+        userRawId: binding?.user_raw_id, clientMsgId: binding?.client_msg_id, created_at: toISODate(binding.created_at) });
+    };
+    function acceptImage(imageRequest, assistant, binding = {}) {
+      const source = imageRequest ? { kind: 'tool', ...imageRequest } : { kind: 'dialogue' };
+      const scene = source.scene || '';
+      const history = db.prepare('SELECT role, content, prompt FROM raw_messages WHERE conversation_id=? AND id<=? ORDER BY id DESC LIMIT 5').all(conversationId, userRawMsgId).reverse();
+      history.push({ role: 'assistant', content: stripTags(assistant?.content || streamState.fullContent) });
+      const snapshot = { ...buildImagePromptMessages(conversationId, character, source, history), character: structuredClone(character), imageConfig: {
+        ...captureImageGenerationConfig('chat'), imageProvider: config.comfyui.imageProvider,
+        width: config.comfyui.width, height: config.comfyui.height,
+        artist: config.comfyui.imageProvider === 'novelai' ? config.comfyui.novelaiArtist : config.comfyui.artist,
+      } };
+      snapshot.crossCharacters = snapshot.crossRefCharIdsForImage.map(id => db.prepare('SELECT loras,artist_override FROM characters WHERE id=?').get(id)).filter(Boolean);
+      return queuePrivateImage(db, { conversationId, userRawId: userRawMsgId, scene, snapshot, ...binding, notify: notifyImage,
+        execute: async ({ taskId, rawId, messageId }, frozen) => {
+          const output = await requestNonEmptyImagePrompt(() => chatWithLorebook(frozen.msgs, { temperature: 0.7, label: '私聊生图', lorebook: frozen.lorebook }), { emptyRetries: 1 });
+          const prompt = extractImagePromptResponse(output);
+          if (!prompt) throw new Error('模型未返回图像描述');
+          db.prepare('UPDATE raw_messages SET prompt=? WHERE id=?').run(prompt, rawId);
+          db.prepare("UPDATE image_tasks SET prompt_original=?,prompt_refined=?,status='running' WHERE id=?").run(prompt,prompt,taskId);
+          await triggerImageGeneration(conversationId,prompt,messageId,taskId,notifyImage,frozen.crossRefCharIdsForImage,frozen.ragQuery,frozen.character,frozen.crossCharacters,frozen.imageConfig,{ includeCharacter: frozen.includeCharacter });
+        },
+      });
+    }
+
     // 流式消费 + flush（一次调用 = 一段 LLM 流；@memory 触发时会被复用跑第二段）
     async function consumeStream(streamMessages, signal) {
       // 仅主聊天流的本轮 user 头部增加模式偏好；重试和回想续写都从原始消息组装，避免重复叠加。
       const requestMessages = withGalgameEmojiPreference(streamMessages, { galgameMode: galgame_mode === true, hasEmojis: emojiMap.size > 0 });
-      for await (const chunk of chatStream(requestMessages, { ...streamOpts, signal })) {
+      const stream = imageResume || imageMode === 'smart' ? streamPrivateChatImages(requestMessages, {
+        ...streamOpts, signal, nativeStream: chatAgentStream, textStream: chatStream,
+        resume: imageResume,
+        accept: acceptImage,
+        skipTools: assistant => {
+          if (!recallGateEnabled || recallChecked || !assistant?.content?.trim()) return false;
+          recallChecked = true;
+          recallQuery = parseRecallInstruction(assistant?.content || '');
+          return !!recallQuery;
+        },
+        record: (call, assistant, result) => { hadToolCalls = true; db.prepare('INSERT INTO private_chat_tool_calls (user_raw_id,call_id,assistant_json,arguments_json,result_json,task_id) VALUES (?,?,?,?,?,?)').run(userRawMsgId,call.id,JSON.stringify(assistant),call.function.arguments,JSON.stringify(result),result.task_id || null); },
+        onUnavailable: () => send('image_unavailable', { message: '当前渠道不支持图片工具，本轮灵性配图不可用' }),
+      }) : chatStream(requestMessages, { ...streamOpts, signal });
+      for await (const chunk of stream) {
         const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
         streamState.fullContent += cleanChunk;
 
@@ -1244,14 +1217,15 @@ ${coreRules}
       // 会污染后续轮次的上下文，而这一轮用户已经放弃了。
       if (clientGone) throw err;
       // @memory 闸门主动 abort 属预期；其余错误维持原行为向上抛
-      if (!recallQuery) throw err;
-      console.log('[chat] first stream aborted for @memory recall');
+      if (!recallQuery && !streamState.fullContent.trim()) throw err;
+      if (!recallQuery) send('image_unavailable', { message: '回复流中断，未完成的图片调用未执行' });
+      if (recallQuery) console.log('[chat] first stream aborted for @memory recall');
     }
 
     // 空正文重试：端点在思考模式下偶发只产出推理、正文为空（finish=stop），
     // 表现为用户看到一个空气泡（最终由下方兜底写成 "..."）。此处最多补发一次请求；
     // 仍为空则维持原行为交给兜底，不改变任何既有分支。
-    if (!clientGone && !recallQuery
+    if (!clientGone && !recallQuery && !hadToolCalls
       && !streamState.fullContent.trim()
       && streamState.collectedSegments.length === 0) {
       console.warn('[chat] 主聊天流返回空正文，重试一次');
@@ -1262,8 +1236,9 @@ ${coreRules}
         await consumeStream(msgs, upstreamAbort.signal);
       } catch (err) {
         if (clientGone) throw err;
-        if (!recallQuery) throw err;
-        console.log('[chat] empty-reply retry aborted for @memory recall');
+        if (!recallQuery && !streamState.fullContent.trim()) throw err;
+        if (!recallQuery) send('image_unavailable', { message: '回复流中断，未完成的图片调用未执行' });
+        if (recallQuery) console.log('[chat] empty-reply retry aborted for @memory recall');
       }
     }
 
@@ -1311,6 +1286,7 @@ ${coreRules}
         dynamicBlocks: budgetConfig.enabled ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens) : dynamicBlocks,
       });
       const recallMsgs = lorebookTurn.reapply ? await lorebookTurn.reapply(originalRecallMsgs) : originalRecallMsgs;
+      recallQuery = null;
 
       // 重置流状态：指令行不进气泡不落库；闸门前已发出的零散片段用 context_update 清空
       if (streamState.collectedSegments.length > 0) {
@@ -1389,45 +1365,17 @@ ${coreRules}
     if (streamState.wasStopped || tags.prompt || hasNeedImageTag) {
       send('context_update', { content: displayContent });
     }
-    // 8.5 保存 raw_messages（完整原文，保留 {"prompt" JSON 标签以便 LLM 理解上下文）
-    //     thinking 列存深度思考原文（{think, plan} JSON），仅历史回看用，不进入 LLM 上下文
-    const rawContent = fullContent
-      .replace(/<needImage>/gi, '')
-      .trim();
-    const thinkingPayload = (deepThink && (planThinkText || replyPlan))
-      ? JSON.stringify({ think: planThinkText, plan: replyPlan })
-      : null;
-    // prepare 提到循环外 + 事务包裹：语句只编译一次，段落数增长时仍常数开销
-    const insertRawStmt = db.prepare('INSERT INTO raw_messages (conversation_id, role, content, prompt, thinking) VALUES (?, ?, ?, ?, ?)');
-    const insertMsgStmt = db.prepare('INSERT INTO messages (conversation_id, raw_id, role, content, images, seq) VALUES (?, ?, ?, ?, ?, ?)');
-    const saveSegments = db.transaction((segs, rawId) => {
-      const ids = [];
-      for (let i = 0; i < segs.length; i++) {
-        const p = segs[i];
-        const r = insertMsgStmt.run(conversationId, rawId, 'assistant', p.content, p.images.length > 0 ? JSON.stringify(p.images) : null, i);
-        ids.push({ id: r.lastInsertRowid, p });
-      }
-      return ids;
-    });
-
-    const rawResult = insertRawStmt.run(conversationId, 'assistant', rawContent, tags.prompt || null, thinkingPayload);
-    const rawMsgId = rawResult.lastInsertRowid;
+    // 8.5 图片载体与正文共用一条 raw，避免空图片占用额外历史轮数。
+    const rawContent = stripTags(fullContent).trim();
+    const reply = savePrivateChatReply(db, { conversationId, userRawId: userRawMsgId, content: rawContent, segments: parsedSegments });
+    const rawMsgId = reply.rawId;
     lorebookTurn.commit();
     send('dialogue_saved', { raw_id: rawMsgId });
 
-    const savedIds = [];
-    for (const { id, p } of saveSegments(parsedSegments, rawMsgId)) {
-      savedIds.push(id);
-      send('msg_saved', { id, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
+    for (const { id, p } of reply.saved) {
+      send('msg_saved', { id, raw_id: rawMsgId, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
     }
-    if (parsedSegments.length === 0) {
-      // 兜底：AI 没有返回有效文本
-      const rawEmpty = insertRawStmt.run(conversationId, 'assistant', '...', null, null);
-      const r = insertMsgStmt.run(conversationId, rawEmpty.lastInsertRowid, 'assistant', '...', null, 0);
-      savedIds.push(r.lastInsertRowid);
-      send('msg_saved', { id: r.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
-    }
-    const lastInsertRowid = savedIds[savedIds.length - 1];
+    const lastInsertRowid = reply.lastMessageId;
     getStandingDisplay().complete(standingTurn);
 
     // 8.8 回复猜想 ← 启动（不 await，与情绪评估并行发起 LLM 调用）
@@ -1522,109 +1470,17 @@ ${coreRules}
       });
     }
 
-    // 10. 生图判断 ← 同步决策 + 异步发射（与预测、情绪三路并行发射 LLM 调用）
-    let imageGenPromise = null;
-    if (imageMode === 'off') {
-      console.log('[chat] image gen disabled: skipping image pipeline');
-    } else if (tags.prompt) {
-      // 路径 A: 模型直接输出了 {"prompt":"..."}（正则强匹配 → 或模型自主决定）
-      const db2 = getDb();
-      const taskResult = db2.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
-        .run(conversationId, tags.prompt, tags.prompt);
-      const genTaskId = taskResult.lastInsertRowid;
-      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
-      const ragQuery = `${chatUserName}: ${extractRealContent(message)}\n${character?.display_name || '角色'}: ${stripTags(fullContent)}`;
-      imageGenPromise = triggerImageGeneration(conversationId, tags.prompt, lastInsertRowid, genTaskId, send, allRefIds, ragQuery);
-    } else if (hasNeedImageTag) {
-      // 路径 B: 模型追加了 <needImage>，需要二次请求获取 prompt
-      // 提前创建 task + 发送 generate_start，前端立即显示遮罩层
-      const preTaskId = createPreparingTask(conversationId);
-      send('generate_start', { taskId: preTaskId });
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
-    } else if (replyPlan?.plannedImage) {
-      // 深度思考规划了图片 → 直接带 planner 的画面需求走生图助手，
-      // 不依赖主回复 LLM 输出 {"prompt"}；画面描述已在回复流期间并行预生成
-      const sceneHint = replyPlan.blocks.find(b => b.type === 'image')?.scene || '';
-      console.log(`[chat] 🧠 planner image → direct image pipeline (scene: ${sceneHint.slice(0, 40)})`);
-      const preTaskId = createPreparingTask(conversationId);
-      send('generate_start', { taskId: preTaskId });
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId, sceneHint, plannedImagePromptPromise);
-    } else if (force_image_gen && (!replyPlan || deepThink)) {
-      // 路径 D: 强制生图 — 普通模式：用户主动勾选，无条件生图；
-      // 深度思考模式：强制 = 本轮必须有图，planner 漏规划时在此兜底补一张（画面由生图助手按上下文自拟）
-      console.log('[chat] force image gen: user requested, triggering needImage flow');
-      const preTaskId = createPreparingTask(conversationId);
-      send('generate_start', { taskId: preTaskId });
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
-    } else if (explicitImageIntent) {
-      // 正则强匹配命中 → 跳过判断助手，直接走 handleNeedImageFlow
-      console.log('[chat] regex intent hit: skipping judge, triggering needImage flow');
-      const preTaskId = createPreparingTask(conversationId);
-      send('generate_start', { taskId: preTaskId });
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
-    } else if (replyPlan) {
-      // 深度思考决定本回复不配图 → 跳过计数器保底（E）与静默判断（C），尊重规划结果
-      console.log('[chat] planner planned non-image reply: skipping judge/counter');
-    } else if (deepThink) {
-      // 深度思考模式下不跑灵性判断（planner 已是决策者，失败时也不回退到判断助手）
-      console.log('[chat] deep-think mode: planner failed, skipping judge/counter');
-    } else if ((imageJudgeCounters.get(conversationId) ?? 3) <= 0) {
-      // 路径 E: 计数器归零 → 强制生图
-      console.log('[chat] counter forced: skipping judge, triggering needImage flow');
-      const preTaskId = createPreparingTask(conversationId);
-      send('generate_start', { taskId: preTaskId });
-      imageGenPromise = handleNeedImageFlow(conversationId, character, send, preTaskId);
-    } else {
-      // 路径 C: 静默判断（系统强制开启）
-      imageGenPromise = (async () => {
-        try {
-          const needImage = await judgeImageNeed(conversationId);
-          if (needImage) {
-            console.log('[chat] auto judge: image needed, triggering needImage flow');
-            // ★ judge 返回 YES 瞬间 → 立即创建 task + send generate_start，前端立刻显示遮罩层
-            const preTaskId = createPreparingTask(conversationId);
-            send('generate_start', { taskId: preTaskId });
-            const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
-            await handleNeedImageFlow(conversationId, char, send, preTaskId);
-          }
-        } catch (err) {
-          console.error('[chat] auto judge error:', err.message);
-        }
-      })();
-    }
+    // Director mode always uses the frozen final dialogue, never legacy model tags.
+    if (imageMode === 'force') acceptImage('', null, { rawId: rawMsgId, messageId: lastInsertRowid });
 
-    // 结算回复猜想（三路已同时发射，此时大概率已完成；失败静默不阻塞后续）
+    // Auxiliary work completes independently; only text controls the HTTP stream lifetime.
     if (guessPromise) {
-      try {
-        const guesses = await guessPromise;
+      guessPromise.then(guesses => {
         if (guesses) {
           send('guesses', guesses);
           guessCooldowns.set(conversationId, guessCooldownStart + 20_000);
         }
-      } catch (err) {
-        console.error('[chat] guess generation error:', err.message);
-      }
-    }
-
-    // 结算生图
-    if (imageGenPromise) {
-      try {
-        await imageGenPromise;
-      } catch (err) {
-        console.error('[chat] image generation error:', err.message);
-      }
-    }
-
-    // 兜底等待情绪评估（三路中最后一条保底，3s 超时）
-    if (emotionPromise) {
-      try {
-        await Promise.race([
-          emotionPromise,
-          new Promise(resolve => setTimeout(() => resolve(null), 3000)),
-        ]);
-      } catch (err) {
-        console.error('[chat] emotion evaluation error:', err.message);
-      }
+      }).catch(err => console.error('[chat] guess generation error:', err.message));
     }
 
     // 12. 后处理（异步，不依赖 SSE 连接）
@@ -1751,68 +1607,7 @@ function getDefaultPrompt() {
 请用中文回复，语气友好而专业。`;
 }
 
-/**
- * 创建 pending 状态的 image_tasks 行，用于提前发送 generate_start
- * 让前端在 judge / needImage 二次 LLM 调用期间就显示遮罩层
- */
-function createPreparingTask(conversationId) {
-  const db = getDb();
-  const result = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, '', '', 'pending')`)
-    .run(conversationId);
-  return result.lastInsertRowid;
-}
-
-function failPreparingTask(taskId, errorMessage) {
-  if (taskId == null) return;
-  getDb().prepare(`
-    UPDATE image_tasks
-    SET status = 'failed', error_message = ?, finished_at = datetime('now')
-    WHERE id = ? AND status IN ('pending', 'running')
-  `).run(errorMessage, taskId);
-}
-
-/**
- * 静默判断：给定最近对话，是否需要配一张图片增强表达
- * 极轻量 DeepSeek 调用（只需"是/否"），延迟通常 < 300ms
- */
-async function judgeImageNeed(conversationId) {
-  const db = getDb();
-  // 直接从 raw_messages 取最后一条用户/Agent 完整消息，无需合并
-  const lastUser = db.prepare(`
-    SELECT content FROM raw_messages
-    WHERE conversation_id = ? AND role = 'user'
-    ORDER BY id DESC LIMIT 1
-  `).get(conversationId);
-
-  const lastAssistant = db.prepare(`
-    SELECT content FROM raw_messages
-    WHERE conversation_id = ? AND role = 'assistant'
-    ORDER BY id DESC LIMIT 1
-  `).get(conversationId);
-
-  if (!lastUser && !lastAssistant) return false;
-
-  const parts = [];
-  if (lastUser) parts.push(`用户: ${lastUser.content.slice(0, 400)}`);
-  if (lastAssistant) parts.push(`Agent: ${lastAssistant.content.slice(0, 600)}`);
-  const ctx = parts.join('\n');
-
-  try {
-    const result = await chatSync([
-      { role: 'system', content: JUDGE_PROMPT },
-      { role: 'user', content: ctx },
-    ], { temperature: 0, label: '判断需要图片' });
-
-    const verdict = result.trim().startsWith('是');
-    console.log(`[chat] judgeImageNeed: ${verdict ? 'YES' : 'no'} (response: "${result.trim().slice(0, 20)}")`);
-    return verdict;
-  } catch (err) {
-    console.error('[chat] judgeImageNeed error:', err.message);
-    return false; // 失败时默认不生图（安全侧）
-  }
-}
-
-async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send, crossRefCharIds = [], ragQuery = '') {
+async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send, crossRefCharIds = [], ragQuery = '', frozenCharacter = null, frozenCrossCharacters = null, frozenImageConfig = {}, { includeCharacter = true } = {}) {
   const db = getDb();
 
   // 查找角色 lora 设置
@@ -1820,12 +1615,12 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
   try {
     const charId = parseInt(String(conversationId).replace(/^char_/, ''), 10);
     if (!Number.isNaN(charId)) {
-      const char = db.prepare('SELECT custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(charId);
+      const char = frozenCharacter || db.prepare('SELECT custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(charId);
       if (char) {
-        const loras = _parseLoras(char);
-        if (loras.length > 0 || char.custom_workflow || charArtistOverride(char) !== null) {
+        const loras = includeCharacter ? _parseLoras(char) : [];
+        if (loras.length > 0 || (includeCharacter && char.custom_workflow) || charArtistOverride(char) !== null) {
           const opts = {};
-          if (char.custom_workflow) opts.customWorkflow = char.custom_workflow;
+          if (includeCharacter && char.custom_workflow) opts.customWorkflow = char.custom_workflow;
           if (loras.length > 0) opts.loras = loras;
           const charArtist = charArtistOverride(char);
           if (charArtist !== null) opts.artist = charArtist;
@@ -1840,7 +1635,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   // 合并交叉引用角色 LoRA（去重，主角色优先）
   if (crossRefCharIds.length > 0) {
-    const crossChars = crossRefCharIds.map(id => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id)).filter(Boolean);
+    const crossChars = frozenCrossCharacters || crossRefCharIds.map(id => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id)).filter(Boolean);
     const crossLoras = crossChars.flatMap(c => _parseLoras(c));
     if (crossLoras.length > 0) {
       const allLoras = [...(loraOpts.loras || []), ...crossLoras];
@@ -1871,6 +1666,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
           send('generate_progress', { taskId, ...p });
         }
       },
+      ...frozenImageConfig,
       ...loraOpts,
     });
     if (result.success && result.images.length > 0) {
@@ -1900,9 +1696,6 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
       send('generate_done', { taskId, images: result.images, source: result.source });
 
-      // 生图成功 → 智能配图计数器重置为 3
-      imageJudgeCounters.set(conversationId, 3);
-      console.log(`[chat] imageJudgeCounter[${conversationId}] reset to 3 (image generated successfully)`);
     } else {
       throw new Error(result.error || 'No images generated');
     }
@@ -1915,28 +1708,27 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 }
 
 /**
- * needImage 二次触发流程:
- *   模型自主判断用户想要图片 → 追加了 <needImage> →
- *   后端再请求一次模型，让它补上 {"prompt":"..."} →
- *   然后走正常生图流程
- */
-/**
  * 构建生图描述请求的消息列表（破限词+画面规则置顶，人格在后）。
- * 有 planner 画面需求（planSceneHint）时，任务来源切换为「回复规划的画面需求」，
- * 最后一轮对话退为语境参考。返回 { msgs, crossRefCharIdsForImage }（后者供生图 LoRA/画师串合并）。
+ * tool 为手机分享（来源与入镜标记决定构图），dialogue 为对话插画；始终使用受理时冻结的历史。
  */
-function buildImagePromptMessages(conversationId, character, planSceneHint = '') {
+function buildImagePromptMessages(conversationId, character, source = { kind: 'dialogue' }, frozenHistory = null) {
   const db = getDb();
+  const scene = source.kind === 'tool' ? source.scene : '';
+  const isSharedImage = source.kind === 'tool';
+  const isLivePhoto = isSharedImage && ['selfie', 'camera'].includes(source.image_source);
 
   // 1. 构建二次请求的消息列表（破限词+生图指令置顶，人格在后）
-  const globalRules = getSystemRules({ roleplay: false });
+  const globalRules = getSystemRulesWithWorld({ roleplay: false });
+  const world = getWorldSetting();
   // 整卡人格（统一入口，含生效外观注入）
-  let personalityPrompt = buildCharacterPersona(character || {}, { variant: 'full' }) || getDefaultPrompt();
+  let personalityPrompt = buildCharacterPersona(character || {}, {
+    variant: 'full', ...(isSharedImage && !isLivePhoto ? { outfits: null } : {}),
+  }) || getDefaultPrompt();
   const imagePromptRule = getGlobalRule('image_prompt');
 
   // 2. 加载最近 3 轮历史（生图任务只需锚点上下文，取太多稀释注意力）
-  const history = db.prepare(`
-    SELECT role, content FROM raw_messages
+  const history = frozenHistory || db.prepare(`
+    SELECT role, content, prompt FROM raw_messages
     WHERE conversation_id = ? ORDER BY id DESC LIMIT 6
   `).all(conversationId).reverse();
 
@@ -1947,7 +1739,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   };
   const historyText = history.map(m => extractRealContent(m.content)).join('\n');
   const latestUser = extractRealContent(history.filter(m => m.role === 'user').pop()?.content || '');
-  const scanText = historyText + '\n' + latestUser;
+  const scanText = isSharedImage ? scene : historyText + '\n' + latestUser + '\n' + scene;
   const crossMatches = matchAll(scanText, character.id);
   let crossRefCharIdsForImage = [];
   let crossRefImageMsgs = [];
@@ -1974,7 +1766,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
     });
   }
 
-  const formatGuide = imagePromptRule?.rule_content || '';
+  const formatGuide = isSharedImage ? SHARED_IMAGE_PROMPT_RULE : imagePromptRule?.rule_content || '';
 
   // 用户关系描述（供生图参考，体现角色与 user 的关系）
   let userRelationContent = '';
@@ -1991,6 +1783,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
 
   // ── 环境参考（Environment reference，置于 schedule 之前）──
   const weatherHint = (() => {
+    if (isSharedImage && !isLivePhoto) return '';
     try {
       const note = getLightNoteWithWeather();
       return note ? `Environment reference：${note}。` : '';
@@ -1999,6 +1792,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
 
   // ── 日程/状态上下文（不含天气光线，避免与 Environment reference 重复）──
   const scheduleCtx = (() => {
+    if (isSharedImage && !isLivePhoto) return '';
     try {
       const activity = getCurrentActivity(character.id);
       const tempWoken = isTempWoken(character.id);
@@ -2026,10 +1820,6 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   })();
 
   // ── 画面规则 + 环境参考 + 日程上下文（去重：天气仅由 Environment reference 提供）──
-  const formatGuideWithWeather = formatGuide
-    ? formatGuide + (weatherHint ? '\n\n' + weatherHint : '') + (scheduleCtx ? '\n\n' + scheduleCtx : '')
-    : (weatherHint || scheduleCtx ? (weatherHint || '') + (scheduleCtx ? '\n\n' + scheduleCtx : '') : '');
-
   const userName = config.user.nickname || '用户';
   const lastTurnDialogue = (() => {
     const lastAssistantMsg = [...history].reverse().find(m => m.role === 'assistant');
@@ -2041,19 +1831,18 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
   })();
   const msgs = [
     // ── 首因效应：生图输出格式要求，最先一条 system 消息 ──
-    // 有 planner 画面需求时，任务来源切换为「回复规划的画面需求」，最后一轮对话退为语境参考
-    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + (planSceneHint
+    { role: 'system', content: (globalRules ? globalRules + '\n\n' : '') + (isSharedImage
       ? `【当前画面生成规则·最高优先级】
-【回复规划的画面需求】是当前配图的唯一任务来源，画面内容必须与它一致。
-【最后一轮对话】仅是语境参考：用于把握人物当前状态、地点与氛围，不得用它另起一个画面或替换画面主体。
-【上一次画面环境描述】仅是可选的连续性参考，不是当前画面的默认模板，也不代表其中任何环境、构图或人物状态需要继续保留。
-只有与画面需求明确相关、没有冲突且确有连续性价值的细节才可保留。无法确定是否需要保留时，一律不保留。`
+【工具画面需求】是当前分享图片的唯一任务来源，图片来源、是否入镜与 scene 共同决定画面。
+对话仅用于理解分享意图，不得据此另起剧情画面。当前状态只为当场拍摄提供不冲突的可选背景，不约束相册旧照或收藏图片。`
       : `【当前画面生成规则·最高优先级】
 【最后一轮对话】是当前配图的唯一任务来源，必须先独立判断它实际要求描述变化完成后的最终状态。
 【上一次画面环境描述】仅是可选的连续性参考，不是当前画面的默认模板，也不代表其中任何环境、构图或人物状态需要继续保留。
 先根据最后一轮对话完整确定当前画面，再检查上一次画面；只有与当前意图明确相关、没有冲突且确有连续性价值的细节才可保留。无法确定是否需要保留时，一律不保留。
 最后一轮对话直接或间接产生任何变化时，必须采用变化完成后的最终状态，彻底舍弃被替换的旧状态；禁止把新旧画面折中、叠加或并列描述。`) },
-    // ── 用户形象（建立 user↔用户名的映射，紧随最高指令之后让 LLM 明确画面对象）──
+    ...(world ? [{ role: 'system', content: getWorldIntegrationRule('photo') }] : []),
+    ...(formatGuide ? [{ role: 'system', content: formatGuide }] : []),
+    // 用户资料与生效外观属于动态材料。
     ...(() => {
       const hasUserInfo = config.user.nickname || config.user.gender || config.user.appearance || config.user.persona;
       if (!hasUserInfo) return [];
@@ -2070,7 +1859,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
       }];
     })(),
     // ── 画面规则 + 环境参考（天气/光线/日程已整合到规则提示词中）──
-    ...(formatGuideWithWeather ? [{ role: 'system', content: formatGuideWithWeather }] : []),
+    ...([weatherHint, scheduleCtx].filter(Boolean).length ? [{ role: 'system', content: [weatherHint, scheduleCtx].filter(Boolean).join('\n\n') }] : []),
     // ── 人格（让 prompt 内容贴合角色）──
     { role: 'system', content: personalityPrompt },
     // ── 交叉角色生图上下文（在历史上下文之前，确保最后一个 system 聚焦对话）──
@@ -2099,7 +1888,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
       const cleanedHistory = filteredHistory.map(m => {
         const cleaned = stripPrompt(m.content);
         if (m.role === 'assistant') {
-          const extracted = extractPrompt(m.content);
+          const extracted = m.prompt ? JSON.stringify({ prompt: m.prompt }) : extractPrompt(m.content);
           if (extracted) lastScenePrompt = extracted;  // 持续覆盖，最终保留最新一轮
         }
         return { ...m, content: cleaned };
@@ -2117,7 +1906,7 @@ function buildImagePromptMessages(conversationId, character, planSceneHint = '')
         };
 
       // 如果存在上一轮画面，将它与历史对话合并为同一条 system 消息。
-      if (lastScenePrompt) {
+      if (lastScenePrompt && !isSharedImage) {
         contextBlock.content = `【上一次画面环境描述·仅供参考环境】：
 下面是上一张图片的描述，不是本轮必须继承的状态。不要复述或照搬它。只有当【最后一轮对话】明确延续同一画面时，才选择性保留未被改变的必要细节；如果最后一轮能够独立构成新画面，或没有明确要求延续，则忽略下面的全部内容：
 ${lastScenePrompt}
@@ -2126,177 +1915,17 @@ ${contextBlock.content}`;
       }
       return [contextBlock];
     })(),
-    { role: 'user', content: `${planSceneHint ? `【回复规划的画面需求·本次配图的唯一任务来源】\n${planSceneHint}\n\n【人物指代】需求以第三人称描述：其中出现「${character.display_name}」或「我」「自己」均指${character.display_name}本人，使用其人格描述中的外观；「${userName}」指用户，仅当画面需求需要时才使用其外观。\n\n` : ''}${lastTurnDialogue ? `【最后一轮对话】\n${lastTurnDialogue}\n\n` : ''}【当前任务】\n${
-      planSceneHint
-        ? `按上述画面需求直接输出英文画面描述。【最后一轮对话】只提供语境，不要据此另起画面或改动画面主体。仅当画面需求需要出现${userName}时才描述并使用其外观，否则不要让${userName}出现，也不要描述其特征。不要任何格式包装或额外文字。`
-        : `直接输出英文画面描述来描述【最后一轮对话】对应的配图。仅当最后一轮对话对应的画面需要出现${userName}时，才描述并使用${userName}的外观；否则不要让${userName}出现在画面中，也不要描述其特征。不要任何格式包装或额外文字。`
-    }` },
+    { role: 'user', content: isSharedImage
+      ? `${lastTurnDialogue ? `【最后一轮对话·仅供理解分享意图】\n${lastTurnDialogue}\n\n` : ''}${buildSharedImageTask(source, character.display_name, userName)}`
+      : `${lastTurnDialogue ? `【最后一轮对话】\n${lastTurnDialogue}\n\n` : ''}【当前任务】\n直接输出英文画面描述来描述【最后一轮对话】对应的配图。仅当最后一轮对话对应的画面需要出现${userName}时，才描述并使用${userName}的外观；否则不要让${userName}出现在画面中，也不要描述其特征。不要任何格式包装或额外文字。` },
   ];
 
-  return { msgs, crossRefCharIdsForImage, personalityPrompt, lastTurnDialogue };
-}
-
-/** 请求生图描述 LLM，返回原始输出（planner 并行预生成也走这里） */
-async function requestImagePromptContent(conversationId, character, planSceneHint = '') {
-  const { msgs, personalityPrompt } = buildImagePromptMessages(conversationId, character, planSceneHint);
-  return requestNonEmptyImagePrompt(
-    () => chatWithLorebook(msgs, { temperature: 0.7, label: '生图', lorebook:{personaTexts:[personalityPrompt],characterName:character.display_name} }),
-    {
-      emptyRetries: 1,
-      onEmpty: () => console.warn('[chat] image prompt returned empty content, retrying once...'),
-    }
-  );
-}
-
-async function handleNeedImageFlow(conversationId, character, send, preExistingTaskId = null, planSceneHint = '', presetContentPromise = null) {
-  const db = getDb();
-  console.log('[chat] needImage detected, requesting prompt from model (compact)...');
-  const emojiMap = getCharacterEmojiMap(character.id, db);
-
-  const { msgs, crossRefCharIdsForImage, personalityPrompt, lastTurnDialogue } = buildImagePromptMessages(conversationId, character, planSceneHint);
-
-  // 3. 静默请求模型生成 prompt（不流式，避免前端气泡混乱）
-  //    presetContentPromise：planner 阶段已与回复流并行预生成的结果，直接取用，省去回复完成后的串行等待
-  let fullContent = '';
-  try {
-    if (presetContentPromise) {
-      fullContent = (await presetContentPromise) || '';
-      console.log(`[chat] planned image prompt (pre-generated): ${fullContent.slice(0, 80)}...`);
-    } else {
-      fullContent = await requestNonEmptyImagePrompt(
-        () => chatWithLorebook(msgs, { temperature: 0.7, label: '生图', lorebook:{personaTexts:[personalityPrompt],characterName:character.display_name} }),
-        {
-          emptyRetries: 1,
-          onEmpty: () => console.warn('[chat] needImage follow-up returned empty content, retrying once...'),
-        }
-      );
-      console.log(`[chat] needImage follow-up response: ${fullContent.slice(0, 80)}...`);
-    }
-  } catch (err) {
-    console.error('[chat] needImage follow-up error:', err.message);
-    failPreparingTask(preExistingTaskId, `生图请求失败: ${err.message}`);
-    send('generate_error', { taskId: preExistingTaskId, error: '生图请求失败' });
-    return;
-  }
-
-  // 4. 先验证 prompt，再写入 raw_messages/messages，避免空 assistant 消息。
-  const prompt = extractImagePromptResponse(fullContent);
-  if (!prompt) {
-    console.warn('[chat] needImage: failed to extract prompt, raw:', fullContent.slice(0, 120));
-    failPreparingTask(preExistingTaskId, '模型未返回图像描述');
-    send('generate_error', { taskId: preExistingTaskId, error: '模型未返回图像描述' });
-    return;
-  }
-  const tags = { prompt };
-
-  let displayContent = stripTags(fullContent);
-  // 独立生图调用的输出全是 prompt 文本，不展示为对话气泡
-  if (tags.prompt) displayContent = '';
-
-  let assistantRawId;
-  let assistantMsgId;
-  let merged = false;  // 是否拼回上一条（不新建 message）
-
-  if (!displayContent && tags.prompt) {
-    // 模型只输出纯 JSON，无正文 → 优先拼回上一条 raw_messages
-    const prevRaw = db.prepare(`SELECT id, prompt FROM raw_messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`)
-      .get(conversationId);
-    const prevMsg = db.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1`)
-      .get(conversationId);
-
-    if (prevRaw && !prevRaw.prompt) {
-      // 上一条无 prompt → UPDATE raw.prompt + content 拼入 JSON，图片挂到上一条 message
-      const promptJson = JSON.stringify({ prompt: tags.prompt });
-      db.prepare(`UPDATE raw_messages SET prompt = ?, content = content || ? WHERE id = ?`).run(tags.prompt, promptJson, prevRaw.id);
-      assistantRawId = prevRaw.id;
-      assistantMsgId = prevMsg?.id;
-      merged = true;
-      console.log(`[chat] needImage: merged prompt into raw=${prevRaw.id}, msg=${assistantMsgId}`);
-    } else {
-      // 上一条已有 prompt → 兜底：新写 raw，后端组装 {"prompt":"..."} 格式
-      const promptJson = JSON.stringify({ prompt: tags.prompt });
-      const rawContent = `(图片) ${promptJson}`;
-      const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
-        .run(conversationId, rawContent, tags.prompt);
-      assistantRawId = rawResult.lastInsertRowid;
-      console.log(`[chat] needImage: prev raw already has prompt, saved as new raw id=${assistantRawId}`);
-    }
-  } else {
-    // 正常：有正文（无论有无 prompt）→ 经 SentenceSplitter 分句
-    if (displayContent) {
-      const splitter = new SentenceSplitter();
-      const { segments: feedSegs } = splitter.feed(displayContent);
-      const { segments: flushSegs } = splitter.flushAll();
-      const allSegments = [...feedSegs, ...flushSegs]
-        .map(s => stripBracketActions(s).trim())
-        .filter(Boolean);
-
-      for (const segText of allSegments) {
-        const parsedSeg = parseEmojiText(segText, emojiMap);
-        send('token', {
-          content: parsedSeg.content,
-            emojiKeys: parsedSeg.keys,
-          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
-          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
-        });
-        send('bubble_break', {});
-        await sleep(typingDelay(segText));
-      }
-      // 更新 displayContent 为清洗后的分段文本，供下方 messages 表写入
-      displayContent = allSegments.join('\n\n');
-    }
-    const promptJson = tags.prompt ? JSON.stringify({ prompt: tags.prompt }) : '';
-    const rawContent = tags.prompt
-      ? `(图片) ${promptJson}`
-      : fullContent.replace(/<needImage>/gi, '').trim();
-    const rawResult = db.prepare(`INSERT INTO raw_messages (conversation_id, role, content, prompt) VALUES (?, 'assistant', ?, ?)`)
-      .run(conversationId, rawContent, tags.prompt || null);
-    assistantRawId = rawResult.lastInsertRowid;
-  }
-
-  // 保存 messages（展示用）—— merge 路径不新建 message
-  if (!merged) {
-    // 按句子分段保存（与主流程一致）
-    const segments = (displayContent || '').split('\n\n').filter(Boolean);
-    if (segments.length > 0) {
-      for (let i = 0; i < segments.length; i++) {
-        const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, ?)`)
-          .run(conversationId, assistantRawId, segments[i], i);
-        if (i === segments.length - 1) {
-          assistantMsgId = msgResult.lastInsertRowid;
-        }
-        send('msg_saved', { id: msgResult.lastInsertRowid, role: 'assistant', created_at: new Date().toISOString() });
-      }
-    } else {
-      const msgResult = db.prepare(`INSERT INTO messages (conversation_id, raw_id, role, content, seq) VALUES (?, ?, 'assistant', ?, 0)`)
-        .run(conversationId, assistantRawId, displayContent || '');
-      assistantMsgId = msgResult.lastInsertRowid;
-      send('msg_saved', { id: assistantMsgId, role: 'assistant', created_at: new Date().toISOString() });
-    }
-  }
-  console.log(`[chat] needImage: msgId=${assistantMsgId}, rawId=${assistantRawId}, merged=${merged}, hasPrompt=${!!tags.prompt}`);
-
-  // 5. 触发生图
-  if (tags.prompt) {
-    let genTaskId;
-    if (preExistingTaskId) {
-      // 使用预先创建的 task，更新 prompt 和状态
-      db.prepare(`UPDATE image_tasks SET prompt_original=?, prompt_refined=?, status='running' WHERE id=?`)
-        .run(tags.prompt, tags.prompt, preExistingTaskId);
-      genTaskId = preExistingTaskId;
-      // generate_start 已经在 judge/needImage 判定时发送，不再重复
-    } else {
-      const taskResult = db.prepare(`INSERT INTO image_tasks (conversation_id, prompt_original, prompt_refined, status) VALUES (?, ?, ?, 'running')`)
-        .run(conversationId, tags.prompt, tags.prompt);
-      genTaskId = taskResult.lastInsertRowid;
-      send('generate_start', { taskId: genTaskId, prompt: tags.prompt });
-    }
-    // 使用请求生图助手时捕获的最后一轮对话，避免下方生图时读到已拼入的英文 prompt。
-    await triggerImageGeneration(conversationId, tags.prompt, assistantMsgId, genTaskId, send, crossRefCharIdsForImage, lastTurnDialogue);
-  } else {
-    console.log('[chat] needImage follow-up: no prompt tags found, falling back');
-    send('generate_error', { taskId: preExistingTaskId, error: '模型未返回图像描述' });
-  }
+  const stableIndex = (world ? 1 : 0) + (formatGuide ? 1 : 0);
+  return { msgs, crossRefCharIdsForImage, personalityPrompt, lastTurnDialogue,
+    imageSource: isSharedImage ? { image_source: source.image_source, include_self: source.include_self } : undefined,
+    includeCharacter: isSharedImage ? source.include_self : true,
+    ragQuery: isSharedImage ? scene : lastTurnDialogue,
+    lorebook: { personaTexts: [personalityPrompt], staticTexts: msgs.slice(0, stableIndex + 1).map(m => m.content), cacheBoundary: { index: stableIndex, offset: msgs[stableIndex].content.length }, history, characterName: character.display_name } };
 }
 
 /**
@@ -2398,7 +2027,6 @@ async function generateReplyGuessesUncached(conversationId, character) {
 
 // ── 供 characters.js 调用的清理函数 ──
 export function clearImageJudgeCounter(charId) {
-  imageJudgeCounters.delete(`char_${charId}`);
 }
 
 /**
@@ -2490,7 +2118,7 @@ async function handleDreamTalkReply(res, characterId, conversationId, userMsgId,
             send('generate_progress', { taskId: genTaskId, progress: p.progress, totalSteps: p.totalSteps });
           }
         },
-        ...loraOpts,
+      ...loraOpts,
       });
 
       if (!result.success || !result.images?.length) {

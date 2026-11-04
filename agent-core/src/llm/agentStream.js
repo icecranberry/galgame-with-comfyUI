@@ -1,7 +1,18 @@
 // 原生工具调用流；普通聊天的 string generator 契约保持不变。
-export function buildAgentRequest(messages, tools, llm) {
+export function buildAgentRequest(messages, tools, llm, { forceThinking = true, temperature = 0.72 } = {}) {
   const params = { ...llm.extraBody, model: llm.model, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: 'auto' } : {}), stream: true };
   delete params.response_format;
+  delete params.tools;
+  delete params.tool_choice;
+  if (tools?.length) { params.tools = tools; params.tool_choice = 'auto'; }
+  if (!forceThinking) {
+    const normal = { model: llm.model, messages, temperature, stream: true };
+    if (llm.thinkingMode !== 'omit') normal.thinking = { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+    Object.assign(normal, llm.extraBody);
+    delete normal.tools; delete normal.tool_choice; delete normal.response_format;
+    if (tools?.length) { normal.tools = tools; normal.tool_choice = 'auto'; }
+    return normal;
+  }
   // 神说的思考不可被全局开关或 extraBody 关闭。按服务商协议设置，不靠 prompt 伪造思考。
   const model = String(llm.model || '').toLowerCase();
   if (llm.connectionType === 'vertexai' || /gemini/.test(model)) {
@@ -28,7 +39,7 @@ export function buildAgentRequest(messages, tools, llm) {
   return params;
 }
 
-export async function* readAgentResponse(stream, { signal } = {}) {
+export async function* readAgentResponse(stream, { signal, allowEmpty = false } = {}) {
   const message = { role: 'assistant', content: '', reasoning_content: '' };
   const calls = new Map();
   const details = new Map();
@@ -82,6 +93,6 @@ export async function* readAgentResponse(stream, { signal } = {}) {
   }
   if (details.size) message.reasoning_details = [...details.values()];
   if (vertexParts.length) message.vertex_parts = vertexParts;
-  if (!message.content && !message.tool_calls?.length) throw new Error('模型未返回回复或工具调用，请使用支持思考与工具的模型');
+  if (!allowEmpty && !message.content && !message.tool_calls?.length) throw new Error('模型未返回回复或工具调用，请使用支持思考与工具的模型');
   yield { type: 'assistant_end', message };
 }

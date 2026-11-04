@@ -10,7 +10,6 @@ export const useSettingsStore = defineStore('settings', () => {
   const eventHeight = ref(1200)
   const imageProvider = ref('comfyui')
   const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
-  const deepThinkMode = ref(false)  // 私聊深度思考：planner 先规划媒介组合（文字/表情包/图片）再回复
   const realtimeAffinityDisplay = ref(false)
   const bgmMuted = ref(false) // 小镇 BGM 静音（system_settings 持久化，loadComfyConfig 后修正）
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
@@ -41,9 +40,6 @@ export const useSettingsStore = defineStore('settings', () => {
         imageGenMode.value = data.features.imageGenMode
       } else if (data.features?.forceImageGen !== undefined) {
         imageGenMode.value = data.features.forceImageGen ? 'force' : 'smart'
-      }
-      if (data.features?.deepThinkMode !== undefined) {
-        deepThinkMode.value = !!data.features.deepThinkMode
       }
       if (data.features?.realtimeAffinityDisplay !== undefined) {
         realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
@@ -85,13 +81,6 @@ export const useSettingsStore = defineStore('settings', () => {
     await api.updateFeatureFlag('imageGenMode', mode)
   }
 
-  /**
-   * 切换私聊深度思考模式（planner 预规划）
-   */
-  async function setDeepThinkMode(v) {
-    deepThinkMode.value = !!v
-    await api.updateFeatureFlag('deepThinkMode', !!v)
-  }
 
   async function setRealtimeAffinityDisplay(v) {
     realtimeAffinityDisplay.value = v
@@ -126,5 +115,5 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(theme.value)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageProvider, imageGenMode, deepThinkMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageProvider, setImageGenMode, setDeepThinkMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageProvider, imageGenMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageProvider, setImageGenMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
 })

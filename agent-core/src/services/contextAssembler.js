@@ -153,14 +153,14 @@ export function getCheckpointHistory(db, conversationId, maxMessages = MAX_UNCOM
  * @param {number} [maxCheckpointRounds=10] checkpoint 历史保留 assistant 条数
  * @returns {{ checkpoint, checkpointHistory, checkpointRounds, activeText, activeRounds }}
  */
-export function getSplitHistory(db, conversationId, maxActiveRounds = 10, maxCheckpointRounds = 10, { userName = 'user', characterName = 'assistant' } = {}) {
+export function getSplitHistory(db, conversationId, maxActiveRounds = 10, maxCheckpointRounds = 10, { userName = 'user', characterName = 'assistant', throughId = Number.MAX_SAFE_INTEGER } = {}) {
   // 1. 找到最新摘要分界线（冻结点）
   const checkpoint = db.prepare(`
     SELECT id, end_msg_id, summary
     FROM rolling_summaries
-    WHERE conversation_id = ? AND end_msg_id > 0 AND checkpoint_version = 1
+    WHERE conversation_id = ? AND end_msg_id > 0 AND end_msg_id <= ? AND checkpoint_version = 1
     ORDER BY end_msg_id DESC, id DESC LIMIT 1
-  `).get(conversationId);
+  `).get(conversationId, throughId);
 
   const afterId = checkpoint?.end_msg_id || 0;
 
@@ -170,10 +170,10 @@ export function getSplitHistory(db, conversationId, maxActiveRounds = 10, maxChe
   const activeRaw = db.prepare(`
     SELECT id, role, content FROM (
       SELECT id, role, content FROM raw_messages
-      WHERE conversation_id = ? AND id > ? AND role IN ('user', 'assistant')
+      WHERE conversation_id = ? AND id > ? AND id <= ? AND role IN ('user', 'assistant')
       ORDER BY id DESC LIMIT ?
     ) ORDER BY id ASC
-  `).all(conversationId, afterId, activeFetchLimit);
+  `).all(conversationId, afterId, throughId, activeFetchLimit);
 
   // 剔除末尾未回复的 user 消息（当前输入），不计入活跃窗口
   const unrepliedUser = activeRaw.length > 0 && activeRaw[activeRaw.length - 1].role === 'user'

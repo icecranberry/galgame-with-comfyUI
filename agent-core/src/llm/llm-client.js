@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { createVertexClient, clearVertexTokenCache, vertexBaseURL } from './vertex-client.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { config, updateFreeEggEnabled, FREE_EGG_MODELS } from '../config.js';
 import { compressLlmImageInputs } from '../services/llmImageInput.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
@@ -11,10 +11,10 @@ import { buildAgentRequest, readAgentResponse } from './agentStream.js';
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], signal, label = '神说', requestId } = {}) {
+export async function* chatAgentStream(messages, { tools = [], signal, label = '神说', requestId, forceThinking = true, temperature = 0.72 } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
-  const params = buildAgentRequest(messages, tools, llm);
+  const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature });
   applyOutputTokenLimit(params);
   if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
   const logLabel = requestId ? `${label} [${requestId}]` : label;
@@ -29,11 +29,15 @@ export async function* chatAgentStream(messages, { tools = [], signal, label = '
     console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
     console.log(JSON.stringify(compressLogMessages(messages), null, 2));
     console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
+    if (!forceThinking) {
+      const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
+      console.log(`[${logLabel}] local_prefix_fingerprint=${fingerprint}（仅本地字节指纹；服务商缓存命中见 usage）`);
+    }
     console.log(`[${logLabel} 可用工具] ${tools.map(tool => tool.function?.name).filter(Boolean).join(', ')}`);
     console.log('────────────────────────────────────────────────');
     stream = await getClient().chat.completions.create(params, { signal, maxRetries: 0 });
     console.log(`[${providerLabel()} ← ${logLabel} start]`);
-    for await (const event of readAgentResponse(stream, { signal })) {
+    for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking })) {
       if (event.type === 'usage') usage = event.usage;
       else {
         if (event.type === 'text_delta') content += event.text;
@@ -46,7 +50,7 @@ export async function* chatAgentStream(messages, { tools = [], signal, label = '
   } catch (error) {
     outcome = signal?.aborted ? 'cancelled' : 'failed';
     console.error(`[${providerLabel()} ← ${logLabel}] ${outcome}:`, error.message);
-    if (error.status === 400 || error.status === 422) throw new Error('当前模型或接口不接受神说的思考 / 工具协议，请检查模型配置；本轮未完成的工具不会执行。');
+    if (forceThinking && (error.status === 400 || error.status === 422)) throw new Error('当前模型或接口不接受神说的思考 / 工具协议，请检查模型配置；本轮未完成的工具不会执行。');
     throw error;
   } finally {
     stream?.controller?.abort?.();

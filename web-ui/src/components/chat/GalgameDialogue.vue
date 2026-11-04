@@ -140,7 +140,7 @@ import { standingGeometry } from '../../utils/standingGeometry.js'
 import { galgameFrame } from '../../utils/galgameFrame.js'
 import { dialogueCharacters, dialogueCharacterDelay, repaginateDialogue, dialogueWaitStatus } from '../../utils/galgameDialogue.js'
 
-const props = defineProps({ character: { type: Object, required: true }, active: Boolean, draft: { type: String, default: '' }, imageMode: { type: String, default: 'smart' }, deepThink: Boolean, sleeping: Boolean, wakeBusy: Boolean })
+const props = defineProps({ character: { type: Object, required: true }, active: Boolean, draft: { type: String, default: '' }, imageMode: { type: String, default: 'smart' }, sleeping: Boolean, wakeBusy: Boolean })
 const emit = defineEmits(['exit', 'update:draft', 'open-standing', 'wake'])
 const chat = useChatStore()
 const stage = ref(null), textArea = ref(null)
@@ -258,7 +258,7 @@ async function send(value) {
   const sentDraft = props.draft
   emit('update:draft', '')
   try {
-    await chat.sendMessage(text, props.imageMode, props.deepThink, { galgameMode: true })
+    await chat.sendMessage(text, props.imageMode, { galgameMode: true })
     if (disposed || props.character.id !== characterId) return
     if (chat.lastSendError) {
       sendError.value = chat.lastSendError
@@ -316,7 +316,7 @@ watch([suggestionList, choices], async () => {
 }, { flush: 'post' })
 watch([() => props.active, () => props.character.id], async ([active]) => { if (active) { refresh(); await nextTick(); resize(); stage.value?.focus({ preventScroll: true }); startTyping() } else { historyOpen.value = false; managerOpen.value = false; emojiManagerOpen.value = false; lightboxOpen.value = false } }, { immediate: true })
 watch([() => chat.dialogueRevision, () => chat.streaming, () => chat.messages.length], scheduleRefresh)
-const offs = ['connected', 'proactive_message', 'delayed_reply', 'reply_ready'].map(name => onEvent(name, scheduleRefresh))
+const offs = ['connected', 'proactive_message', 'delayed_reply', 'reply_ready', 'private_chat_image'].map(name => onEvent(name, scheduleRefresh))
 const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
 function updateMotion() { reducedMotion.value = motionQuery.matches; startTyping() }
 onMounted(() => {
