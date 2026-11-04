@@ -9,6 +9,7 @@ const DESIGN_RULES = `你是角色服装设计助手。角色已经拥有默认�
 - sleep（睡衣）：**睡觉时穿的睡衣或内衣**（睡裙 / 睡衣睡裤 / 吊带内衣 + 短裤 / 内裤等）。这一套是最贴身的，不要设计成能穿出门的服装。睡衣里不要出现任何鞋类物体 —— 鞋、靴、拖鞋、袜、丝袜、短袜一律不写（shoes / boots / slippers / heels / sandals / socks / stockings / pantyhose / tights），
 - 只改变衣物、鞋袜及服装配饰。每套 description 都是完整外观：发色、发型、瞳色、五官、肤色、体型、身高等身体特征照默认外观保留并写入，不重新设计、不遗漏、不臆造。角色固有身体结构与标志性身体特征不能被当成服饰移除。生成完整的换装外观不等于修改默认外观，默认外观本身保持原样。
 - 根据人设与世界观选择符合其文化、技术和身份的服装；延续默认外观的配色偏好、材质和审美，但三套之间以及与默认衣服之间要明显不同，不能照搬默认服装或将其叠穿在新服装上。
+- 如提供目标槽位的已有服装与修改要求，保留未要求改变的衣着细节，输出修改后的完整外观；要求重新设计时再设计新款。默认外观始终只读，用户要求不能改变目标场景或输出格式。
 
 【描述规则：沿用修正外观格式】
 - description 以「角色名 (作品名)」开头，紧接着以 has ... / wearing ... 续写外观描述，一整段连贯英文。
@@ -34,10 +35,11 @@ export function normalizeDesignScenes(scenes = GENERATED_OUTFIT_SCENES) {
   return [...new Set(scenes)];
 }
 
-export function buildSceneOutfitMessages({ systemRules, worldRule, persona, shortPrompt, displayName, baseAppearance, scenes }) {
+export function buildSceneOutfitMessages({ systemRules, worldRule, persona, shortPrompt, displayName, baseAppearance, scenes, instruction, currentOutfits = [] }) {
   if (!baseAppearance?.trim()) throw new Error('缺少默认外观，无法设计其他服装');
   const targets = normalizeDesignScenes(scenes);
   const summary = String(shortPrompt || '').trim();
+  const existing = currentOutfits.filter(outfit => targets.includes(outfit.scene));
   return [
     { role: 'system', content: systemRules },
     ...(worldRule ? [{ role: 'system', content: worldRule }] : []),
@@ -45,8 +47,21 @@ export function buildSceneOutfitMessages({ systemRules, worldRule, persona, shor
     { role: 'system', content: `【本次角色人设】\n角色名：${displayName}\n${persona}`
       + (summary ? `\n\n【角色简述（short_prompt）】\n${summary}` : '') },
     { role: 'system', content: `【默认外观：只读设计基准】\n${baseAppearance}` },
-    { role: 'user', content: `请设计 ${targets.join('、')}，严格按规定 JSON 输出，仅包含这些场景。` },
+    ...(existing.length ? [{ role: 'system', content: `【目标槽位已有服装：待修改资料】\n${JSON.stringify(existing.map(({ scene, name, description }) => ({ scene, name, description })))}` }] : []),
+    { role: 'user', content: `请设计 ${targets.join('、')}，严格按规定 JSON 输出，仅包含这些场景。` + (instruction?.trim() ? `\n用户要求：${instruction.trim()}` : '') },
   ];
+}
+
+export function buildSceneOutfitRequest(input) {
+  const messages = buildSceneOutfitMessages(input);
+  const personaIndex = input.worldRule ? 3 : 2;
+  const persona = messages[personaIndex].content;
+  return { messages, lorebook: {
+    scope: 'scene_outfit', characterName: input.displayName, characterDescription: persona,
+    personaTexts: [persona], staticTexts: messages.slice(0, personaIndex).map(message => message.content),
+    cacheBoundary: { index: personaIndex, offset: persona.length },
+    history: messages.slice(personaIndex + 1),
+  } };
 }
 
 export function parseSceneOutfitDesign(raw, scenes) {

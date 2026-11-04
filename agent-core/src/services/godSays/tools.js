@@ -11,7 +11,7 @@ const definition = (name, description, parameters) => ({ type: 'function', funct
 
 export const GOD_TOOLS = [
   definition('inspect_neighbors', '查询真实角色/群聊编号、近期世界事件。指代不清先查询，不能猜编号。query 可空串。', object({ query: { type: 'string', maxLength: 100 } }, [])),
-  definition('read_character', '查看指定角色资料与今日安排。日程是计划，不代表已经执行。', object({ character_id: id('角色编号') })),
+  definition('read_character', '读取角色资料摘要和当地日期，默认不查询日程。仅在任务涉及今日安排或当前活动时传 include_schedule=true；日程是计划，不代表已执行。修改人设、外观或设计服装请用 read_character_source 读取完整原文。', object({ character_id: id('角色编号'), include_schedule: { type: 'boolean', description: '是否读取今日完整日程与当前活动，默认 false；仅日程相关任务需要' } }, ['character_id'])),
   definition('set_schedule', '安排角色今天或未来的活动。只代表已安排，涉及服务或相遇可另开奇遇。时间用角色日程所在主机的当地日期，不支持已过去的日期或跨日时段。', object({
     character_id: id('角色编号'), date: string('YYYY-MM-DD；先 read_character 确认当地日期', 10),
     start_time: string('HH:MM', 5), end_time: string('HH:MM，晚于开始时间', 5), activity: string('活动名', 60), location: string('地点', 60), description: string('活动安排，不写已经完成', 200),
@@ -33,9 +33,9 @@ export const GOD_TOOLS = [
   definition('recall_memory', '查找神与天使往日对话的摘要和长期记忆；不包含其他角色私人记忆。', object({ query: string('要回忆的内容', 150) })),
   definition('list_capabilities', '按模块查看天使已接入的真实能力。module 可填聊天、群聊、朋友圈、信箱、日记、日程、奇遇、背包、关系、记忆、相册、角色、立绘、表情包、媒体、日报、世界观、预设、素材库、语音；省略返回全部。', object({ module: string('功能模块名', 30) }, [])),
   definition('inspect_changes', '查询当前对话的批量任务与待确认变更，确认后的实际状态优先于历史工具结果。', object({}, [])),
-  definition('read_character_source', '读取角色完整原始资料，用于生成修改草稿，不使用摘要覆盖原文。', object({ character_id: id('角色编号') })),
+  definition('read_character_source', '读取角色完整原始人设和外观，用于修改外观、人设或设计服装。不查询日程，不使用摘要覆盖原文。', object({ character_id: id('角色编号') })),
   definition('update_character', '准备角色资料修改，用户查看完整草稿并确认后才生效。保留未要求改动的原文。', object({ character_id: id('角色编号'), display_name: string('修改后的显示名', 100), base_prompt: string('完整修改后人设原文', 50000) }, ['character_id', 'base_prompt'])),
-  definition('apply_character_appearance', '按要求修订角色原始“你的外观”：提取原文、生成完整新版，卡片展示原文与新版供用户确认，仅确认后替换该段。批量时逐个角色按各自原文生成。', object({ character_id: id('角色编号'), instruction: string('具体修改要求，例如仅把发色改红，其他细节保留', 4000) })),
+  definition('apply_character_appearance', '仅修改基础外观；私服、居家服、睡衣请用 generate_scene_outfits，不用本工具。按要求修订角色原始“你的外观”：提取原文、生成完整新版，卡片展示原文与新版供用户确认，仅确认后替换该段。批量时逐个角色按各自原文生成。', object({ character_id: id('角色编号'), instruction: string('具体修改要求，例如仅把发色改红，其他细节保留', 4000) })),
   definition('rewrite_world_setting', '按要求修订指定世界观，读取完整原文并生成完整新版，确认卡展示前后全文，用户确认后才替换。', object({ world_id: id('世界观编号'), instruction: string('对世界观原文的修改要求', 4000) })),
   definition('batch_characters', '对固定角色集合逐项执行同一工具。省略 character_ids 表示当前全体角色。长期修改先汇总内容供用户确认一次。arguments_json 是共用参数 JSON 对象，不含 character_id；可用 per_character_json 按角色编号覆盖具体内容。只支持含 character_id 的工具，禁止嵌套批量。', object({
     tool_name: string('已注册的角色工具名称', 80), arguments_json: string('完整 JSON 对象，例如 {"instruction":"仅把发色改为红色"}', 50000),
@@ -96,8 +96,8 @@ export function createGodTools(repo, world, memory, services) {
       }
       case 'read_character': {
         const c = character(args.character_id);
-        return { id: c.id, name: c.display_name, persona: c.short_prompt || c.base_prompt?.slice(0, 6000), localDate: services.localDate(),
-          scheduleEnabled: services.scheduleEnabled(), schedule: services.getSchedule(c.id) || [], currentActivity: services.getActivity(c.id) };
+        return { id: c.id, name: c.display_name, persona: c.short_prompt || c.base_prompt, localDate: services.localDate(),
+          ...(args.include_schedule === true ? { scheduleEnabled: services.scheduleEnabled(), schedule: services.getSchedule(c.id) || [], currentActivity: services.getActivity(c.id) } : {}) };
       }
       case 'set_schedule': {
         const c = character(args.character_id);
@@ -167,7 +167,7 @@ export function createGodTools(repo, world, memory, services) {
   }
   const policy = createChangePolicy(db, services.api, services.generateReplacement);
   const changes = createChangeSets(repo, { ...policy, apply: (item, ctx) => {
-    if (['apply_character_appearance', 'rewrite_world_setting'].includes(item.name)) {
+    if (['apply_character_appearance', 'rewrite_world_setting', 'generate_scene_outfits'].includes(item.name)) {
       if (!item.replacement || !item.preview?.length) throw new Error('旧版草稿未包含完整替换正文，请重新生成');
       return services.api(item.replacement, ctx);
     }

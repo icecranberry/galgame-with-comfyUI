@@ -26,7 +26,7 @@ import { getDb, getWorldSetting } from '../db/index.js';
 import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { splitAppearanceSection } from './characterPersona.js';
-import { buildSceneOutfitMessages, normalizeDesignScenes, parseSceneOutfitDesign } from './sceneOutfitPrompt.js';
+import { buildSceneOutfitRequest, normalizeDesignScenes, parseSceneOutfitDesign } from './sceneOutfitPrompt.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { chatSync } from './lorebook/runtime.js';
 import { config } from '../config.js';
@@ -95,7 +95,7 @@ export async function generateSceneOutfits(character, opts = {}) {
   if (!persona) throw new Error('角色人格为空，无法生成服装');
   const targetScenes = normalizeDesignScenes(opts.scenes);
   const world = getWorldSetting();
-  const msgs = buildSceneOutfitMessages({
+  const request = buildSceneOutfitRequest({
     systemRules: getSystemRulesWithWorld({ roleplay: false }),
     worldRule: world ? getWorldIntegrationRule('world_outfit') : '',
     persona,
@@ -103,9 +103,12 @@ export async function generateSceneOutfits(character, opts = {}) {
     displayName: character?.display_name || '角色',
     baseAppearance: String(opts.baseAppearance || '').trim(),
     scenes: targetScenes,
+    instruction: opts.instruction,
+    currentOutfits: opts.instruction?.trim() ? listSceneOutfits(character.id) : [],
   });
-  const raw = await chatSync(msgs, {
+  const raw = await chatSync(request.messages, {
     model: config.llm.model || 'deepseek-chat', temperature: 0.8, response_format: { type: 'json_object' }, label: '场景服装生成',
+    lorebook: request.lorebook,
   });
   return parseSceneOutfitDesign(raw, targetScenes);
 }

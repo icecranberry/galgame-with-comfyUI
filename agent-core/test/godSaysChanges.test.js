@@ -28,6 +28,38 @@ function appearanceServices(db, generations = [], writes = []) {
   };
 }
 
+test('reading character or source does not query schedules unless explicitly requested', async t => {
+  const { db, repo, run } = setup(t);
+  const fullPersona = `人格1${'完整资料'.repeat(2000)}\n## 你的外观\n保留末尾外观`;
+  db.prepare('UPDATE characters SET base_prompt=? WHERE id=1').run(fullPersona);
+  const reads = [];
+  const schedule = [{ startTime: '08:00', activity: '散步' }];
+  const tools = createGodTools(repo, {}, {}, {
+    localDate: () => '2026-11-04',
+    scheduleEnabled: () => { reads.push('enabled'); return true; },
+    getSchedule: id => { reads.push(['schedule', id]); return schedule; },
+    getActivity: id => { reads.push(['activity', id]); return schedule[0]; },
+  });
+  const execute = (name, args, id) => tools.execute({ id, function: { name, arguments: JSON.stringify(args) } }, run.id, 0);
+  for (const [index, args] of [{ character_id: 1 }, { character_id: 1, include_schedule: false }].entries()) {
+    const result = await execute('read_character', args, `summary-${index}`);
+    assert.equal(result.ok, true);
+    assert.equal(result.value.persona, fullPersona);
+    assert.equal(result.value.localDate, '2026-11-04');
+    assert.equal(Object.hasOwn(result.value, 'schedule'), false);
+    assert.equal(Object.hasOwn(result.value, 'currentActivity'), false);
+  }
+  const source = await execute('read_character_source', { character_id: 1 }, 'source');
+  assert.equal(source.ok, true);
+  assert.match(source.value.base_prompt, /## 你的外观/);
+  assert.deepEqual(reads, []);
+  const result = await execute('read_character', { character_id: 1, include_schedule: true }, 'schedule');
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.schedule, schedule);
+  assert.deepEqual(result.value.currentActivity, schedule[0]);
+  assert.deepEqual(reads, ['enabled', ['schedule', 1], ['activity', 1]]);
+});
+
 test('single and >100 character batch freeze complete drafts; approval applies exactly once, excludes later arrivals', async t => {
   const {db,repo,run} = setup(t, 121);
   const tools = createGodTools(repo, {}, {}, appearanceServices(db));

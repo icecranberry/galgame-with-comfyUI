@@ -1,8 +1,45 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSceneOutfitMessages, normalizeDesignScenes, parseSceneOutfitDesign } from '../src/services/sceneOutfitPrompt.js';
+import { buildSceneOutfitMessages, buildSceneOutfitRequest, normalizeDesignScenes, parseSceneOutfitDesign } from '../src/services/sceneOutfitPrompt.js';
+import { normalizeBook, evaluateBook } from '../src/services/lorebook/engine.js';
+import { applyLorebookLayout } from '../src/services/lorebook/layout.js';
 
 const context = { systemRules: '固定系统规则与世界观', worldRule: '固定世界观强化', persona: '人物甲的人设', displayName: '甲', baseAppearance: 'Existing appearance, unchanged.' };
+
+test('世界书保留角色和世界观边界，动态要求只影响尾部', () => {
+  const world = '<world_setting>海岛世界</world_setting>';
+  const book = normalizeBook({ entries: {
+    0: { uid: 0, constant: true, position: 0, content: 'BEFORE_PERSONA' },
+    1: { uid: 1, constant: false, key: ['橙色'], position: 4, depth: 0, content: 'DYNAMIC_OUTFIT' },
+  } }).document;
+  const request = buildSceneOutfitRequest({ ...context, systemRules: world, instruction: '改成橙色', scenes: ['casual'] });
+  const options = { ...request.lorebook, worldText: world, cachePlacement: true };
+  assert.deepEqual(applyLorebookLayout(request.messages, { entries: [] }, options).messages, request.messages);
+  const result = applyLorebookLayout(request.messages, evaluateBook(book, {}, { history: request.lorebook.history }), options);
+  assert.deepEqual(result.messages.map(m => m.role), request.messages.map(m => m.role));
+  const joined = result.messages.map(m => m.content).join('\n');
+  assert.ok(joined.indexOf('BEFORE_PERSONA') < joined.indexOf('【本次角色人设】'));
+  assert.ok(joined.indexOf('DYNAMIC_OUTFIT') > joined.indexOf('【默认外观'));
+  assert.ok(result.placements.length >= 2);
+});
+
+test('修改要求和已有槽位只进入动态尾部，世界书锚点来自实际消息', () => {
+  for (const worldRule of ['', context.worldRule]) {
+    const first = buildSceneOutfitRequest({ ...context, worldRule, scenes: ['casual'] });
+    const second = buildSceneOutfitRequest({ ...context, worldRule, scenes: ['casual'], instruction: '把私服改成橙色',
+      currentOutfits: [{ scene: 'casual', name: '旧私服', description: 'Old casual.' }, { scene: 'sleep', name: '睡衣', description: 'Do not include.' }] });
+    const boundary = first.lorebook.cacheBoundary;
+    assert.deepEqual(first.messages.slice(0, boundary.index + 1), second.messages.slice(0, boundary.index + 1));
+    assert.deepEqual(second.lorebook.personaTexts, [second.messages[boundary.index].content]);
+    assert.equal(boundary.offset, first.messages[boundary.index].content.length);
+    assert.deepEqual(second.lorebook.staticTexts, second.messages.slice(0, boundary.index).map(m => m.content));
+    assert.match(second.messages.at(-2).content, /Old casual/);
+    assert.doesNotMatch(JSON.stringify(second.messages), /Do not include/);
+    assert.match(second.messages.at(-1).content, /把私服改成橙色/);
+    assert.equal(second.messages.filter(m => m.role === 'user').length, 1);
+    assert.deepEqual(second.lorebook.history, second.messages.slice(boundary.index + 1));
+  }
+});
 
 test('short_prompt 加入角色资料，保持静态前缀与默认外观不变；空值省略', () => {
   const baseline = buildSceneOutfitMessages(context);

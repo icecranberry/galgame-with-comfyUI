@@ -1876,11 +1876,14 @@ router.get('/:id/outfit-now', (req, res) => {
 });
 
 // POST /api/characters/:id/outfits/generate — 基于默认外观设计私服、居家、睡衣
-// Body: { save?, baseAppearance?, scenes?, generateImages? }；自动生图返回后台 task_id，并先保存设计。
+// Body: { save?, baseAppearance?, scenes?, instruction?, generateImages? }；自动生图返回后台 task_id，并先保存设计。
 router.post('/:id/outfits/generate', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
   if (!char) return res.status(404).json({ error: 'Character not found' });
+  if (req.body?.instruction !== undefined && (typeof req.body.instruction !== 'string' || req.body.instruction.length > 4000)) {
+    return res.status(400).json({ error: '服装要求必须是 4000 字符以内的文本' });
+  }
   if (req.body?.generateImages === true) {
     const requested = req.body?.scenes ?? ['casual', 'home', 'sleep'];
     if (!Array.isArray(requested) || !requested.length || requested.some(scene => !['casual', 'home', 'sleep'].includes(scene))) {
@@ -1893,7 +1896,7 @@ router.post('/:id/outfits/generate', async (req, res) => {
     const mode = getSetting(STANDING_MODE_KEY) === 'dynamic' ? 'dynamic' : 'normal';
     const task = startSceneOutfitBatch({
       character: snapshot, scenes, startTask: startBackgroundTask,
-      design: () => generateSceneOutfits(snapshot, { baseAppearance, scenes }),
+      design: () => generateSceneOutfits(snapshot, { baseAppearance, scenes, instruction: req.body?.instruction }),
       save: outfits => upsertSceneOutfits(char.id, outfits),
       render: async scene => {
         const prompt = await generateSceneStandingPrompt(snapshot, scene, '', mode);
@@ -1908,6 +1911,7 @@ router.post('/:id/outfits/generate', async (req, res) => {
     const outfits = await generateSceneOutfits(char, {
       baseAppearance: req.body?.baseAppearance,
       scenes: req.body?.scenes,
+      instruction: req.body?.instruction,
     });
     const saved = req.body?.save === true ? upsertSceneOutfits(char.id, outfits) : null;
     res.json({ ok: true, outfits, saved });
@@ -1917,7 +1921,7 @@ router.post('/:id/outfits/generate', async (req, res) => {
   }
 });
 
-// PUT /api/characters/:id/outfits/scene — 批量保存场景服装（一次覆盖四套，供界面"编辑后保存"）
+// PUT /api/characters/:id/outfits/scene — 保存指定场景服装，未提交的槽位保持原样
 // Body: { outfits: [{ scene, name, description }] }
 router.put('/:id/outfits/scene', (req, res) => {
   const db = getDb();
@@ -1926,9 +1930,10 @@ router.put('/:id/outfits/scene', (req, res) => {
   const list = Array.isArray(req.body?.outfits) ? req.body.outfits : null;
   if (!list) return res.status(400).json({ error: 'outfits 必须是数组' });
   const clean = list
-    .map(o => ({ scene: String(o?.scene || '').trim(), name: String(o?.name || '').trim().slice(0, 60), description: String(o?.description || '').trim().slice(0, 2000) }))
+    .map(o => ({ scene: String(o?.scene || '').trim(), name: String(o?.name || '').trim().slice(0, 60), description: String(o?.description || '').trim() }))
     .filter(o => o.scene && o.name && o.description);
   if (!clean.length) return res.status(400).json({ error: '没有有效的服装条目' });
+  if (clean.some(outfit => outfit.description.length > 2400)) return res.status(400).json({ error: '服装描述不能超过 2400 字符' });
   const saved = upsertSceneOutfits(char.id, clean);
   res.json({ ok: true, saved, outfits: listSceneOutfits(char.id) });
 });
