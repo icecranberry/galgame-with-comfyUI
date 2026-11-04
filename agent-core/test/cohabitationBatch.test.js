@@ -147,7 +147,7 @@ test('规划加载全体室友short及全部方向关系，但不注入室外人
 test('共同活动最多三人，室外对象计入总人数，超限输出通过重试修正', async () => {
   const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
   const input = {
-    room: { id: 999, name: '人数校验', memberIds: [ids[0]] }, characters,
+    room: { id: 999, name: '人数校验', memberIds: ids.slice(0, 2) }, characters,
     relationships: ids.slice(1).map(id => ({ from_character_id: ids[0], to_character_id: id, relationship_text: '同事' })),
     events: [], batchId: 'participant-limit',
   };
@@ -297,12 +297,38 @@ test('重新启用一个角色仅初始化本人，复用已发布计划和全�
   } finally { config.features.schedule = previous; }
 });
 
-test('单人独居且没有可邀约对象时直接留给个人日程，不浪费一次LLM调用', async () => {
-  const character = db.prepare('SELECT * FROM characters WHERE id=?').get(ids[0]);
-  const result = await planResidence({ room: { id: 999, name: '独居', memberIds: [character.id] }, characters: [character], relationships: [], events: [], batchId: 'solo' }, {
-    chat: async () => { throw new Error('没有共同活动候选，不应调用LLM'); },
-  });
-  assert.deepEqual(result, []);
+test('空房和单人房即使有室外关系对象也跳过共同行动模型', async () => {
+  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  for (const memberIds of [[], [ids[0]]]) {
+    const result = await planResidence({ room: { id: 999, name: '独居', memberIds }, characters,
+      relationships: [{ from_character_id: ids[0], to_character_id: ids[2], relationship_text: '经常相约的朋友' }], events: [], batchId: 'solo' }, {
+      chat: async () => { assert.fail('不足两名室友，不应调用LLM'); },
+    });
+    assert.deepEqual(result, []);
+  }
+});
+
+test('整轮调度跳过单人及空房的规划助手，仍生成个人日程且进度数量准确', async () => {
+  const [first, second] = listResidences(db);
+  const soloId = Number(db.prepare("INSERT INTO cohabitation_rooms(name) VALUES('单人房')").run().lastInsertRowid);
+  const emptyId = Number(db.prepare("INSERT INTO cohabitation_rooms(name) VALUES('空房')").run().lastInsertRowid);
+  db.prepare('UPDATE cohabitation_members SET room_id=? WHERE character_id=?').run(soloId, ids[0]);
+  try {
+    const planned = [], generatedIds = [], progress = [];
+    await startScheduleBatch({ db,
+      planner: async input => { planned.push(input.room.id); return []; },
+      generator: (...args) => { generatedIds.push(args[0].id); return generated(...args); },
+      onProgress: event => progress.push(event),
+    }).promise;
+    assert.deepEqual(planned, [second.id]);
+    assert.deepEqual(generatedIds, ids);
+    assert.ok(progress.every(event => event.roomTotal === 1));
+    assert.equal(progress.at(-1).roomCurrent, 1);
+    assert.equal(progress.at(-1).status, 'done');
+  } finally {
+    db.prepare('UPDATE cohabitation_members SET room_id=? WHERE character_id=?').run(first.id, ids[0]);
+    db.prepare('DELETE FROM cohabitation_rooms WHERE id IN (?,?)').run(soloId, emptyId);
+  }
 });
 
 test('居室待生效状态跨草稿保留，只有成功发布使用的版本才能消除提示', async () => {

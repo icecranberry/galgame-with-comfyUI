@@ -89,7 +89,6 @@
           >
             <span class="residence-new-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 4v16M4 12h16" /></svg></span>
             <span>{{ dragTarget === 'new' ? '松开新建并入住' : '新建房间' }}</span>
-            <span class="residence-new-hint">拖到这里，新建并入住</span>
           </div>
         </TransitionGroup>
       </section>
@@ -99,13 +98,13 @@
       >
         <div class="residence-pool-heading">
           <h4 class="residence-section-title">未安排 <span class="residence-pool-count">{{ unassigned.length }}</span></h4>
+          <p class="residence-description"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg><span>为角色安排住处，住宿分配会影响角色的日程安排。</span></p>
           <linshe-button v-if="selected && assignedIds.has(selectedId)" variant="link" tone="muted" size="sm" :disabled="busy" @click="moveSelected(null)">移出房间</linshe-button>
         </div>
         <p class="residence-guide"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" /></svg><span>拖动头像到房间，也可点选安排</span></p>
-        <linshe-input v-model="search" size="md" placeholder="搜索角色" aria-label="搜索未安排角色" />
         <div class="residence-pool-avatars">
           <div
-            v-for="character in filteredUnassigned" :key="character.id" class="resident-avatar"
+            v-for="character in unassigned" :key="character.id" class="resident-avatar"
             :class="{ 'is-selected': selectedId === character.id, 'is-disabled': busy }"
             role="button" tabindex="0" :draggable="!busy" :aria-disabled="busy" :aria-pressed="selectedId === character.id" :aria-label="`选择${character.display_name}`"
             @dragstart="startDrag($event, character.id)" @dragend="dragTarget = null" @click="select(character.id)" @keydown.enter.prevent="select(character.id)" @keydown.space.prevent="select(character.id)"
@@ -113,7 +112,7 @@
             <span class="resident-portrait"><img v-if="character.avatar_path" :src="character.avatar_path" alt="" draggable="false" /><span v-else class="resident-fallback">{{ character.display_name.slice(0, 1) }}</span></span>
             <span class="resident-name">{{ character.display_name }}</span>
           </div>
-          <span v-if="!loading && !filteredUnassigned.length" class="residence-pool-empty">{{ search ? '没有匹配的角色' : '都已安排妥当' }}</span>
+          <span v-if="!loading && !unassigned.length" class="residence-pool-empty">都已安排妥当</span>
         </div>
       </aside>
     </div>
@@ -134,15 +133,17 @@ const props = defineProps({ modelValue: Boolean })
 const emit = defineEmits(['update:modelValue', 'room-count-change'])
 const toast = inject('toast', null)
 const rooms = ref([]), characters = ref([]), draftNames = ref({}), nameErrors = ref({})
-const selectedId = ref(null), search = ref(''), dragTarget = ref(null), editingId = ref(null)
+const selectedId = ref(null), dragTarget = ref(null), editingId = ref(null)
 const nameEditor = shallowRef(null)
 const busy = ref(false), loading = ref(false), loadError = ref('')
 const pendingChanges = ref(false)
 let pendingRequest = 0
 let pendingRefreshQueued = false
 const assignedIds = computed(() => new Set(rooms.value.flatMap(r => r.memberIds)))
-const unassigned = computed(() => characters.value.filter(c => !assignedIds.value.has(c.id)))
-const filteredUnassigned = computed(() => unassigned.value.filter(c => c.display_name.toLowerCase().includes(search.value.trim().toLowerCase())))
+const residentNameCollator = new Intl.Collator('zh-CN-u-co-pinyin', { sensitivity: 'base', numeric: true })
+const unassigned = computed(() => characters.value
+  .filter(c => !assignedIds.value.has(c.id))
+  .sort((a, b) => residentNameCollator.compare(a.display_name, b.display_name)))
 const selected = computed(() => characters.value.find(c => c.id === selectedId.value))
 const roomCharacters = room => characters.value.filter(c => room.memberIds.includes(c.id))
 function applyRooms(next) {
@@ -235,6 +236,7 @@ async function remove(room) { await mutate(() => api.deleteResidence(room.id)) }
 </script>
 
 <style scoped>
+:global(.cohabitation-body) { display: flex; flex-direction: column; overflow: hidden; }
 .residence-content {
   --residence-muted: color-mix(in srgb, var(--text-primary) 48%, var(--text-secondary));
   --residence-line: color-mix(in srgb, var(--border-strong) 75%, var(--border));
@@ -243,8 +245,11 @@ async function remove(room) { await mutate(() => api.deleteResidence(room.id)) }
   --residence-candy-highlight: color-mix(in srgb, var(--accent-light) 30%, var(--bg-secondary));
   --residence-candy-face: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
   --residence-candy-ink: color-mix(in srgb, var(--accent) 22%, var(--text-primary));
-  display: flex; flex-direction: column; min-height: 380px; height: min(72dvh, 720px); color: var(--text-primary);
+  display: flex; flex-direction: column; flex: 1; min-height: 0; color: var(--text-primary);
 }
+.residence-description { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; flex: 1 1 200px; min-width: 0; margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.6; }
+.residence-description svg { flex-shrink: 0; margin-top: 2px; }
+.residence-description span { max-width: 30em; text-wrap: pretty; }
 .residence-notice { flex-shrink: 0; padding: 0 2px 16px; }
 .residence-notice-card { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1.5px solid var(--residence-candy-edge); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 23%, var(--bg-secondary)); box-shadow: 0 3px 0 var(--residence-candy-lip), inset 0 1px 0 var(--residence-candy-highlight); }
 .residence-notice-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border-radius: var(--radius-md); color: var(--on-accent); background: var(--accent); box-shadow: var(--shadow-hard-sm); }
@@ -260,7 +265,7 @@ async function remove(room) { await mutate(() => api.deleteResidence(room.id)) }
 .selection-status > span { overflow-wrap: anywhere; }
 .residence-count { color: color-mix(in srgb, var(--text-primary) 48%, var(--text-secondary)); font-size: var(--fs-base); }
 .residence-count b { margin-left: 6px; color: var(--text-primary); font-weight: 600; }
-.residence-pool-count { font-size: var(--fs-md); font-weight: 500; color: var(--residence-muted); font-variant-numeric: tabular-nums; }
+.residence-pool-count { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 2px 8px; border-radius: var(--radius-full); background: var(--residence-candy-face); color: var(--residence-candy-ink); font-size: var(--fs-base); font-weight: 600; line-height: 1.5; font-variant-numeric: tabular-nums; }
 .residence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 20px; }
 .residence-room {
   position: relative; isolation: isolate; display: flex; flex-direction: column; min-width: 0;
@@ -324,9 +329,10 @@ async function remove(room) { await mutate(() => api.deleteResidence(room.id)) }
 .residence-drop-label { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--residence-muted); font-size: var(--fs-base); line-height: 1.6; margin: auto; padding: 8px 0; }
 .residence-drop-label svg { opacity: .65; }
 .residence-pool { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 16px 18px 8px; border: 1px solid var(--residence-candy-edge); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 6%, var(--bg-secondary)); }
-.residence-pool-heading { margin-bottom: 14px; min-height: 28px; }
-.residence-guide { display: flex; align-items: flex-start; gap: 6px; margin: -4px 0 12px; color: var(--residence-candy-ink); font-size: var(--fs-base); line-height: 1.6; }
-.residence-guide svg { flex-shrink: 0; margin-top: 1px; }
+.residence-pool-heading { flex-shrink: 0; flex-wrap: wrap; margin-bottom: 14px; min-height: 28px; }
+.residence-pool-heading > .residence-section-title { flex-shrink: 0; }
+.residence-guide { display: flex; flex-shrink: 0; align-items: flex-start; gap: 8px; margin: 0; padding-top: 12px; border-top: 1px solid var(--residence-line); color: var(--text-primary); font-size: var(--fs-base); line-height: 1.6; }
+.residence-guide svg { flex-shrink: 0; margin-top: 1px; color: var(--residence-candy-ink); }
 .residence-pool-avatars { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); align-content: start; justify-items: center; gap: 18px 8px; overflow: auto; padding: 18px 4px 12px; margin-top: 4px; }
 .residence-pool-empty { grid-column: 1/-1; padding: 28px 0; color: var(--residence-muted); font-size: var(--fs-base); line-height: 1.6; text-align: center; }
 .residence-empty { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 200px; color: var(--residence-muted); font-size: var(--fs-md); line-height: 1.6; }
@@ -338,7 +344,6 @@ async function remove(room) { await mutate(() => api.deleteResidence(room.id)) }
   .residence-layout { grid-template-columns: minmax(0, 1fr) minmax(300px, 40%); gap: 20px; }
 }
 @media (max-width: 767px) {
-  .residence-content { height: calc(100dvh - 128px); min-height: 0; }
   .residence-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(170px, 1fr) minmax(220px, 40dvh); gap: 16px; }
   .residence-main { overflow: auto; }
   .residence-toolbar { flex-wrap: wrap; }

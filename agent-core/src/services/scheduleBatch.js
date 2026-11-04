@@ -49,10 +49,11 @@ function assertSharedActivities(schedules, events) {
 export function getScheduleBatchStatus(db = getDb()) {
   const plan = active?.plan || readCohabitationPlan(db);
   if (!plan) return { processing: false };
+  const planningRooms = plan.rooms.filter(r => r.memberIds.length >= 2 && r.memberIds.some(id => plan.characterIds.includes(id)));
   return { processing: Boolean(active), cancelled: plan.status === 'cancelled', phase: plan.phase,
     current: Object.keys(plan.drafts || {}).length, lastCompleted: Object.keys(plan.drafts || {}).length,
     total: plan.characters.length, currentName: active?.currentName || '', status: plan.status, error: plan.error || '',
-    roomCurrent: (plan.completedRoomIds || []).length, roomTotal: plan.rooms.filter(r => r.memberIds.some(id => plan.characterIds.includes(id))).length };
+    roomCurrent: planningRooms.filter(r => (plan.completedRoomIds || []).includes(r.id)).length, roomTotal: planningRooms.length };
 }
 
 export function cancelScheduleBatch() { if (active) active.cancelled = true; }
@@ -118,7 +119,7 @@ export function startScheduleBatch({ kind = 'manual', direction = '', resume = f
       check();
       if (plan.completedRoomIds.includes(originalRoom.id)) continue;
       const room = originalRoom;
-      if (room.memberIds.some(id => plan.characterIds.includes(id))) {
+      if (room.memberIds.length >= 2 && room.memberIds.some(id => plan.characterIds.includes(id))) {
         control.currentName = room.name;
         report({ phase: 'cohabitation', character_name: room.name, status: 'generating' });
         const events = await planner({ room, characters: plan.planningCharacters || plan.characters, eligibleCharacterIds: plan.characterIds, relationships: plan.relationships,

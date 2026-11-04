@@ -74,6 +74,7 @@ export function validateCohabitationResult(raw, { room, candidateIds, occupancy,
 }
 
 export async function planResidence(input, { chat = chatSync } = {}) {
+  if (input.characters.filter(c => input.room.memberIds.includes(c.id)).length < 2) return [];
   const request = buildCohabitationRequest(input);
   if (request.candidateIds.size < 2) return [];
   let error;
