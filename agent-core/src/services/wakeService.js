@@ -20,6 +20,15 @@ import { broadcast } from './unifiedStreamBus.js';
 import { getTempWakeUntil } from './scheduleManager.js';
 import { getCurrentDream, markDreamShared } from './dreamService.js';
 
+const WAKE_REPLY_RULES = `【叫醒回应】
+你就是接下来人设中的角色，正在被叫醒的当下亲口回应对方。这次只输出能直接说出口的简短台词。
+- 用角色自己的自称、称呼和口头习惯说 1～3 句短话，通常 15～60 字，最多 80 字；说完就停，不展开长篇聊天。
+- 困意、迷糊、起床气或亲近感只通过措辞、语气词和停顿表现；按性格与关系自然反应，不必一律撒娇或示爱。
+- 不写旁白、动作、神态、环境、心理活动或声音描写；不写括号动作、星号动作、角色名前缀，也不加包住整段台词的引号。
+- 不替用户说话或描述用户的动作，不把“你”写成代指自己的叙事视角。电话中不能看见对方，不描写对方外貌。
+- 历史对话和梦境只供理解情境，不续写其中的叙述文风。有未回复消息时最多简短回应其中最要紧的一件事；梦境可以不提，若提起也只用一句短话带过，不复述或编造梦境。
+- 即使人设或其他文风要求偏长篇、文学描写，本次仍只给上述短台词，不输出解释、分析或 JSON。`;
+
 /**
  * 处理叫醒：构建 LLM 上下文 → 生成回复 → 写入 DB → 广播 SSE
  */
@@ -35,7 +44,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   // ── 构建 LLM 上下文 ──
   // 梦境系统：被吵醒前正做着的梦（叫醒注入出口②）
   const dream = getCurrentDream(characterId);
-  const msgs = buildWakeContext(char, conversationId, userName, mode, attempts, dream);
+  const { messages: msgs, staticTexts, cacheBoundary } = buildWakeContext(char, conversationId, userName, mode, attempts, dream);
 
   // ── 原子性抢占 reply_queue 中的积压消息 ──
   // 使用 UPDATE + AND status='waiting' 确保与 replyQueueScheduler 互斥
@@ -71,6 +80,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   try {
     lorebookTurn = await prepareNarrativePrompt(msgs, {
       ...buildConversationLorebookContext(db, {conversationId, character:char, kind:`wake:${mode}`, userName}), maxOutputTokens:512,
+      staticTexts, cacheBoundary,
     });
     fullReply = await chatSync(lorebookTurn.messages, {
       temperature: 0.7,
@@ -166,6 +176,11 @@ function buildWakeContext(char, conversationId, userName, mode, attempts, dream 
   const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
   if (stageContent) msgs.push({ role: 'system', content: stageContent });
 
+  // 共用口语与长度规范放在人设前，避免被情境或叙事预设带成长篇描写。
+  msgs.push({ role: 'system', content: WAKE_REPLY_RULES });
+  const staticTexts = [stageContent, WAKE_REPLY_RULES].filter(Boolean);
+  const cacheBoundary = { index: msgs.length - 1, offset: WAKE_REPLY_RULES.length };
+
   // [层 1] 角色人格 + 情绪 + 好感度 + 关系
   const charParts = [];
   charParts.push(char.base_prompt || '');
@@ -187,6 +202,10 @@ function buildWakeContext(char, conversationId, userName, mode, attempts, dream 
     }
   } catch (err) {
     // 情绪加载失败非致命
+  }
+  if (char.base_prompt) {
+    cacheBoundary.index = msgs.length;
+    cacheBoundary.offset = char.base_prompt.length;
   }
   msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
@@ -217,19 +236,19 @@ function buildWakeContext(char, conversationId, userName, mode, attempts, dream 
   switch (mode) {
     case 'phone':
       wakePrompt = `[系统说明] 你被 ${userName} 打来的 ${attempts || 1} 个电话铃声吵醒了，脑袋还昏昏沉沉的。`;
-      userActionMsg = `（手机铃声把熟睡中的你吵醒了，你迷迷糊糊摸到手机，看到是${userName}来电...）`;
+      userActionMsg = `${userName}的电话把你叫醒了。请说出你接通后亲口对对方说的简短回应。`;
       break;
     case 'door':
-      wakePrompt = `[系统说明] ${userName} 打了三个电话都没叫醒你，于是直接上门把从床上把你摇起来了。`;
-      userActionMsg = `（睡梦中你感觉有人在用力摇你...勉强睁开眼，发现${userName}正站在床边，一脸无奈地看着你）`;
+      wakePrompt = `[系统说明] ${userName} 打了三个电话都没叫醒你，于是直接上门把你从床上摇醒了。`;
+      userActionMsg = `${userName}上门把你摇醒了。请说出你此刻亲口对对方说的简短回应。`;
       break;
     case 'shake':
       wakePrompt = `[系统说明] ${userName} 又跑到你床边摇你了，你又被晃醒了。`;
-      userActionMsg = `（身体被一阵摇晃弄醒，你迷迷糊糊睁开眼，${userName}正俯身看着你）`;
+      userActionMsg = `${userName}又把你摇醒了。请说出你这次亲口对对方说的简短回应。`;
       break;
     default:
       wakePrompt = `[系统说明] ${userName} 把你叫醒了，你迷迷糊糊脑袋很懵。`;
-      userActionMsg = `（你感觉到有人在叫你...慢慢睁开眼，看到了${userName}）`;
+      userActionMsg = `${userName}把你叫醒了。请说出你此刻亲口对对方说的简短回应。`;
   }
   msgs.push({ role: 'system', content: wakePrompt });
 
@@ -237,7 +256,7 @@ function buildWakeContext(char, conversationId, userName, mode, attempts, dream 
   if (dream?.content) {
     msgs.push({
       role: 'system',
-      content: `[系统说明] 被吵醒前你正做着一个梦：「${dream.content}」。梦被打断了，你可以迷迷糊糊地提到梦的碎片，也可以因为梦的内容（害羞/后怕/懊恼）影响你此刻的语气。`,
+      content: `[系统说明] 被吵醒前你正做着一个梦：「${dream.content}」。梦已被打断，只作为此刻语气的参考；无需讲梦，若自然提起也只说一句短话，不复述梦境。`,
     });
   }
 
@@ -309,8 +328,8 @@ function buildWakeContext(char, conversationId, userName, mode, attempts, dream 
     }
   }
 
-  // [层 4] 用户唤醒动作（作为最后一条 user 消息，LLM 会对此做出反应）
-  msgs.push({ role: 'user', content: userActionMsg });
+  // [层 4] 当前任务收尾，不用括号动作诱导模型续写叙事。
+  msgs.push({ role: 'user', content: `${userActionMsg}\n只给 1～3 句台词，最多 80 字，不要旁白或动作描写。` });
 
-  return msgs;
+  return { messages: msgs, staticTexts, cacheBoundary };
 }

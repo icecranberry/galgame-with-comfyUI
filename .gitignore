@@ -64,6 +64,7 @@ agent-core/test/helpers/*
 !agent-core/test/dialogueTranscript.test.js
 !agent-core/test/characterBackgrounds.test.js
 !agent-core/test/chatModePrompt.test.js
+!agent-core/test/wakeService.test.js
 !agent-core/test/chatImageRagQuery.test.js
 !agent-core/test/privateChatImageTools.test.js
 !agent-core/test/momentTiming.test.js
