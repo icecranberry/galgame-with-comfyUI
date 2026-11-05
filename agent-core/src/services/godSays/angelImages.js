@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
-import { buildCharacterPersona, buildCharacterAppearanceSection, splitAppearanceSection } from '../characterPersona.js';
-import { buildSceneOutfitMessages, normalizeDesignScenes, parseSceneOutfitDesign } from '../sceneOutfitPrompt.js';
+import { buildCharacterPersona, buildCharacterAppearanceSection, splitAppearanceSection, extractEditableAppearanceBody } from '../characterPersona.js';
+import { buildSceneOutfitRequest, normalizeDesignScenes, parseSceneOutfitDesign } from '../sceneOutfitPrompt.js';
 import { resolveClothingTags, buildClothingAppearanceMessages, parseClothingAppearance } from '../clothingLibrary.js';
 import { angelOutfits, angelStandings, cleanAngelOutfits, validAngelScene, selectAngelOutfit, writeAngelStanding } from './angelWardrobe.js';
 import { saveBase64Image, deleteImageFileByUrl } from '../imagePaths.js';
@@ -40,10 +40,11 @@ export function buildAngelImageRequest(angel, kind, request, { systemRules, worl
 }
 
 export function buildAngelOutfitDesignRequest(angel, request, environment) {
-  const messages = buildSceneOutfitMessages({ systemRules: [environment.systemRules, environment.worldSetting].filter(Boolean).join('\n\n'),
+  const built = buildSceneOutfitRequest({ systemRules: [environment.systemRules, environment.worldSetting].filter(Boolean).join('\n\n'),
     worldRule: environment.worldSetting ? environment.worldRule : '', persona: splitAppearanceSection(angel.persona).before.trim(),
-    displayName: angel.display_name, baseAppearance: request.baseAppearance, scenes: request.scenes });
-  return wardrobePrompt(messages, angel, 'outfits');
+    displayName: angel.display_name, baseAppearance: request.baseAppearance, scenes: request.scenes,
+    instruction: request.instruction, currentOutfits: request.instruction ? angelOutfits(angel) : [] });
+  return { ...built, lorebook: { ...built.lorebook, scope: 'god:angel:outfits', userName: '吾神' } };
 }
 function wardrobePrompt(messages, angel, scope) {
   const index = messages.length - 3;
@@ -211,5 +212,16 @@ export function createAngelImageService(repo, { describe, render, promptEnvironm
       lorebook: { ...request.lorebook, turnKey: randomUUID() } }), signal);
     return { appearance: parseClothingAppearance(raw, entries, scene), tags: entries.map(entry => entry.tag) };
   }
-  return { start, get, list, upload, clothingDraft };
+  async function outfitDraft(input = {}) {
+    const angel=repo.ensureAngel();
+    const scenes=normalizeDesignScenes(input.scenes);
+    if (input.instruction!==undefined && (typeof input.instruction!=='string' || input.instruction.length>4000)) throw bad('服装要求无效');
+    const baseAppearance=extractEditableAppearanceBody(angel.persona);
+    if (!baseAppearance?.trim()) throw bad('请先补全天使默认外观');
+    const design=buildAngelOutfitDesignRequest(angel,{scenes,baseAppearance,instruction:input.instruction},promptEnvironment('outfits'));
+    const signal=AbortSignal.timeout(120000);
+    const raw=await abortable(describe(design.messages,{signal,response_format:{type:'json_object'},label:'天使服装草稿',lorebook:{...design.lorebook,turnKey:randomUUID()}}),signal);
+    return {outfits:parseSceneOutfitDesign(raw,scenes)};
+  }
+  return { start, get, list, upload, clothingDraft, outfitDraft };
 }

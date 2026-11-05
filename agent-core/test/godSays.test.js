@@ -441,7 +441,11 @@ test('agent uses tool results in next turn, effect ledger deduplicates identical
     else { assert.equal(messages.filter(m => m.role === 'tool').length, 2); yield { type: 'text_delta', text: '已安排。' }; yield { type: 'assistant_end', message: { role: 'assistant', content: '已安排。' } }; }
   }
   await runGodAgent(run, { repo, tools, stream, prepare: async () => ({ messages: [{ role: 'user', content: run.input }] }) });
-  assert.equal(actions, 1); assert.equal(turns, 2);
+    assert.equal(actions, 0, '日程修改必须等待确认'); assert.equal(turns, 2);
+    const drafts=tools.changes.list(run.session_id);
+    assert.equal(drafts.length,1,'相同调用只创建一份草稿');
+    await tools.changes.decide(drafts[0].id,drafts[0].version,'approve');
+    assert.equal(actions,1);
   assert.equal(db.prepare('SELECT status FROM god_runs WHERE id=?').get(run.id).status, 'completed');
   assert.ok(db.prepare('SELECT seq FROM god_run_events WHERE run_id=?').all(run.id).length >= 8);
   const history = await memory.contextHistory(run.session_id);

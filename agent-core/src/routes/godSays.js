@@ -104,6 +104,9 @@ router.post('/angel/summon', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 router.put('/angel', (req, res) => res.json(getGodRuntime().repo.updateAngel(req.body)));
+router.post('/angel/outfits/draft', (req,res,next) => {
+  getGodRuntime().images.outfitDraft(req.body).then(result=>res.json(result)).catch(next);
+});
 router.get('/angel/image-jobs', (req, res) => res.json(getGodRuntime().images.list()));
 router.post('/angel/image-jobs', (req, res, next) => {
   if (!['avatar', 'standing', 'peek', 'outfits'].includes(req.body?.kind)) return res.status(400).json({ error: '图片任务类型无效' });

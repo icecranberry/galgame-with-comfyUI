@@ -6,9 +6,11 @@ export function registerGodCommitGuard(key, check) {
   return () => guards.delete(key);
 }
 export function godCommitGuard(req, res, next) {
+  try { assertGodCommit(req); next(); }
+  catch (err) { res.status(409).json({ error: err.message }); }
+}
+export function assertGodCommit(req) {
   const key = req.get('X-Linshe-God-Operation');
   const check = key && guards.get(key);
-  if (!check) return next();
-  try { check(); guards.delete(key); next(); }
-  catch (err) { res.status(409).json({ error: err.message }); }
+  if (check) check();
 }

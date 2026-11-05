@@ -25,3 +25,8 @@ test('updates compare the edited entity, including the nested group snapshot', (
   assert.equal(godChangeFields({ name: 'update_world_setting', before: { name: '旧世界' }, args: { name: '新世界' } })[0].before, '旧世界')
   assert.equal(godChangeFields({ name: 'update_group', before: { group: { name: '旧群名' } }, args: { name: '新群名' } })[0].before, '旧群名')
 })
+
+test('image replacement previews retain their kind and exact before/after addresses', () => {
+  const field = { label: '开心', kind: 'image', before: '/images/emoji/old.png', after: '/images/emoji/draft.png' }
+  assert.deepEqual(godChangeFields({ name: 'generate_emoji_image', preview: [field] }), [{ ...field, key: 'replacement-0' }])
+})

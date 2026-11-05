@@ -356,6 +356,28 @@ async function generateDiaryImages({ character, content, prompts, onProgress }) 
  * @param {{ date?: string }} [opts] - date 缺省为今天
  * @returns {{ started: boolean, date: string, generating: boolean, diary: object|null }}
  */
+function diaryActivities(characterId,dateKey,readOnly=false) {
+  if (dateKey===getLocalDateKey() && !readOnly) return getTodaySchedule(characterId)||[];
+  const db=getDb();
+  const row=db.prepare('SELECT schedule_json FROM daily_schedules WHERE character_id=? AND schedule_date=?').get(characterId,dateKey)
+    || (dateKey===getLocalDateKey()?db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id=?').get(characterId):null);
+  try { const parsed=JSON.parse(row?.schedule_json||'[]'); return Array.isArray(parsed)?parsed:parsed.activities||[]; } catch {return [];}
+}
+export async function generateDiaryDraft(characterId, {date} = {}) {
+  const character=getDb().prepare('SELECT * FROM characters WHERE id=?').get(characterId);
+  if (!character) throw Object.assign(new Error('角色不存在'),{status:404});
+  const dateKey=date || getLocalDateKey();
+  const scheduleText=formatScheduleForDiary(diaryActivities(characterId,dateKey,true));
+  const messages=buildDiaryMessages({character,dateKey,scheduleText});
+  const raw=await chatWithPreset(messages,{temperature:0.9,response_format:{type:'json_object'},label:'日记草稿',
+    lorebook:{personaTexts:[messages.at(-3).content],staticTexts:messages.slice(0,-3).map(message=>message.content),
+      cacheBoundary:{index:messages.length-4,offset:messages.at(-4).content.length},history:messages.slice(-2),
+      characterName:character.display_name,characterDescription:messages.at(-3).content,scenario:scheduleText}});
+  const draft=parseDiaryJSON(raw);
+  if (!draft) throw new Error('日记草稿无法解析');
+  return {date:dateKey,draft};
+}
+
 export function startDiaryGeneration(characterId, opts = {}) {
   const db = getDb();
   const dateKey = opts.date && /^\d{4}-\d{2}-\d{2}$/.test(opts.date) ? opts.date : getLocalDateKey();
@@ -395,20 +417,26 @@ export function startDiaryGeneration(characterId, opts = {}) {
   });
   task.onProgress({ stage: 'text', progress: 0 });
 
-  const promise = runDiaryGeneration({ db, character, dateKey, name, task })
+  const readContent=()=>db.prepare('SELECT title,mood,weather,content,image_prompts,images FROM character_diaries WHERE character_id=? AND diary_date=?').get(characterId,dateKey);
+  const promise = runDiaryGeneration({ db, character, dateKey, name, task, approvedDraft: opts.draft, readContent, expectedContent: JSON.stringify(readContent()), dependencies:opts.dependencies||{} })
     .finally(() => { inflight.delete(key); });
   inflight.set(key, promise);
 
   return { started: true, date: dateKey, generating: true, diary: getDiary(characterId, dateKey) };
 }
 
-async function runDiaryGeneration({ db, character, dateKey, name, task }) {
+async function runDiaryGeneration({ db, character, dateKey, name, task, approvedDraft, readContent, expectedContent, dependencies }) {
   const characterId = character.id;
   let lastText = null;
+  const assertCurrent=()=>{
+    if (approvedDraft && (JSON.stringify(readContent())!==expectedContent || db.prepare('SELECT base_prompt FROM characters WHERE id=?').get(characterId)?.base_prompt!==character.base_prompt)) {
+      throw Object.assign(new Error('生成期间角色或日记已改变，未覆盖新内容'),{code:'DIARY_CONFLICT'});
+    }
+  };
   try {
     // ── 步骤1：角色当日日程 ──
     let activities = [];
-    try { activities = getTodaySchedule(characterId) || []; } catch (err) {
+    try { activities = diaryActivities(characterId,dateKey); } catch (err) {
       console.warn(`[diaryGenerator] schedule unavailable for char #${characterId}:`, err.message);
     }
     const scheduleText = formatScheduleForDiary(activities);
@@ -423,7 +451,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
 
     // ── 步骤3：LLM 生成日记文字 + 3 段生图 prompt ──
     const messages = buildDiaryMessages({ character, dateKey, scheduleText });
-    const raw = await chatWithPreset(messages, {
+    const raw = approvedDraft ? JSON.stringify(approvedDraft) : await (dependencies.chat||chatWithPreset)(messages, {
       temperature: 0.9,
       response_format: { type: 'json_object' },
       label: '日记助手',
@@ -433,6 +461,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
     if (!diary) throw new Error('日记生成返回内容无法解析');
     lastText = diary;
 
+    assertCurrent();
     db.prepare(`
       UPDATE character_diaries
       SET title = ?, mood = ?, weather = ?, content = ?, image_prompts = ?,
@@ -440,6 +469,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
       WHERE character_id = ? AND diary_date = ?
     `).run(diary.title, diary.mood, diary.weather, diary.content,
       JSON.stringify(diary.imagePrompts), handwritingFont || '', characterId, dateKey);
+    expectedContent=JSON.stringify(readContent());
 
     broadcast('diary_text_ready', {
       character_id: characterId,
@@ -450,7 +480,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
     task.onProgress({ stage: 'image', imageIndex: 0, progress: 0 });
 
     // ── 步骤4：并发生成 3 张配图（朋友圈参数 + 横竖随机 + 高优先级）──
-    const { ok, failedCount } = await generateDiaryImages({
+    const { ok, failedCount } = await (dependencies.generateImages||generateDiaryImages)({
       character,
       content: diary.content,
       prompts: diary.imagePrompts,
@@ -478,6 +508,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
       });
     }
 
+    assertCurrent();
     db.prepare(`
       UPDATE character_diaries
       SET images = ?, resolutions = ?, status = 'completed', error_message = NULL, updated_at = datetime('now')
@@ -495,7 +526,7 @@ async function runDiaryGeneration({ db, character, dateKey, name, task }) {
     console.error(`[diaryGenerator] char #${characterId} ${dateKey} failed:`, err.message);
     const message = (err?.message || '日记生成失败').slice(0, 200);
     // 文字已生成、只是配图失败时保留正文，用户可原地重新生成
-    db.prepare(`
+    if (err.code!=='DIARY_CONFLICT' || JSON.stringify(readContent())===expectedContent) db.prepare(`
       UPDATE character_diaries
       SET status = 'failed', error_message = ?, updated_at = datetime('now')
       WHERE character_id = ? AND diary_date = ?

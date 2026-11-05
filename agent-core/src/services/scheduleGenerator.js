@@ -63,7 +63,7 @@ export function generateSchedule(character, direction, options = {}) {
 }
 async function generateScheduleImpl(character, direction, options = {}) {
   const db = getDb();
-  const cohabitation = options.cohabitation || (options.persist === false ? { room: null, events: [] } : publishedCohabitationContext(db, character.id));
+  const cohabitation = options.cohabitation || (options.persist === false && !options.resident ? { room: null, events: [] } : publishedCohabitationContext(db, character.id));
   const worldSetting = getWorldSetting();
   const persona = cropPersonaForSchedule(character.base_prompt);
 

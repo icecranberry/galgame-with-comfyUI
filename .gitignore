@@ -60,6 +60,7 @@ agent-core/test/*
 !agent-core/test/helpers/
 agent-core/test/helpers/*
 !agent-core/test/helpers/audioTemp.js
+!agent-core/test/helpers/godAuditIsolation.mjs
 !agent-core/test/logBuffer.test.js
 !agent-core/test/roleplayRules.test.js
 !agent-core/test/lorebook*.test.js

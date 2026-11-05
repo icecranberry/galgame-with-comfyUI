@@ -100,7 +100,7 @@ test('real module routes create groups, letters, relations, library entries and 
     groups: '/api/groups', mailbox: '/api/mailbox', relationships: '/api/relationships', library: '/api/library', characters: '/api/characters',
     items: '/api/items', diary: '/api/diaries', config: '/api/config', media: '/api/media', presets: '/api/presets',
     schedule: '/api/schedule', moments: '/api/moments', events: '/api/events', portraits: '/api/portraits', memory: '/api/memory',
-    images: '/api/images', newspaper: '/api/newspaper', tts: '/api/tts' };
+    images: '/api/images', newspaper: '/api/newspaper', tts: '/api/tts', godSays: '/api/god-says' };
   for (const [route, mount] of Object.entries(mounts)) {
     const router = (await import(`../src/routes/${route}.js`)).default;
     for (const layer of router.stack) {
@@ -118,7 +118,7 @@ test('real module routes create groups, letters, relations, library entries and 
   t.after(() => server.close());
   const api = createGodLocalApi({ port: server.address().port });
   const repo = createGodRepository(db);
-  const run = repo.start('module-integration', '安排邻舍的事情').run;
+  const run = repo.start('module-integration', '安排邻舍的事情；用户提供的完整外观正文：轻柔的云白色披肩').run;
   const tools = createGodTools(repo, createWorldEventService(repo), createGodMemory(repo, async () => ''), { api, generateReplacement: async ({ source }) => source.replace('黑发', '红发').replace('地方', '岛屿') });
   let index = 0;
   const execute = async (name, args) => {

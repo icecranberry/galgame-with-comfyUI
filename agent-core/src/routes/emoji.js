@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { getDb } from '../db/index.js';
 import {
-  generateEmojiPrompts,
-  generateEmojiImage,
+  generateEmojiPrompts as defaultGenerateEmojiPrompts,
+  generateEmojiImage as defaultGenerateEmojiImage,
   getEmojiCategories,
   saveEmojiCategories,
   getEmojiFixedTagsText,
@@ -17,10 +17,56 @@ import {
   deleteEmojiSet,
   resolveOrCreateEmojiSet,
 } from '../services/emojiService.js';
-import { deleteImageFileByUrl, saveBase64Image } from '../services/imagePaths.js';
+import { deleteImageFileByUrl, saveBase64Image, imageUrlExists } from '../services/imagePaths.js';
 import { inspectStandingOutfits, normalizeStandingOutfitScene, validateMissingOutfitPolicy } from '../services/expressionStandingAppearance.js';
+import { assertGodCommit } from '../services/godSays/commitGuard.js';
 
+export function createEmojiRouter({generateEmojiPrompts=defaultGenerateEmojiPrompts,generateEmojiImage=defaultGenerateEmojiImage}={}) {
 const router = Router();
+
+router.get('/sets/:setId', (req,res) => {
+  const db=getDb();
+  const set=db.prepare('SELECT * FROM emoji_sets WHERE id=?').get(req.params.setId);
+  if (!set) return res.status(404).json({error:'表情包不存在'});
+  res.json({set,emojis:db.prepare('SELECT * FROM character_emojis WHERE set_id=? ORDER BY id').all(set.id)});
+});
+
+function savePromptDraft(db,characterId,setId,prompts,style) {
+  const upsert=db.prepare(`INSERT INTO character_emojis(character_id,set_id,emoji_key,prompt,style,status,updated_at)
+    VALUES(?,?,?,?,?,'prompt_ready',datetime('now')) ON CONFLICT(set_id,emoji_key) DO UPDATE SET
+    prompt=excluded.prompt,style=excluded.style,status='prompt_ready',error_message=NULL,updated_at=datetime('now')`);
+  db.transaction(()=>{for(const [key,prompt] of Object.entries(prompts)) upsert.run(characterId,setId,key,prompt,style);})();
+}
+function unchangedEmoji(db,row) {
+  const current=db.prepare('SELECT prompt,image_path FROM character_emojis WHERE id=?').get(row.id);
+  return current && current.prompt===row.prompt && current.image_path===row.image_path;
+}
+router.post('/prompts/apply',(req,res) => {
+  const db=getDb();
+  const {character_id:characterId,set_id:setId,prompts,style=''}=req.body||{};
+  if (!Number.isSafeInteger(characterId) || !Number.isSafeInteger(setId) || typeof style!=='string' || style.length>1000) return res.status(400).json({error:'表情草稿参数无效'});
+  if (!db.prepare('SELECT id FROM emoji_sets WHERE id=? AND character_id=?').get(setId,characterId)) return res.status(404).json({error:'表情包不存在或不属于该角色'});
+  const keys=getEmojiCategories(db);
+  if (!prompts || Array.isArray(prompts) || typeof prompts!=='object' || !Object.keys(prompts).length || Object.entries(prompts).some(([key,value])=>!keys.includes(key)||typeof value!=='string'||!value.trim()||value.length>12000)) return res.status(400).json({error:'表情提示词草稿无效'});
+  assertGodCommit(req);
+  savePromptDraft(db,characterId,setId,prompts,style);
+  res.json({ok:true,character_id:characterId,set_id:setId,count:Object.keys(prompts).length});
+});
+router.post('/images/apply',(req,res) => {
+  const db=getDb();
+  const {character_id:characterId,set_id:setId,images}=req.body||{};
+  if (!Number.isSafeInteger(characterId)||!Number.isSafeInteger(setId)||!Array.isArray(images)||!images.length||images.length>100) return res.status(400).json({error:'表情图片草稿无效'});
+  if (!db.prepare('SELECT id FROM emoji_sets WHERE id=? AND character_id=?').get(setId,characterId)) return res.status(404).json({error:'表情包不存在或不属于该角色'});
+  const seen=new Set();
+  for(const image of images) {
+    if (typeof image?.emoji_key!=='string'||seen.has(image.emoji_key)||typeof image.image_path!=='string'||!/^\/images\/emoji\/[^/\\?#%]+$/.test(image.image_path)||!imageUrlExists(image.image_path)||!db.prepare('SELECT id FROM character_emojis WHERE set_id=? AND emoji_key=?').get(setId,image.emoji_key)) return res.status(400).json({error:'表情图片不存在或目标已改变'});
+    seen.add(image.emoji_key);
+  }
+  assertGodCommit(req);
+  const update=db.prepare("UPDATE character_emojis SET image_path=?,status='done',error_message=NULL,updated_at=datetime('now') WHERE set_id=? AND emoji_key=?");
+  db.transaction(()=>{for(const image of images) update.run(image.image_path,setId,image.emoji_key);})();
+  res.json({ok:true,count:images.length,images});
+});
 
 /** 解析单条操作的目标配置单：显式 set_id 优先（校验归属），否则该角色启用中的配置单；都没有返回 null */
 function resolveSetId(db, characterId, requested) {
@@ -181,24 +227,16 @@ router.post('/prompts', async (req, res) => {
     }
 
       try {
-        const emojiKeys = getEmojiCategories(db);
-        const set = resolveOrCreateEmojiSet(characterId, set_id ?? null, db);
+        const availableKeys=getEmojiCategories(db);
+        const emojiKeys=req.body.keys===undefined?availableKeys:req.body.keys;
+        if (!Array.isArray(emojiKeys)||!emojiKeys.length||new Set(emojiKeys).size!==emojiKeys.length||emojiKeys.some(key=>!availableKeys.includes(key))) throw new Error('表情类别无效，请先查询真实类别');
+        const set = req.body.save===false
+          ? db.prepare('SELECT * FROM emoji_sets WHERE id=? AND character_id=?').get(set_id,characterId)
+          : resolveOrCreateEmojiSet(characterId, set_id ?? null, db);
+        if (!set) throw new Error('表情包不存在或不属于该角色');
         const prompts = await generateEmojiPrompts(char, typeof style === 'string' ? style.trim() : '', emojiKeys, { outfitScene, missingOutfitPolicy });
-        const upsert = db.prepare(`
-          INSERT INTO character_emojis (character_id, set_id, emoji_key, prompt, style, status, updated_at)
-          VALUES (?, ?, ?, ?, ?, 'prompt_ready', datetime('now'))
-          ON CONFLICT(set_id, emoji_key)
-          DO UPDATE SET
-            prompt = excluded.prompt,
-            style = excluded.style,
-            status = 'prompt_ready',
-            error_message = NULL,
-            updated_at = datetime('now')
-        `);
-        for (const key of emojiKeys) {
-          upsert.run(characterId, set.id, key, prompts[key], style || '');
-        }
-        results.push({ character_id: characterId, set_id: set.id, ok: true, count: emojiKeys.length });
+        if (req.body.save!==false) { assertGodCommit(req); savePromptDraft(db,characterId,set.id,prompts,style||''); }
+        results.push({ character_id: characterId, set_id: set.id, ok: true, count: emojiKeys.length,...(req.body.save===false?{prompts}:{}) });
         } catch (err) {
           results.push({ character_id: characterId, ok: false, error: err.message });
         }
@@ -216,11 +254,13 @@ router.post('/images', (req, res) => {
   }
 
   const db = getDb();
+  if (set_id!==undefined && !db.prepare(`SELECT id FROM emoji_sets WHERE id=? AND character_id IN (${character_ids.map(()=>'?').join(',')})`).get(set_id,...character_ids)) return res.status(404).json({error:'表情包不存在或不属于指定角色'});
   const placeholders = character_ids.map(() => '?').join(',');
   // includeDone 时把已生成完成的行也纳入重画（仍要求已有 prompt）；generating 行始终排除，避免重复提交
   const statuses = includeDone ? ['done', 'prompt_ready', 'failed'] : ['prompt_ready', 'failed'];
   const params = [...character_ids, ...statuses];
   let where = `ce.character_id IN (${placeholders}) AND ce.status IN (${statuses.map(() => '?').join(',')}) AND ce.prompt != ''`;
+  if (req.body.onlyMissing===true) where += " AND (ce.image_path IS NULL OR ce.image_path='')";
   if (set_id !== null && set_id !== undefined && set_id !== '') {
     where += ' AND ce.set_id = ?';
     params.push(parseInt(set_id, 10));
@@ -239,7 +279,7 @@ router.post('/images', (req, res) => {
   `).all(...params);
 
   if (rows.length === 0) {
-    return res.json({ started: true, count: 0, message: includeDone ? '没有可重新生成的表情包' : '没有待生成的表情包' });
+    return res.json({ started: false, count: 0, message: includeDone ? '没有可重新生成的表情包' : '没有待生成的表情包' });
   }
 
   // 先全部置为 generating，再后台串行生成
@@ -261,6 +301,11 @@ router.post('/images', (req, res) => {
       }
       try {
       const result = await generateEmojiImage(row, char, artist);
+        if (!unchangedEmoji(db2,row)) continue; // 新图仍在相册中，不覆盖生成期间被修改的表情。
+        if (db2.prepare('SELECT base_prompt FROM characters WHERE id=?').get(row.character_id)?.base_prompt!==char.base_prompt) {
+          db2.prepare("UPDATE character_emojis SET status='failed',error_message='生成期间角色资料已改变，请核对提示词后重试' WHERE id=?").run(row.id);
+          continue;
+        }
         if (result.ok) {
           db2.prepare(`
             UPDATE character_emojis
@@ -275,6 +320,7 @@ router.post('/images', (req, res) => {
           `).run(result.error || '生成失败', row.id);
         }
       } catch (err) {
+        if (!unchangedEmoji(db2,row)) continue;
         db2.prepare(`
           UPDATE character_emojis
           SET status='failed', error_message=?, updated_at=datetime('now')
@@ -307,6 +353,8 @@ router.post('/:characterId/:key/prompt', async (req, res) => {
       outfitScene: req.body?.outfitScene, missingOutfitPolicy: req.body?.missingOutfitPolicy,
     });
       const prompt = prompts[emojiKey];
+    assertGodCommit(req);
+    if (!unchangedEmoji(db,row)) return res.status(409).json({error:'生成期间表情已改变，请重新生成草稿'});
 
     db.prepare(`
       UPDATE character_emojis
@@ -341,7 +389,8 @@ router.post('/:characterId/:key/image', async (req, res) => {
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(characterId);
   if (!char) return res.status(404).json({ error: '角色不存在' });
 
-  db.prepare(`
+  const previewOnly=req.body?.previewOnly===true;
+  if (!previewOnly) db.prepare(`
     UPDATE character_emojis SET status='generating', error_message=NULL, updated_at=datetime('now') WHERE id=?
   `).run(row.id);
     const artist = typeof req.body?.artist === 'string' ? req.body.artist.trim() : '@ebora';
@@ -350,6 +399,12 @@ router.post('/:characterId/:key/image', async (req, res) => {
 
   try {
       const result = await generateEmojiImage(row, char, artist);
+    if (previewOnly) return res.status(result.ok?200:502).json(result.ok?{ok:true,image_path:result.url}:{error:result.error||'表情图片草稿失败'});
+    if (!unchangedEmoji(db,row)) return res.status(409).json({error:'生成期间表情已改变，新图未覆盖旧记录'});
+    if (db.prepare('SELECT base_prompt FROM characters WHERE id=?').get(characterId)?.base_prompt!==char.base_prompt) {
+      db.prepare("UPDATE character_emojis SET status='failed',error_message='生成期间角色资料已改变，请核对提示词后重试' WHERE id=?").run(row.id);
+      return res.status(409).json({error:'生成期间角色资料已改变，新图未覆盖旧记录'});
+    }
     if (result.ok) {
       db.prepare(`
         UPDATE character_emojis
@@ -364,6 +419,8 @@ router.post('/:characterId/:key/image', async (req, res) => {
       res.json({ ok: false, error: result.error || '生成失败' });
     }
   } catch (err) {
+    if (previewOnly) return res.status(502).json({error:err.message||'表情图片草稿失败'});
+    if (!unchangedEmoji(db,row)) return res.status(409).json({error:'生成期间表情已改变，未覆盖新内容'});
     db.prepare(`
       UPDATE character_emojis SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?
     `).run(err.message || String(err), row.id);
@@ -443,4 +500,6 @@ router.delete('/:characterId/:key', (req, res) => {
   res.json({ ok: true });
 });
 
-export default router;
+return router;
+}
+export default createEmojiRouter();

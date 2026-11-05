@@ -1,6 +1,6 @@
 <template>
   <section class="god-change" :aria-label="work.title">
-    <div class="heading"><h3>{{ work.title }}</h3><span>{{ statusText[work.status] || work.status }} · {{ done }} / {{ work.items.length }}</span></div>
+    <div class="heading"><h3>{{ work.title }}</h3><span>{{ statusLabel(work) }} · {{ done }} / {{ work.items.length }}</span></div>
     <p v-if="work.status === 'pending'" class="note">请核对以下内容。确认后保存这一版。</p>
     <div class="items">
       <article v-for="({ item, name, characterId, avatar }, index) in displayItems" :key="index" class="item">
@@ -12,12 +12,20 @@
             </template>
             <strong>{{ name }}</strong>
           </div>
-          <span>{{ statusText[item.status] || item.status }}</span>
+          <span>{{ statusLabel(item) }}</span>
         </div>
         <div v-for="field in godChangeFields(item)" :key="field.key" class="field">
           <span class="field-label">{{ field.label }}</span>
+          <template v-if="field.kind === 'image'">
+            <p v-if="field.before" class="before">原图</p>
+            <GodMessageImages v-if="field.before" :images="[{ url: field.before }]" />
+            <p class="after">替换后</p>
+            <GodMessageImages :images="[{ url: field.after }]" />
+          </template>
+          <template v-else>
           <p v-if="field.before != null" class="before">原文：{{ field.before }}</p>
           <p class="after"><span v-if="field.before != null" class="replacement-label">替换后：</span>{{ field.after }}</p>
+          </template>
         </div>
         <p v-if="item.error" class="error">{{ item.error }}</p>
         <p v-if="item.result?.note" class="note">{{ item.result.note }}</p>
@@ -35,6 +43,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
+import GodMessageImages from './GodMessageImages.vue'
 import { decideGodChange, stopGodBatch } from '../../api/index.js'
 import { useChatStore } from '../../stores/chat.js'
 import { godChangeFields } from '../../utils/godChangeFields.js'
@@ -57,6 +66,10 @@ const displayItems = computed(() => {
 const busy = ref(false)
 const error = ref('')
 const statusText = { pending: '待确认', awaiting_confirmation: '待确认', applying: '正在应用', running: '处理中', done: '已完成', failed: '失败', partial: '部分完成', rejected: '已取消', cancelled: '已停止', conflict: '内容已变化', uncertain: '需要核对', interrupted: '已中断' }
+function statusLabel(entry) {
+  if (entry.status === 'done' && (entry.result?.status === 'accepted' || entry.items?.some(item => item.result?.status === 'accepted'))) return '已提交'
+  return statusText[entry.status] || entry.status
+}
 const done = computed(() => props.work.items.filter(i => i.status === 'done').length)
 async function stop() {
   if (busy.value) return

@@ -25,7 +25,12 @@ import {
   syncSleepingState, isTempWoken, isSleeping,
   scheduleTempWakeExpiry, resetGroggyShown,
 } from '../services/scheduleManager.js';
-import { generateSchedule, snapshotTodaySchedule } from '../services/scheduleGenerator.js';
+import { generateSchedule, snapshotTodaySchedule, parseAndValidateSchedule } from '../services/scheduleGenerator.js';
+import { publishedCohabitationContext } from '../db/cohabitationRepository.js';
+import { persistIndividualSchedule } from '../services/cohabitationPersistence.js';
+import { assertCompleteDay } from '../services/cohabitationSchedule.js';
+import { assertGodCommit } from '../services/godSays/commitGuard.js';
+import { assertScheduleIdle } from '../services/scheduleGenerationLock.js';
 import { updateScheduleActivity } from '../services/scheduleEditor.js';
 import { generateImage, getLastWorkflowMode } from '../services/imageSkill.js';
 import { scheduleImageContext } from '../services/scheduleParticipants.js';
@@ -550,7 +555,22 @@ router.post('/:characterId/regenerate', async (req, res) => {
     console.log(`[schedule] Regenerating schedule for ${character.display_name}${direction ? ` (direction: ${direction.slice(0, 50)}...)` : ''}...`);
 
     // 生成新模板
-    const result = await generateSchedule(character, direction);
+    if (req.body?.save===false) {
+      const draft=await generateSchedule(character,direction,{persist:false,resident:true});
+      return res.json({activities:JSON.parse(draft.schedule_json)});
+    }
+    let result;
+    if (req.body?.activities!==undefined) {
+      const activities=parseAndValidateSchedule(JSON.stringify({activities:req.body.activities}),character.display_name);
+      if (!activities) return res.status(400).json({error:'日程草稿无效'});
+      assertCompleteDay(activities);
+      assertGodCommit(req);
+      const room=publishedCohabitationContext(db,characterId).room;
+      assertScheduleIdle(room?.memberIds||[characterId]);
+      const saved=persistIndividualSchedule(db,character,activities,room);
+      for (const id of saved.changed) { invalidateCache(id); syncSleepingState(id); }
+      result={version:db.prepare('SELECT version FROM schedule_templates WHERE character_id=?').get(characterId).version};
+    } else result = await generateSchedule(character, direction);
 
     // 单人重排不改变整轮刷新周期，也不触发共同活动规划。
 

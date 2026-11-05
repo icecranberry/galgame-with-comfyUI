@@ -26,6 +26,6 @@ export function buildReplacementRequest({ kind, source, instruction, character }
 export function validateReplacement(result, kind) {
   if (typeof result !== 'string' || !result.trim() || result.length > 50000 || /^\s*```/.test(result)) throw new Error('没有生成有效的完整替换正文，原内容未改变');
   const text = result.trim();
-  if (kind === 'appearance' && /^\s*#{1,2}\s/m.test(text)) throw new Error('新版外观混入章节标题，请重新生成');
+  if (kind === 'appearance' && (/^\s*#{1,6}\s/m.test(text) || /^[\[{]/.test(text) || /```/.test(text))) throw new Error('新版外观必须是完整正文，不能混入章节标题、JSON 或代码围栏，请重新生成');
   return text;
 }

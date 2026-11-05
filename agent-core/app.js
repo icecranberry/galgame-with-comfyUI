@@ -132,6 +132,7 @@ app.use('/avatars', express.static(path.join(DATA_DIR, 'avatars'), { maxAge: '30
 app.use('/town-assets', express.static('data/town/assets'));
 
 // API 路由（wrapRouterAsync：给所有 async 处理器加 rejection 兜底，防请求挂起）
+app.use('/api', godCommitGuard);
 app.use('/api', wrapRouterAsync(expressionStandingRoutes));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/god-says', wrapRouterAsync(godSaysRoutes));
@@ -140,7 +141,6 @@ app.use('/api/tts', wrapRouterAsync(ttsRoutes));
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
 app.use('/api/images', wrapRouterAsync(imagesRoutes));
 app.use('/api/characters/emoji', wrapRouterAsync(emojiRoutes));  // 表情包管理（必须早于 /api/characters 挂载）
-app.use('/api', godCommitGuard);
 app.use('/api/characters', wrapRouterAsync(charactersRoutes));  // /api/characters CRUD
 app.use('/api/config', wrapRouterAsync(configRoutes));
 app.use('/api/config', wrapRouterAsync(lorebookRoutes));

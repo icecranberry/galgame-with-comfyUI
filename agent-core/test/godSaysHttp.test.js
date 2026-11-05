@@ -132,14 +132,10 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.equal(requests[3].messages.at(-1).tool_call_id, 'world-1');
   assert.equal((await send()).duplicate, true);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM god_world_events').get().n, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 0, 'awaiting user confirmation');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 1, '新增群聊直接创建');
   const state = await fetch(`${base}/state`).then(r => r.json());
   assert.equal(state.runs[0].status, 'completed');
-  assert.equal(state.changes.length, 1);
-  const draft = state.changes[0];
-  const approve = () => fetch(`${base}/changes/${draft.id}/decision`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: draft.version, decision: 'approve' }) }).then(r => r.json());
-  assert.equal((await approve()).status, 'done');
-  assert.equal((await approve()).status, 'done');
+  assert.equal(state.changes.length, 0);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM group_chats').get().n, 1);
 
   assert.equal(state.worldEvents.length, 1);

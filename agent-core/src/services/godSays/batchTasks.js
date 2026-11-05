@@ -18,9 +18,9 @@ export function createBatchTasks(repo, { validate, needsConfirmation, changes, e
     if (!common || typeof common !== 'object' || Array.isArray(common) || !overrides || typeof overrides !== 'object' || Array.isArray(overrides)) throw new Error('批量参数必须是 JSON 对象');
     if (Object.keys(overrides).some(id => !targets.some(c => String(c.id) === id))) throw new Error('逐人参数包含目标范围之外的角色');
     const operations = targets.map(c => ({ name: args.tool_name, label: c.display_name, args: { ...common, ...overrides[c.id], character_id: c.id } }));
-    operations.forEach(validate);
+    operations.forEach(operation=>validate(operation,ctx));
     const title = args.title || `批量处理 ${targets.length} 位角色`;
-    if (needsConfirmation(args.tool_name)) return changes.create(ctx.runId, title, operations, ctx.signal);
+    if (operations.some(operation => needsConfirmation(operation.name, operation.args))) return changes.create(ctx.runId, title, operations, ctx.signal);
     const row = { id: randomUUID(), run_id: ctx.runId, title, status: 'running', items: operations.map(o => ({ ...o, status: 'pending' })) };
     db.prepare('INSERT INTO god_batches VALUES (?,?,?,?,?,?)').run(row.id, ctx.runId, title, row.status, JSON.stringify(row.items), repo.timestamp());
     const controller = new AbortController();

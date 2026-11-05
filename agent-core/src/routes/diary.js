@@ -10,7 +10,7 @@
  */
 
 import { Router } from 'express';
-import { getDiary, listDiaries, startDiaryGeneration, isDiaryGenerating } from '../services/diaryGenerator.js';
+import { getDiary, listDiaries, startDiaryGeneration, isDiaryGenerating, generateDiaryDraft, parseDiaryJSON } from '../services/diaryGenerator.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 
 const router = Router();
@@ -27,7 +27,7 @@ function parseCharacterId(req, res) {
 }
 
 function parseDate(value) {
-  return typeof value === 'string' && DATE_RE.test(value) ? value : null;
+  return typeof value === 'string' && DATE_RE.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10)===value ? value : null;
 }
 
 // GET /api/diaries/:characterId?date=YYYY-MM-DD
@@ -52,12 +52,21 @@ router.get('/:characterId/history', (req, res) => {
 });
 
 // POST /api/diaries/:characterId/generate  body: { date? }
+router.post('/:characterId/draft', async (req,res,next) => {
+  const id=parseCharacterId(req,res);
+  if (id===null) return;
+  if (req.body?.date!==undefined && !parseDate(req.body.date)) return res.status(400).json({error:'日期无效'});
+  try { res.json(await generateDiaryDraft(id,{date:parseDate(req.body?.date)})); } catch(error) {next(error);}
+});
 router.post('/:characterId/generate', (req, res) => {
   const characterId = parseCharacterId(req, res);
   if (characterId === null) return;
   const dateKey = parseDate(req.body?.date) || undefined;
   try {
-    const result = startDiaryGeneration(characterId, { date: dateKey });
+    const draft=req.body?.draft;
+    if (draft!==undefined && !parseDiaryJSON(JSON.stringify(draft))) return res.status(400).json({error:'日记草稿无效'});
+    if (draft!==undefined && isDiaryGenerating(characterId,dateKey||getLocalDateKey())) return res.status(409).json({error:'已有日记任务仍在生成，尚未提交这份确认稿，请完成后重试'});
+    const result = startDiaryGeneration(characterId, { date: dateKey, draft });
     res.status(result.started ? 202 : 200).json(result);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message || '日记生成启动失败' });

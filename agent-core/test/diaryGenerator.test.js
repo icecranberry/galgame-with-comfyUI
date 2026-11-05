@@ -5,10 +5,16 @@
  * 「一天一篇」的覆盖路径正好可以借 LLM 失败来跑：失败也会把当日那行从 generating 收敛成 failed，
  * 于是可以在不 mock LLM 的前提下断言「同日只留一行、历史日期原样保留」。
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 process.env.DB_PATH = ':memory:';
+const imageDirectory=fs.mkdtempSync(path.join(os.tmpdir(),'diary-approved-test-'));
+process.env.IMAGES_DIR=imageDirectory;
+after(()=>{assert.equal(path.dirname(imageDirectory),fs.realpathSync(os.tmpdir()));fs.rmSync(imageDirectory,{recursive:true});});
 globalThis.fetch = async () => { throw new Error('Network forbidden'); };
 
 const { config } = await import('../src/config.js');
@@ -210,6 +216,21 @@ test('同日多次生成只保留一行并覆盖，历史日期原样保留；�
 
 test('startDiaryGeneration 对不存在的角色抛 404', () => {
   assert.throws(() => diary.startDiaryGeneration(999999), (err) => err.status === 404);
+});
+
+test('确认后的日记原样保存冻结正文和配图提示词，不重新调用文字生成器',async()=>{
+  const id=seedCharacter();
+  const draft={title:'冻结标题',mood:'平静',weather:'晴',content:'这是一段用户已经确认过的完整日记正文。',imagePrompts:['first prompt','second prompt','third prompt']};
+  let textCalls=0;
+  diary.startDiaryGeneration(id,{draft,dependencies:{chat:async()=>{textCalls++;throw new Error('确认后不应重新生成正文');},generateImages:async({prompts})=>{
+    assert.deepEqual(prompts,draft.imagePrompts);
+    return {ok:[{index:0,width:1,height:1,image:{base64:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='},promptRefined:prompts[0],wfMode:'test'}],failedCount:0};
+  }}});
+  const saved=await waitForSettle(id,getLocalDateKey());
+  assert.equal(saved.status,'completed');
+  assert.equal(saved.content,draft.content);
+  assert.equal(saved.title,draft.title);
+  assert.equal(textCalls,0);
 });
 
 test('getDiary 对没有日记的日期返回 null，DTO 带齐前端渲染字段', () => {

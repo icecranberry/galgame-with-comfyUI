@@ -17,6 +17,8 @@ function tool(name, module, label, description, properties, required, method, pa
 }
 
 export const GOD_MODULE_TOOLS = [
+  tool('read_angel', '天使', '读取自己的资料与服装', '天使使用独立档案，不使用 character_id。读取名字、完整人设与四套服装。', {}, [], 'GET', '/api/god-says/angel', { select: d => ({ display_name: d.display_name, persona: d.persona, outfits: d.outfits, standings: d.standings }) }),
+  tool('update_angel', '天使', '修改自己的资料', '仅提供用户要求修改的字段。改名只传 display_name，不重传人设；确认卡展示新旧值，确认后生效。外观段修改用 apply_angel_appearance，场景服装用 generate_angel_outfits。', { display_name: text('新的天使显示名', 40), persona: text('仅修改人设时提供完整新版', 50000) }, [], 'PUT', '/api/god-says/angel'),
   tool('read_private_chat', '聊天', '读取私聊', '查看最近发言，支持按原始消息编号分页，不改变聊天记录。', { ...char, limit: page.limit, before_id: ident('更早消息的 raw id 游标，可省略') }, ['character_id'], 'GET', '/api/characters/:character_id/dialogue', { query: { limit: 'limit', before_id: 'before' }, href: a => `/chat/${a.character_id}` }),
   tool('send_private_message', '聊天', '向角色传话', '仅在神明确要求传话时使用，以用户身份进入真实私聊；遵循角色日程，可能排队。返回实际保存的消息或排队状态，不代表角色已行动。', { ...char, message: text('用户授权传达的内容', 5000) }, ['character_id', 'message'], 'POST', '/api/characters/:character_id/chat', { body: a => ({ message: a.message, image_mode: 'off' }), clientKey: true, stream: true, href: a => `/chat/${a.character_id}` }),
   tool('list_groups', '群聊', '查询群聊', '返回群名、话题、真实成员和编号。', {}, [], 'GET', '/api/groups'),
@@ -71,7 +73,7 @@ export const GOD_MODULE_TOOLS = [
     scenes: { type: 'array', description: '指定目标槽位：casual 私服、home 居家、sleep 睡衣；只选用户要求的槽位', items: { type: 'string', enum: ['casual', 'home', 'sleep'] }, minItems: 1, maxItems: 3, uniqueItems: true },
     instruction: text('用户对款式、颜色或修改已有服装的要求；没有额外要求可省略，不代写最终外观正文', 4000),
   }, ['character_id', 'scenes'], 'POST', '/api/characters/:character_id/outfits/generate', { body: a => ({ scenes: a.scenes, instruction: a.instruction, save: false, generateImages: false }), href: '/tavern' }),
-  tool('create_outfit', '角色', '创建专属外观', '仅在神明确要求新增独立、可切换的专属外观时使用；这是新增外观记录，不修改角色名称，也不替换原始“你的外观”。私服、居家、睡衣必须使用 generate_scene_outfits 写入对应槽位；基础外观修改用 apply_character_appearance，不能仅因提到“私服”就改为新增记录。设计前用 read_character_source 读取完整人设和外观，不需要查询日程。创建后仍需 set_outfit_enabled 才能启用。', { ...char, name: text('新增外观的名称，不是角色名称', 60), description: text('外观描述', 2000) }, ['character_id', 'name', 'description'], 'POST', '/api/characters/:character_id/outfits', { href: '/tavern' }),
+  tool('create_outfit', '角色', '创建专属外观', '新增独立、可切换的专属外观。instruction 填设计要求，由原外观扩写服务生成规范正文；只有用户明确给了完整最终描述时才传 description，两者二选一。新增直接保存但不启用，启用另用 set_outfit_enabled。私服/居家/睡衣用 generate_scene_outfits，基础外观用 apply_character_appearance。', { ...char, name: text('新增外观名称', 60), instruction: text('服装或形态设计要求，不代写最终描述', 2000), description: text('用户明确提供的完整最终外观正文', 5000) }, ['character_id', 'name'], 'POST', '/api/characters/:character_id/outfits', { href: '/tavern' }),
   tool('set_outfit_enabled', '角色', '切换角色外观', '先查询真实外观编号；启用时由现有服务互斥关闭该角色其他专属外观。', { ...char, outfit_id: ident('专属外观编号'), enabled: bool('是否启用') }, ['character_id', 'outfit_id', 'enabled'], 'PUT', '/api/characters/:character_id/outfits/:outfit_id', { body: a => ({ enabled: a.enabled ? 1 : 0 }), href: '/tavern' }),
   tool('recruit_character', '角色', '招募新角色', '按神明确要求创建一位新角色，走酒馆既有人格生成流程，不修改已有角色。', { description: text('角色名称、人格和背景要求', 4000) }, ['description'], 'POST', '/api/characters/generate', { body: a => ({ description: a.description, save: true }), href: '/tavern', pending: true }),
   tool('read_character_standings', '立绘', '查看角色立绘', '读取角色立绘素材与生成任务。', char, ['character_id'], 'GET', '/api/characters/:character_id/standings', { href: '/tavern' }),
@@ -107,6 +109,9 @@ export const GOD_MODULE_TOOLS = [
   tool('generate_character_standing', '立绘', '为角色生成立绘草稿', '沿用完整人格组装，返回后台任务；成图先暂存，需要在原立绘页面确认采用，不把草稿称为已替换。', { ...char, requirement: text('立绘姿势、衣服或构图要求', 500) }, ['character_id', 'requirement'], 'POST', '/api/characters/:character_id/generate-standing-task', { href: '/tavern', pending: true }),
   tool('read_image_edit_tasks', '相册', '查看待确认的图片', '查询立绘等后台草稿的状态与预览，待确认任务仍需用户在原页面采用。', {}, [], 'GET', '/api/images/edit-tasks', { href: '/gallery' }),
   tool('create_emoji_set', '表情包', '创建表情包组', '为角色建立一套配置，之后可生成各类别的提示词与图片。', { ...char, name: text('配置组名称', 80) }, ['character_id', 'name'], 'POST', '/api/characters/emoji/sets', { href: '/tavern' }),
+  tool('read_emoji_set', '表情包', '读取一套表情包的完整状态', '先查询真实套装编号，读取每个表情的提示词、图片与生成状态，用于核验批量任务。', { set_id: ident('套装编号') }, ['set_id'], 'GET', '/api/characters/emoji/sets/:set_id', { href: '/tavern' }),
+  tool('initialize_emoji_prompts', '表情包', '初始化或批量设计表情提示词', '指定一个真实角色和所属套装，复用原表情生成规则生成全部类别。空白套装直接新增；覆盖已有提示词时先展示完整草稿，确认后原样保存。随后调用 generate_emoji_images；这一步没有生成图片。', { ...char, set_id: ident('套装编号'), style: text('用户指定画面风格，可省略', 1000) }, ['character_id', 'set_id'], 'POST', '/api/characters/emoji/prompts', { body: a => ({ character_ids: [a.character_id], set_id: a.set_id, style: a.style }), href: '/tavern' }),
+  tool('generate_emoji_images', '表情包', '批量生成表情图片', '已有提示词后才能生成，默认只处理尚无图片的类别；overwrite=true 表示重做已有图片，必须先确认。后台受理不等于完成，使用 read_emoji_set 核对逐项状态。', { ...char, set_id: ident('套装编号'), keys: { type: 'array', items: text('类别键', 100), minItems: 1, maxItems: 100, uniqueItems: true }, artist: text('画师风格', 500), overwrite: bool('是否覆盖已有图片，默认 false') }, ['character_id', 'set_id'], 'POST', '/api/characters/emoji/images', { body: a => ({ character_ids: [a.character_id], set_id: a.set_id, keys: a.keys, artist: a.artist, includeDone: a.overwrite === true, onlyMissing: a.overwrite !== true }), pending: true, href: '/tavern' }),
   tool('set_emoji_set_enabled', '表情包', '启停表情包组', '先查询真实表情包组编号，按神要求启用或停用。', { set_id: ident('配置组编号'), enabled: bool('是否启用') }, ['set_id', 'enabled'], 'POST', '/api/characters/emoji/sets/:set_id/activate', { href: '/tavern' }),
   tool('generate_emoji_prompt', '表情包', '准备一个表情画面', '用角色人格与当前外观为真实表情类别生成提示词；这一步只生成描述，未生成图片。', { ...char, emoji_key: text('先查询表情类别得到的键', 100), set_id: ident('表情包组编号'), style: text('画面风格', 1000) }, ['character_id', 'emoji_key', 'set_id'], 'POST', '/api/characters/emoji/:character_id/:emoji_key/prompt', { href: '/tavern' }),
   tool('generate_emoji_image', '表情包', '生成一个角色表情', '必须先有该表情的提示词，沿用角色参考图和完整人格生图服务。', { ...char, emoji_key: text('真实表情类别键', 100), set_id: ident('表情包组编号'), artist: text('用户指定的画师风格，可省略', 500) }, ['character_id', 'emoji_key', 'set_id'], 'POST', '/api/characters/emoji/:character_id/:emoji_key/image', { href: '/tavern' }),
@@ -144,8 +149,10 @@ export async function executeModuleTool(entry, args, ctx, api) {
   if (!api) throw new Error('业务工具接口尚未连接');
   const response = await api(buildModuleRequest(entry, args, ctx), ctx);
   const data = entry.select ? entry.select(response.data, args) : response.data;
+  const failed=data?.results?.filter(item=>item.ok===false)||[];
+  if (failed.length && failed.length===data.results.length) throw new Error(failed.map(item=>item.error||'生成失败').join('；'));
   const pending = response.status === 202 || data?.started === true || data?.queued === true || entry.pending;
   const href = typeof entry.href === 'function' ? entry.href(args, data) : entry.href;
-  return { status: pending ? 'accepted' : 'returned', data, ...(href ? { href } : {}),
-    note: data?.partial ? '已有部分结果，但尚未完整结束；请到目标页面核对已保存内容。' : pending ? '请求已交给原功能模块处理；请查询对应记录或任务，确认是否实际完成。' : '已取得原功能模块的实际返回结果。' };
+  return { status: failed.length ? 'partial' : data?.started===false ? 'not_started' : pending ? 'accepted' : 'returned', data, ...(href ? { href } : {}),
+    note: failed.length || data?.partial ? '已有部分结果，但尚未完整结束；请到目标页面核对已保存内容。' : data?.started===false ? (data.generating?'本次未启动新任务，已有任务仍在处理，请查询实际进展。':data.message||'没有启动新的任务。') : pending ? '请求已交给原功能模块处理；请查询对应记录或任务，确认是否实际完成。' : '已取得原功能模块的实际返回结果。' };
 }

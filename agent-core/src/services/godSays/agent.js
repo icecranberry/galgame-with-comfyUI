@@ -15,6 +15,8 @@ export async function runGodAgent(run, { repo, tools, stream, prepare, signal, m
   let attempt = 0;
   try {
     signal?.throwIfAborted();
+    const unavailable = tools.boundary?.(run.input);
+    if (unavailable) { repo.message(run, 'assistant', unavailable); repo.finish(run.id, 'completed'); return; }
     prepared = await abortable(prepare(run, signal), signal);
     const messages = [...prepared.messages];
     // 一次模型回合：allowTools 为假时不提供工具，强制模型只能给出文本收尾。
@@ -50,6 +52,16 @@ export async function runGodAgent(run, { repo, tools, stream, prepare, signal, m
         const content = JSON.stringify(result);
         repo.message(run, 'tool', content, { tool_call_id: call.id });
         messages.push({ role: 'tool', tool_call_id: call.id, content });
+        if (result.stop) {
+          // 停止当前批次中尚未执行的调用，也不给模型机会换一个写工具绕过缺失能力。
+          for (const remaining of response.tool_calls.slice(response.tool_calls.indexOf(call) + 1)) {
+            repo.message(run, 'tool', JSON.stringify({ ok: false, error: '能力边界已触发，本项未执行' }), { tool_call_id: remaining.id });
+          }
+          repo.message(run, 'assistant', result.error);
+          prepared.commit?.();
+          repo.finish(run.id, 'completed');
+          return;
+        }
       }
       signal?.throwIfAborted();
       if (toolCount >= maxTools) {

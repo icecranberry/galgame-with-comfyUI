@@ -425,6 +425,13 @@ router.put('/:id', (req, res) => {
       updates.push('short_prompt = ?'); params.push(cropPersonalityForEmotion(base_prompt, cropName));
     }
   }
+  if (base_prompt===undefined && (display_name!==undefined || name!==undefined)) {
+    const current=db.prepare('SELECT name,display_name,base_prompt FROM characters WHERE id=?').get(req.params.id);
+    if (current && ((display_name!==undefined && display_name!==current.display_name)||(name!==undefined && name!==current.name))) {
+      updates.push('short_prompt = ?');
+      params.push(cropPersonalityForEmotion(current.base_prompt,display_name||current.display_name||name||current.name));
+    }
+  }
   if (emotion_baseline !== undefined) { updates.push('emotion_baseline = ?'); params.push(typeof emotion_baseline === 'string' ? emotion_baseline : JSON.stringify(emotion_baseline)); }
   if (avatar_path !== undefined) { updates.push('avatar_path = ?'); params.push(avatar_path || null); }
   if (chat_bg_path !== undefined) { updates.push('chat_bg_path = ?'); params.push(chat_bg_path || null); }
@@ -468,6 +475,8 @@ router.put('/:id', (req, res) => {
         const char = db.prepare('SELECT display_name, name, base_prompt FROM characters WHERE id = ?').get(charId);
         if (!char) return;
         const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name, char.name);
+        const current=db.prepare('SELECT name,display_name,base_prompt FROM characters WHERE id=?').get(charId);
+        if (!current || current.name!==char.name || current.display_name!==char.display_name || current.base_prompt!==char.base_prompt) return;
         db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, charId);
         console.log(`[char] short_prompt LLM-optimized for "${char.display_name || char.name}" (id=${charId})`);
         runShortPromptMigration();

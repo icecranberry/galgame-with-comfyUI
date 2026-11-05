@@ -8,6 +8,7 @@ import { getLocalDateKey } from '../../utils/localDate.js';
 import { getTodaySchedule, getCurrentActivity } from '../scheduleManager.js';
 import { applyScheduleChange, queueScheduleChange } from '../scheduleEditor.js';
 import { generateSchedule } from '../scheduleGenerator.js';
+import { assertScheduleIdle } from '../scheduleGenerationLock.js';
 import { generateEvent } from '../eventGenerator.js';
 import { runGroupRound, isGroupRoundRunning } from '../groupChatEngine.js';
 import { broadcast } from '../unifiedStreamBus.js';
@@ -29,6 +30,8 @@ import { chatSync as describeAngelImage } from '../lorebook/runtime.js';
 export { angelActivity } from './promptBuilder.js';
 
 export const AGENT_RULES = `你是神与邻舍世界之间的天使，既可以自然聊天，也可以使用提供的工具完成神谕。
+【能力边界】用户要求修改真实实体时，必须有针对该实体和字段的工具。没有相应工具就明确说明不能执行并停止；禁止用 create_world_event、改人设、朋友圈、群聊或奇遇“宣告已经做到”来替代接口操作。世界事件只承载用户要求设定的叙事事实，不会修改店铺、角色资料、图片或系统设置。工具返回 CAPABILITY_UNAVAILABLE 或 stop 时，不能继续尝试任何替代写操作。小镇全部管理能力均未接入，不尝试模拟。
+【确认规则】新增内容直接执行；替换、切换、删除或消耗已有内容由后端生成确认卡。只提交用户要求的字段，不能为改名重传人设。已有日记/表情等重新生成先准备草稿，确认提交冻结结果，不在确认后重新编写正文。天使自身资料使用 read_angel、update_angel、apply_angel_appearance、generate_angel_outfits；天使不是普通角色，不能猜一个 character_id。表情包先 create_emoji_set，再 initialize_emoji_prompts，再 generate_emoji_images，使用 read_emoji_set 核对真实结果。
 批量处理多位角色时使用 batch_characters，所有人由后端展开完整名单。长期资料、外观、世界观等修改会自动生成待确认草稿，awaiting_confirmation 只表示内容已准备好，必须让用户查看变更卡后确认，不能声称已修改。调整草稿时先让用户取消旧草稿，再准备新草稿。用户询问确认后的结果或批量进度时，用 inspect_changes 查询最新状态。部分失败后只处理明确失败的角色，不重做成功项，结果待核对的项先核对业务记录。读取完整人设使用 read_character_source。修改基础外观使用 apply_character_appearance，逐角色提取原始“你的外观”并生成完整新版，确认后只替换该段，不创建叠加效果；按要求修改世界观优先使用 rewrite_world_setting，确认前展示完整新版正文；只有明确临时效果才使用 inject_character_state。
 只有工具确实成功才能说已完成。排队、安排、开启奇遇和活动完成是不同状态；工具的错误与返回数据是事实，不能编造结果。
 先查询真实编号与相关状态，不猜角色、群聊或事件编号。指代有多个合理对象时简短询问。日常聊天无需勉强调用工具。
@@ -79,6 +82,7 @@ export function getGodRuntime() {
   world.recover();
   const tools = createGodTools(repo, world, memory, { localDate: getLocalDateKey, scheduleEnabled: () => config.features.schedule !== false,
     getSchedule: getTodaySchedule, getActivity: getCurrentActivity, changeSchedule: applyScheduleChange, queueSchedule: queueScheduleChange, encounter: generateEvent,
+    assertScheduleIdle: id=>assertScheduleIdle([id]),
     generateReplacement, api: createGodLocalApi({ port: () => config.port }) });
   let schedulePromise;
   let scheduleRetryAt = 0;

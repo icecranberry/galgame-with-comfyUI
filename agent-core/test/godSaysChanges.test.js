@@ -108,15 +108,15 @@ test('edited/deleted original, duplicate targets and approval-looking model para
   await assert.rejects(tools.changes.decide(draft2.id,draft2.version,'approve'),{status:409});
 });
 
-test('recruitment generates preview before approval and submits the exact generated content without generating again', async t => {
+test('recruitment delegates to the original generator and saves new content without confirmation', async t => {
   const {repo,run}=setup(t); const requests=[];
   const candidate={name:'new',display_name:'新角色',base_prompt:'完整新设定',emotion_baseline:{valence:0.5}};
   const tools=createGodTools(repo,{}, {}, {api:async request=>{requests.push(request);return {data:request.path.endsWith('/generate')?candidate:{id:3}};}});
   const result=await tools.execute({id:'recruit',function:{name:'recruit_character',arguments:JSON.stringify({description:'新角色'})}},run.id,0);
-  assert.equal(requests.length,1); assert.equal(requests[0].body.save,false);
-  const draft=tools.changes.get(result.value.change_id);
-  await tools.changes.decide(draft.id,draft.version,'approve');
-  assert.equal(requests.length,2); assert.deepEqual(requests[1].body,candidate);
+  assert.equal(result.ok,true);
+  assert.equal(requests.length,1); assert.equal(requests[0].body.save,true);
+  assert.notEqual(result.value.status,'awaiting_confirmation');
+  assert.equal(tools.changes.list(run.session_id).length,0);
 });
 
 test('batch execution is independent of confirmation and validates all items before any side effect', async t => {

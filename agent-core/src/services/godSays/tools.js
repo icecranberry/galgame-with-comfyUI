@@ -1,6 +1,7 @@
 import { createChangeSets } from './changeSets.js';
 import { createBatchTasks } from './batchTasks.js';
-import { CONFIRMED_TOOLS, createChangePolicy } from './changePolicy.js';
+import { createChangePolicy, PREPARED_TOOLS } from './changePolicy.js';
+import { capabilityBoundary } from './capabilityBoundary.js';
 import { effectKey, parseJson } from './repository.js';
 import { GOD_MODULE_TOOLS, moduleTool, moduleToolCatalog, executeModuleTool } from './moduleTools.js';
 
@@ -34,8 +35,10 @@ export const GOD_TOOLS = [
   definition('list_capabilities', '按模块查看天使已接入的真实能力。module 可填聊天、群聊、朋友圈、信箱、日记、日程、奇遇、背包、关系、记忆、相册、角色、立绘、表情包、媒体、日报、世界观、预设、素材库、语音；省略返回全部。', object({ module: string('功能模块名', 30) }, [])),
   definition('inspect_changes', '查询当前对话的批量任务与待确认变更，确认后的实际状态优先于历史工具结果。', object({}, [])),
   definition('read_character_source', '读取角色完整原始人设和外观，用于修改外观、人设或设计服装。不查询日程，不使用摘要覆盖原文。', object({ character_id: id('角色编号') })),
-  definition('update_character', '准备角色资料修改，用户查看完整草稿并确认后才生效。保留未要求改动的原文。', object({ character_id: id('角色编号'), display_name: string('修改后的显示名', 100), base_prompt: string('完整修改后人设原文', 50000) }, ['character_id', 'base_prompt'])),
+  definition('update_character', '按字段准备角色修改，确认后生效。仅改名字只传 display_name，不复制或重传人设；未提供字段保持原样。', { ...object({ character_id: id('角色编号'), display_name: string('修改后的显示名', 100), base_prompt: string('仅修改人设时提供完整新版原文', 50000) }, ['character_id']), minProperties: 2 }),
   definition('apply_character_appearance', '仅修改基础外观；私服、居家服、睡衣请用 generate_scene_outfits，不用本工具。按要求修订角色原始“你的外观”：提取原文、生成完整新版，卡片展示原文与新版供用户确认，仅确认后替换该段。批量时逐个角色按各自原文生成。', object({ character_id: id('角色编号'), instruction: string('具体修改要求，例如仅把发色改红，其他细节保留', 4000) })),
+  definition('apply_angel_appearance', '修改天使自己的默认外观，先读取 read_angel；生成完整替换草稿，用户确认后仅修改天使外观段，不操作普通角色。', object({ instruction: string('仅修改天使默认外观的具体要求', 4000) })),
+  definition('generate_angel_outfits', '为天使自己设计或修改私服、居家服、睡衣。复用天使服装生成器，展示完整草稿，确认后只保存指定槽位，不自动生图，不修改普通角色或默认外观。', object({ scenes: { type: 'array', items: { type: 'string', enum: ['casual', 'home', 'sleep'] }, minItems: 1, maxItems: 3, uniqueItems: true }, instruction: string('款式、颜色或修改要求', 4000) }, ['scenes'])),
   definition('rewrite_world_setting', '按要求修订指定世界观，读取完整原文并生成完整新版，确认卡展示前后全文，用户确认后才替换。', object({ world_id: id('世界观编号'), instruction: string('对世界观原文的修改要求', 4000) })),
   definition('batch_characters', '对固定角色集合逐项执行同一工具。省略 character_ids 表示当前全体角色。长期修改先汇总内容供用户确认一次。arguments_json 是共用参数 JSON 对象，不含 character_id；可用 per_character_json 按角色编号覆盖具体内容。只支持含 character_id 的工具，禁止嵌套批量。', object({
     tool_name: string('已注册的角色工具名称', 80), arguments_json: string('完整 JSON 对象，例如 {"instruction":"仅把发色改为红色"}', 50000),
@@ -55,6 +58,7 @@ export function validateToolArgs(schema, value, path = '参数') {
   if (schema.enum && !schema.enum.includes(value)) throw new Error(`${path}不在允许范围内`);
   if (schema.type === 'object') {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${path}必须是对象`);
+    if (Object.keys(value).length < (schema.minProperties || 0)) throw new Error(`${path}至少需要提供一个待修改字段`);
     for (const k of schema.required || []) if (!Object.hasOwn(value, k)) throw new Error(`${path}缺少 ${k}`);
     for (const [k, v] of Object.entries(value)) {
       if (!Object.hasOwn(schema.properties, k)) throw new Error(`不支持的参数 ${k}`);
@@ -87,7 +91,7 @@ export function createGodTools(repo, world, memory, services) {
         const c = character(args.character_id);
         return { id: c.id, name: c.name, display_name: c.display_name, base_prompt: c.base_prompt };
       }
-      case 'update_character': character(args.character_id); return services.api({ method: 'PUT', path: `/api/characters/${args.character_id}`, body: { base_prompt: args.base_prompt, ...(args.display_name ? { display_name: args.display_name } : {}) } }, ctx);
+      case 'update_character': character(args.character_id); return services.api({ method: 'PUT', path: `/api/characters/${args.character_id}`, body: { ...(args.base_prompt !== undefined ? { base_prompt: args.base_prompt } : {}), ...(args.display_name !== undefined ? { display_name: args.display_name } : {}) } }, ctx);
       case 'inspect_neighbors': {
         const q = `%${args.query || ''}%`;
         return { characters: db.prepare('SELECT id,display_name FROM characters WHERE display_name LIKE ? OR name LIKE ? ORDER BY id LIMIT 100').all(q, q),
@@ -101,6 +105,7 @@ export function createGodTools(repo, world, memory, services) {
       }
       case 'set_schedule': {
         const c = character(args.character_id);
+        services.assertScheduleIdle?.(c.id);
         if (!services.scheduleEnabled() || c.schedule_enabled === 0) throw new Error('这位角色的日程尚未启用，暂时无法安排');
         if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date) || Number.isNaN(Date.parse(args.date)) || new Date(args.date).toISOString().slice(0, 10) !== args.date || args.date < services.localDate()) throw new Error('需要有效的今天或未来日期');
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.start_time) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(args.end_time) || args.end_time <= args.start_time) throw new Error('请使用当天开始时间早于结束时间的 HH:MM 时段，跨日安排需分成两段');
@@ -124,7 +129,10 @@ export function createGodTools(repo, world, memory, services) {
       case 'create_world_event': return world.create(args, ctx);
       case 'inspect_work': return world.list(args.event_id);
       case 'recall_memory': return { memories: memory.recall(args.query) || '暂时没有对应的往日记忆。' };
-      case 'list_capabilities': return { tools: moduleToolCatalog().filter(t => !args.module || t.module === args.module), core: GOD_TOOLS.slice(0, 9).map(t => ({ name: t.function.name, description: t.function.description })) };
+      case 'list_capabilities': {
+        const matched=moduleToolCatalog().filter(t=>!args.module||t.module===args.module);
+        return {tools:matched,core:GOD_TOOLS.filter(t=>!moduleTool(t.function.name)).map(t=>({name:t.function.name,description:t.function.description})),...(args.module && args.module!=='神说' && !matched.length?{unavailable:true,note:'吾神，该模块没有接入，不能用其他模块写工具代替操作。'}:{})};
+      }
       default: {
         const entry = moduleTool(name);
         if (!entry) throw new Error('这项能力尚未接入，不能执行');
@@ -137,10 +145,14 @@ export function createGodTools(repo, world, memory, services) {
     const callId = `${runId}:${round}:${call.id}`;
     let args;
     try {
-      if (!def) throw new Error('这项能力尚未接入');
+      if (!def) return { ok: false, stop: true, code: 'CAPABILITY_UNAVAILABLE', error: '这项能力尚未接入，不能用其他写工具替代执行。' };
       args = JSON.parse(call.function.arguments);
       validateToolArgs(def.function.parameters, args);
+      const input = db.prepare('SELECT input FROM god_runs WHERE id=?').get(runId)?.input || '';
+      validateBusinessOperation(call.function.name,args,input);
       signal?.throwIfAborted();
+      const boundary = capabilityBoundary(input);
+      if (boundary) return { ok: false, stop: true, code: 'CAPABILITY_UNAVAILABLE', error: boundary };
     } catch (err) { return { ok: false, error: err.message }; }
     const readOnly = ['inspect_changes', 'inspect_neighbors', 'read_character', 'read_character_source', 'inspect_work', 'recall_memory', 'list_capabilities'].includes(call.function.name) || moduleTool(call.function.name)?.method === 'GET';
     const key = readOnly ? callId : effectKey(runId, call.function.name, args);
@@ -152,35 +164,60 @@ export function createGodTools(repo, world, memory, services) {
     let result;
     try {
       const ctx = { runId, effectKey: key, callId, signal };
-      const value = CONFIRMED_TOOLS.has(row.name)
-        ? await changes.create(runId, moduleTool(row.name)?.label || (row.name === 'rewrite_world_setting' ? '世界观修改' : row.name === 'apply_character_appearance' ? '外观修改' : '角色资料变更'), [{ name: row.name, args }], signal)
-        : await dispatch(row.name, args, ctx);
-      result = { ok: true, value };
+      const value = await dispatchOperation({ name: row.name, args }, ctx);
+      result = value?.unavailable ? {ok:false,stop:true,code:'CAPABILITY_UNAVAILABLE',error:value.note} : { ok: true, value };
     } catch (err) {
       const saved = parseJson(db.prepare('SELECT result_json FROM god_tool_calls WHERE id=?').get(callId)?.result_json);
-      result = saved ? { ok: true, value: saved } : { ok: false, error: err.message === 'ALREADY_ACTIVE_EVENT' ? '这位角色已有进行中的奇遇，请先完成当前奇遇。' : err.message, ...(err.uncertain ? { uncertain: true } : {}) };
+      result = saved ? { ok: true, value: saved } : { ok: false, error: err.message === 'ALREADY_ACTIVE_EVENT' ? '这位角色已有进行中的奇遇，请先完成当前奇遇。' : err.message, ...(err.uncertain ? { uncertain: true } : {}),...(err.code==='CAPABILITY_UNAVAILABLE'?{stop:true,code:err.code}:{}) };
     }
     const status = result.ok ? 'done' : result.uncertain ? 'uncertain' : 'failed';
     db.prepare('UPDATE god_tool_calls SET status=?,result_json=? WHERE id=?').run(status, JSON.stringify(result), callId);
     repo.emit(runId, 'tool', { ...row, status, result });
     return result;
   }
-  const policy = createChangePolicy(db, services.api, services.generateReplacement);
-  const changes = createChangeSets(repo, { ...policy, apply: (item, ctx) => {
-    if (['apply_character_appearance', 'rewrite_world_setting', 'generate_scene_outfits'].includes(item.name)) {
-      if (!item.replacement || !item.preview?.length) throw new Error('旧版草稿未包含完整替换正文，请重新生成');
-      return services.api(item.replacement, ctx);
-    }
-    if (item.name === 'recruit_character') return services.api({ method: 'POST', path: '/api/characters', body: item.args }, ctx);
-    return dispatch(item.name, item.args, ctx);
-  } });
-  const batches = createBatchTasks(repo, { changes, needsConfirmation: name => CONFIRMED_TOOLS.has(name), execute: dispatchOperation,
-    validate(operation) {
+  const policy = createChangePolicy(db, services.api, services.generateReplacement, services);
+  const frozenTools=new Set([...PREPARED_TOOLS,'apply_character_appearance','rewrite_world_setting','generate_scene_outfits','apply_angel_appearance','update_angel','generate_angel_outfits','regenerate_schedule','generate_diary','generate_emoji_prompt','generate_emoji_image','generate_emoji_images']);
+  const applyOperation = async (item, ctx) => {
+    if (frozenTools.has(item.name) && !item.replacement) throw new Error('旧版草稿未包含冻结结果，请重新生成');
+    if (item.name==='update_character' && item.args.display_name!==undefined && !item.preview?.some(field=>field.label==='显示名称' && field.after===item.args.display_name)) throw new Error('旧版草稿未展示新名字，请重新生成');
+    if (item.name==='recruit_character' && item.args.description===undefined) throw new Error('旧版招募草稿已失效，请重新提出招募要求');
+    if (!item.replacement) return dispatch(item.name, item.args, ctx);
+    const response=await services.api(item.replacement,ctx);
+    const accepted=response.status===202 || response.data?.started===true || response.data?.queued===true;
+    return {status:accepted?'accepted':'returned',data:response.data,note:accepted?'已提交原功能模块，后台仍在处理，请查询实际结果。':'已保存准备好的内容。'};
+  };
+  const changes = createChangeSets(repo, { ...policy, apply: applyOperation });
+  const batches = createBatchTasks(repo, { changes, needsConfirmation: (name, args) => policy.needsConfirmation({ name, args }), execute: dispatchOperation,
+    validate(operation,ctx) {
       const def = GOD_TOOLS.find(t => t.function.name === operation.name);
+      if (!def) throw Object.assign(new Error('该能力没有接入，不能执行或用其他写操作替代'),{code:'CAPABILITY_UNAVAILABLE'});
       if (!def?.function.parameters.properties.character_id || operation.name === 'batch_characters') throw new Error('该工具不支持按角色批量执行');
       validateToolArgs(def.function.parameters, operation.args);
+      validateBusinessOperation(operation.name,operation.args,db.prepare('SELECT input FROM god_runs WHERE id=?').get(ctx.runId)?.input||'');
     },
   });
-  function dispatchOperation(item, ctx) { return dispatch(item.name, item.args, ctx); }
-  return { definitions: GOD_TOOLS, execute, changes, batches };
+  function validateBusinessOperation(name,args,input) {
+    if (args.date!==undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)||Number.isNaN(Date.parse(args.date))||new Date(args.date).toISOString().slice(0,10)!==args.date)) throw new Error('需要有效的 YYYY-MM-DD 日期');
+    if (name==='create_outfit' && !!args.description===!!args.instruction) throw new Error('instruction 与 description 必须且只能提供一个');
+    if (name==='create_outfit' && args.description && !input.includes(args.description)) throw new Error('description 只能原样使用本轮用户提供的完整正文；设计要求请传 instruction，调用原外观生成器');
+    if (name==='update_angel' && args.display_name===undefined && args.persona===undefined) throw new Error('至少提供一个待修改字段');
+    if (name==='set_schedule') {
+      const c=character(args.character_id);
+      if (!services.scheduleEnabled()||c.schedule_enabled===0) throw new Error('这位角色的日程尚未启用，暂时无法安排');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)||Number.isNaN(Date.parse(args.date))||new Date(args.date).toISOString().slice(0,10)!==args.date||args.date<services.localDate()) throw new Error('需要有效的今天或未来日期');
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.start_time)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.end_time)||args.end_time<=args.start_time) throw new Error('请使用当天开始时间早于结束时间的 HH:MM 时段，跨日安排需分成两段');
+    }
+  }
+  async function dispatchOperation(item, ctx) {
+    if (policy.needsConfirmation(item)) return changes.create(ctx.runId, moduleTool(item.name)?.label || '资料修改', [item], ctx.signal);
+    if (PREPARED_TOOLS.has(item.name)) {
+      const before = policy.snapshot(item);
+      const prepared = await policy.prepare(item, ctx.signal, before);
+      const assertCurrent = () => { if (JSON.stringify(policy.snapshot(prepared)) !== JSON.stringify(before)) throw new Error('生成期间原数据已改变，请重试'); };
+      assertCurrent();
+      return applyOperation(prepared, { ...ctx, assertCurrent });
+    }
+    return dispatch(item.name, item.args, ctx);
+  }
+  return { definitions: GOD_TOOLS, execute, changes, batches, boundary: capabilityBoundary };
 }
