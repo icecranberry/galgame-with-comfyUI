@@ -39,11 +39,18 @@ import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
 
 let timer = null;
+let initTimer = null;
+let schedulerGeneration = 0;
 let processing = false;
 let freqTimer = null;        // 线路 B：频率强制线
 let freqRunning = false;
 let startupTimer = null;     // 线路 C：启动强制线
 let startupRunning = false;
+
+function automaticChatEnabled(generation = schedulerGeneration) {
+  return generation === schedulerGeneration && config.features.proactiveChat
+    && config.features.proactiveChatFreq > 0;
+}
 
 // ── 未回复连续计数（DB 持久化，重启不丢失）──
 
@@ -778,7 +785,8 @@ async function tick() {
   }
 
   // 功能未开启时跳过
-  if (!config.features.proactiveChat) return;
+  if (!automaticChatEnabled()) return;
+  const generation = schedulerGeneration;
 
   const db = getDb();
   try {
@@ -877,6 +885,7 @@ async function tick() {
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
+    if (!automaticChatEnabled(generation)) return;
     const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
     lorebookTurn?.commit();
 
@@ -930,11 +939,6 @@ function freqToMinutes(freq) {
   return Math.round(8 + (1 - freq) / 0.9 * 112);
 }
 
-function startupToMinutes(freq) {
-  // freq 0.1 → 10min, freq 1.0 → 5min（启动线更密集）
-  return Math.round(5 + (1 - freq) / 0.9 * 5);
-}
-
 function fmtIn(minutes) {
   if (minutes >= 60) {
     const h = Math.floor(minutes / 60);
@@ -954,7 +958,8 @@ function stopFreqLine() {
 function startFreqLine() {
   stopFreqLine();
   const freq = config.features.proactiveChatFreq;
-  if (freq <= 0) return;
+  if (!automaticChatEnabled()) return;
+  const generation = schedulerGeneration;
 
   freqRunning = true;
   const intervalMin = freqToMinutes(freq);
@@ -964,13 +969,13 @@ function startFreqLine() {
   console.log(`⚡ [Line B·Freq]  timer set, first fire in ${delayMin.toFixed(1)}min (base ${intervalMin}min ±${maxJitter.toFixed(0)}min)`);
 
   const scheduleNext = () => {
-    if (!freqRunning) return;
+    if (!freqRunning || !automaticChatEnabled(generation)) return;
     const maxJitter = Math.min(10, intervalMin * 0.3);
     const nextMin = Math.max(1, intervalMin + (-maxJitter + Math.random() * maxJitter * 2));
     freqTimer = setTimeout(() => {
-      if (!freqRunning) return;
+      if (!freqRunning || !automaticChatEnabled(generation)) return;
       console.log(`⚡ [Line B·Freq]  firing...`);
-      forceProactiveNow().then((r) => {
+      forceProactiveNow(undefined, { automatic: true, generation }).then((r) => {
         if (r) {
           console.log(`⚡ [Line B·Freq]  force done: ${r.character} (${r.motive})`);
         } else {
@@ -998,8 +1003,8 @@ function stopStartupLine() {
 
 function startStartupLine() {
   stopStartupLine();
-  const freq = config.features.proactiveChatFreq;
-  if (freq <= 0) return;
+  if (!automaticChatEnabled()) return;
+  const generation = schedulerGeneration;
 
   // 开发环境不执行启动暖场（开发期重启频繁，避免每次启动都强制触发一次主动消息）
   if (config.isDev) {
@@ -1012,15 +1017,15 @@ function startStartupLine() {
   // 单次首发：1~3min 后触发一次即结束（只做启动暖场）
   const firstMin = 1 + Math.random() * 2;
   startupTimer = setTimeout(async () => {
-    if (!startupRunning) return;
+    if (!startupRunning || !automaticChatEnabled(generation)) return;
     console.log('⚡ [Line C·Startup] firing (one-shot)...');
-    const r = await forceProactiveNow();
+    const r = await forceProactiveNow(undefined, { automatic: true, generation });
     if (r) {
       console.log(`⚡ [Line C·Startup] force done: ${r.character} (${r.motive}) — line finished`);
     } else {
       console.log('⚡ [Line C·Startup] no eligible character — line finished');
     }
-    startupRunning = false;
+    if (generation === schedulerGeneration) startupRunning = false;
   }, firstMin * 60_000);
   return firstMin;
 }
@@ -1029,56 +1034,25 @@ function startStartupLine() {
  * 当频率配置变更时调用（由 config 路由触发）
  */
 export function restartProactiveFreq() {
-  startFreqLine();
-  startStartupLine();
+  startProactiveChatScheduler();
 }
 
 // ── 启动：三条线并行 ──
 
 export function startProactiveChatScheduler() {
-  console.log('⚡ [Proactive] Starting (interval:', CHECK_INTERVAL / 60000, 'min)');
-
-  const freq = config.features.proactiveChatFreq;
-  if (freq <= 0) {
-    console.log('⚡ [Proactive] freq=0, all lines disabled');
-    return;
-  }
-
-  // 线路 A：VAD/好感度调度（60s 后首次检查，之后每 5min）
-  setTimeout(() => {
+  stopProactiveChatScheduler();
+  if (!automaticChatEnabled()) return;
+  const generation = schedulerGeneration;
+  // 可取消的启动等待；频率/开关变化后，旧回调不能重新拉起调度器。
+  initTimer = setTimeout(() => {
+    if (!automaticChatEnabled(generation)) return;
+    initTimer = null;
     tick();
     timer = setInterval(tick, CHECK_INTERVAL);
-    const nextAt = new Date(Date.now() + CHECK_INTERVAL);
-    console.log(`⚡ [Line A·VAD]     next trigger at ${nextAt.toLocaleString('zh-CN', { hour12: false })} (in ${fmtIn(CHECK_INTERVAL / 60000)})`);
+    startFreqLine();
+    startStartupLine();
   }, 60_000);
-  console.log(`⚡ [Line A·VAD]     first trigger in ${fmtIn(1)} (after DB init)`);
-
-  // 线路 B：频率强制线（60s 后启动，先打印预估）
-  if (freq > 0) {
-    console.log(`⚡ [Line B·Freq]    first trigger in ${fmtIn(1 + freqToMinutes(freq))} (after DB init, interval ${fmtIn(freqToMinutes(freq))}±5min)`);
-  } else {
-    console.log('⚡ [Line B·Freq]    disabled (freq=0)');
-  }
-  setTimeout(() => startFreqLine(), 60_000);
-
-  // 线路 C：启动强制线（和 B 线一样 60s 后启动；开发环境跳过，只做生产启动暖场）
-  setTimeout(() => {
-    const firstMin = startStartupLine();
-    if (firstMin != null) {
-      console.log(`⚡ [Line C·Startup] next trigger in ${fmtIn(firstMin)} (interval ${fmtIn(startupToMinutes(freq))}±3min)`);
-    } else {
-      console.log('⚡ [Line C·Startup] not scheduled (freq=0 or dev mode)');
-    }
-  }, 60_000);
-  if (freq > 0) {
-    if (config.isDev) {
-      console.log('⚡ [Line C·Startup] disabled (dev mode: startup warmup off)');
-    } else {
-      console.log(`⚡ [Line C·Startup] first trigger in ${fmtIn(1 + startupToMinutes(freq))} (after DB init, interval ${fmtIn(startupToMinutes(freq))}±3min)`);
-    }
-  } else {
-    console.log('⚡ [Line C·Startup] disabled (freq=0)');
-  }
+  console.log('⚡ [Proactive] all lines start after 60s');
 }
 
 /**
@@ -1086,7 +1060,8 @@ export function startProactiveChatScheduler() {
  * 无视 processing 锁和 next_proactive_at 时间，直接走完整流程。
  * @returns {Promise<{ character: string, motive: string, greeting: string } | null>}
  */
-export async function forceProactiveNow(targetCharacterId) {
+export async function forceProactiveNow(targetCharacterId, { automatic = false, generation = schedulerGeneration } = {}) {
+  if (automatic && !automaticChatEnabled(generation)) return null;
   try {
     const db = getDb();
 
@@ -1171,6 +1146,7 @@ export async function forceProactiveNow(targetCharacterId) {
   }
   const {greeting, lorebookTurn} = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
+  if (automatic && !automaticChatEnabled(generation)) return null;
   const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
   lorebookTurn?.commit();
 
@@ -1223,6 +1199,8 @@ function _parseCharLoras(raw) {
 }
 
 export function stopProactiveChatScheduler() {
+  schedulerGeneration++;
+  if (initTimer) { clearTimeout(initTimer); initTimer = null; }
   if (timer) {
     clearInterval(timer);
     timer = null;

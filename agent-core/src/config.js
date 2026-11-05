@@ -600,12 +600,11 @@ export function updateFeatureFlag(key, value) {
 
 /**
  * 更新主动聊天频率 0~1
- * freq=0 → 双线全关；freq>0 → 启用以频率为基准的定时触发线
+ * freq=0 暂停自动调度；频率独立于主动聊天总开关。
  */
 export function updateProactiveFreq(value) {
   const f = Math.max(0, Math.min(1, parseFloat(value) || 0));
   config.features.proactiveChatFreq = f;
-  config.features.proactiveChat = f > 0;
   persistSettingSync('feature_proactiveChatFreq', String(f));
   console.log(`[config] proactiveChatFreq = ${f}`);
 }

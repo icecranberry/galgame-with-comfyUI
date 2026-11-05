@@ -290,6 +290,7 @@ router.put('/features', (req, res) => {
     return res.status(400).json({ error: `Invalid feature key: ${key}` });
   }
   updateFeatureFlag(key, value);
+  if (key === 'proactiveChat') restartProactiveFreq();
   if (key === 'serializeBackgroundLLM') {
     applyFromConfig(config);
   }
