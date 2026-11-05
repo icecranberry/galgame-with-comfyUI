@@ -5,6 +5,13 @@ import { SYSTEM_RULES_CONTENT, THINKING_CHAIN_ZH_PLACEHOLDER, THINKING_CHAIN_ZH_
 
 let _db = null;
 
+/** 兼容已有世界观；重复启动不覆盖用户保存的风格。 */
+export function migrateWorldLanguageStyle(db) {
+  if (!db.prepare('PRAGMA table_info(world_settings)').all().some(column => column.name === 'language_style')) {
+    db.exec("ALTER TABLE world_settings ADD COLUMN language_style TEXT NOT NULL DEFAULT ''");
+  }
+}
+
 /** db/index.js 打开数据库后注入句柄（此模块不反向依赖 db/index.js） */
 export function initWorldRepository(db) {
   _db = db;
@@ -143,21 +150,22 @@ export function getWorldSettingById(id) {
   return database.prepare(`SELECT * FROM world_settings WHERE id = ?`).get(id);
 }
 
-export function createWorldSetting({ name, content }) {
+export function createWorldSetting({ name, content, language_style = '' }) {
   const database = handle();
   const maxOrder = database.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM world_settings`).get().m;
   const result = database.prepare(
-    `INSERT INTO world_settings (name, content, is_active, sort_order) VALUES (?, ?, 0, ?)`
-  ).run(name, content, maxOrder + 1);
+    `INSERT INTO world_settings (name, content, language_style, is_active, sort_order) VALUES (?, ?, ?, 0, ?)`
+  ).run(name, content, language_style, maxOrder + 1);
   return getWorldSettingById(result.lastInsertRowid);
 }
 
-export function updateWorldSetting(id, { name, content }) {
+export function updateWorldSetting(id, { name, content, language_style }) {
   const database = handle();
   const sets = [];
   const params = [];
   if (name !== undefined) { sets.push('name = ?'); params.push(name); }
   if (content !== undefined) { sets.push('content = ?'); params.push(content); }
+  if (language_style !== undefined) { sets.push('language_style = ?'); params.push(language_style); }
   if (sets.length === 0) return null;
   sets.push("updated_at = datetime('now')");
   params.push(id);

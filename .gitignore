@@ -64,6 +64,8 @@ agent-core/test/helpers/*
 !agent-core/test/logBuffer.test.js
 !agent-core/test/roleplayRules.test.js
 !agent-core/test/lorebook*.test.js
+!agent-core/test/worldLanguageStyle.test.js
+!agent-core/test/worldLanguageStyle.live.test.js
 !agent-core/test/dialogueTranscript.test.js
 !agent-core/test/characterBackgrounds.test.js
 !agent-core/test/chatModePrompt.test.js

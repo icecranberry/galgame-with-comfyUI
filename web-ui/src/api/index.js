@@ -917,6 +917,10 @@ export async function polishWorldSetting(data) {
   return request(`/config/world-settings/polish`, { method: 'POST', body: data })
 }
 
+export async function polishWorldLanguageStyle(id, data) {
+  return request(`/config/world-settings/${id}/language-style/polish`, { method: 'POST', body: data })
+}
+
 export async function activateWorldSetting(id) {
   return request(`/config/world-settings/${id}/activate`, { method: 'POST' })
 }

@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from '../services/worldLanguageStyle.js';
 import { scheduleMomentCompanions } from '../services/scheduleParticipants.js';
 import { Router } from 'express';
 import { saveBase64Image } from '../services/imagePaths.js';
@@ -874,7 +875,7 @@ async function generateMomentPostImpl(character, opts = {}) {
 通用规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
-${MOMENT_TONE_RULES}
+${appendWorldLanguageStyle(MOMENT_TONE_RULES)}
 ${MOMENT_IMAGE_RULES}
 - text 中的事符合当前时间和天气，但不用报时或报天气；只有它直接触发了这次反应才自然提及。
 
@@ -1161,7 +1162,7 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
 通用规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
-${MOMENT_TONE_RULES}
+${appendWorldLanguageStyle(MOMENT_TONE_RULES)}
 ${MOMENT_IMAGE_RULES}
 - text 中的事符合当前时间，不用特意报时。
 

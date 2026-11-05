@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config.js';
 import { initSettingsHandle, loadSystemSettings } from './settings.js';
-import { initWorldRepository } from './worldRepository.js';
+import { initWorldRepository, migrateWorldLanguageStyle } from './worldRepository.js';
 import { migrateLorebooks } from './lorebookRepository.js';
 import { migratePresets } from './presetRepository.js';
 import { seedAll } from './seedData.js';
@@ -1072,6 +1072,7 @@ function initSchema(db) {
 
   // 迁移: 将 global_rules.world_setting 移至 world_settings 表（多套世界观）
   migrateWorldSettings(db);
+  migrateWorldLanguageStyle(db);
 
   // 空表补默认激活世界观：前端世界观弹窗的保存依赖选中项，空表时写入无法落库
   seedDefaultWorldSetting(db);

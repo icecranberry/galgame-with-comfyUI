@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from '../services/worldLanguageStyle.js';
 import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
@@ -882,7 +883,7 @@ ${coreRules}
       return '10~60个汉字';
     })();
     const preSummarySystem = [
-      getChatRhythmRules(),
+      appendWorldLanguageStyle(getChatRhythmRules()),
       emojiNote,
     ];
     // 长度条放动态块最前，仍紧跟在规则区之后（<dynamic_context> 顶部）

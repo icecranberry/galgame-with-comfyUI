@@ -22,6 +22,8 @@ import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
 import { getMemorySettings, saveMemorySettings, normalizeMemorySettings } from '../services/memory/memoryConfig.js';
 import { getPreferredMemoryEmbeddingProfile, testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
 import { reindexAllMemories } from '../services/memory/memoryRepository.js';
+import { buildLanguageStylePolishRequest } from '../services/worldLanguageStylePolish.js';
+import { chatSync as chatSyncWithLorebook } from '../services/lorebook/runtime.js';
 
 const router = Router();
 
@@ -957,9 +959,10 @@ router.get('/world-settings', (req, res) => {
 
 // POST /api/world-settings — 创建新世界观
 router.post('/world-settings', (req, res) => {
-  const { name, content } = req.body;
+  const { name, content, language_style } = req.body;
+  if (language_style !== undefined && typeof language_style !== 'string') return res.status(400).json({ error: '语言风格必须是文本' });
   if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-  const item = createWorldSetting({ name: name.trim(), content: content?.trim() || '' });
+  const item = createWorldSetting({ name: name.trim(), content: content?.trim() || '', language_style: language_style?.trim() });
   res.json({ ok: true, item });
 });
 
@@ -967,8 +970,9 @@ router.post('/world-settings', (req, res) => {
 router.put('/world-settings/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id || !getWorldSettingById(id)) return res.status(404).json({ error: 'not found' });
-  const { name, content } = req.body;
-  const item = updateWorldSetting(id, { name: name?.trim(), content: content?.trim() });
+  const { name, content, language_style } = req.body;
+  if (language_style !== undefined && typeof language_style !== 'string') return res.status(400).json({ error: '语言风格必须是文本' });
+  const item = updateWorldSetting(id, { name: name?.trim(), content: content?.trim(), language_style: language_style?.trim() });
   res.json({ ok: true, item });
 });
 
@@ -991,6 +995,28 @@ router.post('/world-settings/:id/activate', (req, res) => {
 // GET /api/config/system-rules — 获取系统破限词（供世界观润色等 AI 功能请求体携带）
 router.get('/system-rules', (_req, res) => {
   res.json({ content: getSystemRules({ roleplay: false }) || '' });
+});
+
+// 语言风格只生成草稿；保存复用世界观局部更新接口。
+router.post('/world-settings/:id/language-style/polish', async (req, res) => {
+  const id = Number(req.params.id);
+  const world = Number.isSafeInteger(id) && id > 0 ? getWorldSettingById(id) : null;
+  if (!world) return res.status(404).json({ error: '世界观不存在' });
+  const source = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+  if (!source) return res.status(400).json({ error: '请先填写语言风格需求或示例' });
+  try {
+    const { messages, lorebook } = buildLanguageStylePolishRequest({
+      content: source,
+      worldContent: world.content,
+      worldId: world.id,
+    });
+    const result = await chatSyncWithLorebook(messages, { temperature: 0.7, label: '语言风格润色', lorebook });
+    const polished = (result || '').trim().replace(/^```[^\n]*\n([\s\S]*?)\n?```$/, '$1').trim();
+    if (!polished) return res.status(502).json({ error: 'AI 生成结果为空，请重试' });
+    res.json({ ok: true, content: polished });
+  } catch (err) {
+    res.status(500).json({ error: '润色失败: ' + err.message });
+  }
 });
 
 // POST /api/world-settings/polish — AI 一键润色扩写世界观（酒馆世界书风格）

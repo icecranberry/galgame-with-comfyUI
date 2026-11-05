@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 import { chatWithPreset } from './presets/narrative.js';
 /**
  * 用户自己发朋友圈 + 角色来评论区互动
@@ -162,7 +163,7 @@ export async function generateUserPostComment(character, post, historyComments, 
   const commentRulesContext = [
     '<user_moment_comment_rules>',
     '像刷到好友动态一样在评论区随口说话，参考群聊那种即时反应，但这里只输出一条评论：',
-    MOMENT_COMMENT_RULES,
+    appendWorldLanguageStyle(MOMENT_COMMENT_RULES),
     '- 优先抓住正文或图里的一个点给出第一反应；短、糙、随口比完整书面句更像真人。',
     '- 可以吐槽内容、质疑细节、起哄、追问，也可以只给一个短反应；不要每条都强行幽默。',
     '- 不要用“这张图”“配图里”开场，不要解说画面；可以自然提到某个具体细节。',

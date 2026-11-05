@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 /**
  * 用户评论流程：帖主回评 / @ 点名回复 / 楼中楼回评
  *
@@ -204,7 +205,7 @@ ${visibleContent}
 
 ${latestCommentLines.join('\n')}
 
-${MOMENT_COMMENT_RULES}
+${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 可以参考评论区的上下文，但不要重复自己已经说过的话
 ${momentRules}`
     : (() => {
@@ -225,7 +226,7 @@ ${userName}在评论区${opts.isThreadReply ? '楼里回复' : '评论'}${opts.i
 
 ${latestCommentLines.join('\n')}
 
-${MOMENT_COMMENT_RULES}
+${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 看你的性格和你与${userName}的关系，决定是调侃、关心、吐槽，还是只起个哄`;
       })();
 

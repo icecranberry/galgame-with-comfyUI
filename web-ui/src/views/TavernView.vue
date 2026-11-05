@@ -532,6 +532,7 @@
                 <div class="world-editor-bar">
                   <span class="world-editor-label">世界观内容</span>
                   <div class="world-editor-tools">
+                    <linshe-button variant="secondary" :disabled="!selectedWorldId || worldSaving" @click="showLanguageStyle = true">语言风格</linshe-button>
                     <linshe-button
                       class="btn-polish"
                       variant="secondary"
@@ -731,6 +732,13 @@
       <VoiceLibraryModal v-model="showVoiceLibrary" :characters="sortedCharacters" />
 
     <WorldLorebookModal v-model="showLorebook" :world-id="selectedWorldId" :world-name="worldItems.find(item => item.id === selectedWorldId)?.name || ''" />
+    <WorldLanguageStyleModal
+      v-model="showLanguageStyle"
+      :world-id="selectedWorldId"
+      :world-name="selectedWorld?.name || ''"
+      :language-style="selectedWorld?.language_style || ''"
+      @saved="onLanguageStyleSaved"
+    />
     <PromptPresetModal v-model="showPromptPresets" />
     <CharacterFolderManager
       v-model="showFolderManager"
@@ -742,6 +750,7 @@
 
 <script setup>
 import WorldLorebookModal from '../components/WorldLorebookModal.vue'
+import WorldLanguageStyleModal from '../components/WorldLanguageStyleModal.vue'
 import PromptPresetModal from '../components/PromptPresetModal.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
@@ -1285,6 +1294,8 @@ watch(showRelationGraph, async (val) => {
 const showWorldModal = ref(false)
 const showLorebook = ref(false)
 const worldItems = ref([])
+const showLanguageStyle = ref(false)
+const selectedWorld = computed(() => worldItems.value.find(item => item.id === selectedWorldId.value))
 const activeWorldName = ref('')
 const selectedWorldId = ref(null)
 const worldContent = ref('')
@@ -1298,6 +1309,12 @@ const editingNameId = ref(null)
 const editNameValue = ref('')
 const editNameInput = ref(null)
 const worldTextareaRef = ref(null)
+
+function onLanguageStyleSaved(item) {
+  const saved = worldItems.value.find(world => world.id === item.id)
+  if (saved) saved.language_style = item.language_style
+  showToast('语言风格已保存', 'success')
+}
 
 // 纯文本世界观 → 带层级标记的展示 HTML（不改变原始文本内容）
 function toWorldHighlightHtml(text) {
@@ -2148,6 +2165,7 @@ onMounted(async () => {
 }
 .world-editor-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -2162,6 +2180,7 @@ onMounted(async () => {
 }
 .world-editor-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

@@ -9,6 +9,8 @@ import {
   stripImagePromptLines,
 } from '../src/utils/groupImagePrompt.js';
 import { IMAGE_PROMPT_RULE } from '../src/builtinRules.js';
+import Database from 'better-sqlite3';
+import { initWorldRepository } from '../src/db/worldRepository.js';
 
 const members = new Map([['宵宫', { id: 1, display_name: '宵宫' }]]);
 
@@ -105,7 +107,11 @@ test('规范特征只在行首/块内命中，普通英文画面描述不误判'
   assert.equal(isImageRuleEcho(undefined), false);
 });
 
-test('发图格式行里的花括号放的是可直接用的英文示例，不是占位词', () => {
+test('发图格式行里的花括号放的是可直接用的英文示例，不是占位词', t => {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE world_settings (id INTEGER PRIMARY KEY, is_active INTEGER, language_style TEXT)');
+  initWorldRepository(db);
+  t.after(() => { initWorldRepository(null); db.close(); });
   const block = buildProtocolBlock();
   const demo = block.match(/^\s*角色名: \{([^{}]*)\}$/m);
   assert.ok(demo, '格式示范里应有一对花括号');

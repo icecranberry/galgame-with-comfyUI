@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 /**
  * 群聊引擎 — 批量剧本生成 + 流式行协议解析
  *
@@ -134,7 +135,7 @@ export function detectMentionAll(text) {
 
 /**
  * 稳定块 [1]：输出协议 + 活人感规则
- * 全局不变（仅依赖用户昵称和全局图片规则），排在群名片之前：
+ * 同配置下不变（依赖用户昵称、全局图片规则和当前世界观语言风格），排在群名片之前：
  * 所有群共享这段前缀缓存，且改群名/成员不会连带使协议部分失效
  */
 export function buildProtocolBlock() {
@@ -145,7 +146,7 @@ export function buildProtocolBlock() {
   const imageRulesBlock = imagePromptFieldGuide
     ? `\n\n<image_prompt_rules>\n（以下规范只决定 {} 里的英文画面描述怎么写。它是写作规范、不是要填进 {} 的内容，任何情况下都不得原样出现在群聊消息里）\n${imagePromptFieldGuide}\n</image_prompt_rules>`
     : '';
-  return `<group_chat_rules>
+  return appendWorldLanguageStyle(`<group_chat_rules>
 你一个人扮演群聊中的【全部角色】，根据聊天记录续写接下来的群聊消息。
 
 输出协议（严格遵守）：
@@ -182,7 +183,7 @@ export function buildProtocolBlock() {
 - 谁有话谁说，同一个人可以连发几条；也允许有人潜水不说话，不必人人到场
 - 角色之间互动要真实：接梗、抬杠、拆台、开玩笑、追问细节、@点名怼人都可以，别一团和气互相吹捧
 - 允许小跑题：聊着聊着岔开话题、想起别的事，比"围着主题开会"更像真群聊
-- 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思
+- 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思`) + `
 - 爱发图：聊到正在做的事、看到的东西、吃的喝的、去过的地方、自拍表情包时，主动配一张图
 - 禁止括号动作描写、禁止方括号动作描写、禁止旁白、禁止总结式客套发言；颜文字可以正常使用，但不能把动作藏进括号
 ${imageRulesBlock}

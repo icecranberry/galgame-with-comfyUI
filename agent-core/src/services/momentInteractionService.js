@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 /**
  * 朋友圈关系网互动服务
  *
@@ -115,7 +116,7 @@ ${post.content}
 
 请以你的身份（${friendName}），在${posterName}的朋友圈评论区留一条自然的评论。
 
-${MOMENT_COMMENT_RULES}
+${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 看你的性格和你们的关系，决定是调侃、关心、吐槽，还是只起个哄`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -173,7 +174,7 @@ ${post.content}
 ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
 请以你的身份自然回复${friendName}的评论。
 
-${MOMENT_COMMENT_RULES}
+${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 可以参考上下文，但不要重复自己说过的话`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
@@ -234,7 +235,7 @@ ${threadText}
 
 现在轮到你回复了。请以你的身份（${friendName}）继续这段对话。
 
-${MOMENT_COMMENT_RULES}
+${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 看上下文，不要重复自己说过的话，也别重复对方说过的话
 - 可以顺着话题聊下去，也可以自然转移`;
 
