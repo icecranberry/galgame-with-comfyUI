@@ -40,7 +40,7 @@ import { hybridSearch } from './memorySearch.js';
 import { getTimeTag } from './timeLight.js';
 import { takeGroupNewspaperBlockFor } from './newspaperService.js';
 import { splitText } from '../utils/sentenceSplitter.js';
-import { stripImagePromptLines, stripBracePromptBlocks, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
+import { stripImagePromptLines, stripBracePromptBlocks, extractUnbracedGroupImagePrompt, isImageRuleEcho, isImageRuleEchoStart, isPlaceholderImagePrompt } from '../utils/groupImagePrompt.js';
 import { getCurrentActivity } from './scheduleManager.js';
 import { detectAndApplyAppointment } from './appointmentDetector.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
@@ -344,7 +344,7 @@ export function buildRecentGroupLogBlock(db, characterId, chatUserName) {
       const source = r.role === 'user'
         ? (String(r.content || '').match(USER_WRAPPER_RE)?.[1] ?? String(r.content || ''))
         : String(r.content || '').trim();
-      const text = stripBracePromptBlocks(stripImagePromptLines(source));
+      const text = stripBracePromptBlocks(stripImagePromptLines(source, { allowUnbraced: r.role !== 'user' }));
       return text ? (speaker ? `[${speaker}]: ${text}` : text) : '';
     }).filter(Boolean);
     if (logLines.length > 0) lines.push(`[最近的聊天记录]\n${logLines.join('\n')}`);
@@ -513,11 +513,15 @@ const MAX_GROUP_IMAGE_PROMPT_CHARS = 2000;
 /**
  * 兜底提取任意位置的 {...}。群聊协议将花括号保留给生图，因此即使模型把它
  * 单独换行或粘在台词后面，也不能让其中内容进入聊天气泡。
+ * 没有花括号时，按中文群聊约定将长英文正文直接转为生图。
  */
 export function extractEmbeddedGroupImagePrompt(body) {
   const source = String(body || '');
   const matches = [...source.matchAll(EMBEDDED_IMG_RE)];
-  if (matches.length === 0) return null;
+  if (matches.length === 0) {
+    const prompt = extractUnbracedGroupImagePrompt(source);
+    return prompt ? { prompt, text: '' } : null;
+  }
 
   const prompts = matches.map((match) => {
     let prompt = match[1].trim();

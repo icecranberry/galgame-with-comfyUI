@@ -73,6 +73,7 @@ agent-core/test/helpers/*
 !agent-core/test/proactiveChatSwitch.test.js
 !agent-core/test/chatRecoveryHttp.test.js
 !agent-core/test/sentenceSplitter.test.js
+!agent-core/test/groupUnbracedImagePrompt.test.js
 !agent-core/test/momentTiming.test.js
 !agent-core/test/momentIntervalScheduler.test.js
 !agent-core/test/mediaFavorites.test.js

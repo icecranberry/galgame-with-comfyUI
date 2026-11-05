@@ -7,6 +7,22 @@
 export const LEGACY_IMG_LINE_RE = /\{["'“”]?prompt["'“”]?\s*:\s*["“]((?:[^"”\\]|\\.)*)["”]\s*\}/i;
 export const DIRECT_IMG_LINE_RE = /^\{([\s\S]+)\}$/;
 
+export const MIN_UNBRACED_GROUP_IMAGE_PROMPT_CHARS = 150;
+
+/**
+ * 中文群聊的容错约定：漏写花括号的长英文正文直接视为画面描述。
+ * 只供模型群聊输出使用，不处理用户输入，也不推断短英文的发图意图。
+ */
+export function extractUnbracedGroupImagePrompt(body) {
+  const text = String(body ?? '').trim();
+  if (text.length < MIN_UNBRACED_GROUP_IMAGE_PROMPT_CHARS) return null;
+  if (/[{}<>]/.test(text) || isImageRuleEcho(text)) return null;
+  if (!/^[\p{Script=Latin}\p{N}\p{P}\p{S}\s]+$/u.test(text)) return null;
+  // 排除以数字或符号凑满长度的内容；英文中的空格、标点及数字正常保留。
+  const letters = text.match(/\p{Script=Latin}/gu) || [];
+  return letters.length >= text.length / 2 ? text : null;
+}
+
 /**
  * 生图规范原文（<image_prompt_rules>）的特征片段。
  * 模型偶尔把规范当成 {} 里要填的内容原样输出，甚至输出到一半被截断（花括号未闭合），
@@ -88,13 +104,13 @@ function partitionBlocks(content, shouldDropBlock) {
 }
 
 /** 提取群聊发图画面描述；不是 prompt 行时返回 null。 */
-export function extractGroupImagePrompt(body) {
+export function extractGroupImagePrompt(body, { allowUnbraced = true } = {}) {
   const text = String(body || '').trim();
   const legacy = text.match(LEGACY_IMG_LINE_RE);
   if (legacy) return legacy[1].replace(/\\"/g, '"').trim() || null;
 
   const direct = text.match(DIRECT_IMG_LINE_RE);
-  if (!direct) return null;
+  if (!direct) return allowUnbraced ? extractUnbracedGroupImagePrompt(text) : null;
   const prompt = direct[1].trim();
   return prompt && !/^["'“”]?prompt["'“”]?\s*:/i.test(prompt) ? prompt : null;
 }
@@ -106,13 +122,14 @@ export function extractGroupImagePrompt(body) {
  * （前者是噪声，后者留在聊天记录里会让模型下一轮继续复读）。
  * 纯函数：同一 raw 输出稳定，不破坏 transcript 的 append-only 前缀缓存。
  */
-export function stripImagePromptLines(content) {
-  if (!content.includes('{') && !isImageRuleEcho(content)) return content;
+export function stripImagePromptLines(content, { allowUnbraced = true } = {}) {
+  if (!content.includes('{') && !isImageRuleEcho(content)
+    && (!allowUnbraced || content.length < MIN_UNBRACED_GROUP_IMAGE_PROMPT_CHARS)) return content;
   return partitionBlocks(content, (lines) => {
     const whole = lines.join('\n');
     const body = blockBody(lines);
     if (isImageRuleEchoStart(body)) return true;          // 复读的规范原文
-    if (extractGroupImagePrompt(body)) return true;       // 完整发图行
+    if (extractGroupImagePrompt(body, { allowUnbraced })) return true; // 完整发图行或漏括号的长英文
     return body.startsWith('{') && braceDelta(whole) > 0; // 被截断的未闭合发图行
   }).join('\n');
 }
