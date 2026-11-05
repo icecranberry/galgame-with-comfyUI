@@ -777,7 +777,7 @@ const imageGenModeLabel = computed(() => {
 })
 const imageGenModeIcon = computed(() => {
   if (imageGenMode.value === 'off') return '🚫'
-  if (imageGenMode.value === 'force') return '✨'
+  if (imageGenMode.value === 'force') return '🎬'
   return '🎨'
 })
 const realtimeAffinityEnabled = computed({

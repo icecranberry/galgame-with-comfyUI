@@ -8,6 +8,17 @@ const account = { type: 'service_account', project_id: 'test-project', client_em
 const json = value => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 const reply = { candidates: [{ content: { parts: [{ thought: true, text: 'reasoning' }, { text: '正文' }] }, finishReason: 'MAX_TOKENS' }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 10, thoughtsTokenCount: 3, totalTokenCount: 113, cachedContentTokenCount: 80 } };
 
+test('tool choice maps required/auto/none to Vertex modes without changing declarations', () => {
+  const tools = [{ type: 'function', function: { name: 'request_chat_image', description: '分享图片', parameters: { type: 'object', properties: {} } } }];
+  let definitions;
+  for (const [tool_choice, mode] of [['required', 'ANY'], ['auto', 'AUTO'], ['none', 'NONE'], [undefined, 'AUTO']]) {
+    const body = buildVertexBody({ model: 'gemini-3-pro', tools, tool_choice, messages: [{ role: 'user', content: '你好' }] });
+    assert.equal(body.toolConfig.functionCallingConfig.mode, mode);
+    definitions ??= body.tools;
+    assert.deepEqual(body.tools, definitions);
+  }
+});
+
 test('service account validation and fixed Google hosts reject malformed credentials and path/host injection', () => {
   for (const raw of ['', '{', '[]', '{}', { ...account, type: 'authorized_user' }, { ...account, private_key: 'secret-not-a-key' }]) assert.throws(() => parseServiceAccount(raw), { status: 400 });
   assert.deepEqual(parseServiceAccount(JSON.stringify(account)), account);

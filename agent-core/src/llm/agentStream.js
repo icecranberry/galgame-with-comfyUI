@@ -1,16 +1,16 @@
 // 原生工具调用流；普通聊天的 string generator 契约保持不变。
-export function buildAgentRequest(messages, tools, llm, { forceThinking = true, temperature = 0.72 } = {}) {
-  const params = { ...llm.extraBody, model: llm.model, messages, ...(Array.isArray(tools) && tools.length ? { tools, tool_choice: 'auto' } : {}), stream: true };
+export function buildAgentRequest(messages, tools, llm, { forceThinking = true, temperature = 0.72, toolChoice = 'auto' } = {}) {
+  const params = { ...llm.extraBody, model: llm.model, messages, stream: true };
   delete params.response_format;
   delete params.tools;
   delete params.tool_choice;
-  if (tools?.length) { params.tools = tools; params.tool_choice = 'auto'; }
+  if (tools?.length) { params.tools = tools; params.tool_choice = toolChoice; }
   if (!forceThinking) {
     const normal = { model: llm.model, messages, temperature, stream: true };
     if (llm.thinkingMode !== 'omit') normal.thinking = { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
     Object.assign(normal, llm.extraBody);
     delete normal.tools; delete normal.tool_choice; delete normal.response_format;
-    if (tools?.length) { normal.tools = tools; normal.tool_choice = 'auto'; }
+    if (tools?.length) { normal.tools = tools; normal.tool_choice = toolChoice; }
     return normal;
   }
   // 神说的思考不可被全局开关或 extraBody 关闭。按服务商协议设置，不靠 prompt 伪造思考。

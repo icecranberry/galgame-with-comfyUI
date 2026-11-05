@@ -10,6 +10,34 @@ const call = (scene = '我拍一张厨房饼干给你', id = 'call-1', extra = {
 async function collect(stream) { const result = []; for await (const item of stream) result.push(item); return result; }
 const textStream = async function* () { yield '纯文字'; };
 
+test('灵性配图按现有正则切换 required/auto，关闭和导演模式跳过检测并阻止工具执行', async () => {
+  const mustNotScan = { toString() { assert.fail('关闭和导演模式不得进行正则检测'); } };
+  const definitions = JSON.stringify(CHAT_IMAGE_TOOLS);
+  for (const [imageMode, userInput, expected] of [
+    ['smart', '发张照片给我', 'required'],
+    ['smart', '今天心情不错', 'auto'],
+    ['off', '发张照片给我', 'none'],
+    ['force', '发张照片给我', 'none'],
+    ['off', mustNotScan, 'none'],
+    ['force', mustNotScan, 'none'],
+  ]) {
+    let accepted = 0, recorded = 0;
+    const nativeStream = async function* (_messages, opts) {
+      assert.equal(opts.toolChoice, expected);
+      assert.equal(opts.tools, CHAT_IMAGE_TOOLS);
+      yield { type: 'text_delta', text: '你好' };
+      // 模拟渠道在 none 下仍错误返回工具，应用层也不能执行。
+      yield { type: 'assistant_end', message: { role: 'assistant', content: '你好', tool_calls: [call()] } };
+    };
+    const output = await collect(streamPrivateChatImages([], { imageMode, userInput, nativeStream, textStream,
+      accept() { accepted++; return { ok: true, status: 'queued' }; }, record() { recorded++; } }));
+    assert.deepEqual(output, ['你好']);
+    assert.equal(accepted, expected === 'none' ? 0 : 1);
+    assert.equal(recorded, accepted);
+    assert.equal(JSON.stringify(CHAT_IMAGE_TOOLS), definitions);
+  }
+});
+
 test('native fragments stream text before complete arguments and preserve signatures', async () => {
   const emitted = []; const records = [];
   const nativeStream = async function* () {
@@ -26,7 +54,7 @@ test('native fragments stream text before complete arguments and preserve signat
   assert.equal(records[0][1].tool_calls[0].extra_content.signature, 'signed');
 });
 
-test('tool-only response continues once without tools using the identical prepared context', async () => {
+test('required tool-only response continues once with none and identical tools/context', async () => {
   const messages = [{ role: 'system', content: 'stable' }, { role: 'user', content: '<active_chat_history>history</active_chat_history>task' }];
   const assistant = { role: 'assistant', content: '', reasoning_details: [{ signature: 'keep' }], tool_calls: [call()] };
   const requests = [];
@@ -35,9 +63,11 @@ test('tool-only response continues once without tools using the identical prepar
     if (requests.length === 1) yield { type: 'assistant_end', message: assistant };
     else yield { type: 'text_delta', text: '正在准备。' };
   };
-  assert.deepEqual(await collect(streamPrivateChatImages(messages, { nativeStream, textStream, accept: () => ({ ok: true, status: 'queued', task_id: 8 }), record() {} })), ['正在准备。']);
+  assert.deepEqual(await collect(streamPrivateChatImages(messages, { userInput: '发张照片', nativeStream, textStream, accept: () => ({ ok: true, status: 'queued', task_id: 8 }), record() {} })), ['正在准备。']);
   assert.equal(requests.length, 2);
-  assert.deepEqual(requests[1].opts.tools, []);
+  assert.equal(requests[0].opts.toolChoice, 'required');
+  assert.equal(requests[1].opts.toolChoice, 'none');
+  assert.equal(requests[1].opts.tools, requests[0].opts.tools);
   assert.deepEqual(requests[1].context.slice(0, 2), messages);
   assert.equal(requests[1].context[2], assistant);
   assert.equal(JSON.parse(requests[1].context[3].content).status, 'queued');
@@ -179,6 +209,15 @@ test('private tools respect configured thinking; God mode keeps its own policy',
   const params = buildAgentRequest([], CHAT_IMAGE_TOOLS, llm, { forceThinking: false });
   assert.equal(params.reasoning_effort, 'low');
   assert.equal(params.thinking.type, 'disabled');
+  assert.equal(params.tool_choice, 'auto');
+  for (const forceThinking of [false, true]) {
+    for (const toolChoice of ['required', 'auto', 'none']) {
+      const request = buildAgentRequest([], CHAT_IMAGE_TOOLS, llm, { forceThinking, toolChoice });
+      assert.equal(request.tool_choice, toolChoice);
+      assert.equal(request.tools, CHAT_IMAGE_TOOLS);
+    }
+  }
+  assert.equal(llm.extraBody.tool_choice, 'required');
   const plain = buildAgentRequest([], [], llm, { forceThinking: false });
   assert.equal(plain.tools, undefined); assert.equal(plain.tool_choice, undefined);
   assert.equal(buildAgentRequest([], CHAT_IMAGE_TOOLS, llm).reasoning_effort, 'high');
@@ -223,12 +262,13 @@ test('accepted native turn resumes with the same scene and signatures; completed
   let requests = 0;
   const nativeStream = async function* (messages, opts) {
     requests++;
-    assert.deepEqual(opts.tools, []);
+    assert.equal(opts.tools, CHAT_IMAGE_TOOLS);
+    assert.equal(opts.toolChoice, 'none');
     assert.deepEqual(messages.at(-2), assistant);
     assert.equal(JSON.parse(messages.at(-1).content).status, 'done');
     yield { type: 'text_delta', text: '这只小猫像你犯困的样子。' };
   };
-  const options = { nativeStream, textStream, accept() { assert.fail('must not accept again'); }, record() { assert.fail('must not record again'); } };
+  const options = { nativeStream, textStream, userInput: { toString() { assert.fail('恢复任务不得重新检测索图'); } }, accept() { assert.fail('must not accept again'); }, record() { assert.fail('must not record again'); } };
   assert.equal((await collect(streamPrivateChatImages([{ role: 'user', content: '发那张猫图' }], { ...options, resume: getPrivateChatImageResume(db, 1) }))).join(''), '这只小猫像你犯困的样子。');
   assert.equal(requests, 1);
   db.prepare('UPDATE raw_messages SET content=? WHERE id=2').run('这只小猫像你犯困的样子。');

@@ -11,10 +11,10 @@ import { buildAgentRequest, readAgentResponse } from './agentStream.js';
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], signal, label = '神说', requestId, forceThinking = true, temperature = 0.72 } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72 } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
-  const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature });
+  const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature, toolChoice });
   applyOutputTokenLimit(params);
   if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
   const logLabel = requestId ? `${label} [${requestId}]` : label;
@@ -28,7 +28,7 @@ export async function* chatAgentStream(messages, { tools = [], signal, label = '
     signal?.throwIfAborted();
     console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
     console.log(JSON.stringify(compressLogMessages(messages), null, 2));
-    console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
+    console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, tool_choice=${params.tool_choice ?? 'none'}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
     if (!forceThinking) {
       const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
       console.log(`[${logLabel}] local_prefix_fingerprint=${fingerprint}（仅本地字节指纹；服务商缓存命中见 usage）`);
@@ -104,6 +104,8 @@ function outputLogLimit(label) {
 
 // 思考内容仅进入日志，不混入业务正文；完整打印，便于检查服务商实际返回的内容。
 function logReasoning(label, reasoning) {
+  // 未开启思考且没有返回思考内容时，不输出空标题和缺失提示。
+  if (!reasoning && config.llm.thinkingMode !== 'enabled') return;
   console.log(`[${providerLabel()} ← ${label} 思考链]`);
   console.log(reasoning || '(服务商未返回思考内容)');
 }

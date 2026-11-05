@@ -138,7 +138,8 @@ export function buildVertexBody(params) {
   }
   if (params.tools?.some(t => t.type === 'function')) {
     body.tools = [{ functionDeclarations: params.tools.map(t => ({ name: t.function.name, description: t.function.description, parametersJsonSchema: t.function.parameters })) }];
-    body.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+    const mode = params.tool_choice === 'required' ? 'ANY' : params.tool_choice === 'none' ? 'NONE' : 'AUTO';
+    body.toolConfig = { functionCallingConfig: { mode } };
   }
   return body;
 }

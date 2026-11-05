@@ -1,3 +1,5 @@
+import { detectImageIntent } from '../builtinRules.js';
+
 export const CHAT_IMAGE_TOOLS = [{ type: 'function', function: {
   name: 'request_chat_image',
   description: `主动向对方分享一张图片，让对方看见你的生活、心情和此刻想展示的样子。你有自己的分享欲：想被关注、想让对方开心、想炫耀小成果、想逗对方或拉近距离，都可以成为发图的理由。主动寻找符合你的人设、当下情绪和关系氛围的分享机会，不必等用户索要图片。
@@ -52,14 +54,16 @@ async function* spokenText(stream) {
 }
 
 // One completed native response, then at most one tool-free continuation. Text is never buffered here.
-export async function* streamPrivateChatImages(messages, { nativeStream, textStream, accept, record, signal, onUnavailable, skipTools, resume, ...opts }) {
+export async function* streamPrivateChatImages(messages, { nativeStream, textStream, accept, record, signal, onUnavailable, skipTools, resume, imageMode = 'smart', userInput = '', ...opts }) {
   if (resume?.text?.trim()) { signal?.throwIfAborted(); yield resume.text; return; }
+  // 只检测灵性配图的本轮输入；关闭、导演模式及已受理任务恢复都不再判定索图。
+  const toolChoice = resume || imageMode !== 'smart' ? 'none' : detectImageIntent(userInput) ? 'required' : 'auto';
   let assistant = resume?.assistant;
   let visible = false;
   try {
     const responseText = async function* () {
       if (resume) { if (assistant?.content) yield assistant.content; return; }
-      for await (const event of nativeStream(messages, { ...opts, signal, tools: CHAT_IMAGE_TOOLS, forceThinking: false })) {
+      for await (const event of nativeStream(messages, { ...opts, signal, tools: CHAT_IMAGE_TOOLS, toolChoice, forceThinking: false })) {
         if (event.type === 'text_delta') yield event.text;
         if (event.type === 'assistant_end') assistant = event.message;
       }
@@ -70,13 +74,15 @@ export async function* streamPrivateChatImages(messages, { nativeStream, textStr
   } catch (error) {
     if (!visible && !signal?.aborted && [400, 422].includes(error.status)
         && /tool|function.call|unsupported.*(schema|protocol)/i.test(error.message)) {
-      onUnavailable?.();
+      if (toolChoice !== 'none') onUnavailable?.();
       yield* textStream(messages, { ...opts, signal });
       return;
     }
     throw error;
   }
   signal?.throwIfAborted();
+  // 即使渠道违背 none 返回了工具调用，也不能在关闭或导演模式受理新图片。
+  if (toolChoice === 'none' && !resume) return;
   if (skipTools?.(assistant)) return;
   if (!assistant?.tool_calls?.length) return;
   const results = [];
@@ -101,7 +107,7 @@ export async function* streamPrivateChatImages(messages, { nativeStream, textStr
     // Keep the prepared context and provider signatures verbatim; no lorebook reinjection.
     const continuation = [...messages, assistant, ...results];
     const reply = async function* () {
-      for await (const event of nativeStream(continuation, { ...opts, signal, tools: [], forceThinking: false })) {
+      for await (const event of nativeStream(continuation, { ...opts, signal, tools: CHAT_IMAGE_TOOLS, toolChoice: 'none', forceThinking: false })) {
         if (event.type === 'text_delta') yield event.text;
       }
     };

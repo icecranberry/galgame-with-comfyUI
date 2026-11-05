@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { generateKeyPairSync } from 'node:crypto';
+import { CHAT_IMAGE_TOOLS, streamPrivateChatImages } from '../src/services/privateChatImageTools.js';
 
 const stub = source => `data:text/javascript,${encodeURIComponent(source)}`;
 const configModule = stub(`
@@ -34,6 +35,36 @@ const source = readFileSync(sourceUrl, 'utf8').replace(/from '([^']+)'/g,
 const client = await import(stub(source));
 const limitKeys = ['max_tokens', 'max_completion_tokens', 'max_output_tokens'];
 const messages = [{ role: 'system', content: 'stable rules' }, { role: 'user', content: 'task' }];
+
+test('私聊各模式的 tool_choice 透传到实际 HTTP 请求且工具定义保持一致', async t => {
+  t.mock.method(console, 'log', () => {});
+  const bodies = [];
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    bodies.push(JSON.parse(body));
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: '你好' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { client.resetClient(); await new Promise(resolve => server.close(resolve)); });
+  Object.assign(config.llm, { connectionType: 'openai', freeEgg: false,
+    baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'local-fixture', model: 'test-model',
+    maxTokens: 8192, thinkingMode: 'disabled', headers: {}, extraBody: { tool_choice: 'required', tools: [] } });
+  client.resetClient();
+  for (const [imageMode, userInput, expected] of [
+    ['smart', '发张照片', 'required'], ['smart', '你好', 'auto'],
+    ['off', '发张照片', 'none'], ['force', '发张照片', 'none'],
+  ]) {
+    let reply = '';
+    for await (const text of streamPrivateChatImages(messages, { imageMode, userInput, nativeStream: client.chatAgentStream })) reply += text;
+    assert.equal(reply, '你好');
+    assert.equal(bodies.at(-1).tool_choice, expected);
+    assert.deepEqual(bodies.at(-1).tools, CHAT_IMAGE_TOOLS);
+    assert.deepEqual(bodies.at(-1).messages, messages);
+  }
+  assert.equal(bodies.length, 4);
+});
 
 test('shared sync, stream and connection-test entry points route Vertex requests through service-account authentication', async t => {
   t.mock.method(console, 'log', () => {});
@@ -175,10 +206,24 @@ test('all LLM request paths use the configured output allowance', async t => {
       assert.ok(logs.indexOf(reasoning) < logs.indexOf(reply.slice(0, 2000)));
     }
     reasoning = undefined;
-    logs.length = 0;
-    await client.chatSync(messages);
-    await stream();
-    assert.equal(logs.filter(line => line === '(服务商未返回思考内容)').length, 2);
+  });
+
+  await t.test('仅开启思考模式时记录未返回思考内容的提示', async () => {
+    const previousMode = config.llm.thinkingMode;
+    try {
+      for (const mode of ['enabled', 'disabled', 'omit', undefined]) {
+        config.llm.thinkingMode = mode;
+        logs.length = 0;
+        await client.chatSync(messages);
+        await stream();
+        const expected = mode === 'enabled' ? 2 : 0;
+        assert.equal(logs.filter(line => line === '(服务商未返回思考内容)').length, expected);
+        assert.equal(logs.filter(line => line.endsWith(' 思考链]')).length, expected);
+        assert.equal(logs.filter(line => line.endsWith(' 正文]')).length, 2);
+      }
+    } finally {
+      config.llm.thinkingMode = previousMode;
+    }
   });
 
   await t.test('an interrupted stream logs reasoning received before the failure', async () => {

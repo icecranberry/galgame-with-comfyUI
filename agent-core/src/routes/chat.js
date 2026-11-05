@@ -605,8 +605,6 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     // 2.1 用户在跟临时唤醒的角色聊天 → 重置睡眠倒计时，保持活跃清醒
     if (isTempWoken(characterId)) extendTempWake(characterId);
 
-    // 3. 生图意图（正则强匹配 → 提前检测，用于 msgs[2] 格式消息）
-
     // 4.5b 活跃奇遇检测（提前查询，供情绪引擎 + 人格层锚点 + 上下文注入三处使用）
     // 奇遇创建已超过一天的视为过期话题：私聊中不再提及（情绪联动与上下文注入一并失效）
     const activeEvent = db.prepare(`
@@ -1178,8 +1176,9 @@ ${coreRules}
     async function consumeStream(streamMessages, signal) {
       // 仅主聊天流的本轮 user 头部增加模式偏好；重试和回想续写都从原始消息组装，避免重复叠加。
       const requestMessages = withGalgameEmojiPreference(streamMessages, { galgameMode: galgame_mode === true, hasEmojis: emojiMap.size > 0 });
-      const stream = imageResume || imageMode === 'smart' ? streamPrivateChatImages(requestMessages, {
+      const stream = streamPrivateChatImages(requestMessages, {
         ...streamOpts, signal, nativeStream: chatAgentStream, textStream: chatStream,
+        imageMode, userInput: realInput,
         resume: imageResume,
         accept: acceptImage,
         skipTools: assistant => {
@@ -1190,7 +1189,7 @@ ${coreRules}
         },
         record: (call, assistant, result) => { hadToolCalls = true; db.prepare('INSERT INTO private_chat_tool_calls (user_raw_id,call_id,assistant_json,arguments_json,result_json,task_id) VALUES (?,?,?,?,?,?)').run(userRawMsgId,call.id,JSON.stringify(assistant),call.function.arguments,JSON.stringify(result),result.task_id || null); },
         onUnavailable: () => send('image_unavailable', { message: '当前渠道不支持图片工具，本轮灵性配图不可用' }),
-      }) : chatStream(requestMessages, { ...streamOpts, signal });
+      });
       let lastActivityAt = 0;
       for await (const chunk of stream) {
         // 分句尚未凑齐时也报告真实上游活动；没有新内容就不续命。
