@@ -169,21 +169,7 @@
     <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
-    <div class="char-toolbar">
-      <div class="section-title">角色 ({{ charCountLabel }})</div>
-      <div class="char-search" role="search" aria-label="查找酒馆角色">
-        <svg class="char-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" />
-        </svg>
-        <linshe-input
-          v-model="charSearch"
-          size="sm"
-          class="char-search-input"
-          placeholder="搜索角色名"
-          aria-label="搜索角色名"
-        />
-      </div>
-    </div>
+    <div class="section-title">角色 ({{ folderScopedCharacters.length }})</div>
     
     <!-- ═══════════════════════════════════════════
          文件夹筛选栏（单层分类：全部 / 未分类 / 各文件夹）
@@ -343,18 +329,10 @@
       </div>
     </TransitionGroup>
 
-    <!-- 空状态：文件夹内无角色 / 搜索无匹配 -->
+    <!-- 空状态：文件夹内无角色 -->
     <div v-if="!visibleCharacters.length" class="char-empty empty">
       <div class="empty-title">{{ emptyTitle }}</div>
       <div class="empty-hint">{{ emptyDesc }}</div>
-      <linshe-button
-        v-if="canSearchEverywhere"
-        variant="secondary"
-        size="sm"
-        @click="folderFilter = 'all'"
-      >
-在全部角色中搜索
-</linshe-button>
     </div>
 
     <!-- ═══════════════════════════════════════════
@@ -823,7 +801,7 @@ const sortedCharacters = computed(() =>
   })
 )
 // ═══════════════════════════════════════
-// 角色文件夹（单层分类）+ 名称搜索
+// 角色文件夹（单层分类）
 // 文件夹数据由共享 store 持有，左侧会话栏的分组用的是同一份 —— 两边同屏，必须同步
 // ═══════════════════════════════════════
 const folderStore = useCharacterFoldersStore()
@@ -838,7 +816,6 @@ function folderCountOf(id) {
 const folderFeatureReady = computed(() => folderStore.ready)
 // 'all' | 'uncategorized' | 文件夹 id
 const folderFilter = ref('all')
-const charSearch = ref('')
 
 // ── 文件夹拖拽排序 ──
 // 用原生 HTML5 拖放：这一排就是个扁平的 chip 列表，没必要为此引入拖拽库。
@@ -908,7 +885,7 @@ const showFolderManager = ref(false)
 // 角色增删后各文件夹的成员数会变，跟着刷新一次（首屏由 onMounted 负责）
 watch(() => chat.characters.length, () => folderStore.load())
 
-// 当前文件夹范围内的角色（未叠加搜索词）
+// 当前文件夹范围内的角色
 const folderScopedCharacters = computed(() => {
   const list = chat.characters
   if (folderFilter.value === 'uncategorized') return list.filter(c => !c.folder_id)
@@ -916,43 +893,21 @@ const folderScopedCharacters = computed(() => {
   return list.filter(c => c.folder_id === folderFilter.value)
 })
 
-// 实际渲染：文件夹筛选 + 名称搜索，置顶优先、组内按拼音排序
+// 实际渲染：文件夹筛选，置顶优先、组内按拼音排序
 const visibleCharacters = computed(() => {
-  const kw = charSearch.value.trim().toLowerCase()
-  const list = kw
-    ? folderScopedCharacters.value.filter(c => (c.display_name || '').toLowerCase().includes(kw))
-    : folderScopedCharacters.value
-  return [...list].sort((a, b) => {
+  return [...folderScopedCharacters.value].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1
     if (!a.pinned && b.pinned) return 1
     return (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')
   })
 })
 
-// 标题计数：以当前筛选范围为分母
-const charCountLabel = computed(() => {
-  const scoped = folderScopedCharacters.value.length
-  const shown = visibleCharacters.value.length
-  return shown === scoped ? `${scoped}` : `${shown} / ${scoped}`
-})
-
-// 搜索词在全部角色里有命中，但当前文件夹内没有 —— 提示可以放宽到全部范围
-const canSearchEverywhere = computed(() => {
-  const kw = charSearch.value.trim().toLowerCase()
-  if (!kw || folderFilter.value === 'all') return false
-  return chat.characters.some(c => (c.display_name || '').toLowerCase().includes(kw))
-})
-
 const emptyTitle = computed(() => {
-  if (charSearch.value.trim()) return `没有找到「${charSearch.value.trim()}」`
   if (!chat.characters.length) return '还没有角色'
   if (folderFilter.value === 'uncategorized') return '「未分类」里没有角色'
   return '这个文件夹还是空的'
 })
 const emptyDesc = computed(() => {
-  if (charSearch.value.trim()) {
-    return folderFilter.value === 'all' ? '换个关键词试试。' : '换个关键词，或者切到「全部」看看。'
-  }
   if (!chat.characters.length) return '点上面的「招募」认识第一位邻居。'
   if (folderFilter.value === 'uncategorized') return '所有角色都已经归好类了。'
   return '打开「分类管理」，勾选角色加入这个分类。'
@@ -2419,35 +2374,6 @@ onMounted(async () => {
   font-family: inherit;
 }
 /* ── 角色网格 ── */
-.char-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.char-toolbar .section-title { margin-bottom: 0; }
-
-.char-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: min(300px, 100%);
-}
-.char-search-input { flex: 1; min-width: 0; width: 100%; padding-left: 34px; }
-.char-search-icon {
-  position: absolute;
-  left: 12px;
-  color: var(--text-secondary);
-  pointer-events: none;
-}
-.char-search:focus-within .char-search-icon { color: var(--accent); }
-@media (max-width: 480px) {
-  .char-search { width: 100%; }
-}
-
 /* ── 文件夹筛选栏 ── */
 .folder-bar {
   display: flex;
@@ -2496,7 +2422,7 @@ onMounted(async () => {
 .folder-manage-entry,
 .folder-manage-entry:active { cursor: pointer; text-align: center; }
 
-/* 空状态（文件夹为空 / 搜索无结果），皮肤走全局 .empty */
+/* 空状态（文件夹为空），皮肤走全局 .empty */
 .char-empty {
   margin-top: 8px;
 }

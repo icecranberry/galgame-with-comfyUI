@@ -1,6 +1,26 @@
-# 邻舍.EXE
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/2a01f4f4-6a15-4978-b01a-44b0a3c2c935" width="144" alt="邻舍.EXE Logo" />
+  <h1>邻舍.EXE</h1>
+  <p><strong>让 AI 角色拥有自己的生活</strong></p>
+  <p>受 Galgame 启发的 AI 角色陪伴应用，让对话、记忆与画面在同一个小镇里延续。</p>
+  <p>
+    <a href="https://github.com/icecranberry/galgame-with-comfyUI/releases"><img src="https://img.shields.io/badge/下载邻舍-Windows_整合包-e9826e?style=for-the-badge" alt="下载邻舍 Windows 整合包" /></a>
+  </p>
+  <p>
+    <a href="#主要功能">主要功能</a>
+    · <a href="#快速开始">快速开始</a>
+    · <a href="#项目截图">项目截图</a>
+    · <a href="#开发">开发</a>
+    · <a href="./README_EN.md">English</a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/License-MIT-786b63" alt="License: MIT" />
+    <img src="https://img.shields.io/badge/客户端-Web_%7C_Android-e9826e" alt="客户端：Web / Android" />
+    <img src="https://img.shields.io/badge/生图-ComfyUI_%7C_NovelAI-c3a477" alt="生图：ComfyUI / NovelAI" />
+  </p>
+</div>
 
-[English](./README_EN.md) · [下载](https://github.com/icecranberry/galgame-with-comfyUI/releases)
+## 项目简介
 
 邻舍.EXE 是一款受 Galgame 启发的 AI 角色陪伴应用。用户可以创建具有独立人格、情绪、记忆和生活节奏的角色，与她们聊天，并在朋友圈、信箱、日程、群聊和随机事件中持续互动。角色还能够根据对话和当前场景主动调用 ComfyUI 生成图片，让文字交流自然延伸成视觉体验。
 
@@ -10,57 +30,15 @@
 
 **[🤯这一定是一个不同以往的浪漫AI小镇♪~【超自定义的素材生成】【邻舍3.5】](https://www.bilibili.com/video/BV1tKab6CEp2/)**
 
-完整链接：[https://www.bilibili.com/video/BV1tKab6CEp2/](https://www.bilibili.com/video/BV1tKab6CEp2/)
-
-## 项目截图
-
-### 传媒与社交平台
-
-浏览报纸、数字报刊与社交平台，在不同频道发现角色动态和街巷新闻。
-
-![传媒与社交平台](https://github.com/user-attachments/assets/788b4841-2237-4a33-9bdd-e07ef924a011)
-
-### Galgame 沉浸聊天
-
-以场景背景、角色立绘和逐字对话呈现聊天，支持历史回顾、表情变化与直接输入回复。
-
-![Galgame 沉浸聊天](https://github.com/user-attachments/assets/f5e7183c-f385-4e8b-b415-f6738b05b6e5)
-
-### 小镇互动
-
-在地图上与居民相遇，通过人物对话了解近况、接受奇遇邀请，或进行打工与交易。
-
-![小镇居民互动](https://github.com/user-attachments/assets/5cd70530-a961-4770-84c7-bcc9d9aa7a09)
-
-### 更多界面
-
-| 私聊 | 群聊 |
-| --- | --- |
-| ![私聊界面](https://github.com/user-attachments/assets/73bb4cae-c191-41a0-a0fb-26c4ec2087fa) | ![群聊界面](https://github.com/user-attachments/assets/c2c92fcb-d6f1-4be6-9e96-12d18157b58f) |
-
-| 朋友圈 | 日程 |
-| --- | --- |
-| ![朋友圈界面](https://github.com/user-attachments/assets/3d191b4e-2353-4440-ab36-990759ced1ea) | ![日程界面](https://github.com/user-attachments/assets/71c08460-5473-4d8f-a069-7fdf76532e85) |
-
-| 角色酒馆 | 角色详情 |
-| --- | --- |
-| ![角色酒馆界面](https://github.com/user-attachments/assets/1711b6ee-b7df-4130-a192-d61ca783eb08) | ![角色详情界面](https://github.com/user-attachments/assets/4cd732fa-1e98-4627-af87-5f7fc3b8cddc) |
-
-| 相册 | 奇遇 |
-| --- | --- |
-| ![相册界面](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd) | ![奇遇界面](https://github.com/user-attachments/assets/c2b80641-54c7-4c08-8d1a-661f14d8da9e) |
-
-**手机端**
-
-<img src="https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201" alt="手机端界面" width="260" />
-
 ## 主要功能
 
-- **角色陪伴**：私聊、群聊、人物关系、情绪与好感度，结合近期对话、滚动摘要和长期记忆生成回复。
-- **日常互动**：主动聊天、日程、朋友圈、信件、礼物与背包，让角色在对话之外也有自己的生活。
-- **小镇与奇遇**：探索小镇、与 NPC 对话、接受邀请，在奇遇页通过选项推进故事与建筑服务；支持金币、赠礼和交易。
-- **场景生图**：根据对话与角色外观生成配图，支持 ComfyUI 与 NovelAI，配套相册、立绘和放大细化功能。
-- **个性化与多端**：自定义人格、世界观和模型配置；暖色 / 暗夜主题，可按时间切换；支持浏览器与 Android 网页壳。
+| 功能 | 体验 |
+| --- | --- |
+| **角色陪伴** | 私聊、群聊、人物关系、情绪与好感度，结合近期对话、滚动摘要和长期记忆生成回复。 |
+| **日常互动** | 主动聊天、日程、朋友圈、信件、礼物与背包，让角色在对话之外也有自己的生活。 |
+| **小镇与奇遇** | 探索小镇、与 NPC 对话、接受邀请，在奇遇页通过选项推进故事与建筑服务；支持金币、赠礼和交易。 |
+| **场景生图** | 根据对话与角色外观生成配图，支持 ComfyUI 与 NovelAI，配套相册、立绘和放大细化功能。 |
+| **个性化与多端** | 自定义人格、世界观和模型配置；暖色 / 暗夜主题，可按时间切换；支持浏览器与 Android 网页壳。 |
 
 聊天、角色和图片保存在本地；使用云端模型或在线生图、嵌入、重排服务时，相应内容会发送给所配置的服务商。
 
@@ -97,6 +75,56 @@ npm run dev
 访问 [localhost:5173](http://localhost:5173)，按上面的步骤完成配置。开发脚本启动前端 `5173`、后端 `3099` 和向量服务 `8765`，ComfyUI 需单独启动。首次下载向量模型需要网络；缺失时开发脚本也会尝试下载。
 
 macOS / Linux 使用 `python3 -m venv vector-service/venv` 创建环境，激活 `source vector-service/venv/bin/activate` 后，以 `python` 执行安装依赖、下载模型，再运行 `npm run dev`。桌面 EXE 与整合包构建面向 Windows。
+
+## 项目截图
+
+### 传媒与社交平台
+
+浏览报纸、数字报刊与社交平台，在不同频道发现角色动态和街巷新闻。
+
+![传媒与社交平台](https://github.com/user-attachments/assets/788b4841-2237-4a33-9bdd-e07ef924a011)
+
+### Galgame 沉浸聊天
+
+以场景背景、角色立绘和逐字对话呈现聊天，支持历史回顾、表情变化与直接输入回复。
+
+![Galgame 沉浸聊天](https://github.com/user-attachments/assets/f5e7183c-f385-4e8b-b415-f6738b05b6e5)
+
+### 小镇互动
+
+在地图上与居民相遇，通过人物对话了解近况、接受奇遇邀请，或进行打工与交易。
+
+![小镇居民互动](https://github.com/user-attachments/assets/5cd70530-a961-4770-84c7-bcc9d9aa7a09)
+
+### 更多界面
+
+| 私聊 | 群聊 |
+| --- | --- |
+| 与角色一对一交流，让记忆、情绪和关系随对话延续。 | 与多位角色共同聊天，体验不同人格之间的互动。 |
+| ![私聊界面](https://github.com/user-attachments/assets/73bb4cae-c191-41a0-a0fb-26c4ec2087fa) | ![群聊界面](https://github.com/user-attachments/assets/c2c92fcb-d6f1-4be6-9e96-12d18157b58f) |
+
+| 朋友圈 | 日程 |
+| --- | --- |
+| 浏览角色分享的生活动态，在聊天之外了解她们的日常。 | 查看角色的生活安排，感受她们各自的生活节奏。 |
+| ![朋友圈界面](https://github.com/user-attachments/assets/3d191b4e-2353-4440-ab36-990759ced1ea) | ![日程界面](https://github.com/user-attachments/assets/71c08460-5473-4d8f-a069-7fdf76532e85) |
+
+| 角色酒馆 | 角色详情 |
+| --- | --- |
+| 创建或导入角色，开启新的陪伴故事。 | 查看和编辑角色的人格、外观等设定。 |
+| ![角色酒馆界面](https://github.com/user-attachments/assets/1711b6ee-b7df-4130-a192-d61ca783eb08) | ![角色详情界面](https://github.com/user-attachments/assets/4cd732fa-1e98-4627-af87-5f7fc3b8cddc) |
+
+| 相册 | 奇遇 |
+| --- | --- |
+| 浏览生成的图片，回顾对话与生活中的画面。 | 接受邀请，通过选项推进故事与小镇服务。 |
+| ![相册界面](https://github.com/user-attachments/assets/6b746150-7974-43fa-b2f5-677406f23bcd) | ![奇遇界面](https://github.com/user-attachments/assets/c2b80641-54c7-4c08-8d1a-661f14d8da9e) |
+
+**手机端**
+
+通过手机浏览器或 Android 网页壳连接服务，继续与角色互动。
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c8d86580-94a5-4822-96bf-4dc9e459f201" alt="手机端界面" width="260" />
+</p>
 
 ## 配置与数据
 
