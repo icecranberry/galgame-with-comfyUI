@@ -38,6 +38,7 @@ function workContext(work) {
 // 日程、着装、世界事件与任务状态由 promptState 按已发送快照去重；每条 user 保留自己的发送时刻。
 // 工具调用历史不能压成 active_chat_history 文本，否则会丢失工具关联和 thoughtSignature。
 export function buildGodChatContext({ systemRules, worldSetting = '', worldIntegrationRule = '', agentRules,
+  chatRhythmRules = getChatRhythmRules(),
   angel, user = {}, history = { messages: [] }, recall = {}, schedule = [], scheduleEnabled = true,
   now = new Date(), timeZone = 'Asia/Shanghai', worldContext = '', work = [], images = [],
 }) {
@@ -52,7 +53,7 @@ export function buildGodChatContext({ systemRules, worldSetting = '', worldInteg
   const info = [user.nickname && `称呼：${user.nickname}`, user.gender && `性别：${user.gender}`,
     user.appearance && `外观特征：${user.appearance}`, user.persona && `其他说明：${user.persona}`].filter(Boolean);
   stableBlocks.push([RELATION_RULE, info.length ? `<user_info>\n${info.join('\n')}\n</user_info>` : ''].filter(Boolean).join('\n\n'));
-  const rhythm = `${getChatRhythmRules()}\n以上节奏适用于日常交流；执行神谕时仍需清楚汇报结果、失败与待办，可以按需使用列表，不为了聊天语气省略重要状态。\n${TIME_RULE}`;
+  const rhythm = `${chatRhythmRules}\n以上节奏适用于日常交流；执行神谕时仍需清楚汇报结果、失败与待办，可以按需使用列表，不为了聊天语气省略重要状态。\n${TIME_RULE}`;
   const summaryBlock = recall.summary && `[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n${recall.summary}`;
   const scheduleBlock = scheduleContext(schedule, scheduleEnabled, angel.schedule_error);
   const workBlock = workContext(work);

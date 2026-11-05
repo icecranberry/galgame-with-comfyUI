@@ -198,6 +198,23 @@ router.post('/test-style', async (req, res) => {
   let dimensions;
   try { dimensions = studioDimensions(req.body, config.comfyui); }
   catch (error) { return res.status(400).json({ error: error.message }); }
+  // 显式入镜名单优先；查过角色不等于生图接口能继承查询上下文。
+  // 在调用 LLM / 生图服务前检查，错误编号不能静默退回匿名人物。
+  let explicitCharacters = null;
+  if (req.body.character_ids !== undefined) {
+    const ids = req.body.character_ids;
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 30
+      || ids.some(id => !Number.isSafeInteger(id) || id < 1) || new Set(ids).size !== ids.length) {
+      return res.status(400).json({ error: 'character_ids 必须是 1–30 个不重复的正整数角色编号' });
+    }
+    if (typeof req.body.sceneDesc !== 'string' || !req.body.sceneDesc.trim()) {
+      return res.status(400).json({ error: '指定入镜角色时必须提供 sceneDesc 画面描述' });
+    }
+    const lookup = getDb().prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?');
+    explicitCharacters = ids.map(id => lookup.get(id));
+    const missing = ids.filter((_, index) => !explicitCharacters[index]);
+    if (missing.length) return res.status(400).json({ error: `入镜角色不存在：${missing.join('、')}` });
+  }
   // 实验室可选流式返回提示词；其他调用方保留原 JSON 响应。
   const streaming = req.body.stream === true;
   const send = (event, data) => {
@@ -240,10 +257,10 @@ router.post('/test-style', async (req, res) => {
 
     const loras = [];
     const crossBlocks = [];
-    const matched = matchAll(desc);
-    if (matched.length > 0) {
+    const matched = explicitCharacters === null ? matchAll(desc) : [];
+    if (explicitCharacters !== null || matched.length > 0) {
       const db = getDb();
-      const chars = matched.map(m =>
+      const chars = explicitCharacters ?? matched.map(m =>
         db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
       ).filter(Boolean);
       crossBlocks.push(...chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));

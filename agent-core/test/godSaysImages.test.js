@@ -49,6 +49,23 @@ test('image tool directly uses the studio endpoint, omits default dimensions, an
   assert.throws(() => validateToolArgs(tool.definition.function.parameters, { prompt: '图', saveToChat: false }), /不支持/);
 });
 
+test('image tool carries queried character identities separately from scene prose', async () => {
+  const tool = moduleTool('generate_image');
+  const args = { prompt: '流萤坐在窗边看书', character_ids: [1076] };
+  validateToolArgs(tool.definition.function.parameters, args);
+  const result = await executeModuleTool(tool, args, {}, async request => {
+    assert.deepEqual(request.body, {
+      sceneDesc: args.prompt, character_ids: [1076], mode: 'chat', saveToChat: true,
+    });
+    return { status: 200, data: { success: true } };
+  });
+  assert.equal(result.data.success, true);
+  assert.match(tool.definition.function.description, /已知角色必须保留真实姓名/);
+  for (const character_ids of [[], [0], [-1], ['1076'], [1.5], [1076, 1076], Array.from({ length: 31 }, (_, i) => i + 1)]) {
+    assert.throws(() => validateToolArgs(tool.definition.function.parameters, { prompt: '看书', character_ids }));
+  }
+});
+
 test('saved studio images persist as chat URLs and completed task receipts without base64 or provider filenames', t => {
   const { db, dir, deps } = fixture(t);
   const result = saveStudioChatImages(db, { success: true, images: [{ base64: png, filename: '../../bad.png' }], promptId: 'studio-1', wfMode: 'turbo' },

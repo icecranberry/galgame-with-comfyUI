@@ -9,6 +9,7 @@ import { getChatRhythmRules } from '../src/builtinRules.js';
 import { MOMENT_TONE_RULES, MOMENT_COMMENT_RULES } from '../src/services/momentForms.js';
 import { buildProtocolBlock } from '../src/services/groupChatEngine.js';
 import { buildChatContext } from '../src/services/contextAssembler.js';
+import { buildGodChatContext } from '../src/services/godSays/promptBuilder.js';
 import { buildPromptProfile } from '../src/services/lorebook/promptProfile.js';
 import { applyLorebookLayout } from '../src/services/lorebook/layout.js';
 import { normalizeBook, evaluateBook } from '../src/services/lorebook/engine.js';
@@ -96,6 +97,33 @@ test('私聊语言风格稳定在摘要前，改变历史和当前任务不改�
   assert.deepEqual(first.messages.map(message => message.role), ['system', 'system', 'system', 'system', 'user', 'assistant', 'user']);
   assert.deepEqual(first.messages.slice(4, 6), [{ role: 'user', content: '此前问题' }, { role: 'assistant', content: '此前回答' }]);
   assert.equal(first.metadata.fullPrefixHash, second.metadata.fullPrefixHash);
+});
+
+test('神说在原节奏示例后追加语言风格，保留历史、附件与准确的稳定边界', () => {
+  const input = {
+    systemRules: '世界规则', agentRules: '工具规则',
+    angel: { display_name: '天使', persona: '天使人格' },
+    now: new Date('2026-11-05T08:00:00Z'),
+    history: { messages: [{ role: 'user', content: '之前' }, { role: 'assistant', content: '你好' }, { role: 'user', content: '现在' }] },
+    images: ['data:image/png;base64,example'],
+  };
+  const build = (overrides = {}) => buildGodChatContext({ ...input, chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules()), ...overrides });
+  const original = buildGodChatContext(input);
+  assert.deepEqual(build(), original);
+  updateWorldSetting(1, { language_style: '含蓄幽默' });
+  const styled = build();
+  const boundary = styled.lorebookOptions.cacheBoundary;
+  const rhythm = styled.messages[boundary.index].content;
+  assert.ok(rhythm.startsWith(getChatRhythmRules() + '\n\n<additional_writing_style>'));
+  assert.match(rhythm, /<\/additional_writing_style>\n以上节奏适用于日常交流/);
+  assert.equal(boundary.offset, rhythm.length);
+  assert.ok(styled.lorebookOptions.staticTexts.includes(rhythm));
+  const restored = structuredClone(styled.messages);
+  restored[boundary.index].content = rhythm.replace(appendWorldLanguageStyle(''), '');
+  assert.deepEqual(restored, original.messages);
+  assert.deepEqual(build({ now: new Date('2026-11-06T09:00:00Z') }).messages.slice(0, boundary.index + 1), styled.messages.slice(0, boundary.index + 1));
+  updateWorldSetting(1, { language_style: '' });
+  assert.deepEqual(build(), original);
 });
 
 test('润色只有末条 user 携带需求，世界观与规范稳定，保存前不修改数据库', () => {

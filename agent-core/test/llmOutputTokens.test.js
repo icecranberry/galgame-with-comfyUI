@@ -24,6 +24,7 @@ const imports = {
   openai: import.meta.resolve('openai'),
   './modelCapabilities.js': new URL('../src/llm/modelCapabilities.js', import.meta.url).href,
   './agentStream.js': new URL('../src/llm/agentStream.js', import.meta.url).href,
+  './thinkingMode.js': new URL('../src/llm/thinkingMode.js', import.meta.url).href,
   './vertex-client.js': new URL('../src/llm/vertex-client.js', import.meta.url).href,
   '../config.js': configModule,
   '../services/llmImageInput.js': stub('export const compressLlmImageInputs = async messages => messages;'),
@@ -35,6 +36,110 @@ const source = readFileSync(sourceUrl, 'utf8').replace(/from '([^']+)'/g,
 const client = await import(stub(source));
 const limitKeys = ['max_tokens', 'max_completion_tokens', 'max_output_tokens'];
 const messages = [{ role: 'system', content: 'stable rules' }, { role: 'user', content: 'task' }];
+
+test('招募强制思考覆盖配置，开启被拒绝才按原设置重发一次', async t => {
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const requests = [];
+  let failure;
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    requests.push(JSON.parse(body));
+    if (failure) {
+      const { status, message, once } = failure;
+      if (once) failure = undefined;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message } }));
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: '角色卡' }, finish_reason: 'stop' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { client.resetClient(); await new Promise(resolve => server.close(resolve)); });
+  Object.assign(config.llm, { connectionType: 'openai', freeEgg: false,
+    baseURL: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'local-fixture',
+    model: 'test-model', maxTokens: 8192, headers: {}, extraBody: {} });
+  client.resetClient();
+  const run = mode => client.chatSync(messages, {
+    forceThinkingMode: mode, fallbackToConfiguredThinking: true, retries: 0, maxRetries: 0,
+  });
+  for (const mode of ['enabled', 'disabled', 'omit']) {
+    config.llm.thinkingMode = mode;
+    for (const forced of ['enabled', 'disabled']) {
+      const opposite = forced === 'enabled' ? 'disabled' : 'enabled';
+      const extra = Object.freeze({ thinking: Object.freeze({ type: opposite }),
+        enable_thinking: opposite === 'enabled', reasoning_effort: opposite === 'enabled' ? 'high' : 'none',
+        chat_template_kwargs: Object.freeze({ enable_thinking: opposite === 'enabled', custom: 1 }),
+        reasoning: Object.freeze({ enabled: opposite === 'enabled', effort: 'low', max_tokens: 256 }),
+        generationConfig: Object.freeze({ thinkingConfig: Object.freeze({ thinkingBudget: 0 }), temperature: 0.4 }) });
+      config.llm.extraBody = extra;
+      await run(forced);
+      const sent = requests.at(-1);
+      assert.deepEqual(sent.thinking, { type: forced });
+      assert.equal(sent.enable_thinking, forced === 'enabled');
+      assert.equal(sent.chat_template_kwargs.enable_thinking, forced === 'enabled');
+      assert.equal(sent.reasoning.enabled, forced === 'enabled');
+      assert.equal(sent.reasoning_effort, forced === 'enabled' ? 'high' : 'none');
+      assert.deepEqual(sent.generationConfig, { temperature: 0.4 });
+      await client.chatSync(messages);
+      assert.deepEqual(requests.at(-1).thinking, extra.thinking);
+      assert.deepEqual(requests.at(-1).generationConfig, extra.generationConfig);
+      assert.equal(config.llm.thinkingMode, mode);
+    }
+    for (const extra of [{}, { thinking: { type: 'disabled' }, reasoning_effort: 'low' }]) {
+      config.llm.extraBody = extra;
+      const start = requests.length;
+      failure = { status: 400, message: 'thinking enabled is unsupported', once: true };
+      assert.equal(await run('enabled'), '角色卡');
+      assert.equal(requests.length - start, 2);
+      assert.deepEqual(requests[start].thinking, { type: 'enabled' });
+      assert.deepEqual(requests.at(-1).thinking, extra.thinking ?? (mode === 'omit' ? undefined : { type: mode }));
+      assert.equal(requests.at(-1).reasoning_effort, extra.reasoning_effort);
+      assert.deepEqual(requests[start].messages, requests.at(-1).messages);
+    }
+  }
+  config.llm.extraBody = {};
+  for (const model of ['qwen3', 'gpt-5', 'claude-sonnet', 'gemini-3-flash']) {
+    config.llm.model = model;
+    for (const mode of ['enabled', 'disabled']) {
+      await run(mode);
+      const sent = requests.at(-1);
+      if (model === 'gpt-5') {
+        assert.equal(sent.thinking, undefined);
+        assert.equal(sent.temperature, undefined);
+        assert.equal(sent.max_completion_tokens, 8192);
+      } else assert.equal(sent.thinking.type, mode);
+      if (model === 'gpt-5' || model.startsWith('gemini')) {
+        assert.equal(sent.reasoning_effort, mode === 'enabled' ? 'high' : 'none');
+      }
+      if (model.startsWith('qwen')) {
+        assert.equal(sent.enable_thinking, mode === 'enabled');
+        assert.equal(sent.chat_template_kwargs.enable_thinking, mode === 'enabled');
+      }
+      if (model.startsWith('claude')) assert.equal(sent.thinking.budget_tokens, mode === 'enabled' ? 4096 : undefined);
+    }
+  }
+  config.llm.model = 'test-model';
+  for (const [mode, status, message, count] of [
+    ['enabled', 400, 'thinking not supported', 2],
+    ['disabled', 400, 'thinking disabled not supported', 1],
+    ['enabled', 401, 'thinking endpoint: invalid key', 1],
+    ['enabled', 429, 'thinking rate limit', 1],
+    ['enabled', 500, 'thinking server failure', 1],
+    ['enabled', 400, 'invalid messages', 1],
+  ]) {
+    failure = { status, message };
+    const start = requests.length;
+    await assert.rejects(run(mode));
+    assert.equal(requests.length - start, count);
+  }
+  const controller = new AbortController();
+  controller.abort();
+  const start = requests.length;
+  await assert.rejects(client.chatSync(messages, { forceThinkingMode: 'enabled', fallbackToConfiguredThinking: true, signal: controller.signal }));
+  assert.equal(requests.length, start);
+});
 
 test('私聊各模式的 tool_choice 透传到实际 HTTP 请求且工具定义保持一致', async t => {
   t.mock.method(console, 'log', () => {});
@@ -92,6 +197,13 @@ test('shared sync, stream and connection-test entry points route Vertex requests
     assert.match(call.url, /^https:\/\/aiplatform.googleapis.com\/v1\/projects\/fixture\//);
     assert.equal(call.body.generationConfig.maxOutputTokens, 65536);
   }
+  config.llm.extraBody = { generationConfig: { thinkingConfig: { thinkingBudget: 2048 } } };
+  for (const mode of ['enabled', 'disabled']) {
+    await client.chatSync(messages, { forceThinkingMode: mode, retries: 0 });
+    assert.deepEqual(calls.at(-1).body.generationConfig.thinkingConfig, { thinkingBudget: mode === 'enabled' ? -1 : 0 });
+  }
+  assert.deepEqual(config.llm.extraBody.generationConfig.thinkingConfig, { thinkingBudget: 2048 });
+  config.llm.extraBody = {};
   config.llm.connectionType = 'openai';
   client.resetClient();
 });
