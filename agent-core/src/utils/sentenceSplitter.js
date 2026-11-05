@@ -3,6 +3,8 @@
  *
  * 字符先进 3 字闸门检测 {" 和 {p（兜底），安全的再逐字进入分句逻辑。
  * 分句规则:
+ *    无 CJK 的语流按英文句末标点断句，长句在 320 字符后的词边界切分，硬上限 480。
+ *    含 CJK 的队列保持以下原有规则。
  *    1. 队列 > 20 字: 遇到 ！？～~ 保留符号后断句; 遇到 ，空格 断句并去掉该字符
  *    2. 队列 ≤ 20 字: 遇到 ！？… 且前后不是 ！？… 时，强制断句（保留符号）
  *    3. 。无论队列长度都触发分句，去掉句号，重置计数器
@@ -40,6 +42,32 @@ export class SentenceSplitter {
   };
   static TOGGLE_PAIRS = new Set(['"', '\'']);  // ASCII 引号，开=闭，遇同类切换
   static COMMA_SPACE_RE = /[， ]/;  // 空格与逗号同类，队列超过 20 字后触发分句
+  static CJK_RE = /[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/u;
+
+  _feedLatin(ch, next, emit) {
+    const end = /[.!?]["'”’\])}]*$/.test(this.buffer);
+    const abbreviation = /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|e\.g|i\.e)\.$/i.test(this.buffer)
+      || /\b(?:[A-Za-z]\.)+$/.test(this.buffer);
+    if (ch === '\n' || (/\s/.test(ch) && this._canSplit()
+      && ((end && !abbreviation) || this.buffer.length >= 320))) {
+      emit(this.buffer.trim());
+      this.buffer = '';
+      this.pendingSplit = -1;
+      return;
+    }
+    if (!this.buffer && /\s/.test(ch)) return;
+    const prev = this.buffer.at(-1);
+    this.buffer += ch;
+    // don't / user's / dogs' 中的撇号不是引号，不能把整条语流锁在成对保护中。
+    const apostrophe = ch === "'" && /[\p{L}\p{N}]/u.test(prev || '')
+      && (/[\p{L}\p{N}]/u.test(next || '') || !this.pairStack.includes("'"));
+    if (!apostrophe) this._trackPair(ch);
+    if (this.buffer.length >= 480) {
+      emit(this.buffer.trim());
+      this.buffer = '';
+    }
+    this.pendingSplit = -1;
+  }
 
   constructor() {
     this.gate = '';          // {" 检测窗口（最多 3 字）
@@ -47,6 +75,7 @@ export class SentenceSplitter {
     this.pendingSplit = -1;  // 规则 2 的延迟断句位置
     this.stopped = false;
     this.pairStack = [];     // 成对符号栈（未闭合的开符号）
+    this.cjkSeen = false;    // 出现 CJK 后沿用原分句路径，保留中文段间空格和符号语义。
   }
 
   _canSplit() { return this.pairStack.length === 0; }
@@ -88,6 +117,12 @@ export class SentenceSplitter {
       if (this.gate.length < 3) continue;  // 缓冲未满，不出字
       const safe = this.gate[0];            // 确认安全，释放一字
       this.gate = this.gate.slice(1);
+
+      if (!this.cjkSeen && !SentenceSplitter.CJK_RE.test(this.buffer + safe)) {
+        this._feedLatin(safe, this.gate[0], emit);
+        continue;
+      }
+      this.cjkSeen = true;
 
       // ── 规则 3: 。始终触发分句，去掉句号，重置计数器 ──
       if (safe === '。') {
@@ -181,6 +216,18 @@ export class SentenceSplitter {
 
   // 流结束，释放闸门剩余安全字 + flush 分句队列
   flushAll() {
+    const remaining = this.stopped ? this.gate.slice(0, -2) : this.gate;
+    if (!this.cjkSeen && !SentenceSplitter.CJK_RE.test(this.buffer + remaining)) {
+      const segments = [];
+      const emit = text => { if (text) segments.push(text); };
+      for (let i = 0; i < remaining.length; i++) this._feedLatin(remaining[i], remaining[i + 1], emit);
+      emit(this.buffer.trim());
+      this.gate = '';
+      this.buffer = '';
+      this.pendingSplit = -1;
+      this.pairStack.length = 0;
+      return { segments, stopped: this.stopped };
+    }
     if (this.stopped) {
       // 闸门中 {" 或 {p 之前仍有安全字（如 "。{" 中的 "。"），释放后再清空
       const pending = this.gate.slice(0, -2);
