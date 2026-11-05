@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import path from 'node:path';
+import { normalizeBook, evaluateBook } from '../src/services/lorebook/engine.js';
+import { applyLorebookLayout } from '../src/services/lorebook/layout.js';
 
 process.env.DB_PATH = ':memory:';
 globalThis.fetch = async () => { throw new Error('image lab test forbids network'); };
 const { filterGlobalLoras } = await import('../src/services/imageSkill.js');
 const { studioDimensions } = await import('../src/services/studioChatImages.js');
 const { buildImageCrossRefInfo } = await import('../src/services/characterPersona.js');
+const { resolveAngelImageReference } = await import('../src/services/godSays/angelImageReference.js');
 
 const source = readFileSync(new URL('../src/routes/images.js', import.meta.url), 'utf8');
 const image = { base64: 'data:image/png;base64,dGVzdA==', filename: 'test.png' };
@@ -30,6 +33,9 @@ function loadHandler(route, dependencies) {
     path,
     lastStyleTest: null,
     studioDimensions,
+    resolveAngelImageReference: (desc, refs) => resolveAngelImageReference(desc, refs, {
+      prepare: () => ({ get: () => ({ display_name: '小羽', persona: '私人往事不能给生图\n## 你的外观\n你有白金短发、金眼、白羽和白袍。' }) }),
+    }),
     RAG_TIMEOUT_FAST_MS: 100,
     ...dependencies,
     config: { comfyui: {
@@ -108,6 +114,105 @@ for (const scenario of [
     assert.equal(generated, true);
   });
 }
+
+for (const scenario of [
+  { sceneDesc: '天使和流萤在窗边合照', character_ids: [1076] },
+  { sceneDesc: '小羽和流萤在窗边合照' },
+  { sceneDesc: '我和流萤在窗边合照', character_ids: [1076], special_characters: ['angel'] },
+  { sceneDesc: '天使小羽和流萤在窗边合照', character_ids: [1076], special_characters: ['angel'] },
+  { sceneDesc: '流萤读天使的来信，天使不入镜', special_characters: [] },
+]) {
+  test(`图片实验室天使同框：${scenario.sceneDesc}`, async () => {
+    let calls = 0;
+    const includeAngel = scenario.special_characters?.length !== 0;
+    const handler = loadHandler('/test-style', identityDependencies({
+      chatSync: async (messages, { lorebook }) => {
+        calls++;
+        const ref = messages.find(message => message.content.startsWith('【画面交叉参考】')).content;
+        assert.match(ref, /\[流萤\][\s\S]*银白色长发/);
+        assert.equal(ref.includes('白金短发、金眼、白羽和白袍'), includeAngel);
+        assert.equal(ref.split('[天使（小羽）]').length - 1, includeAngel ? 1 : 0);
+        assert.doesNotMatch(ref, /私人往事/);
+        if (includeAngel) assert.match(ref, /小羽有白金短发/);
+        for (const persona of lorebook.personaTexts) assert.ok(ref.includes(persona));
+        assert.equal(lorebook.staticTexts.length, 2);
+        assert.equal(lorebook.cacheBoundary.index, 1);
+        assert.equal(lorebook.cacheBoundary.offset, messages[1].content.length);
+        assert.deepEqual(Array.from(lorebook.history), [messages.at(-1)]);
+        assert.equal(messages.filter(m => m.role === 'user').length, 1);
+        return 'two distinct characters by the window';
+      },
+      generateImageRaw: async (_, options) => {
+        assert.deepEqual(Array.from(options.loras, lora => lora.path), ['firefly.safetensors']);
+        return { success: true, images: [image] };
+      },
+    }));
+    await handler({ body: scenario }, {
+      json(value) { assert.equal(value.success, true); },
+      status(code) { assert.fail(`Unexpected HTTP ${code}`); },
+    });
+    assert.equal(calls, 1);
+  });
+}
+
+test('图片实验室拒绝无效天使名单及缺失外观，在 SSE 和模型之前返回错误', async () => {
+  const handler = loadHandler('/test-style', identityDependencies({
+    resolveAngelImageReference: (desc, refs) => resolveAngelImageReference(desc, refs, { prepare: () => ({ get: () => undefined }) }),
+    chatSync: () => assert.fail('must not call LLM'),
+    generateImageRaw: () => assert.fail('must not generate'),
+  }));
+  for (const body of [
+    ...[null, 'angel', [1], ['unknown'], ['angel', 'angel']].map(special_characters => ({ sceneDesc: '天使', special_characters })),
+    { prompt: 'prepared prompt', special_characters: ['angel'] },
+    { sceneDesc: '天使和流萤合照' }, { sceneDesc: '我和流萤合照', special_characters: ['angel'] },
+  ]) {
+    let status;
+    await handler({ body: { ...body, stream: true } }, {
+      status(code) { status = code; return this; },
+      json(value) { assert.ok(value.error); },
+      writeHead() { assert.fail('must validate before SSE'); },
+    });
+    assert.equal(status, 400);
+  }
+});
+
+test('实验室世界书实际边界位于动态参考前，有无世界观及天使均保持稳定前缀', async () => {
+  const entries = [0, 1, 2, 3, 4, 5, 6].map(position => ({ position, constant: true, content: `STABLE_${position}` }));
+  entries.push({ position: 4, depth: 0, constant: false, key: ['合照'], content: 'DYNAMIC_LORE' });
+  const document = normalizeBook({ entries }).document;
+  for (const withWorld of [false, true]) {
+    const world = withWorld ? '<world_setting>云庭世界</world_setting>' : '';
+    let previousPrefix;
+    const handler = loadHandler('/test-style', identityDependencies({
+      getSystemRulesWithWorld: () => `static rules${world}`,
+      getWorldSetting: () => withWorld ? world : null,
+      getWorldIntegrationRule: () => 'world integration',
+      chatSync: async (messages, { lorebook }) => {
+        const options = { ...lorebook, worldText: world, cachePlacement: true };
+        assert.deepEqual(applyLorebookLayout(messages, { entries: [] }, options).messages, messages);
+        const activation = evaluateBook(document, {}, { history: lorebook.history });
+        const applied = applyLorebookLayout(messages, activation, options);
+        const boundary = lorebook.cacheBoundary.index;
+        assert.equal(boundary, withWorld ? 2 : 1);
+        assert.deepEqual(Array.from(applied.messages, m => m.role), Array.from(messages, m => m.role));
+        for (const position of [0, 1, 4, 5, 6]) assert.ok(applied.messages[boundary].content.includes(`STABLE_${position}`));
+        assert.equal(applied.messages.at(-1).content.includes('DYNAMIC_LORE'), messages.at(-1).content.includes('合照'));
+        assert.ok(applied.placements.every(p => p.actualAnchor && Number.isInteger(p.index) && Number.isInteger(p.offset)));
+        const prefix = applied.messages.slice(0, boundary + 1);
+        if (previousPrefix) assert.deepEqual(prefix, previousPrefix);
+        previousPrefix = prefix;
+        return 'scene prompt';
+      },
+      generateImageRaw: async () => ({ success: true, images: [image] }),
+    }));
+    for (const sceneDesc of ['天使和流萤合照', '流萤看书', '空无一人的房间']) {
+      await handler({ body: { sceneDesc } }, {
+        json(value) { assert.equal(value.success, true, value.error); },
+        status() { return this; },
+      });
+    }
+  }
+});
 
 test('图片实验室拒绝无效入镜编号，不调用模型或生图', async () => {
   const handler = loadHandler('/test-style', identityDependencies({

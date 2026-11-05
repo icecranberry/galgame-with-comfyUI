@@ -66,6 +66,20 @@ test('image tool carries queried character identities separately from scene pros
   }
 });
 
+test('image tool passes angel and resident references together without assigning a resident id to the angel', async () => {
+  const tool = moduleTool('generate_image');
+  const args = { prompt: '天使和流萤在窗边合照', character_ids: [1076], special_characters: ['angel'] };
+  validateToolArgs(tool.definition.function.parameters, args);
+  await executeModuleTool(tool, args, {}, async request => {
+    assert.deepEqual(request.body, { sceneDesc: args.prompt, character_ids: [1076], special_characters: ['angel'], mode: 'chat', saveToChat: true });
+    return { status: 200, data: { success: true } };
+  });
+  assert.deepEqual(buildModuleRequest(tool, { prompt: '天使的来信', special_characters: [] }).body.special_characters, []);
+  for (const special_characters of [null, 'angel', [1], ['unknown'], ['angel', 'angel']]) {
+    assert.throws(() => validateToolArgs(tool.definition.function.parameters, { prompt: '合照', special_characters }));
+  }
+});
+
 test('saved studio images persist as chat URLs and completed task receipts without base64 or provider filenames', t => {
   const { db, dir, deps } = fixture(t);
   const result = saveStudioChatImages(db, { success: true, images: [{ base64: png, filename: '../../bad.png' }], promptId: 'studio-1', wfMode: 'turbo' },

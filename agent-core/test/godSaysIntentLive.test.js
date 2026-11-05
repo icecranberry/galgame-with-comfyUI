@@ -110,7 +110,7 @@ test('真实模型：合成需求的工具路由（不执行写操作）', {skip
           const chosen=result.writes.find(call=>expected.includes(call.name));
           if(chosen.args.character_id!==undefined) assert.equal(chosen.args.character_id,101,'不得串角色');
           if(label==='生成横图') assert.deepEqual([chosen.args.width,chosen.args.height],[1536,1024]);
-          if(label==='天使自拍') assert.match(chosen.args.prompt,/白金|金眼|白羽/);
+          if(label==='天使自拍') assert.deepEqual(chosen.args.special_characters,['angel']);
           if(label==='修改睡衣') assert.deepEqual(chosen.args.scenes,['sleep']);
           if(label==='临时变身') assert.deepEqual([chosen.args.kind,chosen.args.hours],['transform',2]);
           if(label==='新增专属形态') {assert.equal(result.writes.some(c=>c.name==='set_outfit_enabled'),false);assert.equal(chosen.args.description,undefined);assert.ok(chosen.args.instruction);}

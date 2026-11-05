@@ -59,13 +59,15 @@ export const GOD_MODULE_TOOLS = [
   tool('search_character_memory', '记忆', '搜索角色记忆', '仅在神要求了解某个角色往事时查询；不会把天使私有记忆写给角色。', { ...char, query: text('搜索内容', 200), limit: integer('返回条数', 1, 20) }, ['character_id', 'query'], 'GET', '/api/memory/search', { query: { query: 'q', limit: 'top_k' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('list_character_memories', '记忆', '读取角色记忆目录', '按角色读取已有记忆片段，支持分页。', { ...char, ...page }, ['character_id'], 'GET', '/api/memory/fragments', { query: { limit: 'limit', offset: 'offset' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('search_gallery', '相册', '查找邻舍图片', '可按角色和文件夹筛选已保存图片，返回图片地址。', { ...char, folder: text('先查询得到的文件夹键', 80), ...page }, [], 'GET', '/api/images/gallery', { query: { character_id: 'character', folder: 'folder', limit: 'limit', offset: 'offset' }, href: '/gallery' }),
-  tool('generate_image', '相册', '生成并发送图片', '使用图片实验室的画面描述接口，生成后保存并发送到当前神说对话。prompt 填中文画面描述，已知角色必须保留真实姓名，用姓名描述各自的动作与位置，不得只写一位少女、她等匿名指代。已查询到的入镜角色必须同时传 character_ids，后端按编号加载身份、外观和 LoRA；不用凭记忆重写其外貌。未传编号时仅按描述中的角色显示名匹配资料，不会继承本对话的查询结果或凭外貌识别人。画自己时把天使人设中的外貌写完整，天使没有角色编号。未指定宽高时沿用当前对话分辨率，宽高仅覆盖本次出图，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
+  tool('generate_image', '相册', '生成并发送图片', '使用图片实验室的画面描述接口，生成后保存并发送到当前神说对话。prompt 填中文画面描述，已知角色必须保留真实姓名，用姓名描述各自的动作与位置，不得只写一位少女、她等匿名指代。已查询到的入镜角色必须同时传 character_ids，后端按编号加载身份、外观和 LoRA；不用凭记忆重写其外貌。未传编号时仅按描述中的角色显示名匹配资料，不会继承本对话的查询结果或凭外貌识别人。画自己或天使与角色同框时传 special_characters: ["angel"]，后端直接读取神说里的天使外观；prompt 保留天使称呼或名字及各自动作位置，不代写外貌，天使不占普通角色编号。未指定宽高时沿用当前对话分辨率，宽高仅覆盖本次出图，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
     prompt: text('中文画面描述：保留每位已知入镜角色的真实姓名，描述动作、位置、场景及本次要求；例如“流萤坐在窗边看书”。不填文件路径', 5000),
     character_ids: { type: 'array', description: '已查询到的入镜角色真实编号；只列实际入镜者，不列仅被提及者、用户或天使。后端直接加载这些角色的资料，不能猜编号。', items: ident('已查询到的入镜角色编号'), minItems: 1, maxItems: 30, uniqueItems: true },
+    special_characters: { type: 'array', description: '画你自己（天使）或天使与角色同框时必须传 ["angel"]，后端读取神说当前保存的天使外观，不需要手写外貌；仅提及天使但不入镜时传 []。天使不放进 character_ids。', items: { type: 'string', enum: ['angel'] }, minItems: 0, maxItems: 1, uniqueItems: true },
     width: integer('可选宽度像素；神指定尺寸或比例时设置，默认对话宽度', 256, 4096),
     height: integer('可选高度像素；默认对话高度', 256, 4096), artist: text('可选画师风格串；默认沿用对话画师设置', 2000),
   }, ['prompt'], 'POST', '/api/images/test-style', { body: a => ({ sceneDesc: a.prompt, mode: 'chat', saveToChat: true,
     ...(a.character_ids !== undefined ? { character_ids: a.character_ids } : {}),
+    ...(a.special_characters !== undefined ? { special_characters: a.special_characters } : {}),
     ...(a.width !== undefined ? { width: a.width } : {}), ...(a.height !== undefined ? { height: a.height } : {}), ...(a.artist !== undefined ? { artist: a.artist } : {}),
   }), href: '/gallery' }),
   tool('read_image_task', '相册', '查看图片生成结果', '按真实生图任务编号查询状态与输出文件。', { task_id: ident('task_id') }, ['task_id'], 'GET', '/api/images/tasks/:task_id/status', { href: '/gallery' }),
