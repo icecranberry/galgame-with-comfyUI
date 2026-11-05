@@ -34,7 +34,7 @@ import { migrateTownBuildingFeatureSchema } from './townBuildingFeatureSchema.js
 import { migrateExpressionStandings, recoverExpressionStandingJobs } from './expressionStandingSchema.js';
 import { migrateStandingInteractions } from './standingInteractionSchema.js';
 import { migrateCharacterReactionPacksSchema } from './characterReactionPackSchema.js';
-import { migrateCharacterDiarySchema } from './diarySchema.js';
+import { migrateCharacterDiarySchema, recoverInterruptedDiaries } from './diarySchema.js';
 import { migrateMediaAvatarLibrary } from './mediaAvatarSchema.js';
 import { migrateMediaFavorites } from './mediaFavorites.js';
 import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
@@ -69,6 +69,7 @@ export function getDb() {
 // ── 启动清理：进程中断后，"生成中/处理中" 状态永远不会被完成，统一回收 ──
 // moment_posts、mailbox_letters 自带启动自愈逻辑，不在此重复处理
 function cleanupOrphanedInFlight(database) {
+  recoverInterruptedDiaries(database);
   recoverSpeechJobs(database);
   recoverExpressionStandingJobs(database);
   cleanupTownDialogueRequests(database);

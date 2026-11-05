@@ -261,7 +261,7 @@ export function listDiaries(characterId, limit = 60) {
            c.display_name, c.avatar_path
     FROM character_diaries cd
     LEFT JOIN characters c ON cd.character_id = c.id
-    WHERE cd.character_id = ? AND cd.status = 'completed'
+    WHERE cd.character_id = ? AND cd.status IN ('completed', 'failed')
     ORDER BY cd.diary_date DESC
     LIMIT ?
   `).all(characterId, limit);
@@ -271,6 +271,7 @@ export function listDiaries(characterId, limit = 60) {
       id: r.id,
       character_id: r.character_id,
       date: r.diary_date,
+      status: r.status,
       title: r.title || '',
       mood: r.mood || '',
       weather: r.weather || '',

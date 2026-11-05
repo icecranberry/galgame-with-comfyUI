@@ -52,7 +52,7 @@ export const useDiaryStore = defineStore('diary', () => {  // ── 书本开�
   const isToday = computed(() => date.value === todayKey())
   const hasDiary = computed(() => Boolean(diary.value && diary.value.content))
   const images = computed(() => (Array.isArray(diary.value?.images) ? diary.value.images : []))
-  const canGenerate = computed(() => isToday.value && !generating.value)
+  const canGenerate = computed(() => (isToday.value || diary.value?.status === 'failed') && !generating.value)
   /** 历史简目里位于当前页之后（更早）的一篇 */
   const olderEntry = computed(() => history.value.find(e => e.date < date.value) || null)
   const newerEntry = computed(() => [...history.value].reverse().find(e => e.date > date.value) || null)
@@ -112,7 +112,7 @@ export const useDiaryStore = defineStore('diary', () => {  // ── 书本开�
       if (targetDate !== date.value || requestedCharacter !== characterId.value || requestedBook !== bookRequest) return
       diary.value = res?.diary || null
       generating.value = Boolean(res?.generating)
-      error.value = res?.diary?.status === 'failed' ? (res.diary.error || '') : ''
+      error.value = res?.diary?.status === 'failed' ? (res.diary.error || '上次日记没有写完，请重试') : ''
       return diary.value
     } catch (err) {
       if (!silent) error.value = err.message || '日记加载失败'
@@ -187,10 +187,10 @@ export const useDiaryStore = defineStore('diary', () => {  // ── 书本开�
     if (newerEntry.value) goTo(newerEntry.value.date, { direction: -1 })
   }
 
-  /** 生成 / 重新生成当前这一页（只对今天开放） */
+  /** 生成 / 重新生成当前这一页（今天可生成；历史失败页可重试） */
   async function generate() {
     if (!characterId.value || generating.value) return
-    if (!isToday.value) return
+    if (!canGenerate.value) return
     generating.value = true
     error.value = ''
     try {

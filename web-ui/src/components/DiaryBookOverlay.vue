@@ -36,14 +36,14 @@
               </button>
               <button
                 type="button"
-                v-if="store.isToday"
+                v-if="store.isToday || store.diary?.status === 'failed' || store.generating"
                 class="db-btn"
                 :aria-busy="store.generating"
                 :disabled="store.generating"
                 @click="onGenerate"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" /><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" /></svg>
-                <span>{{ store.generating ? '正在写…' : store.hasDiary ? '重新生成' : '写今天的日记' }}</span>
+                <span>{{ store.generating ? '正在写…' : store.diary?.status === 'failed' ? '重试日记' : store.hasDiary ? '重新生成' : '写今天的日记' }}</span>
               </button>
               <button type="button" class="db-close" title="合上日记" aria-label="合上日记" @click="requestClose">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -129,7 +129,7 @@
                   </div>
 
                   <div v-if="store.error" class="page-note is-error">
-                    配图没画全：{{ store.error }} 点右上角「重新生成」可以再写一遍。
+                    {{ store.error }}
                   </div>
                   <div v-else-if="store.generating" class="page-note">正在重新写这一页，写完会自己换上来…</div>
                 </template>
@@ -142,18 +142,18 @@
 
                 <div v-else class="sheet-state">
                   <diary-icon :size="42" class="page-empty-icon-svg" />
-                  <p class="page-empty-title">{{ store.isToday ? '今天这一页还是空的' : '这一天没有留下日记' }}</p>
+                  <p class="page-empty-title">{{ store.error ? '这一页没能写完' : store.isToday ? '今天这一页还是空的' : '这一天没有留下日记' }}</p>
                   <span class="page-empty-hint">
-                    {{ store.isToday ? '让 ta 把今天的日程里值得记住的部分写成一篇日记。' : '只有当天写过日记，才会留下这一页。' }}
+                    {{ store.error || (store.isToday ? '让 ta 把今天的日程里值得记住的部分写成一篇日记。' : '只有当天写过日记，才会留下这一页。') }}
                   </span>
                   <linshe-button
-                    v-if="store.isToday"
+                    v-if="store.isToday || store.diary?.status === 'failed'"
                     variant="primary"
                     class="page-empty-btn"
                     :loading="store.generating"
                     @click="onGenerate"
                   >
-                    写今天的日记
+                    {{ store.error ? '重试日记' : '写今天的日记' }}
                   </linshe-button>
                 </div>
               </div>
@@ -210,7 +210,8 @@
               >
                 <div class="dh-item-head">
                   <span class="dh-item-date">{{ shortLabelOf(entry.date) }}</span>
-                  <span v-if="entry.mood" class="dh-item-mood">{{ entry.mood }}</span>
+                  <span v-if="entry.status === 'failed'" class="dh-item-mood">未完成</span>
+                  <span v-else-if="entry.mood" class="dh-item-mood">{{ entry.mood }}</span>
                 </div>
                 <span class="dh-item-title">{{ entry.title || '无题' }}</span>
               </div>
@@ -344,7 +345,7 @@ function openLightbox(slotIndex) {
 async function onGenerate() {
   try {
     await store.generate()
-    toast?.(store.hasDiary ? '正在重新写这一篇日记' : '开始写今天的日记', 'info')
+    toast?.(store.isToday && !store.hasDiary ? '开始写今天的日记' : '正在重新写这一篇日记', 'info')
   } catch (err) {
     toast?.(err.message || '日记生成启动失败', 'error')
   }
@@ -500,9 +501,9 @@ onUnmounted(() => {
 .db-close { width: 40px; padding: 0; margin-left: 4px; border-left-color: var(--town-paper-line); border-radius: 0; }
 .db-close:hover { color: var(--town-paper-accent); background: color-mix(in srgb, var(--town-paper-accent) 10%, transparent); }
 .db-btn[aria-busy="true"] svg { animation: cel-spin 1.4s linear infinite; }
-:global([data-theme="dark"]) .diary-overlay { --diary-control-paper: var(--bg-primary); }
-:global([data-theme="dark"]) .diary-bar,
-:global([data-theme="dark"]) .diary-nav { --town-paper-ink: var(--text-primary); --town-paper-muted: var(--text-secondary); --town-paper-line: var(--border-strong); --town-paper-accent: var(--accent); }
+[data-theme="dark"] .diary-overlay { --diary-control-paper: var(--bg-primary); }
+[data-theme="dark"] .diary-bar,
+[data-theme="dark"] .diary-nav { --town-paper-ink: var(--text-primary); --town-paper-muted: var(--text-secondary); --town-paper-line: var(--border-strong); --town-paper-accent: var(--accent); }
 
 /* ── 书 ── */
 .diary-book {

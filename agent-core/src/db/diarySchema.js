@@ -33,3 +33,10 @@ export function migrateCharacterDiarySchema(db) {
   `);
   console.log('[db] character_diaries schema ensured');
 }
+
+/** 仅由数据库启动恢复调用，不能在轮询中改写仍在运行的任务。 */
+export function recoverInterruptedDiaries(db) {
+  return db.prepare(`UPDATE character_diaries SET status='failed',
+    error_message='服务重启导致日记生成中断，请重试', updated_at=datetime('now')
+    WHERE status='generating'`).run();
+}

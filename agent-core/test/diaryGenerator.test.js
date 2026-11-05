@@ -203,11 +203,12 @@ test('同日多次生成只保留一行并覆盖，历史日期原样保留；�
   assert.equal(history.status, 'completed');
   assert.equal(history.content, '昨天的正文');
 
-  // 历史简目只收完成的日记，且最新在前
+  // 失败记录也能从历史定位并重试，且最新在前
   const list = diary.listDiaries(characterId);
-  assert.equal(list.length, 1);
-  assert.equal(list[0].date, yesterday);
-  assert.equal(list[0].cover, '/images/diary/old.png');
+  assert.equal(list.length, 2);
+  assert.equal(list[0].status, 'failed');
+  assert.equal(list[1].date, yesterday);
+  assert.equal(list[1].cover, '/images/diary/old.png');
 
   const failedTask = editTasks.getEditTask(task.id);
   assert.equal(failedTask.status, 'failed');
@@ -251,4 +252,21 @@ test('getDiary 对没有日记的日期返回 null，DTO 带齐前端渲染字�
   assert.equal(dto.handwriting_font, 'lxgw_wenkai');
   assert.equal(dto.date, '2026-10-07');
   assert.ok(dto.character_name, 'DTO 应带角色名，日记本顶栏直接可用');
+});
+
+
+test('启动恢复将中断日记标为失败，保留已有正文并进入历史', async () => {
+  const { recoverInterruptedDiaries } = await import('../src/db/diarySchema.js');
+  const characterId = seedCharacter();
+  for (const [date, content, status] of [
+    ['2026-01-01', '', 'generating'], ['2026-01-02', '保留旧正文', 'generating'], ['2026-01-03', '已完成', 'completed'],
+  ]) db.prepare('INSERT INTO character_diaries(character_id,diary_date,content,status) VALUES (?,?,?,?)').run(characterId,date,content,status);
+  recoverInterruptedDiaries(db);
+  assert.equal(diary.getDiary(characterId, '2026-01-01').status, 'failed');
+  assert.match(diary.getDiary(characterId, '2026-01-01').error, /重启.*中断/);
+  assert.equal(diary.getDiary(characterId, '2026-01-02').content, '保留旧正文');
+  assert.equal(diary.getDiary(characterId, '2026-01-03').status, 'completed');
+  assert.equal(diary.listDiaries(characterId).length, 3);
+  assert.equal(diary.isDiaryGenerating(characterId, '2026-01-01'), false);
+  assert.equal(recoverInterruptedDiaries(db).changes, 0, '恢复可重入且不触碰已收敛行');
 });
