@@ -7,7 +7,6 @@ import { GOD_TOOLS, createGodTools, validateToolArgs } from '../src/services/god
 import { GOD_MODULE_TOOLS, moduleTool, buildModuleRequest, executeModuleTool } from '../src/services/godSays/moduleTools.js';
 import { createGodLocalApi, publicToolData, readChatStream } from '../src/services/godSays/localApi.js';
 import { createGodRepository } from '../src/services/godSays/repository.js';
-import { createGodMemory } from '../src/services/godSays/memory.js';
 import { createWorldEventService } from '../src/services/godSays/worldEvents.js';
 
 test('capability registry has unique bounded native tools and validates identifiers, booleans and member lists', () => {
@@ -119,7 +118,7 @@ test('real module routes create groups, letters, relations, library entries and 
   const api = createGodLocalApi({ port: server.address().port });
   const repo = createGodRepository(db);
   const run = repo.start('module-integration', '安排邻舍的事情；用户提供的完整外观正文：轻柔的云白色披肩').run;
-  const tools = createGodTools(repo, createWorldEventService(repo), createGodMemory(repo, async () => ''), { api, generateReplacement: async ({ source }) => source.replace('黑发', '红发').replace('地方', '岛屿') });
+  const tools = createGodTools(repo, createWorldEventService(repo), { api, generateReplacement: async ({ source }) => source.replace('黑发', '红发').replace('地方', '岛屿') });
   let index = 0;
   const execute = async (name, args) => {
     const result = await tools.execute({ id: `module-${index++}`, function: { name, arguments: JSON.stringify(args) } }, run.id, index);

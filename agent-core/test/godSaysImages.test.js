@@ -127,7 +127,7 @@ test('native image calls persist and replay their actual results without duplica
     res.json({ success: true, ...saved, ...dimensions });
   });
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => server.close());
-  const tools = createGodTools(repo, {}, {}, { api: createGodLocalApi({ port: server.address().port }) });
+  const tools = createGodTools(repo, {}, { api: createGodLocalApi({ port: server.address().port }) });
   const run = repo.start('send-image-test', '给我一张云庭的照片').run;
   let round = 0;
   const stream = async function* (messages) {

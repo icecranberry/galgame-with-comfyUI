@@ -146,6 +146,24 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.match(resumed, /run_end/);
   assert.equal(requests.length, 4, 'reconnect and duplicate POST do not repeat generation');
   assert.equal((await fetch(`${base}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+  await fetch(`${base}/sessions`, { method: 'POST' });
+  const other = repo.start('http-other-session', '另一段对话的独立内容').run;
+  repo.finish(other.id, 'completed');
+  const selectedState = await fetch(`${base}/state?session=${first.run.session_id}`).then(r => r.json());
+  assert.equal(selectedState.current, false);
+  assert.equal(selectedState.writable, true);
+  const continuationBody = { client_id: 'http-resume-previous', text: '继续第一段', session_id: first.run.session_id };
+  const continuationResponse = await fetch(`${base}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(continuationBody) });
+  assert.equal(continuationResponse.status, 200);
+  const continuation = await continuationResponse.json();
+  assert.equal(continuation.run.session_id, first.run.session_id);
+  await fetch(`${base}/runs/${continuation.run.id}/stream`).then(r => r.text());
+  assert.match(JSON.stringify(requests.at(-1).messages), /建立彩虹茶话会，让天空出现巨大的彩虹/);
+  assert.doesNotMatch(JSON.stringify(requests.at(-1).messages), /另一段对话的独立内容/);
+  assert.ok(requests.at(-1).messages.at(-1).content.endsWith('继续第一段'));
+  for (const invalid of [0, -1, '1']) {
+    assert.equal((await fetch(`${base}/runs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...continuationBody, session_id: invalid }) })).status, 400);
+  }
   const profile = { display_name: '星羽', persona: `${persona}\n你喜欢晨间的风。`, emotion_baseline: { valence: 0.6, arousal: 0.5, dominance: 0.4 } };
   assert.equal((await fetch(`${base}/angel`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile) })).status, 200);
   assert.equal((await fetch(`${base}/angel`).then(r => r.json())).persona, profile.persona);
@@ -176,6 +194,8 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.equal((await fetch(`${base}/angel/image-jobs`).then(r => r.json())).jobs.length, 0);
   assert.equal((await fetch(`${base}/angel/image-jobs/not-a-job`)).status, 404);
   assert.equal((await fetch(`${base}/angel/image-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"kind":"bad"}' })).status, 400);
+  assert.equal((await fetch(`${base}/runs/${continuation.run.id}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await fetch(`${base}/runs/${other.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await fetch(`${base}/runs/${first.run.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await fetch(`${base}/runs/${first.run.id}/stream`)).status, 404);
   assert.deepEqual(await fetch(`${base}/sessions`).then(r => r.json()), []);

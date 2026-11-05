@@ -34,7 +34,7 @@ test('reading character or source does not query schedules unless explicitly req
   db.prepare('UPDATE characters SET base_prompt=? WHERE id=1').run(fullPersona);
   const reads = [];
   const schedule = [{ startTime: '08:00', activity: '散步' }];
-  const tools = createGodTools(repo, {}, {}, {
+  const tools = createGodTools(repo, {}, {
     localDate: () => '2026-11-04',
     scheduleEnabled: () => { reads.push('enabled'); return true; },
     getSchedule: id => { reads.push(['schedule', id]); return schedule; },
@@ -62,7 +62,7 @@ test('reading character or source does not query schedules unless explicitly req
 
 test('single and >100 character batch freeze complete drafts; approval applies exactly once, excludes later arrivals', async t => {
   const {db,repo,run} = setup(t, 121);
-  const tools = createGodTools(repo, {}, {}, appearanceServices(db));
+  const tools = createGodTools(repo, {}, appearanceServices(db));
   const execute = (name,args,id) => tools.execute({id,function:{name,arguments:JSON.stringify(args)}},run.id,0);
   const result = await execute('batch_characters',{tool_name:'apply_character_appearance',arguments_json:JSON.stringify({instruction:'只把发色改红'})},'batch');
   assert.equal(result.ok,true,JSON.stringify(result));
@@ -89,7 +89,7 @@ test('single and >100 character batch freeze complete drafts; approval applies e
 
 test('edited/deleted original, duplicate targets and approval-looking model parameters cannot bypass confirmation', async t => {
   const {db,repo,run} = setup(t);
-  const tools = createGodTools(repo, {}, {}, appearanceServices(db));
+  const tools = createGodTools(repo, {}, appearanceServices(db));
   const execute = (args,id) => tools.execute({id,function:{name:'apply_character_appearance',arguments:JSON.stringify(args)}},run.id,0);
   const args={character_id:1,instruction:'只把发色改红'};
   const duplicate = await tools.execute({ id: 'duplicate', function: { name: 'batch_characters', arguments: JSON.stringify({ tool_name: 'apply_character_appearance', character_ids: [1,1], arguments_json: '{"instruction":"只把发色改红"}' }) } }, run.id, 0);
@@ -111,7 +111,7 @@ test('edited/deleted original, duplicate targets and approval-looking model para
 test('recruitment delegates to the original generator and saves new content without confirmation', async t => {
   const {repo,run}=setup(t); const requests=[];
   const candidate={name:'new',display_name:'新角色',base_prompt:'完整新设定',emotion_baseline:{valence:0.5}};
-  const tools=createGodTools(repo,{}, {}, {api:async request=>{requests.push(request);return {data:request.path.endsWith('/generate')?candidate:{id:3}};}});
+  const tools=createGodTools(repo, {}, {api:async request=>{requests.push(request);return {data:request.path.endsWith('/generate')?candidate:{id:3}};}});
   const result=await tools.execute({id:'recruit',function:{name:'recruit_character',arguments:JSON.stringify({description:'新角色'})}},run.id,0);
   assert.equal(result.ok,true);
   assert.equal(requests.length,1); assert.equal(requests[0].body.save,true);
@@ -148,7 +148,7 @@ test('world edits preview full old/new text and submit the approved version with
   const { db,repo,run }=setup(t);
   db.exec("CREATE TABLE world_settings(id INTEGER PRIMARY KEY,name TEXT,content TEXT); INSERT INTO world_settings VALUES (1,'海岛','## 地理\n海岛。\n## 气候\n冬天温暖。');");
   const generations=[], writes=[];
-  const tools=createGodTools(repo,{}, {}, {generateReplacement:async input=>{generations.push(input);return input.source.replace('温暖','寒冷');},api:async req=>{writes.push(req);db.prepare('UPDATE world_settings SET content=? WHERE id=1').run(req.body.content);return {data:{ok:true}};}});
+  const tools=createGodTools(repo, {}, {generateReplacement:async input=>{generations.push(input);return input.source.replace('温暖','寒冷');},api:async req=>{writes.push(req);db.prepare('UPDATE world_settings SET content=? WHERE id=1').run(req.body.content);return {data:{ok:true}};}});
   const result=await tools.execute({id:'world',function:{name:'rewrite_world_setting',arguments:JSON.stringify({world_id:1,instruction:'冬天改为寒冷'})}},run.id,0);
   assert.equal(result.ok,true,JSON.stringify(result));
   const draft=tools.changes.get(result.value.change_id);
@@ -168,7 +168,7 @@ test('concurrent edits during generation and invalid generation never produce an
     if(mode==='concurrent') { db.prepare('UPDATE characters SET base_prompt=? WHERE id=1').run('用户的新资料'); return input.source.replace('黑色','红色'); }
     return '## 你的性格\n不应该覆盖这一段';
   };
-  const tools=createGodTools(repo,{}, {}, services);
+  const tools=createGodTools(repo, {}, services);
   const call = id=>tools.execute({id,function:{name:'apply_character_appearance',arguments:JSON.stringify({character_id:mode==='concurrent'?1:2,instruction:'改成红色'})}},run.id,0);
   assert.equal((await call('during')).ok,false);
   assert.equal(tools.changes.list(run.session_id).length,0);

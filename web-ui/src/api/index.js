@@ -7,9 +7,9 @@ export const deleteResidence = id => request(`/cohabitation/rooms/${id}`, { meth
 export const moveResidenceMember = (id, roomId) => request(`/cohabitation/members/${id}`, { method: 'PUT', body: { roomId } })
 
 export const getGodSaysState = session => request(`/god-says/state${session ? `?session=${session}` : ''}`)
-export const getGodSaysSessions = before => request(`/god-says/sessions${before ? `?before=${encodeURIComponent(before)}` : ''}`)
-export const getGodSaysMemories = () => request('/god-says/memories')
-export const sendGodSaysMessage = (client_id, text, images = []) => request('/god-says/runs', { method: 'POST', body: { client_id, text, images } })
+export const getGodSaysSessions = (before, beforeId) => request(`/god-says/sessions${before ? `?before=${encodeURIComponent(before)}${beforeId ? `&before_id=${beforeId}` : ''}` : ''}`)
+export const createGodSaysSession = () => request('/god-says/sessions', { method: 'POST' })
+export const sendGodSaysMessage = (client_id, text, images = [], session_id = null) => request('/god-says/runs', { method: 'POST', body: { client_id, text, images, session_id } })
 export const stopGodSaysRun = id => request(`/god-says/runs/${id}/stop`, { method: 'POST' })
 export const deleteGodSaysTurn = id => request(`/god-says/runs/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const getGodAngel = () => request('/god-says/angel')
@@ -25,7 +25,6 @@ export const generateGodAngelClothingDraft = ({ basePrompt, scene, tags, brief, 
 export const getGodWorldEvents = session => request(`/god-says/world-events${session ? `?session=${session}` : ''}`)
 export const getGodAngelActivity = () => request('/god-says/activity')
 export const retryGodWorldEvent = id => request(`/god-says/world-events/${id}/retry`, { method: 'POST' })
-export const retryGodSummary = id => request(`/god-says/sessions/${id}/summarize`, { method: 'POST' })
 
 export const getLogs = after => request('/logs' + (after ? `?after=${after}` : ''))
 export const clearLogs = () => request('/logs', { method: 'DELETE' })

@@ -30,7 +30,7 @@ const activation = entries => {
   return evaluateBook(doc, {}, { history: [{ role: 'user', content: '命中' }] });
 };
 
-test('private-style layers keep language after jailbreak, exact persona, summary before history, and current input last', () => {
+test('private-style layers keep language after jailbreak, exact persona, no past memory, and current input last', () => {
   const { messages, lorebookOptions: options } = build({ user: { nickname: '晨曦', appearance: '银色眼睛' },
     history: { messages: nativeHistory, summary: '今天已核对一次工作。' }, recall: { summary: '2026-10-30：聊过云池。', memories: '- 2026-10-30 · 偏好：神喜欢彩虹。' } });
   assert.equal(messages[0].content, `破甲规则\n\n${LANGUAGE_RULE}\n\n${world}`);
@@ -38,9 +38,8 @@ test('private-style layers keep language after jailbreak, exact persona, summary
   assert.ok(personaIndex > 1);
   assert.match(messages[personaIndex - 1].content, /<dialogue_format_rules>/);
   assert.match(messages[personaIndex + 1].content, /<user_relation>[\s\S]*<user_info>[\s\S]*银色眼睛/);
-  assert.match(messages[options.historyStart - 2].content, /<dialogue_rules>/);
-  assert.match(messages[options.historyStart - 1].content, /往日对话摘要/);
-  assert.doesNotMatch(JSON.stringify(messages), /今日对话历史摘要|今天已核对一次工作|rag_memories|神喜欢彩虹/);
+  assert.match(messages[options.historyStart - 1].content, /<dialogue_rules>/);
+  assert.doesNotMatch(JSON.stringify(messages), /往日对话摘要|聊过云池|今日对话历史摘要|今天已核对一次工作|rag_memories|神喜欢彩虹/);
   assert.deepEqual(messages.slice(options.historyStart, -1), nativeHistory.slice(0, -1));
   const current = messages.at(-1);
   assert.equal(current.role, 'user');

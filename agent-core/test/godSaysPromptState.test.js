@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { migrateGodSaysSchema } from '../src/db/godSaysSchema.js';
 import { createGodRepository } from '../src/services/godSays/repository.js';
-import { createGodMemory } from '../src/services/godSays/memory.js';
+import { createGodHistory } from '../src/services/godSays/history.js';
 import { createGodPromptState } from '../src/services/godSays/promptState.js';
 import { buildGodChatContext } from '../src/services/godSays/promptBuilder.js';
 import { createPresetRuntime } from '../src/services/presets/runtime.js';
@@ -20,7 +20,7 @@ function fixture(t) {
   migrateGodSaysSchema(db);
   let now = new Date('2026-11-02T01:00:00Z');
   const repo = createGodRepository(db, { now: () => now });
-  const memory = createGodMemory(repo, () => assert.fail('no intraday summary'));
+  const memory = createGodHistory(repo);
   const input = { prompts: ['固定预设规则', '{{setvar::x::{{lastusermessage}}}}', '本轮要求：{{getvar::x}} {{random::甲::乙}}', '后续规则'].map((content, i) => ({ identifier: `${i}`, content })) };
   let compiled = 0, committed = 0, activePreset = { document: input };
   const preset = createPresetRuntime({ getActivePreset: async () => activePreset,
@@ -104,7 +104,6 @@ test('deletion removes request fragments and midnight starts an independent pref
   assert.ok(replay.messages.some(m => JSON.stringify(m) === JSON.stringify(saved.messages.at(-1))));
   f.repo.finish(third.id, 'completed');
   f.setTime('2026-11-03T01:00:00Z');
-  await createGodMemory(f.repo, async () => JSON.stringify({ summary: '昨日摘要', memories: [] })).archive();
   const tomorrow = f.repo.start('tomorrow', '新一天').run;
   const next = await f.prepare(tomorrow, { systemRules: '次日规则' });
   assert.match(next.messages[0].content, /次日规则/);
@@ -417,4 +416,23 @@ test('partial old context metadata still deduplicates wardrobe, and deleting its
   const fresh = f.repo.start('fresh-wardrobe', '新会话').run;
   const next = await f.prepare(fresh, overrides);
   assert.match(JSON.stringify(next.messages.at(-1)), /蓝色长睡裙/);
+});
+
+
+test('legacy frozen summary is excluded on retry and later turns while original history stays intact', async t => {
+  const f = fixture(t);
+  const first = f.repo.start('legacy-memory-first', '保留原话').run;
+  const prepared = await f.prepare(first);
+  const row = f.db.prepare('SELECT payload_json FROM god_prompt_prefixes WHERE session_id=?').get(first.session_id);
+  const payload = JSON.parse(row.payload_json);
+  payload.messages.push({ role: 'system', content: '[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n不应再注入的旧记忆' });
+  f.db.prepare('UPDATE god_prompt_prefixes SET payload_json=? WHERE session_id=?').run(JSON.stringify(payload), first.session_id);
+  assert.deepEqual((await f.prepare(first)).messages, prepared.messages);
+  f.repo.message(first, 'assistant', '保留回复');
+  f.repo.finish(first.id, 'completed');
+  const second = f.repo.start('legacy-memory-second', '继续').run;
+  const next = await f.prepare(second);
+  assert.doesNotMatch(JSON.stringify(next.messages), /不应再注入的旧记忆|往日对话摘要/);
+  assert.match(JSON.stringify(next.messages), /保留原话/);
+  assert.match(JSON.stringify(next.messages), /保留回复/);
 });

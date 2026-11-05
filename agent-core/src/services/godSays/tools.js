@@ -31,7 +31,6 @@ export const GOD_TOOLS = [
     moment_count: { type: 'integer', minimum: 0, maximum: 8 }, group_count: { type: 'integer', minimum: 0, maximum: 5 }, supersedes_id: id('被替代的世界事件编号'),
   }, ['title', 'fact'])),
   definition('inspect_work', '读取神谕实际投递结果。event_id 不填时返回最近事件与任务；区分 pending、running、done、failed、uncertain。', object({ event_id: id('事件/任务编号') }, [])),
-  definition('recall_memory', '查找神与天使往日对话的摘要和长期记忆；不包含其他角色私人记忆。', object({ query: string('要回忆的内容', 150) })),
   definition('list_capabilities', '按模块查看天使已接入的真实能力。module 可填聊天、群聊、朋友圈、信箱、日记、日程、奇遇、背包、关系、记忆、相册、角色、立绘、表情包、媒体、日报、世界观、预设、素材库、语音；省略返回全部。', object({ module: string('功能模块名', 30) }, [])),
   definition('inspect_changes', '查询当前对话的批量任务与待确认变更，确认后的实际状态优先于历史工具结果。', object({}, [])),
   definition('read_character_source', '读取角色完整原始人设和外观，用于修改外观、人设或设计服装。不查询日程，不使用摘要覆盖原文。', object({ character_id: id('角色编号') })),
@@ -76,7 +75,7 @@ export function validateToolArgs(schema, value, path = '参数') {
   }
 }
 
-export function createGodTools(repo, world, memory, services) {
+export function createGodTools(repo, world, services) {
   const { db } = repo;
   function character(id) {
     const c = db.prepare('SELECT * FROM characters WHERE id=?').get(id);
@@ -128,7 +127,6 @@ export function createGodTools(repo, world, memory, services) {
       }
       case 'create_world_event': return world.create(args, ctx);
       case 'inspect_work': return world.list(args.event_id);
-      case 'recall_memory': return { memories: memory.recall(args.query) || '暂时没有对应的往日记忆。' };
       case 'list_capabilities': {
         const matched=moduleToolCatalog().filter(t=>!args.module||t.module===args.module);
         return {tools:matched,core:GOD_TOOLS.filter(t=>!moduleTool(t.function.name)).map(t=>({name:t.function.name,description:t.function.description})),...(args.module && args.module!=='神说' && !matched.length?{unavailable:true,note:'吾神，该模块没有接入，不能用其他模块写工具代替操作。'}:{})};
@@ -154,7 +152,7 @@ export function createGodTools(repo, world, memory, services) {
       const boundary = capabilityBoundary(input);
       if (boundary) return { ok: false, stop: true, code: 'CAPABILITY_UNAVAILABLE', error: boundary };
     } catch (err) { return { ok: false, error: err.message }; }
-    const readOnly = ['inspect_changes', 'inspect_neighbors', 'read_character', 'read_character_source', 'inspect_work', 'recall_memory', 'list_capabilities'].includes(call.function.name) || moduleTool(call.function.name)?.method === 'GET';
+    const readOnly = ['inspect_changes', 'inspect_neighbors', 'read_character', 'read_character_source', 'inspect_work', 'list_capabilities'].includes(call.function.name) || moduleTool(call.function.name)?.method === 'GET';
     const key = readOnly ? callId : effectKey(runId, call.function.name, args);
     const old = db.prepare('SELECT * FROM god_tool_calls WHERE effect_key=?').get(key);
     if (old) return parseJson(old.result_json) || { ok: false, error: '这项工作已发起但结果尚不确定，请查询执行记录，不要重复执行。' };

@@ -32,7 +32,10 @@ export function createGodPromptState(repo, prepareNarrative) {
     return row ? JSON.parse(row.payload_json) : null;
   };
   async function prepare(run, context, history, signal) {
-    const prefix = read('god_prompt_prefixes', 'session_id', run.session_id);
+    const storedPrefix = read('god_prompt_prefixes', 'session_id', run.session_id);
+    // 旧版本把往日摘要冻结进前缀；停用记忆后仅移除该系统层，保留原始对话和工具配对。
+    const prefix = storedPrefix && { ...storedPrefix, messages: storedPrefix.messages.filter(message =>
+      !(message.role === 'system' && typeof message.content === 'string' && message.content.startsWith('[往日对话摘要 — 按日期标明，属于过去的交流，不代表今日状态]\n'))) };
     const currentId = history.messageIds.at(-1);
     const current = db.prepare("SELECT id FROM god_messages WHERE id=? AND run_id=? AND role='user'").get(currentId, run.id);
     if (!current) throw new Error('神说请求缺少本轮用户消息');

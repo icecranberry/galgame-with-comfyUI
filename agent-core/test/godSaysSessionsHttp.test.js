@@ -44,7 +44,17 @@ test('history endpoints omit empty days and final-turn deletion, while state rea
   const run = repo.start('history-first-message', '第一轮对话').run;
   repo.finish(run.id, 'completed');
   assert.deepEqual((await get('/sessions')).map(s => s.id), [run.session_id]);
-  repo.summonSession();
+  const blocked = repo.start('running-new-session', '尚在回应').run;
+  assert.equal((await fetch(base + '/sessions', { method: 'POST' })).status, 409);
+  repo.finish(blocked.id, 'completed');
+  repo.deleteTurn(blocked.id);
+  for (let i = 0; i < 3; i++) {
+    const response = await fetch(base + '/sessions', { method: 'POST' });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).id, null);
+  }
+  assert.equal(repo.db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 1);
+  assert.equal((await fetch(`${base}/sessions/${run.session_id}/summarize`, { method: 'POST' })).status, 410);
   assert.equal((await get('/state')).session.id, null);
   assert.deepEqual((await get('/sessions')).map(s => s.id), [run.session_id]);
   assert.equal((await get(`/state?session=${run.session_id}`)).current, false);

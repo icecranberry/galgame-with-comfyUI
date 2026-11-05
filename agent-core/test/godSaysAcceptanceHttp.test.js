@@ -87,7 +87,7 @@ test('全量真实路由清点与业务数据落库验收（合成内存库）',
   const api=createGodLocalApi({port:server.address().port});
   const repo=createGodRepository(db);
   const run=repo.start('http-acceptance','合成业务验收；用户原样提供的完整外观正文：蓝色斗篷').run;
-  const tools=createGodTools(repo,{},{},{api,generateReplacement:async({source})=>source.replace('黑发','红发')});
+  const tools=createGodTools(repo, {},{api,generateReplacement:async({source})=>source.replace('黑发','红发')});
   let index=0;
   const execute=(name,args)=>tools.execute({id:`http-audit-${++index}`,function:{name,arguments:JSON.stringify(args)}},run.id,index);
   const approve=async result=>{const draft=tools.changes.get(result.value.change_id);return (await api({method:'POST',path:`/api/god-says/changes/${draft.id}/decision`,body:{version:draft.version,decision:'approve'}})).data;};

@@ -10,7 +10,7 @@
 flowchart TD
     A[用户发送文字与可选图片] --> B[校验输入并按 client_id 去重]
     B --> C[创建 run 与用户消息<br/>同一会话只允许一个 run 执行]
-    C --> D[准备天使资料与日程<br/>读取历史和往日摘要]
+    C --> D[准备天使资料与日程<br/>读取当前会话历史]
     D --> E[组装上下文<br/>重放前缀与历史快照，追加本轮变化]
     E --> F[请求模型<br/>流式保存正文与服务商思考]
     F --> G{完整回复中有工具调用？}
@@ -55,7 +55,7 @@ flowchart LR
 
 ### 把决策循环保持在最小范围
 
-`agent.js` 只接收 `prepare`、`stream`、`tools`、`repo` 和取消信号，负责请求模型、执行工具、回填结果与结束。天使人格、会话、记忆、业务队列由外部模块负责。日常聊天可以直接结束，复杂要求则由模型根据实际结果逐步选择工具，无需为每种需求预先编排流程。
+`agent.js` 只接收 `prepare`、`stream`、`tools`、`repo` 和取消信号，负责请求模型、执行工具、回填结果与结束。天使人格、会话历史、业务队列由外部模块负责。日常聊天可以直接结束，复杂要求则由模型根据实际结果逐步选择工具，无需为每种需求预先编排流程。
 
 ### 工具复用现有业务入口
 
@@ -65,13 +65,15 @@ flowchart LR
 
 模型负责理解意图、查清对象和解释结果，业务代码负责真正执行与校验。提示词要求明确区分“已安排”“已排队”“奇遇已开启”和“实际完成”，对外回复以工具返回的事实为依据。奇遇仍由用户在奇遇页选择推进。
 
+角色反馈默认先选择朋友圈或群聊：个人分享与展示走 `publish_moment`，多人讨论与相互回应走 `discuss_in_group`。`create_encounter` 只用于明确要求奇遇或亲自参与选项剧情的需求，不作为普通互动、日程安排或社交反馈失败后的自动替代。此优先级同时写入 Agent 稳定规则与工具说明；已有会话通过规则更新机制在下一轮获得新规则，保留历史前缀。
+
 ### 上下文保持稳定并逐轮追加
 
-首次请求按基础规则与世界观、Agent 规则、天使人格、用户资料和对话规则组织前缀，再加入往日摘要与本次会话。当前时间、日程、服装、世界事件和任务状态放在动态部分。
+首次请求按基础规则与世界观、Agent 规则、天使人格、用户资料和对话规则组织前缀，再加入本次会话历史。当前时间、日程、服装、世界事件和任务状态放在动态部分。
 
 `promptState.js` 保存会话前缀和每条用户消息的最终请求片段，后续重放原片段并追加新内容。未变化的日程和状态不重复发送；资料、预设或状态改变时追加更新，不回写已发送历史，以维持前缀缓存和历史语义。世界书与预设通过现有叙事提示词入口接入。
 
-`assistant.tool_calls`、`tool_call_id` 和服务商附加字段保留原生结构，避免把工具调用压成普通聊天文字后丢失关联。当前会话历史完整累积，仅过滤未完成消息和不完整工具批次；往日默认带入最近两次已完成摘要，更早内容通过 `recall_memory` 按需查询。跨日归档在循环外生成摘要和长期记忆。
+`assistant.tool_calls`、`tool_call_id` 和服务商附加字段保留原生结构，避免把工具调用压成普通聊天文字后丢失关联。当前会话历史完整累积，仅过滤未完成消息和不完整工具批次；新建与跨日会话相互独立，不再生成或带入神说记忆，也不提供 `recall_memory`；旧对话原文仍可在侧栏回看。
 
 ### 用执行记录处理重复与中断
 
@@ -91,7 +93,7 @@ flowchart LR
 | 工具定义、校验、去重和业务调用 | [tools.js](../agent-core/src/services/godSays/tools.js)、[moduleTools.js](../agent-core/src/services/godSays/moduleTools.js)、[localApi.js](../agent-core/src/services/godSays/localApi.js) |
 | 会话、消息、执行记录和 SSE 事件存储 | [repository.js](../agent-core/src/services/godSays/repository.js) |
 | 世界事实、投递队列与恢复 | [worldEvents.js](../agent-core/src/services/godSays/worldEvents.js) |
-| 当日历史、往日摘要与记忆检索 | [memory.js](../agent-core/src/services/godSays/memory.js) |
+| 当前会话原始历史 | [history.js](../agent-core/src/services/godSays/history.js) |
 | 模型原生工具流适配 | [agentStream.js](../agent-core/src/llm/agentStream.js) |
 | HTTP 与前端续接 | [routes/godSays.js](../agent-core/src/routes/godSays.js)、[stores/godSays.js](../web-ui/src/stores/godSays.js) |
 

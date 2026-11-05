@@ -11,19 +11,18 @@
     <Transition name="god-history">
       <aside v-if="!isMobile || historyOpen" class="god-history" aria-label="按日期查看对话">
         <div class="history-heading"><span>神说 · 对话</span><GodSacredButton v-if="isMobile" variant="icon" size="sm" tone="muted" aria-label="收起对话列表" @click="historyOpen = false"><svg class="gsb-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10 4-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton></div>
+        <div class="history-create"><GodSacredButton variant="line" size="sm" :touch-target="isMobile" :disabled="god.busy || god.loading || god.deleting || !angelSummoned" :loading="god.creating" @click="newConversation">新建对话</GodSacredButton></div>
         <nav class="history-days" aria-label="对话日期">
           <div v-for="session in sessions" :key="session.id" class="history-day" :class="{ selected: session.id === god.state?.session.id }">
             <div role="button" tabindex="0" class="history-choice" :aria-current="session.id === god.state?.session.id ? 'page' : undefined" @click="selectSession(session)" @keydown.enter.prevent="selectSession(session)" @keydown.space.prevent="selectSession(session)">
-              <span class="history-date">{{ session.day === god.state?.today ? '今天' : session.day }}</span><span v-if="session.day === god.state?.today" class="history-day-label">{{ (session.seq || 0) > 0 ? '重新召唤' : session.day }}</span>
-              <span class="history-preview">{{ session.preview || session.summary || '这一日的对话' }}</span>
+              <span class="history-date">{{ session.day === god.state?.today ? '今天' : session.day }}</span><span v-if="session.day === god.state?.today" class="history-day-label">{{ session.day }}</span>
+              <span class="history-preview">{{ session.preview || '对话' }}</span>
             </div>
-            <GodSacredButton v-if="session.summary_status === 'failed'" variant="link" tone="muted" size="sm" @click="retrySummary(session.id)">重新整理记忆</GodSacredButton>
           </div>
           <p v-if="sessionsLoading" class="history-note" role="status">正在翻阅…</p>
           <GodSacredButton v-if="hasMoreSessions" variant="link" tone="muted" size="sm" :loading="sessionsLoading" @click="moreSessions">更早的对话</GodSacredButton>
           <p v-if="sessionsError" class="history-note" role="alert">{{ sessionsError }} <GodSacredButton variant="link" tone="muted" size="sm" @click="moreSessions">重试</GodSacredButton></p>
         </nav>
-        <div class="history-footer"><GodSacredButton variant="link" tone="muted" size="sm" @click="openMemory">天使记忆</GodSacredButton></div>
       </aside>
     </Transition>
     <div class="god-main">
@@ -45,10 +44,10 @@
     </header>
 
     <div v-if="god.error" class="god-error" role="alert">
-      <span>{{ god.error }}</span><GodSacredButton variant="link" tone="muted" size="sm" @click="god.load(god.archiveId)">重新连接</GodSacredButton>
+      <span>{{ god.error }}</span><GodSacredButton variant="link" tone="muted" size="sm" @click="god.load(god.state?.session.id ?? god.archiveId)">重新连接</GodSacredButton>
     </div>
     <div v-if="god.archiveId" class="archive-strip">
-      <span>{{ god.state?.session.day }} · {{ god.state?.session.status === 'closing' ? '正在归档' : '往日对话' }}</span>
+      <span>{{ god.state?.session.day }} · {{ '往日对话' }}</span>
       <GodSacredButton variant="link" tone="muted" size="sm" @click="god.load()">回到今天</GodSacredButton>
     </div>
 
@@ -106,7 +105,7 @@
             <div v-else class="welcome-message">
             <span class="welcome-kicker"><span class="kicker-rule" aria-hidden="true" />云 庭 来 信<span class="kicker-rule" aria-hidden="true" /></span>
             <h2>{{ god.archiveId ? '这一日的静谧，已珍藏。' : '吾神，今天想说些什么？' }}</h2>
-            <p>{{ god.archiveId ? god.state?.session.summary || '这一天没有留下对话。' : '我在这里听您说。关于人间，也关于我们。' }}</p>
+            <p>{{ god.archiveId ? '这段对话已没有消息。' : '我在这里听您说。关于人间，也关于我们。' }}</p>
             <div v-if="!god.archiveId" class="welcome-prompts">
               <GodSacredButton v-for="prompt in suggestions" :key="prompt" variant="pill" size="sm" @click="fillPrompt(prompt)">
                 <svg class="gsb-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 6.9 4.1 10 5 6.9 5.9 6 9 5.1 5.9 2 5 5.1 4.1Z" fill="currentColor" /></svg>
@@ -234,19 +233,6 @@
 
     <CharacterDetailModal :visible="angelOpen" :character="angelCharacter" @close="angelOpen = false" @saved="angelSaved" @resummon="openResummon" />
     <GodAngelScheduleModal :visible="scheduleOpen" :loading="scheduleLoading" :character="angelCharacter" @close="scheduleOpen = false" @saved="angelSaved" />
-    <linshe-modal v-model="memoryOpen" title="天使记忆" :transition-ms="300">
-      <div class="god-modal-content">
-        <p class="modal-note">这些是与你说过的话，和我们一起留下的约定。</p>
-        <p v-if="panelLoading" class="modal-note">正在找回记忆…</p>
-        <p v-else-if="!memories.length" class="memory-empty">今日的对话会在新的一天到来后归档，值得记住的事会留在这里。</p>
-        <section v-for="day in memories" :key="day.id" class="memory-entry">
-          <h4>{{ day.day }}</h4>
-          <ul v-if="day.memories.length"><li v-for="(memory, i) in day.memories" :key="i"><span>{{ memoryLabels[memory.kind] }}</span>{{ memory.text }}</li></ul>
-          <p v-else>{{ day.summary }}</p>
-        </section>
-        <p v-if="panelError" class="modal-error" role="alert">{{ panelError }}</p>
-      </div>
-    </linshe-modal>
     <linshe-modal v-model="summonOpen" title="仪式召唤" :transition-ms="300" wide>
       <GodAngelSummon :options="personalityOptions" :initial="summonInitial" :busy="resummoning" :error="resummonError" compact @submit="doResummon" />
     </linshe-modal>
@@ -260,7 +246,7 @@ import { useGodSaysStore } from '../stores/godSays.js'
 import { useGodThinking } from '../composables/useGodThinking.js'
 import { useGodScrollFollow } from '../composables/useGodScrollFollow.js'
 import { onEvent } from '../stores/unifiedStream.js'
-import { getGodSaysSessions, getGodSaysMemories, retryGodSummary, getGodAngel, summonGodAngel } from '../api/index.js'
+import { getGodSaysSessions, getGodAngel, summonGodAngel } from '../api/index.js'
 import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import LinsheAutoTextarea from '../components/ui/LinsheAutoTextarea.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
@@ -310,12 +296,8 @@ const resummonError = ref('')
 const angelSummoned = computed(() => god.state?.angel?.summoned !== false)
 const personalityOptions = computed(() => god.state?.angelPersonalities || [])
 const confirm = inject('confirm', async () => false)
-const memoryOpen = ref(false)
 const logsOpen = ref(false)
 const sessions = ref([])
-const memories = ref([])
-const panelLoading = ref(false)
-const panelError = ref('')
 const hasMoreSessions = ref(false)
 const sessionsLoading = ref(false)
 const sessionsError = ref('')
@@ -373,10 +355,10 @@ const SUGGESTION_POOL = [
   '刚才那件事进行到哪了？',
   '神谕落地了吗？',
   '帮我看看回应结果',
-  '翻阅我们往日的话',
-  '还记得上次那场雨吗？',
-  '找出我最近的偏好',
-  '把我们的约定念给我听',
+  '聊聊云庭的风景',
+  '如果云庭下雨会是什么样？',
+  '你有什么喜欢的东西？',
+  '给我讲个小故事',
   '你想对我说些什么？',
   '陪我坐一会儿',
   '今天有想告诉我什么吗？',
@@ -389,12 +371,11 @@ function rollSuggestions() {
   while (picked.length < 3 && pool.length) picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0])
   suggestions.value = picked
 }
-const coreToolLabels = { inspect_neighbors: '看看邻舍的近况', read_character: '了解角色与日程', set_schedule: '安排日程', publish_moment: '请角色分享动态', discuss_in_group: '把话题带进群聊', create_encounter: '开启一段奇遇', create_world_event: '让神谕成为现实', inspect_work: '查看回应进展', recall_memory: '翻阅往日记忆', list_capabilities: '查看可用能力' }
+const coreToolLabels = { inspect_neighbors: '看看邻舍的近况', read_character: '了解角色与日程', set_schedule: '安排日程', publish_moment: '请角色分享动态', discuss_in_group: '把话题带进群聊', create_encounter: '开启一段奇遇', create_world_event: '让神谕成为现实', inspect_work: '查看回应进展', list_capabilities: '查看可用能力' }
 const toolLabels = computed(() => ({ ...Object.fromEntries((god.state?.toolCatalog || []).map(t => [t.name, t.label])), ...coreToolLabels }))
 const toolStateText = { running: '处理中', done: '已处理', failed: '暂未完成', uncertain: '需要核对' }
 const userAvatarFailed = ref(false)
 const showUserAvatar = computed(() => !!userAvatar.value && !userAvatarFailed.value)
-const memoryLabels = { preference: '偏好', promise: '约定', event: '经历', relationship: '我们' }
 const subtitle = computed(() => !god.state ? '云庭 · 等待你的声音' : `${god.state.angel.display_name} · ${!god.state.scheduleEnabled ? '日程未启用' : god.state.activity?.activity || (god.state.angel.schedule_error ? '今日日程暂未就绪' : '在云庭等候')}`)
 
 function renderText(text) {
@@ -415,7 +396,6 @@ function resultDescription(call) {
   if (value?.deliveries) return `已建立「${value.title}」，${value.deliveries.length} 个对象的实际回应见上方记录。`
   if (call.name === 'inspect_neighbors') return `查到 ${value.characters.length} 位角色和 ${value.groups.length} 个群聊。`
   if (call.name === 'read_character') return `已读取 ${value.name} 的资料与今日安排。`
-  if (call.name === 'recall_memory') return '已读取相关的往日记忆。'
   if (call.name === 'inspect_work') return `已核对 ${value.length} 项工作。`
   return '已完成，结果已交给天使。'
 }
@@ -508,7 +488,8 @@ async function moreSessions() {
   if (sessionsLoading.value) return
   sessionsLoading.value = true; sessionsError.value = ''
   try {
-    const page = await getGodSaysSessions(sessionsLoaded ? sessions.value.at(-1)?.day : undefined)
+    const last = sessionsLoaded ? sessions.value.at(-1) : null
+    const page = await getGodSaysSessions(last?.day, last?.id)
     sessions.value = [...new Map([...sessions.value, ...page].map(s => [s.id, s])).values()].sort((a, b) => b.day.localeCompare(a.day) || (b.seq || 0) - (a.seq || 0))
     sessionsLoaded = true; hasMoreSessions.value = page.length === 60
   }
@@ -520,6 +501,14 @@ async function reloadSessions() {
   sessionsLoaded = false
   hasMoreSessions.value = true
   await moreSessions()
+}
+async function newConversation() {
+  if (!await god.newConversation()) return
+  historyOpen.value = false
+  await reloadSessions()
+  await nextTick()
+  await goBottom({ immediate: true })
+  if (!isMobile.value) composer.value?.focus()
 }
 async function selectSession(session) { historyOpen.value = false; await god.load(session.id); await goBottom({ immediate: true }) }
 async function openAngelPanel(schedule = false) {
@@ -568,22 +557,11 @@ async function doResummon(payload) {
 
 function angelSaved(angel) { angelCharacter.value = angel; if (god.state) god.state.angel = angel }
 async function removeTurn(turn) {
-  if (!await confirm({ title: '删除这一轮对话？', message: '这轮提问、回复、思考和执行记录将被删除，相关摘要与记忆会重新整理。已经执行的发帖、群聊等操作不会撤销。', okText: '删除这一轮', danger: true })) return
+  if (!await confirm({ title: '删除这一轮对话？', message: '这轮提问、回复、思考和执行记录将被删除。已经执行的发帖、群聊等操作不会撤销。', okText: '删除这一轮', danger: true })) return
   if (await god.deleteTurn(turn.id)) {
     const session = sessions.value.find(s => s.id === turn.session_id)
-    if (session) { session.summary = ''; session.preview = god.turns[0]?.input || ''; session.summary_status = 'pending' }
-    memories.value = memories.value.filter(m => m.id !== turn.session_id)
+    if (session) session.preview = god.turns[0]?.input || ''
   }
-}
-async function retrySummary(id) {
-  try { await retryGodSummary(id); const item = sessions.value.find(s => s.id === id); if (item) item.summary_status = 'pending' }
-  catch (err) { sessionsError.value = err.message }
-}
-async function openMemory() {
-  memoryOpen.value = true; panelLoading.value = true; panelError.value = ''
-  try { memories.value = await getGodSaysMemories() }
-  catch (err) { panelError.value = err.message }
-  finally { panelLoading.value = false }
 }
 let poll
 let unsubscribe
@@ -595,7 +573,7 @@ onMounted(async () => {
   void loadUserAvatar()
   loadFont(USER_BUBBLE_FONT_ID)
   unsubscribe = onEvent('god_world_event', god.updateWorld)
-  await god.load(god.archiveId)
+  await god.load(god.state?.session.id ?? god.archiveId)
   if (!mounted) return
   activateThinking()
   void moreSessions()
@@ -628,6 +606,7 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .god-page,.god-modal-content { --god-muted:color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary)); }
 .god-page { --god-col:776px; position:relative; display:flex; flex-direction:row; flex:1; min-width:0; min-height:0; height:100dvh; overflow:hidden; color:var(--text-primary); background:var(--bg-sunken); }
 .god-main { display:flex; flex-direction:column; min-width:0; min-height:0; flex:1; }
+.history-create { padding:0 16px 12px; }
 .god-history { display:flex; flex-direction:column; width:216px; flex-shrink:0; min-height:0; background:var(--bg-secondary); border-right:1px solid var(--border); }
 .history-heading { display:flex; align-items:center; justify-content:space-between; min-height:78px; padding:0 20px; font-size:var(--fs-sm); font-weight:600; box-sizing:border-box; letter-spacing:1px; }
 .history-days { flex:1; overflow-y:auto; padding:8px 10px; }.history-day { margin-bottom:5px; border-radius:var(--radius-md); transition:background .3s; }.history-day.selected { background:color-mix(in srgb,var(--accent) 11%,var(--bg-secondary)); }.history-choice { display:flex; flex-wrap:wrap; gap:6px 8px; padding:12px 10px; cursor:pointer; text-align:left; border-radius:var(--radius-md); }.history-choice:hover { background:var(--bg-sunken); }.history-choice:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }.history-date { font-size:var(--fs-sm); font-weight:600; }.history-day-label { color:var(--god-muted); font-size:var(--fs-xs); align-self:center; }.history-preview { display:block; width:100%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--god-muted); font-size:var(--fs-xs); line-height:1.7; }.history-note { padding:0 10px; color:var(--god-muted); font-size:var(--fs-sm); line-height:1.7; }.history-footer { border-top:1px solid var(--border); padding:16px 20px; }
@@ -780,14 +759,7 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .god-loading .skeleton { height:56px; margin-bottom:25px; border-radius:var(--radius-md); }
 .god-loading .skeleton:nth-child(2) { width:75%; }
 .god-modal-content { font-size:var(--fs-md); line-height:1.8; }
-.modal-note,.memory-empty { margin:0 0 18px; font-size:var(--fs-sm); line-height:1.8; color:var(--god-muted); }
 .modal-error { margin:12px 0; color:var(--danger); font-size:var(--fs-sm); line-height:1.7; }
-.memory-entry { margin:20px 0; }
-.memory-entry h4 { font-size:var(--fs-md); margin:0 0 10px; }
-.memory-entry ul { margin:0; padding:0; list-style:none; }
-.memory-entry li { display:flex; gap:10px; font-size:var(--fs-sm); line-height:1.8; margin:10px 0; }
-.memory-entry li span { color:var(--accent); flex-shrink:0; }
-.memory-entry p { margin:8px 0; font-size:var(--fs-sm); color:var(--god-muted); line-height:1.8; }
 .god-content-enter-active,.god-content-leave-active { transition:opacity .3s var(--ease-standard),transform .3s var(--ease-standard); }
 .god-content-enter-from,.god-content-leave-to { opacity:0; transform:translateY(5px); }
 @keyframes god-breathe { 0%,100% { opacity:.45; } 50% { opacity:1; } }

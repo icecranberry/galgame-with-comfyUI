@@ -51,7 +51,7 @@ test('scene outfit tool uses the actual generation API and saves only reviewed s
   const api = createGodLocalApi({ port: server.address().port });
   const repo = createGodRepository(db);
   const run = repo.start('scene-outfits', '给角色设计私服').run;
-  const tools = createGodTools(repo, {}, {}, { api });
+  const tools = createGodTools(repo, {}, { api });
   let calls = 0;
   const execute = (args, name = 'generate_scene_outfits') => tools.execute({ id: `call-${calls++}`, function: { name, arguments: JSON.stringify(args) } }, run.id, 0);
 

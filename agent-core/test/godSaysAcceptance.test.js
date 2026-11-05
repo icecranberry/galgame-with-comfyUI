@@ -58,7 +58,7 @@ function fixture(t) {
     changeSchedule: () => { requests.push({operation:'changeSchedule'}); return {ok:true}; },
     queueSchedule: () => {requests.push({operation:'queueSchedule'});},
   };
-  const tools = createGodTools(repo, {queue: () => ({status:'pending'})}, {}, services);
+  const tools = createGodTools(repo, {queue: () => ({status:'pending'})}, services);
   let index=0;
   const execute = (name,args) => tools.execute({id:`accept-${++index}`,function:{name,arguments:JSON.stringify(args)}},run.id,index);
   t.after(() => db.close());
@@ -208,7 +208,7 @@ test('AC-13 每个模块工具生成的接口地址都固定在 /api/ 内，编�
 
 test('AC-14 新增独立世界事件不需要确认',async t=>{
   const f=fixture(t);
-  const tools=createGodTools(f.repo,createWorldEventService(f.repo),{},{});
+  const tools=createGodTools(f.repo,createWorldEventService(f.repo), {});
   const result=await tools.execute({id:'new-world',function:{name:'create_world_event',arguments:JSON.stringify({title:'彩虹',fact:'天空出现彩虹',moment_count:0,group_count:0})}},f.run.id,0);
   assert.equal(result.ok,true);
   assert.equal(f.db.prepare('SELECT COUNT(*) n FROM god_world_events').get().n,1);
@@ -219,7 +219,7 @@ test('AC-15 同一新增工具带替代参数时，不得无确认结束旧事�
   const f=fixture(t);
   const world=createWorldEventService(f.repo);
   const previous=world.create({title:'晴天',fact:'今天晴天',moment_count:0,group_count:0},{runId:f.run.id,effectKey:'previous'});
-  const tools=createGodTools(f.repo,world,{},{});
+  const tools=createGodTools(f.repo,world, {});
   const result=await tools.execute({id:'replace-world',function:{name:'create_world_event',arguments:JSON.stringify({title:'雨天',fact:'现在下雨',supersedes_id:previous.id,moment_count:0,group_count:0})}},f.run.id,0);
   assert.equal(result.ok,true);
   assert.equal(f.db.prepare('SELECT status FROM god_world_events WHERE id=?').get(previous.id).status,'active');

@@ -39,13 +39,13 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
   const openSession = key => db.prepare("SELECT * FROM god_sessions WHERE day=? AND status='open' ORDER BY seq DESC, id DESC LIMIT 1").get(key);
   function today({ persist = true } = {}) {
     const key = day();
-    // 跨天仍沿用当前会话，只有摘要成功才允许切换；兼容旧版本的 closing 状态。
-    const latest = db.prepare('SELECT * FROM god_sessions ORDER BY day DESC,seq DESC,id DESC LIMIT 1').get();
-    if (latest?.day < key && latest.summary_status !== 'done' &&
-      db.prepare("SELECT 1 FROM god_messages WHERE session_id=? AND role='user'").get(latest.id)) return latest;
+    // 午夜在途回复仍属于原会话；结束后直接换日，不再等待记忆总结。
+    const running = db.prepare("SELECT s.* FROM god_sessions s JOIN god_runs r ON r.session_id=s.id WHERE r.status='running' LIMIT 1").get();
+    if (running) return running;
+    db.prepare("UPDATE god_sessions SET status='archived' WHERE day<? AND status IN ('open','closing')").run(key);
     const open = openSession(key);
     if (open) return open;
-    // 当天首次建立会话；同一天的后续对话由 summonSession 以 seq+1 追加。
+    // 当天首次建立会话；同一天的后续对话由 newSession / summonSession 以 seq+1 追加。
     const next = db.prepare('SELECT COALESCE(MAX(seq),-1)+1 AS seq FROM god_sessions WHERE day=?').get(key).seq;
     // 浏览页面和召唤只返回草稿，首条消息受理时才落库。
     if (!persist) return { id: null, day: key, time_zone: timeZone, seq: next, status: 'open',
@@ -53,28 +53,27 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     db.prepare('INSERT INTO god_sessions(day,time_zone,seq,created_at) VALUES (?,?,?,?)').run(key, timeZone, next, timestamp());
     return latestSession(key);
   }
-  // 重新召唤结束旧会话；新会话等第一条消息再保存，重复召唤不积累空记录。
-  function summonSession() {
-    const key = day();
-    db.prepare("UPDATE god_sessions SET status='closing' WHERE day=? AND status='open'").run(key);
+  // 新建与重新召唤共用唯一未保存草稿；首条消息前重复调用不增加记录。
+  const newSession = db.transaction(() => {
+    if (db.prepare("SELECT 1 FROM god_runs WHERE status='running'").get()) {
+      throw Object.assign(new Error('请等待当前回应结束或先停止，再新建对话'), { status: 409 });
+    }
+    db.prepare("UPDATE god_sessions SET status='archived' WHERE status IN ('open','closing')").run();
     pruneEmptySessions();
     return today({ persist: false });
-  }
+  });
+  const summonSession = newSession;
   function pruneEmptySessions() {
     // 保留删除对话后的幂等墓碑及业务关联，仅清理从未产生任何内容的空壳。
     db.prepare(`DELETE FROM god_sessions WHERE NOT EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=god_sessions.id)
       AND NOT EXISTS(SELECT 1 FROM god_runs r WHERE r.session_id=god_sessions.id)`).run();
   }
-  function listSessions(before = '9999-12-31') {
+  function listSessions(before = '9999-12-31', beforeId = null) {
     return db.prepare(`SELECT s.id,s.day,s.seq,s.created_at,s.status,s.summary,s.summary_status,s.summary_error,
       (SELECT substr(r.input,1,160) FROM god_runs r WHERE r.session_id=s.id AND r.deleted_at IS NULL ORDER BY r.created_at,r.rowid LIMIT 1) AS preview
-      FROM god_sessions s WHERE s.day<? AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user')
-      ORDER BY s.day DESC,s.seq DESC LIMIT 60`).all(before);
-  }
-  function listMemories() {
-    return db.prepare(`SELECT id,day,summary,memories_json FROM god_sessions s WHERE summary_status='done'
+      FROM god_sessions s WHERE (s.day<? OR (s.day=? AND s.seq<(SELECT seq FROM god_sessions WHERE id=? AND day=?)))
       AND EXISTS(SELECT 1 FROM god_messages m WHERE m.session_id=s.id AND m.role='user')
-      ORDER BY day DESC LIMIT 90`).all().map(s => ({ ...s, memories: parseJson(s.memories_json, []) }));
+      ORDER BY s.day DESC,s.seq DESC LIMIT 60`).all(before, before, beforeId, before);
   }
   function message(run, role, content = '', extra = {}) {
     const id = Number(db.prepare(`INSERT INTO god_messages(session_id,run_id,role,content,reasoning,tool_calls,tool_call_id,provider_json,status,created_at)
@@ -85,17 +84,24 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     emit(run.id, 'message', publicMessage(row));
     return row;
   }
-  const start = db.transaction((clientId, input, images = []) => {
+  const start = db.transaction((clientId, input, images = [], sessionId = null) => {
+    if (sessionId !== null && (!Number.isSafeInteger(sessionId) || sessionId < 1)) {
+      throw Object.assign(new Error('会话编号无效'), { status: 400 });
+    }
     const existing = db.prepare('SELECT * FROM god_runs WHERE client_id=?').get(clientId);
     if (existing) {
       if (existing.deleted_at) throw Object.assign(new Error('这轮对话已删除，请使用新的发送标识'), { status: 409 });
       if (existing.input !== input) throw Object.assign(new Error('这次发送标识已用于另一条消息'), { status: 409 });
+      if (sessionId !== null && existing.session_id !== sessionId) throw Object.assign(new Error('这次发送标识已用于另一段对话'), { status: 409 });
       return { run: existing, duplicate: true };
     }
-    const session = today();
-    if (db.prepare("SELECT id FROM god_runs WHERE session_id=? AND status='running'").get(session.id)) {
+    const selected = sessionId === null ? null : db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId);
+    if (sessionId !== null && !selected) throw Object.assign(new Error('这段对话不存在'), { status: 404 });
+    if (selected && selected.day !== day()) throw Object.assign(new Error('往日对话只读，请回到今天继续对话'), { status: 409 });
+    if (db.prepare("SELECT id FROM god_runs WHERE status='running'").get()) {
       throw Object.assign(new Error('天使仍在回应上一句话，请稍候或先停止'), { status: 409 });
     }
+    const session = selected || today();
     const imagesJson = JSON.stringify(Array.isArray(images) ? images : []);
     const run = { id: randomUUID(), session_id: session.id, client_id: clientId, input, images_json: imagesJson, status: 'running', created_at: timestamp() };
     db.prepare('INSERT INTO god_runs(id,session_id,client_id,input,images_json,created_at) VALUES (?,?,?,?,?,?)').run(run.id, session.id, clientId, input, imagesJson, run.created_at);
@@ -136,11 +142,9 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     const run = db.prepare('SELECT * FROM god_runs WHERE id=?').get(id);
     if (!run) throw Object.assign(new Error('这轮对话不存在'), { status: 404 });
     if (run.deleted_at) return { ok: true, session_id: run.session_id };
-    const session = db.prepare('SELECT * FROM god_sessions WHERE id=?').get(run.session_id);
     if (db.prepare("SELECT 1 FROM god_runs WHERE session_id=? AND status='running'").get(run.session_id)) {
-      throw Object.assign(new Error('请等待本日回应结束或先停止，再删除对话'), { status: 409 });
+      throw Object.assign(new Error('请等待当前回应结束或先停止，再删除对话'), { status: 409 });
     }
-    if (session.summary_status === 'running') throw Object.assign(new Error('这一天的记忆正在整理，请稍后再删除'), { status: 409 });
     db.prepare('DELETE FROM god_messages WHERE run_id=?').run(id);
     db.prepare('DELETE FROM god_run_events WHERE run_id=?').run(id);
     db.prepare('DELETE FROM god_tool_calls WHERE run_id=?').run(id);
@@ -175,7 +179,7 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     const session = sessionId ? db.prepare('SELECT * FROM god_sessions WHERE id=?').get(sessionId) : active;
     if (!session) throw Object.assign(new Error('这一天的对话不存在'), { status: 404 });
     return {
-      session, current: session.id === active.id, angel: ensureAngel(),
+      session, current: session.id === active.id, writable: session.day === day(), angel: ensureAngel(),
       messages: db.prepare('SELECT * FROM god_messages WHERE session_id=? ORDER BY id').all(session.id).map(publicMessage),
       runs: db.prepare('SELECT * FROM god_runs WHERE session_id=? AND deleted_at IS NULL ORDER BY created_at,rowid').all(session.id).map(r => ({ ...r, images: parseJson(r.images_json, []) })),
       calls: db.prepare('SELECT c.* FROM god_tool_calls c JOIN god_runs r ON r.id=c.run_id WHERE r.session_id=? ORDER BY c.created_at,c.rowid').all(session.id).map(c => ({ ...c, args: parseJson(c.args_json, {}), result: parseJson(c.result_json) })),
@@ -183,5 +187,5 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
       today: day(),
     };
   }
-  return { db, now, day, timeZone, timestamp, today, summonSession, pruneEmptySessions, listSessions, listMemories, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
+  return { db, now, day, timeZone, timestamp, today, newSession, summonSession, pruneEmptySessions, listSessions, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
 }

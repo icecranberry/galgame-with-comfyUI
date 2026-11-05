@@ -178,3 +178,112 @@ test('stream separates reasoning/body, final snapshot replaces deltas, tool resu
   applyGodStreamEvent(state, { type: 'run_end', data: { id: 'r', status: 'completed' } });
   assert.equal(state.runs[0].status, 'completed');
 });
+
+
+test('new conversation reuses empty drafts, preserves input, and blocks concurrent creation', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  const empty = { session: { id: null }, current: true, runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 };
+  god.state = structuredClone(empty);
+  god.setDraft('尚未发送的草稿');
+  let posts = 0;
+  let release;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options?.method === 'POST') {
+      posts++;
+      await new Promise(resolve => { release = resolve; });
+      return Response.json({ id: null });
+    }
+    return Response.json(empty);
+  });
+  assert.equal(await god.newConversation(), false);
+  assert.equal(posts, 0);
+  god.state = { ...empty, session: { id: 1 }, runs: [{ id: 'previous', status: 'completed' }] };
+  const creating = god.newConversation();
+  assert.equal(god.creating, true);
+  assert.equal(await god.newConversation(), false);
+  release();
+  assert.equal(await creating, true);
+  assert.equal(await god.newConversation(), false);
+  assert.equal(posts, 1);
+  assert.equal(god.draft, '尚未发送的草稿');
+  assert.equal(god.state.session.id, null);
+  assert.equal(god.creating, false);
+});
+
+test('failed creation preserves conversation and draft; history can return to the one new draft', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  god.state = { session: { id: 5 }, runs: [{ id: 'old', status: 'completed' }], messages: [], calls: [], worldEvents: [] };
+  god.archiveId = 5;
+  god.setDraft('不要丢掉');
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+  assert.equal(await god.newConversation(), false);
+  assert.equal(god.archiveId, 5);
+  assert.equal(god.state.session.id, 5);
+  assert.equal(god.draft, '不要丢掉');
+  assert.equal(god.creating, false);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ session: { id: null }, current: true, runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 }));
+  assert.equal(await god.newConversation(), true);
+  assert.equal(god.archiveId, null);
+  assert.equal(god.state.session.id, null);
+});
+
+
+test('same-day non-current sessions can send, retain selection and bind retries to the selected session', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const stored = new Map();
+  mockGlobal(t, 'localStorage', { getItem: k => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, v) });
+  const bodies = [], reads = [];
+  let fail = true;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options?.method === 'POST') {
+      const body = JSON.parse(options.body); bodies.push(body);
+      if (fail) throw new Error('offline');
+      return Response.json({ run: { id: 'resumed', session_id: body.session_id, status: 'completed' } });
+    }
+    reads.push(url);
+    const id = Number(new URL(url, 'http://localhost').searchParams.get('session'));
+    assert.ok(id, 'reload must keep the selected session instead of loading the default');
+    return Response.json({ session: { id, day: today, time_zone: 'Asia/Shanghai', status: 'archived' }, today,
+      current: false, writable: true, runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 });
+  });
+  await god.load(1);
+  assert.equal(god.archiveId, null);
+  god.setDraft('继续聊');
+  await god.send();
+  await god.send();
+  assert.equal(bodies[0].client_id, bodies[1].client_id);
+  await god.load(2);
+  fail = false;
+  assert.equal((await god.send()).session_id, 2);
+  assert.notEqual(bodies[2].client_id, bodies[0].client_id, 'same text in another conversation is a new request');
+  assert.deepEqual(bodies.map(b => b.session_id), [1, 1, 2]);
+  assert.equal(god.state.session.id, 2);
+  assert.equal(god.archiveId, null);
+  assert.equal(reads.at(-1), '/api/god-says/state?session=2');
+  assert.equal(god.draft, '');
+});
+
+test('yesterday sessions remain read-only and failed date refresh preserves the draft', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  let posts = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options?.method === 'POST') posts++;
+    return Response.json({ session: { id: 1, day: '2020-01-01', time_zone: 'Asia/Shanghai' }, current: false, writable: false,
+      runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 });
+  });
+  await god.load(1);
+  god.setDraft('保留内容');
+  assert.equal(god.archiveId, 1);
+  assert.equal(await god.send(), undefined);
+  assert.equal(posts, 0);
+  god.archiveId = null;
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+  assert.equal(await god.send(), undefined);
+  assert.equal(god.draft, '保留内容');
+  assert.equal(god.error, 'offline');
+});

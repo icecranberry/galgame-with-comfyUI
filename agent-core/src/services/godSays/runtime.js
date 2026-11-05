@@ -3,7 +3,7 @@ import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { config } from '../../config.js';
 import { getWorldIntegrationRule, getChatRhythmRules } from '../../builtinRules.js';
 import { appendWorldLanguageStyle } from '../worldLanguageStyle.js';
-import { chatAgentStream, chatSync } from '../../llm/llm-client.js';
+import { chatAgentStream } from '../../llm/llm-client.js';
 import { prepareNarrativePrompt } from '../presets/narrative.js';
 import { getLocalDateKey } from '../../utils/localDate.js';
 import { getTodaySchedule, getCurrentActivity } from '../scheduleManager.js';
@@ -14,7 +14,7 @@ import { generateEvent } from '../eventGenerator.js';
 import { runGroupRound, isGroupRoundRunning } from '../groupChatEngine.js';
 import { broadcast } from '../unifiedStreamBus.js';
 import { createGodRepository } from './repository.js';
-import { createGodMemory } from './memory.js';
+import { createGodHistory } from './history.js';
 import { createWorldEventService, worldEventContext } from './worldEvents.js';
 import { createGodTools } from './tools.js';
 import { runGodAgent } from './agent.js';
@@ -58,7 +58,7 @@ export function getGodRuntime() {
     promptEnvironment: kind => ({ systemRules: getSystemRules({ roleplay: false }), worldSetting: getWorldSetting(), worldRule: getWorldIntegrationRule(kind === 'outfits' ? 'world_outfit' : kind === 'clothing' ? 'interaction' : 'photo') }),
     settings: () => config.comfyui, scheduleEnabled: () => config.features.schedule !== false });
   repo.recover();
-  const memory = createGodMemory(repo, chatSync);
+  const historyReader = createGodHistory(repo);
   const promptState = createGodPromptState(repo, prepareNarrativePrompt);
   const world = createWorldEventService(repo, {
     broadcast, groupBusy: isGroupRoundRunning,
@@ -82,7 +82,7 @@ export function getGodRuntime() {
     },
   });
   world.recover();
-  const tools = createGodTools(repo, world, memory, { localDate: getLocalDateKey, scheduleEnabled: () => config.features.schedule !== false,
+  const tools = createGodTools(repo, world, { localDate: getLocalDateKey, scheduleEnabled: () => config.features.schedule !== false,
     getSchedule: getTodaySchedule, getActivity: getCurrentActivity, changeSchedule: applyScheduleChange, queueSchedule: queueScheduleChange, encounter: generateEvent,
     assertScheduleIdle: id=>assertScheduleIdle([id]),
     generateReplacement, api: createGodLocalApi({ port: () => config.port }) });
@@ -125,7 +125,7 @@ export function getGodRuntime() {
     }
     const schedule = repo.ensureAngel().schedule;
     // 历史日程只在当日快照；归档不会被未来模板刷新覆盖。
-    if (session?.day === repo.day()) repo.db.prepare("UPDATE god_sessions SET schedule_json=? WHERE id=? AND status='open'").run(JSON.stringify(schedule), session.id);
+    if (session?.day === repo.day()) repo.db.prepare('UPDATE god_sessions SET schedule_json=? WHERE id=?').run(JSON.stringify(schedule), session.id);
     return schedule;
   }
   async function prepare(run, signal) {
@@ -133,7 +133,7 @@ export function getGodRuntime() {
     await ensureSchedule(session);
     signal?.throwIfAborted();
     const angel = repo.ensureAngel();
-    const history = await memory.contextHistory(session.id, { includeIds: true });
+    const history = await historyReader.contextHistory(session.id, { includeIds: true });
     signal?.throwIfAborted();
     const worldSetting = getWorldSetting();
     const schedule = config.features.schedule === false ? [] : angel.schedule;
@@ -141,7 +141,7 @@ export function getGodRuntime() {
       systemRules: getSystemRules({ roleplay: false }), worldSetting,
       chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules()),
       worldIntegrationRule: worldSetting ? getWorldIntegrationRule('interaction') : '', agentRules: AGENT_RULES,
-      angel, user: config.user, history, recall: memory.pastSummaries(session.day), schedule,
+      angel, user: config.user, history, schedule,
       scheduleEnabled: config.features.schedule !== false, now: new Date(run.created_at), timeZone: repo.timeZone,
       worldContext: worldEventContext(repo.db), work: world.list(null, session.id),
       images: run.imageDataUris || [],
@@ -149,8 +149,8 @@ export function getGodRuntime() {
     return promptState.prepare(run, context, history, signal);
   }
   const running = new Map();
-  function start(clientId, text, { urls = [], dataUris = [] } = {}) {
-    const started = repo.start(clientId, text, urls);
+  function start(clientId, text, { urls = [], dataUris = [], sessionId = null } = {}) {
+    const started = repo.start(clientId, text, urls, sessionId);
     if (!started.duplicate) {
       if (dataUris.length) started.run.imageDataUris = dataUris;
       const controller = new AbortController();
@@ -160,7 +160,7 @@ export function getGodRuntime() {
         beginTurn('神说');
         runGodAgent(started.run, { repo, tools, stream: chatAgentStream, prepare, signal })
           .catch(err => { console.error('[神说]', err.message); repo.finish(started.run.id, 'failed', '执行意外中断'); })
-          .finally(() => { running.delete(started.run.id); void memory.archive().catch(err => console.warn('[神说归档]', err.message)); });
+          .finally(() => { running.delete(started.run.id); });
       });
     }
     return started;
@@ -172,7 +172,7 @@ export function getGodRuntime() {
     repo.db.prepare("UPDATE god_world_deliveries SET status='cancelled' WHERE status='pending' AND event_id IN (SELECT id FROM god_world_events WHERE run_id=?)").run(id);
     return { ok: true };
   }
-  singleton = { repo, world, memory, images, tools, start, cancel, ensurePersona, ensureSchedule, summon };
+  singleton = { repo, world, images, tools, start, cancel, ensurePersona, ensureSchedule, summon };
   return singleton;
 }
 
@@ -182,7 +182,7 @@ export function startGodSays() {
   const runtime = getGodRuntime();
   const deliveries = () => runtime.world.tick().catch(err => console.warn('[神谕投递]', err.message));
   const maintenance = async () => {
-    while (await runtime.memory.archive()) { /* 补齐离线期间积压的会话 */ }
+    runtime.repo.today({ persist: false });
     const session = runtime.repo.db.prepare('SELECT * FROM god_sessions WHERE day=?').get(runtime.repo.day());
     if (session) await runtime.ensureSchedule(session);
   };
@@ -192,13 +192,13 @@ export function startGodSays() {
     const next = Date.parse(`${runtime.repo.day()}T00:00:00+08:00`) + 86400000;
     timers[1] = setTimeout(() => {
       scheduleMidnight();
-      void maintenance().catch(err => console.warn('[神说归档]', err.message));
+      void maintenance().catch(err => console.warn('[天使日程]', err.message));
     }, Math.max(1, next - now.getTime()));
     timers[1].unref();
   };
   timers = [setInterval(deliveries, 3000)];
   scheduleMidnight();
-  void maintenance().catch(err => console.warn('[神说归档]', err.message));
+  void maintenance().catch(err => console.warn('[天使日程]', err.message));
   timers.forEach(t => t.unref());
   void deliveries();
 }
