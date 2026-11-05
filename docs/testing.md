@@ -56,3 +56,9 @@
 - 功能有独立总开关 `config.features.townBuildingFeatures`（`FEATURE_TOWN_BUILDING_FEATURES`，默认开）；关闭后隐藏入口并拒绝新生成与新操作，已有预留仍按既有状态机结算或释放。旧镇建筑不自动建档，由管理面板「特殊建筑功能」逐栋启用。
 
 触摸样例还验证按下形变、松手回弹、最终恢复原形，以及图片节点不被重建。「完整触摸动效预览」只在测试页覆盖媒体偏好输入，以检查完整动画分支，不修改用户系统设置。
+
+## 聊天与日记中断恢复
+
+`proactiveChatSwitch.test.js` 验证关闭总开关、零频率、取消启动等待和丢弃旧调度结果；`sentenceSplitter.test.js` 覆盖英文流式分句及中文 golden 回归。日记重启恢复与失败历史在 `diaryGenerator.test.js` 中验证；纯文字回复幂等与回放在 `privateChatImageTools.test.js` 中验证。
+
+前端 `chatTimeoutRecovery.test.js` 使用真实 store/API、合成 SSE 和虚拟时钟，验证首次等待、活动续期、真正断流、本机恢复与原消息重试。`diaryRecovery.test.js` 验证历史失败页可重试。`chatDiaryRecovery.browser.test.js` 设置 `PLAYWRIGHT_MODULE` 后运行真实组件的桌面/窄屏与暖色/暗夜检查，可通过 `RECOVERY_SCREENSHOTS` 指定截图输出目录；配套 `/test/fixtures/chatDiaryRecovery.html` 的全部接口使用合成数据。
