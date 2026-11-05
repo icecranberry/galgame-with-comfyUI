@@ -63,7 +63,9 @@
         正常 column 布局：最旧消息在顶部，最新消息在底部
         新消息到达时 JS 平滑滚底，与列表高度变化同步
       -->
-      <div ref="msgList" class="message-list" @scroll="onScroll(); clearSpeechBubble()">
+      <div ref="msgList" class="message-list" @scroll="onScroll(); clearSpeechBubble()"
+        @wheel.passive="interruptImageScroll" @touchstart.passive="interruptImageScroll"
+        @pointerdown="interruptImageScroll" @keydown="onScrollKeydown">
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
         <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
@@ -144,8 +146,9 @@
               </div>
               <ImageGenBubble
                 :msg="item.msg"
+                :emit-loaded-when-initially-done="!!item.msg.liveImage"
                 @preview="onChatImagePreview($event)"
-                @loaded="scrollToBottom(true)"
+                @loaded="onChatImageLoaded(item.msg)"
               />
             </div>
           </template>
@@ -1517,10 +1520,33 @@ function timeLabel(iso) {
 
 let userScrolledUp = false
 let scrollTimer = null
+let imageScrollFrame = null
+
+function onChatImageLoaded(message) {
+  message.liveImage = false
+  scrollToBottom(false, 600)
+}
+
+function cancelImageScroll() {
+  if (imageScrollFrame !== null) cancelAnimationFrame(imageScrollFrame)
+  imageScrollFrame = null
+}
+
+function interruptImageScroll() {
+  if (imageScrollFrame === null) return
+  cancelImageScroll()
+  userScrolledUp = true
+}
+
+function onScrollKeydown(event) {
+  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) interruptImageScroll()
+}
 
 function onScroll() {
   const el = msgList.value
   if (!el) return
+  // 图片缓动中离底部较远是正常追赶，不应误判为用户上翻。
+  if (imageScrollFrame !== null) return
   const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
   if (distToBottom > 60) {
     userScrolledUp = true
@@ -1542,17 +1568,36 @@ function onScroll() {
   }
 }
 
-// force=true: 瞬间滚底（切角色/首次加载/发消息/图片加载完毕）
-// force=false: 平滑滚动（流式分句，列表高度变化有 0.2s 缓动）
-async function scrollToBottom(force = false) {
+// force=true: 瞬间滚底（切角色/首次加载/发消息）
+// force=false: 文字沿用浏览器平滑滚动；图片显式使用更长的 duration（毫秒）
+async function scrollToBottom(force = false, duration = 0) {
   await nextTick()
   const el = msgList.value
   if (!el) return
   if (force || !userScrolledUp) {
     if (force) {
+      cancelImageScroll()
       el.scrollTop = el.scrollHeight
+    } else if (duration > 0 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      cancelImageScroll()
+      clearTimeout(scrollTimer)
+      const from = el.scrollTop
+      // 停止尚未结束的原生 smooth，避免两套滚动相互争抢。
+      el.scrollTo({ top: from, behavior: 'instant' })
+      const started = performance.now()
+      const step = now => {
+        const progress = Math.min(1, (now - started) / duration)
+        const eased = progress < 0.5 ? 4 * progress ** 3 : 1 - (-2 * progress + 2) ** 3 / 2
+        const bottom = Math.max(0, el.scrollHeight - el.clientHeight)
+        el.scrollTop = from + (bottom - from) * eased
+        imageScrollFrame = progress < 1 ? requestAnimationFrame(step) : null
+      }
+      imageScrollFrame = requestAnimationFrame(step)
+    } else if (imageScrollFrame !== null) {
+      // 图片跟随期间新分句共用当前动画，下一帧会读取最新底部。
+      return
     } else {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      el.scrollTo({ top: el.scrollHeight, behavior: duration > 0 ? 'instant' : 'smooth' })
     }
   }
 }
@@ -1572,6 +1617,7 @@ function setupMobileKeyboard() {
     const h = window.visualViewport.height
     if (Math.abs(h - prevH) < 10) return
     prevH = h
+    cancelImageScroll()
     userScrolledUp = false
     el.scrollTop = el.scrollHeight
   }
@@ -1602,7 +1648,7 @@ function setupResizeObserver() {
     resizeRaf = requestAnimationFrame(() => {
       resizeRaf = null
       const el2 = msgList.value
-      if (!el2 || pendingCharSwitch || chat.streaming) return
+      if (!el2 || pendingCharSwitch || chat.streaming || imageScrollFrame !== null) return
       const newSH = el2.scrollHeight
       if (newSH === lastObservedSH) return
       // 用旧 scrollHeight 算 distBefore，避免 userScrolledUp 被 scroll 事件误判污染
@@ -1651,6 +1697,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cancelImageScroll()
+  clearTimeout(scrollTimer)
   teardownMobileKeyboard()
   teardownResizeObserver()
   window.removeEventListener('click', dismissUndoBubble)
@@ -1672,6 +1720,7 @@ watch(() => chat.activeCharId, (id, oldId) => {
   stopSpeech()
   if (id) loadSpeech(id).catch(() => {})
   if (id && id !== oldId) {
+    cancelImageScroll()
     const routeId = parseInt(route.params.id)
     if (id !== routeId) router.replace('/chat/' + id)
     pendingCharSwitch = true
@@ -1683,7 +1732,11 @@ watch(() => chat.activeCharId, (id, oldId) => {
 })
 
 // 新消息到达 → 自动滚底（监听 messages.length，窗口展开不影响）
+let previousImageIds = new Set(chat.messages.filter(msg => msg.type === 'image_gen').map(msg => msg.id))
 watch(() => chat.messages.length, (newLen) => {
+  const imageIds = new Set(chat.messages.filter(msg => msg.type === 'image_gen').map(msg => msg.id))
+  const hasNewImage = [...imageIds].some(id => !previousImageIds.has(id))
+  previousImageIds = imageIds
   if (newLen === 0) return
   if (pendingCharSwitch) {
     // 切角色后消息加载完成：滚底 + 恢复可见
@@ -1700,7 +1753,8 @@ watch(() => chat.messages.length, (newLen) => {
       }, 150)
     }, 50)
   } else {
-    scrollToBottom()  // 流式分句：平滑滚动
+    // 图片的第一次入场发生在占位气泡插入时，不能只在 loaded 后延长滚动。
+    scrollToBottom(false, hasNewImage ? 600 : 0)
   }
 })
 // 表情包是追加到当前分句气泡上的，不改变 messages.length；单独监听贴图数量触发滚底

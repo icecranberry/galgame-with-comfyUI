@@ -1,8 +1,8 @@
 <template>
-  <div class="igb">
+  <div class="igb" :class="{ 'igb-awaiting': waitingForImages }">
     <!-- Generating / pending / retrying overlay (hidden when done) -->
     <div
-      v-if="genStatus !== 'done' && genStatus !== 'error'"
+      v-if="(genStatus !== 'done' && genStatus !== 'error') || waitingForImages"
       class="igb-gen"
       :style="genBoxStyle"
     >
@@ -31,7 +31,7 @@
           v-if="!imgError.has(i)"
           :src="img.url || img.base64"
           class="igb-img"
-          loading="lazy"
+          :loading="liveImage ? 'eager' : 'lazy'"
           decoding="async"
           @click="$emit('preview', img.url || img.base64)"
           @error="onImgError(i)"
@@ -93,10 +93,12 @@ const genBoxStyle = computed(() => {
 // 跟踪图片加载失败和完成
 const imgError = reactive(new Set())
 const imgLoadCount = ref(0)
+// 新图片下载期间保留生成占位，避免 done 后先塌陷、load 后再撑高。
+const liveImage = ref(props.msg.genStatus !== 'done' || props.emitLoadedWhenInitiallyDone)
 // 群聊队列可能在组件挂载前已收到 done，仍需等待浏览器实际加载后解除分句门控。
 let loadedEmitted = props.msg.genStatus === 'done' && !props.emitLoadedWhenInitiallyDone
 
-function onImgError(i) { imgError.add(i) }
+function onImgError(i) { imgError.add(i); checkAllLoaded() }
 function onImgLoad() {
   imgLoadCount.value++
   checkAllLoaded()
@@ -114,6 +116,7 @@ function checkAllLoaded() {
 watch(() => props.msg.genId, () => {
   imgError.clear()
   imgLoadCount.value = 0
+  liveImage.value = props.msg.genStatus !== 'done' || props.emitLoadedWhenInitiallyDone
   loadedEmitted = props.msg.genStatus === 'done' && !props.emitLoadedWhenInitiallyDone
 })
 
@@ -122,12 +125,14 @@ const circumference = 2 * Math.PI * 34
 // 本地 genStatus 副本，避免 props.msg 替换后不更新
 const genStatus = ref(props.msg.genStatus || 'pending')
 const images = ref(props.msg.images || [])
+const waitingForImages = computed(() => liveImage.value && genStatus.value === 'done'
+  && imgLoadCount.value + imgError.size < (props.msg.images?.length || 0))
 
 watch(() => props.msg.genStatus, (v) => { genStatus.value = v })
 watch(() => props.msg.images, (v) => { images.value = v || [] })
 
 // ── 真实进度（ComfyUI WebSocket → KSampler step/total）──
-const realPct = ref(0)  // 0~100，仅当真实>模拟时才被采纳，防止回滚
+const realPct = ref(Math.floor((props.msg.genProgress || 0) * 100))  // 排队后首次挂载也使用已收到的真实进度
 watch(() => props.msg.genProgress, (v) => {
   if (v !== undefined) realPct.value = Math.floor(v * 100)
 })
@@ -182,6 +187,8 @@ watch(genStatus, (v) => {
   if (v === 'done') {
     simulatedPct.value = 100; clearTimeout(timer)
     // 重置加载计数，等待图片渲染和加载
+    liveImage.value = true
+    imgError.clear()
     imgLoadCount.value = 0
     loadedEmitted = false
     // 兜底：如果图片已缓存 @load 同步触发，nextTick+setTimeout 做二次确认
@@ -200,7 +207,11 @@ onUnmounted(() => clearTimeout(timer))
 </script>
 
 <style scoped>
-.igb { display: flex; flex-direction: column; gap: 6px; }
+.igb { display: flex; flex-direction: column; gap: 6px; position: relative; }
+/* 新图片实际加载完成前不参与排版，原占位持续撑住高度。历史图片仍按原方式懒加载。 */
+.igb-awaiting > .igb-img, .igb-awaiting > .igb-missing {
+  position: absolute; top: 0; left: 0; visibility: hidden; pointer-events: none;
+}
 
 .igb-img {
   max-width: min(600px, 70vw); max-height: min(800px, 60vh); width: auto; height: auto;

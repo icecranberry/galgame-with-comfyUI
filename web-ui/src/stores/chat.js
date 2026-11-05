@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose } from 'vue'
 import * as api from '../api/index.js'
 import { useMessageWindow } from '../composables/useMessageWindow.js'
 import { useProactiveStore } from './notifications.js'
@@ -20,8 +20,48 @@ export const useChatStore = defineStore('chat', () => {
   let activeStream = null  // { charId, id, abort } | null
   let restoreAfterStream = false
   let imageRevision = 0
+  // 仅控制上屏顺序；后台生图与事件接收始终立即进行，按轮次隔离等待中的图片。
+  const imageTurns = new Map()
+
+  function clearImageTurns() {
+    for (const turn of imageTurns.values()) clearTimeout(turn.timer)
+    imageTurns.clear()
+  }
+  onScopeDispose(clearImageTurns)
+
+  function insertImageMessage(message) {
+    // 重连/刷新可能已经从历史接口读回同一张图，不能在延迟上屏时再插入一次。
+    if (messages.value.some(m => m.type === 'image_gen' && (m.genId === message.genId
+      || (message.sourceMsgId && m.sourceMsgId === message.sourceMsgId)))) return
+    const user = messages.value.findIndex(m => m.role === 'user' && (
+      (message.userRawId && m.raw_id === message.userRawId)
+      || (message.turnClientMsgId && (m.clientMsgId || m.client_msg_id) === message.turnClientMsgId)))
+    const nextUser = user < 0 ? -1 : messages.value.findIndex((m, i) => i > user && m.role === 'user')
+    const anchor = messages.value.findIndex(m => m.id === message.sourceMsgId)
+    const at = nextUser >= 0 ? nextUser : user >= 0 || anchor < 0 ? messages.value.length : anchor + 1
+    messages.value.splice(at, 0, message)
+  }
+
+  function revealTurnImages(turn) {
+    if (!turn?.ended || turn.contentTimers.size || imageTurns.get(turn.clientMsgId) !== turn || turn.timer) return
+    // 给最后一句文字的滚动留出一拍，再让图片以自己的 600ms 节奏入场。
+    turn.timer = setTimeout(() => {
+      if (imageTurns.get(turn.clientMsgId) !== turn) return
+      imageTurns.delete(turn.clientMsgId)
+      if (activeCharId.value !== turn.charId) return
+      for (const image of turn.images.values()) insertImageMessage(image)
+      if (turn.images.size) dialogueRevision.value++
+    }, 300)
+  }
+
+  function finishTurnImages(turn) {
+    if (!turn) return
+    turn.ended = true
+    revealTurnImages(turn)
+  }
 
   function cancelActiveStream() {
+    clearImageTurns()
     if (!activeStream) return
     try { activeStream.abort() } catch {}
     activeStream = null
@@ -48,31 +88,22 @@ export const useChatStore = defineStore('chat', () => {
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
   const activeChar = computed(() => characters.value.find(c => c.id === activeCharId.value))
 
-  function settleTurnImages(clientMsgId) {
-    const start = messages.value.findIndex(m => m.role === 'user' && (m.clientMsgId || m.client_msg_id) === clientMsgId)
-    if (start < 0) return
-    const next = messages.value.findIndex((m, i) => i > start && m.role === 'user')
-    const end = next < 0 ? messages.value.length : next
-    const turn = messages.value.slice(start + 1, end)
-    const pictures = turn.filter(m => m.independentTask)
-    if (pictures.length) messages.value.splice(start + 1, turn.length, ...turn.filter(m => !m.independentTask), ...pictures)
-  }
-
   function applyImageEvent(d) {
     if (Number(d.characterId) !== Number(activeCharId.value)) return
     imageRevision++
-    let gm = messages.value.find(m => m.genId === d.taskId || (d.messageId && m.type === 'image_gen' && m.sourceMsgId === d.messageId))
+    let gm = findGenMsg(d.taskId, d.messageId)
     if (!gm) {
       gm = { id: uid(), role: 'assistant', type: 'image_gen', genId: d.taskId, independentTask: true,
-        sourceMsgId: d.messageId, genStatus: 'pending', genStartTime: Date.now(), created_at: d.created_at || new Date().toISOString() }
-      const user = messages.value.findIndex(m => m.role === 'user' && ((d.userRawId && m.raw_id === d.userRawId) || (d.clientMsgId && (m.clientMsgId || m.client_msg_id) === d.clientMsgId)))
-      const nextUser = user < 0 ? -1 : messages.value.findIndex((m, i) => i > user && m.role === 'user')
-      const anchor = messages.value.findIndex(m => m.id === d.messageId)
-      messages.value.splice(nextUser >= 0 ? nextUser : anchor < 0 ? messages.value.length : anchor + 1, 0, gm)
-      gm = messages.value.find(m => m.genId === d.taskId)
+        sourceMsgId: d.messageId, userRawId: d.userRawId, turnClientMsgId: d.clientMsgId, liveImage: true,
+        genStatus: 'pending', genStartTime: Date.now(), created_at: d.created_at || new Date().toISOString() }
+      const user = messages.value.find(m => m.role === 'user' && d.userRawId && m.raw_id === d.userRawId)
+      const turn = imageTurns.get(d.clientMsgId || user?.clientMsgId || user?.client_msg_id)
+      if (turn) turn.images.set(gm.genId, gm)
+      else insertImageMessage(gm)
+      gm = findGenMsg(d.taskId, d.messageId)
     }
     if (d.event === 'generate_progress') { gm.genStatus = 'generating'; gm.genProgress = d.progress; gm.genTotalSteps = d.totalSteps }
-    if (d.event === 'generate_retrying') gm.genStatus = 'retrying'
+    if (d.event === 'generate_retrying') { gm.genStatus = 'retrying'; gm.genProgress = 0 }
     if (d.event === 'generate_done') { gm.genStatus = 'done'; gm.images = d.images; dialogueRevision.value++ }
     if (d.event === 'generate_error') { gm.genStatus = 'error'; gm.genError = d.error }
   }
@@ -211,6 +242,7 @@ export const useChatStore = defineStore('chat', () => {
 
   async function selectChar(charId) {
     const selection = ++selectionSeq
+    clearImageTurns()
     if (activeStream) {
       cancelActiveStream()
       streaming.value = false
@@ -348,7 +380,10 @@ export const useChatStore = defineStore('chat', () => {
     await loadCharacters()
   }
 
-  function findGenMsg(genId) { return messages.value.find(m => m.genId === genId) }
+  function findGenMsg(genId, sourceMsgId) {
+    const match = m => m.type === 'image_gen' && (m.genId === genId || (sourceMsgId && m.sourceMsgId === sourceMsgId))
+    return messages.value.find(match) || [...imageTurns.values()].flatMap(turn => [...turn.images.values()]).find(match)
+  }
 
   async function sendMessage(content, imageMode = 'smart', { townContext, galgameMode = false } = {}) {
     if (streaming.value || !content.trim()) return
@@ -366,6 +401,10 @@ export const useChatStore = defineStore('chat', () => {
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
     const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+    const previousImageTurn = imageTurns.get(clientMsgId)
+    clearTimeout(previousImageTurn?.timer)
+    const imageTurn = { charId, clientMsgId, images: previousImageTurn?.images || new Map(), contentTimers: new Set(), ended: false, timer: null }
+    imageTurns.set(clientMsgId, imageTurn)
     messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
@@ -471,27 +510,39 @@ export const useChatStore = defineStore('chat', () => {
       const scheduleSticker = (target, urls, leadingSticker = false) => {
         if (!target || !Array.isArray(urls) || urls.length === 0) return
         const existing = pendingStickerTimers.get(target)
-        if (existing) clearTimeout(existing)
+        if (existing) { clearTimeout(existing); imageTurn.contentTimers.delete(existing) }
         const delay = leadingSticker ? 0 : 450
-        pendingStickerTimers.set(target, setTimeout(() => {
+        const timer = setTimeout(() => {
           pendingStickerTimers.delete(target)
           target.sticker_images = urls.map(url => ({ url, base64: null }))
-        }, delay))
+          imageTurn.contentTimers.delete(timer)
+          revealTurnImages(imageTurn)
+        }, delay)
+        pendingStickerTimers.set(target, timer)
+        imageTurn.contentTimers.add(timer)
+        clearTimeout(imageTurn.timer); imageTurn.timer = null
       }
       const scheduleLeadingText = (target, text, delay = 450) => {
         if (!target) return
         const existing = pendingTextTimers.get(target)
-        if (existing) clearTimeout(existing)
-        pendingTextTimers.set(target, setTimeout(() => {
+        if (existing) { clearTimeout(existing); imageTurn.contentTimers.delete(existing) }
+        const timer = setTimeout(() => {
           pendingTextTimers.delete(target)
           target.content = stripPromptBlock(text)
-        }, delay))
+          imageTurn.contentTimers.delete(timer)
+          revealTurnImages(imageTurn)
+        }, delay)
+        pendingTextTimers.set(target, timer)
+        imageTurn.contentTimers.add(timer)
+        clearTimeout(imageTurn.timer); imageTurn.timer = null
       }
       const clearPendingEmojiTimers = () => {
-        for (const timer of pendingStickerTimers.values()) clearTimeout(timer)
-        for (const timer of pendingTextTimers.values()) clearTimeout(timer)
+        for (const timer of [...pendingStickerTimers.values(), ...pendingTextTimers.values()]) {
+          clearTimeout(timer); imageTurn.contentTimers.delete(timer)
+        }
         pendingStickerTimers.clear()
         pendingTextTimers.clear()
+        revealTurnImages(imageTurn)
       }
 
       const { stream, abort: streamAbort } = api.chatStream(charId, content, clientMsgId, imageMode, townContext, galgameMode)
@@ -506,8 +557,8 @@ export const useChatStore = defineStore('chat', () => {
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
             const d = value.data
-            if (lastEvent === 'response_end') { responseComplete.value = true; settleTurnImages(clientMsgId) }
-            if (lastEvent === 'dialogue_saved') { responseComplete.value = true; lastSendError.value = ''; dialogueRevision.value++ }
+            if (lastEvent === 'response_end') { responseComplete.value = true; finishTurnImages(imageTurn) }
+            if (lastEvent === 'dialogue_saved') { responseComplete.value = true; lastSendError.value = ''; dialogueRevision.value++; finishTurnImages(imageTurn) }
             if (lastEvent === 'error') lastSendError.value = d.message || '回应失败，请稍后重试'
              //  token（只有 token 事件才写入回复气泡，避免 msg_saved 等带 content 的事件串入）
              if (lastEvent === 'token' && (d.content || (Array.isArray(d.images) && d.images.length))) {
@@ -592,11 +643,16 @@ export const useChatStore = defineStore('chat', () => {
               // 生图开始，延长安全超时到 10 分钟（匹配 ComfyUI 后端超时）
               resetSafetyTimer(IMAGE_SAFETY_MS)
               sawImageGen = true
-              messages.value.push({
+              const genId = d.taskId || uid()
+              const image = {
                 id: uid(), role: 'assistant', type: 'image_gen',
-                genId: d.taskId || uid(), genStatus: 'pending', genStartTime: Date.now(),
+                genId, genStatus: 'pending', genStartTime: Date.now(), liveImage: true, turnClientMsgId: clientMsgId,
                 created_at: new Date().toISOString(),
-              })
+              }
+              if (!findGenMsg(genId)) {
+                if (imageTurns.get(clientMsgId) === imageTurn) imageTurn.images.set(genId, image)
+                else insertImageMessage(image)
+              }
             }
             if (lastEvent === 'generate_progress') {
               const gm = findGenMsg(d.taskId)
@@ -613,7 +669,7 @@ export const useChatStore = defineStore('chat', () => {
             }
             if (lastEvent === 'generate_retrying') {
               const gm = findGenMsg(d.taskId)
-              if (gm) gm.genStatus = 'retrying'
+              if (gm) { gm.genStatus = 'retrying'; gm.genProgress = 0 }
             }
             if (lastEvent === 'generate_error') {
               const gm = findGenMsg(d.taskId)
@@ -804,6 +860,7 @@ export const useChatStore = defineStore('chat', () => {
     clearSafetyTimer()
     if (isCurrentStream(sessionId)) {
       streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
+      finishTurnImages(imageTurn)
       activeStream = null
       if (restoreAfterStream) { restoreAfterStream = false; await loadMessages(charId) }
       if (!admissionError) await loadCharacters()
