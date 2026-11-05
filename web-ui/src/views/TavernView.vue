@@ -464,8 +464,8 @@
          ═══════════════════════════════════════════ -->
     <Teleport to="body">
       <Transition name="modal-fade">
-        <div v-if="showWorldModal" class="modal-overlay" @mousedown.self="closeWorldSetting">
-          <div class="modal-panel world-modal-panel">
+        <div v-if="showWorldModal" class="modal-overlay world-modal-overlay" @mousedown.self="closeWorldSetting">
+          <div class="modal-panel world-modal-panel" role="dialog" aria-modal="true" aria-label="世界观设置">
             <div class="modal-header world-modal-header">
               <div class="world-modal-title">
                 <h3>世界观设置</h3>
@@ -509,7 +509,7 @@
                     @keyup.escape="editingNameId = null"
                     @blur="renameWorld(item)"
                   />
-                  <span v-else>{{ item.name }}</span>
+                  <span v-else class="world-tag-name" :title="item.name">{{ item.name }}</span>
                   <div
                     class="world-tag-act world-tag-edit"
                     title="重命名"
@@ -551,6 +551,7 @@
                     v-model="worldContent"
                     type="textarea"
                     class="world-textarea"
+                    aria-label="世界观内容"
                     rows="10"
                     placeholder="例如：这是一个低魔世界，魔法师必须养一只不会魔法的宠物当充电宝。/每天凌晨三点，全人类会共享同一个梦，醒后都能记住。"
                     @input="worldDirty = true"
@@ -561,18 +562,17 @@
                   <span v-if="worldSaved" class="world-saved-hint">✓ 已保存</span>
                 </div>
               </div>
-
-              <div class="modal-actions">
-                <linshe-button class="world-lorebook-button" variant="secondary" :disabled="!selectedWorldId" @click="showLorebook = true">管理SillyTavern世界书</linshe-button>
-                <linshe-button variant="secondary" @click="closeWorldSetting">取消</linshe-button>
-                <linshe-button
-                  variant="primary"
-                  :disabled="!worldDirty || worldSaving"
-                  @click="saveWorld"
-                >
-                  {{ worldSaving ? '保存中...' : '保存' }}
-                </linshe-button>
-              </div>
+            </div>
+            <div class="modal-actions world-modal-actions">
+              <linshe-button class="world-lorebook-button" variant="secondary" :disabled="!selectedWorldId" @click="showLorebook = true">管理SillyTavern世界书</linshe-button>
+              <linshe-button variant="secondary" @click="closeWorldSetting">取消</linshe-button>
+              <linshe-button
+                variant="primary"
+                :disabled="!worldDirty || worldSaving"
+                @click="saveWorld"
+              >
+                {{ worldSaving ? '保存中...' : '保存' }}
+              </linshe-button>
             </div>
           </div>
         </div>
@@ -2085,6 +2085,9 @@ onMounted(async () => {
   border-radius: 24px;
   box-shadow: 0 24px 70px rgba(58, 42, 30, 0.22), 0 3px 12px rgba(58, 42, 30, 0.06);
 }
+.world-modal-overlay.modal-fade-enter-active,
+.world-modal-overlay.modal-fade-leave-active { transition-duration: 0.3s; }
+.world-modal-overlay.modal-fade-enter-active .world-modal-panel { animation-duration: 0.3s; }
 .world-modal-panel::before {
   content: '';
   position: absolute;
@@ -2263,9 +2266,8 @@ onMounted(async () => {
 }
 
 .world-modal-panel .modal-actions {
-  position: sticky;
-  bottom: 0;
-  margin: 10px -30px -24px;
+  flex-shrink: 0;
+  margin: 0;
   padding: 8px 30px 12px;
   border-top: 1px solid rgba(120, 90, 60, 0.08);
 }
@@ -3080,14 +3082,44 @@ onMounted(async () => {
   }
 
   /* 世界观 / 润色弹窗移动端 */
-  .world-modal-panel .world-modal-header { padding: 14px 16px 12px; padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+  /* 世界观保留独立暖纸容器；安全区由遮罩统一留出。 */
+  .world-modal-overlay {
+    padding: calc(8px + env(safe-area-inset-top, 0px))
+             calc(8px + env(safe-area-inset-right, 0px))
+             calc(8px + env(safe-area-inset-bottom, 0px))
+             calc(8px + env(safe-area-inset-left, 0px));
+  }
+  .world-modal-panel {
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 24px;
+  }
+  .world-modal-panel .world-modal-header { padding: 12px; gap: 8px; }
+  .world-modal-panel .world-modal-title { flex-shrink: 0; }
+  .world-modal-panel .world-modal-title h3 { font-size: var(--fs-lg); letter-spacing: 1px; margin: 0; }
   .world-modal-subtitle { display: none; }
-  .world-active-badge { max-width: 110px; padding: 3px 9px; }
-  .world-modal-panel .modal-body { padding: 0 14px 20px; }
-  .world-tags { padding: 2px 4px 0; gap: 2px; }
-  .world-editor { border-radius: 0 0 12px 12px; }
-  .world-editor .world-textarea { min-height: 320px; padding: 20px 20px 16px; }
-  .world-modal-panel .modal-actions { margin: 10px -14px -20px; padding: 8px 14px 12px; }
+  .world-header-right { min-width: 0; flex-shrink: 1; gap: 6px; }
+  .world-active-badge { display: block; min-width: 0; max-width: 110px; padding: 3px 9px; }
+  .world-modal-panel .modal-body { padding: 0 12px 12px; overscroll-behavior: contain; }
+  .world-tags { flex-wrap: nowrap; overflow-x: auto; padding: 2px 0 0; gap: 2px; scrollbar-width: thin; }
+  .world-tag { flex-shrink: 0; max-width: 100%; min-height: 44px; padding: 0 8px; gap: 2px; }
+  .world-tag-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .world-tag-act { width: 44px; height: 44px; opacity: 0.7; }
+  .world-tag-add { width: 44px; height: 44px; margin: 0; }
+  .world-new-row { flex-wrap: wrap; padding: 8px; }
+  .world-name-input { flex-basis: 100%; min-width: 0; }
+  .world-editor { border-radius: 0 0 12px 12px; margin-bottom: 0; }
+  .world-modal-panel .modal-body > .world-editor { flex: 1 0 260px; }
+  .world-editor-body { display: flex; flex: 1; min-height: 0; }
+  .world-editor-bar, .world-editor-meta { flex-shrink: 0; }
+  .world-editor-bar { padding: 10px 12px 0; gap: 8px; }
+  .world-editor-tools { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .world-editor .world-textarea { flex: 1; min-height: 160px; height: auto; resize: none; padding: 16px 12px; font-size: 16px; line-height: 1.8; }
+  .world-editor-meta { padding: 4px 12px 10px; }
+  .world-modal-panel .modal-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 10px 12px 12px; }
+  .world-lorebook-button { grid-column: 1 / -1; margin-right: 0; }
   .polish-preview { max-height: 55vh; }
 
   /* 招募预览卡片 */

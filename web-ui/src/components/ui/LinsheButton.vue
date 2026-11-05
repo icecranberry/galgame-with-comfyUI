@@ -167,17 +167,17 @@ const endJelly = (event) => {
 }
 .ls-btn--danger:hover:not(:disabled) { filter: brightness(1.05); }
 
-/* ── 幽灵：亮面糖纸（无主题色，弱存在感） ── */
+/* ── 幽灵：白面糖纸（中性墨色，悬停只强调文字与描边） ── */
 .ls-btn--ghost {
   background: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1.5px solid var(--border);
-  box-shadow: 0 var(--depth) 0 var(--border), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: color-mix(in srgb, var(--text-primary) 70%, var(--text-secondary));
+  border: 1.5px solid color-mix(in srgb, var(--border-strong) 85%, var(--text-secondary));
+  box-shadow: 0 var(--depth) 0 var(--border-strong), inset 0 1px 0 var(--glass-border);
 }
 .ls-btn--ghost:hover:not(:disabled) {
   background: var(--bg-secondary);
-  border-color: var(--border-strong);
-  color: var(--text-bright);
+  border-color: color-mix(in srgb, var(--border-strong) 65%, var(--accent-hover));
+  color: color-mix(in srgb, var(--accent-hover) 65%, var(--text-primary));
 }
 .ls-btn--ghost:active:not(:disabled) { transform: translateY(1px); }
 
