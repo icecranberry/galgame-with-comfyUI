@@ -6,6 +6,7 @@ import { useProactiveStore } from './notifications.js'
 import { emitCharacterAvatarChanged } from '../utils/characterReactionProducers.js'
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
 import { onEvent } from './unifiedStream.js'
+import { readChatRecovery, writeChatRecovery } from '../utils/chatRecovery.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -83,6 +84,13 @@ export const useChatStore = defineStore('chat', () => {
   const dialogueRevision = ref(0)
   const responseComplete = ref(false)
   const lastSendError = ref('')
+  const failedTurn = ref(null)
+
+  async function retryFailedMessage() {
+    const turn = failedTurn.value
+    if (!turn || streaming.value) return
+    return sendMessage(turn.content, turn.imageMode, { ...turn.options, retryClientMsgId: turn.clientMsgId })
+  }
   const realtimeAffinity = ref(null)  // { affinity, affinityDelta, lastReason } — SSE affinity_update 推送
   const affinityKey = ref(0)          // 仅 SSE 推送时递增，驱动 roll 动画；初始加载/切角色时不递增
   const sidebarScrollSignal = ref(0)  // 主动消息到达时递增，驱动 Sidebar 滚动到顶部
@@ -151,6 +159,17 @@ export const useChatStore = defineStore('chat', () => {
       if (!Array.isArray(d.messages)) return false;
       const raw = d.messages || [];
       const result = rawToMessages(raw);
+      let recovery = readChatRecovery(charId)
+      if (recovery && d.completedClientMsgIds?.includes(recovery.clientMsgId)) { writeChatRecovery(charId, null); recovery = null }
+      failedTurn.value = recovery
+      if (!recovery) lastSendError.value = ''
+      if (recovery) {
+        const user = result.find(m => m.role === 'user' && (m.client_msg_id === recovery.clientMsgId || m.id === recovery.userMessageId))
+        if (!user) result.push({ id: uid(), role: 'user', type: 'text', content: recovery.content, clientMsgId: recovery.clientMsgId })
+        else user.clientMsgId = recovery.clientMsgId
+        if (recovery.partial) result.push({ id: uid(), role: 'assistant', type: 'text', content: recovery.partial, interrupted: true, recoveryKey: recovery.clientMsgId })
+        lastSendError.value = recovery.error
+      }
       messages.value = result;
       for (const task of d.imageTasks || []) applyImageEvent({ characterId: charId, taskId: task.id,
         messageId: task.message_id, userRawId: task.user_raw_id, created_at: task.created_at,
@@ -256,6 +275,7 @@ export const useChatStore = defineStore('chat', () => {
     guessSourceRawId.value = null
     responseComplete.value = false
     lastSendError.value = ''
+    failedTurn.value = null
     realtimeAffinity.value = null  // 切角色时清除实时好感度
     // 标记主动消息已读（DB 持久化），Sidebar 的 onCharClick 也会调，这里兜底
     try {
@@ -284,6 +304,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     showTypingDots.value = false
     await api.clearMessages(id)
+    writeChatRecovery(id, null)
+    failedTurn.value = null
     messages.value = []
     resetToLatest()
   }
@@ -294,6 +316,8 @@ export const useChatStore = defineStore('chat', () => {
     if (!id) return
     const result = await api.undoLastRound(id)
     if (!result.ok || !result.deleted) return
+    writeChatRecovery(id, null)
+    failedTurn.value = null
 
     // 找到本地消息数组中最后一个 user 消息的 raw_id
     const msgs = messages.value
@@ -374,6 +398,8 @@ export const useChatStore = defineStore('chat', () => {
     streamingContent.value = ''
     showTypingDots.value = false
     await api.deleteCharacter(id)
+    writeChatRecovery(id, null)
+    failedTurn.value = null
     messages.value = []
     resetToLatest()
     activeCharId.value = null
@@ -385,7 +411,7 @@ export const useChatStore = defineStore('chat', () => {
     return messages.value.find(match) || [...imageTurns.values()].flatMap(turn => [...turn.images.values()]).find(match)
   }
 
-  async function sendMessage(content, imageMode = 'smart', { townContext, galgameMode = false } = {}) {
+  async function sendMessage(content, imageMode = 'smart', { townContext, galgameMode = false, retryClientMsgId } = {}) {
     if (streaming.value || !content.trim()) return
     const charId = activeCharId.value
     if (!charId) return
@@ -400,28 +426,44 @@ export const useChatStore = defineStore('chat', () => {
     lastSendError.value = ''
     const now = new Date().toISOString()
     // 幂等键：防止重试导致服务端写入重复用户消息
-    const clientMsgId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+    const clientMsgId = retryClientMsgId || Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
     const previousImageTurn = imageTurns.get(clientMsgId)
     clearTimeout(previousImageTurn?.timer)
     const imageTurn = { charId, clientMsgId, images: previousImageTurn?.images || new Map(), contentTimers: new Set(), ended: false, timer: null }
     imageTurns.set(clientMsgId, imageTurn)
-    messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
+    messages.value = messages.value.filter(m => !m.recoveryKey)
+    if (!retryClientMsgId || !messages.value.some(m => m.role === 'user' && (m.clientMsgId || m.client_msg_id) === clientMsgId)) {
+      messages.value.push({ id: uid(), role: 'user', type: 'text', content, created_at: now, clientMsgId })
+    }
+    failedTurn.value = null
+    let dialogueSaved = false
+    const previousRecovery = retryClientMsgId ? readChatRecovery(charId) : null
+    const recovery = { clientMsgId, content, imageMode, options: { townContext, galgameMode }, partial: previousRecovery?.partial || '', error: '上次回应中断，可以重试' }
+    function checkpoint() {
+      if (dialogueSaved) return
+      const user = messages.value.find(m => m.role === 'user' && (m.clientMsgId || m.client_msg_id) === clientMsgId)
+      recovery.userMessageId = user?.id
+      writeChatRecovery(charId, recovery)
+    }
+    checkpoint()
 
     streaming.value = true; streamingContent.value = ''; showTypingDots.value = true; memoryRecalling.value = false
 
     // ── 安全超时：自适应时长，防止 streaming 永久锁死发送键 ──
-    //     纯文本场景 30s，生图场景延长到 600s（匹配 ComfyUI 后端超时）
+    // 首次回应允许 120s；收到正文后按 30s 无活动计时，生图阶段允许 600s。
+    const FIRST_RESPONSE_MS = 120_000
     const TEXT_SAFETY_MS = 30_000
     const IMAGE_SAFETY_MS = 600_000
     let safetyFired = false
     let safetyTimer = null
-    let safetyMs = TEXT_SAFETY_MS
+    let safetyMs = FIRST_RESPONSE_MS
 
     function clearSafetyTimer() {
       if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null }
     }
     function resetSafetyTimer(newMs) {
       clearSafetyTimer()
+      if (dialogueSaved) return
       if (newMs) safetyMs = newMs
       safetyTimer = setTimeout(onSafetyFire, safetyMs)
     }
@@ -438,7 +480,10 @@ export const useChatStore = defineStore('chat', () => {
       }
       console.warn('[chat] streaming safety timeout — force reset')
       safetyFired = true
-      lastSendError.value = '等待回应超时，请稍后重试'
+      lastSendError.value = '回应中断，已保留收到的内容'
+      recovery.error = lastSendError.value
+      checkpoint()
+      failedTurn.value = { ...recovery }
       abort()
       streaming.value = false
       streamingContent.value = ''
@@ -456,13 +501,8 @@ export const useChatStore = defineStore('chat', () => {
           gm.genStatus = 'error'
         }
       }
-      // 确保至少有一条提示
-      messages.value.push({
-        id: uid(), role: 'assistant', type: 'text',
-        content: '(请求超时，请重试)', created_at: new Date().toISOString()
-      })
     }
-    resetSafetyTimer(TEXT_SAFETY_MS)
+    resetSafetyTimer(FIRST_RESPONSE_MS)
 
     // 安全剥离 {"prompt":"..."} JSON 块
     function stripPromptBlock(s) {
@@ -503,9 +543,11 @@ export const useChatStore = defineStore('chat', () => {
         _bufTimer = null
         pendingStickerTimers = new Map()
         pendingTextTimers = new Map()
-        messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() })
+        messages.value.push({ id: firstBubbleId, role: 'assistant', type: 'text', content: '', recoveryKey: clientMsgId, created_at: new Date().toISOString() })
       }
+      if (streamAttempt > 0) fullResponse = ''
       initAttemptState()
+      resetSafetyTimer(FIRST_RESPONSE_MS)
 
       const scheduleSticker = (target, urls, leadingSticker = false) => {
         if (!target || !Array.isArray(urls) || urls.length === 0) return
@@ -554,23 +596,37 @@ export const useChatStore = defineStore('chat', () => {
           const { done, value } = await reader.read()
           if (done) break
           if (!isCurrentStream(sessionId)) break
+          if (value?.type === 'event' || value?.type === 'data') resetSafetyTimer()
           if (value?.type === 'event') lastEvent = value.event
           if (value?.type === 'data') {
             const d = value.data
             if (lastEvent === 'response_end') { responseComplete.value = true; finishTurnImages(imageTurn) }
-            if (lastEvent === 'dialogue_saved') { responseComplete.value = true; lastSendError.value = ''; dialogueRevision.value++; finishTurnImages(imageTurn) }
+            if (lastEvent === 'dialogue_saved' || lastEvent === 'done') {
+              dialogueSaved = true
+              writeChatRecovery(charId, null)
+              failedTurn.value = null
+              for (const m of messages.value) { if (m.recoveryKey === clientMsgId) delete m.recoveryKey }
+              clearSafetyTimer()
+              responseComplete.value = true
+              finishTurnImages(imageTurn)
+              lastSendError.value = ''
+              dialogueRevision.value++
+            }
             if (lastEvent === 'error') lastSendError.value = d.message || '回应失败，请稍后重试'
              //  token（只有 token 事件才写入回复气泡，避免 msg_saved 等带 content 的事件串入）
              if (lastEvent === 'token' && (d.content || (Array.isArray(d.images) && d.images.length))) {
+               resetSafetyTimer(sawImageGen ? IMAGE_SAFETY_MS : TEXT_SAFETY_MS)
                if (showTypingDots.value) showTypingDots.value = false
                if (d.content) {
                  fullResponse += d.content
+                 recovery.partial = stripPromptBlock(fullResponse)
+                 checkpoint()
                  bubbleText += d.content
                }
                const curId = bubbleIds[bubbleIds.length - 1]
                let m = messages.value.find(x => x.id === curId)
                if (!m) {
-                 m = { id: curId, role: 'assistant', type: 'text', content: '', created_at: new Date().toISOString() }
+                 m = { id: curId, role: 'assistant', type: 'text', content: '', recoveryKey: clientMsgId, created_at: new Date().toISOString() }
                  messages.value.push(m)
                }
                 const hasImages = Array.isArray(d.images) && d.images.length
@@ -594,6 +650,9 @@ export const useChatStore = defineStore('chat', () => {
              }
             // ── bubble_break ──
             if (lastEvent === 'bubble_break') {
+              fullResponse += '\n\n'
+              recovery.partial = stripPromptBlock(fullResponse)
+              checkpoint()
               thisAttemptHadBubble = true
               const prevId = bubbleIds[bubbleIds.length - 1]
               const pm = messages.value.find(x => x.id === prevId)
@@ -605,6 +664,8 @@ export const useChatStore = defineStore('chat', () => {
             // ── context_update ──
             if (lastEvent === 'context_update' && d.content !== undefined && d.content !== null) {
               fullResponse = d.content
+              recovery.partial = stripPromptBlock(fullResponse)
+              checkpoint()
                if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
                clearPendingEmojiTimers()
                const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
@@ -632,7 +693,7 @@ export const useChatStore = defineStore('chat', () => {
             if (lastEvent === 'memory_recall_start') {
               // Memory v3 阶段二：角色发起主动回想，显示状态条并刷新安全超时
               memoryRecalling.value = true
-              resetSafetyTimer(TEXT_SAFETY_MS)
+              resetSafetyTimer(FIRST_RESPONSE_MS)
             }
             if (lastEvent === 'memory_recall_end') {
               memoryRecalling.value = false
@@ -682,6 +743,8 @@ export const useChatStore = defineStore('chat', () => {
             }
             // ── queued: 日程系统延迟回复 ──
             if (lastEvent === 'queued') {
+              dialogueSaved = true
+              writeChatRecovery(charId, null)
               queuedReplies.value[charId] = { currentActivity: d.currentActivity || '', estimatedReplyAt: d.estimatedReplyAt || null }
               // 清理临时气泡（后端已保存用户消息）
               for (const bid of bubbleIds) {
@@ -732,6 +795,8 @@ export const useChatStore = defineStore('chat', () => {
               if (lastEvent === 'msg_saved' && d.role === 'user' && d.client_msg_id) {
                 const m = messages.value.find(x => x.role === 'user' && x.clientMsgId === d.client_msg_id)
                 if (m) {
+                  if (d.id) m.id = d.id
+                  checkpoint()
                   if (d.content !== undefined) m.content = d.content
                   if (Array.isArray(d.images) && d.images.length) {
                     scheduleSticker(m, d.images, !!d.leadingSticker)
@@ -744,7 +809,8 @@ export const useChatStore = defineStore('chat', () => {
         // stream 正常结束（done=true）
         // 有完整气泡或服务端已保存 → 成功
         if (!isCurrentStream(sessionId)) break
-        if (thisAttemptHadBubble || thisAttemptHadMsgSaved) break
+        if (dialogueSaved || thisAttemptHadMsgSaved) break
+        if (thisAttemptHadBubble) { lastSendError.value = '回应中断，已保留收到的内容'; break }
         // 无意义空流（连接后立即关闭，无数据）→ 可重试
         if (streamAttempt < MAX_STREAM_RETRIES) {
           for (const bid of bubbleIds) {
@@ -859,10 +925,17 @@ export const useChatStore = defineStore('chat', () => {
 
     clearSafetyTimer()
     if (isCurrentStream(sessionId)) {
+      if (!dialogueSaved && !admissionError) {
+        recovery.error = lastSendError.value || '回应中断，可以重试'
+        if (!fullResponse.trim() && recovery.partial) messages.value.push({ id: uid(), role: 'assistant', type: 'text', content: recovery.partial, interrupted: true, recoveryKey: clientMsgId })
+        checkpoint()
+        failedTurn.value = { ...recovery }
+      } else if (admissionError) writeChatRecovery(charId, null)
       streaming.value = false; streamingContent.value = ''; showTypingDots.value = false
       finishTurnImages(imageTurn)
       activeStream = null
       if (restoreAfterStream) { restoreAfterStream = false; await loadMessages(charId) }
+      if (retryClientMsgId && dialogueSaved) await loadMessages(charId)
       if (!admissionError) await loadCharacters()
     }
     if (admissionError) throw admissionError
@@ -977,6 +1050,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { characters, activeCharId, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, guessSourceRawId, dialogueRevision, responseComplete, lastSendError, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+  return { characters, activeCharId, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, guessSourceRawId, dialogueRevision, responseComplete, lastSendError, failedTurn, retryFailedMessage, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

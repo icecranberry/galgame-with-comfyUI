@@ -99,7 +99,8 @@
             <p v-else-if="!loading && !sendBusy && !queued" class="gal-empty">故事从你的第一句话开始。</p>
           </div>
           <div class="gal-footer">
-            <span v-if="error || sendError" class="gal-error" role="alert">{{ error || sendError }} <linshe-button v-if="error" variant="link" size="sm" @click="refresh">重试</linshe-button></span>
+            <span v-if="chat.failedTurn && !chat.streaming" class="gal-error" role="alert">{{ chat.failedTurn.error }} <linshe-button variant="link" size="sm" @click="chat.retryFailedMessage">重试回应</linshe-button></span>
+            <span v-else-if="error || sendError" class="gal-error" role="alert">{{ error || sendError }} <linshe-button v-if="error" variant="link" size="sm" @click="refresh">重试</linshe-button></span>
             <span v-else-if="waitStatus" role="status">{{ waitStatus }}</span>
             <span v-else-if="assetsReady">{{ advanceLabel }}</span>
             <div v-if="assetsReady && (typing || hasNext)" class="gal-next" role="button" tabindex="0" :aria-label="advanceLabel" @click="advance" @keydown.enter.stop.prevent="advance" @keydown.space.stop.prevent="advance">▾</div>

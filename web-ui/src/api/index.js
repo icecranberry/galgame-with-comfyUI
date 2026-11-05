@@ -467,10 +467,12 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
       // ── 健壮连接：fetch 异常 + 非 2xx 响应均重试（覆盖代理 ECONNRESET → 502 场景）──
       //    每次尝试带 8s 超时，防止 Vite proxy 挂起导致无限等待
       let res
+      let detachResponseAbort
       let retries = 0
       const MAX_RETRIES = 3
       while (true) {
-        let timeoutId, onUserAbort
+        if (controller.signal.aborted) { outerController.close(); return }
+        let timeoutId, onUserAbort, keepAbortListener = false
         const attemptCtrl = new AbortController()
         try {
           // 8s 超时：超时后走重试逻辑，保证连接断开场景下 8 秒内必有一次判决
@@ -484,7 +486,11 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
             body: JSON.stringify({ message, client_msg_id: clientMsgId, image_mode: imageMode, force_image_gen: imageMode === 'force', ...(galgameMode === true ? { galgame_mode: true } : {}), ...(townContext === undefined ? {} : { townContext }) }),
             signal: attemptCtrl.signal,
           })
-          if (res.ok) break  // 成功
+          if (res.ok) {
+            keepAbortListener = true
+            detachResponseAbort = () => controller.signal.removeEventListener('abort', onUserAbort)
+            break
+          }
           if (townContext !== undefined && [400, 409].includes(res.status)) {
             const detail = await res.json().catch(() => ({}))
             const error = Object.assign(new Error(detail.error || '小镇对话暂时不可用，请重新选择邻居'), { status: res.status, code: detail.code || 'TOWN_CHAT_REJECTED' })
@@ -507,25 +513,25 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
           await new Promise(r => setTimeout(r, retries * 1000))
         } finally {
           clearTimeout(timeoutId)
-          if (onUserAbort) controller.signal.removeEventListener('abort', onUserAbort)
+          if (onUserAbort && !keepAbortListener) controller.signal.removeEventListener('abort', onUserAbort)
         }
       }
 
-      // ── 日程系统：检测 queued 响应（非 SSE，是 JSON）──
-      const contentType = res.headers.get('Content-Type') || ''
-      if (contentType.includes('application/json')) {
-        const json = await res.json()
-        if (json.queued) {
-          // 返回结构化事件（与正常 SSE 解析路径格式一致，确保 store 能正确识别）
-          outerController.enqueue({ type: 'event', event: 'queued' })
-          outerController.enqueue({ type: 'data', event: 'queued', data: json })
-          outerController.close()
-          return
-        }
-      }
-
-      // ── 流式读取 ──
       try {
+        // ── 日程系统：检测 queued 响应（非 SSE，是 JSON）──
+        const contentType = res.headers.get('Content-Type') || ''
+        if (contentType.includes('application/json')) {
+          const json = await res.json()
+          if (json.queued) {
+            // 返回结构化事件（与正常 SSE 解析路径格式一致，确保 store 能正确识别）
+            outerController.enqueue({ type: 'event', event: 'queued' })
+            outerController.enqueue({ type: 'data', event: 'queued', data: json })
+            outerController.close()
+            return
+          }
+        }
+
+        // ── 流式读取 ──
         await consumeSSE(res, (event, data) => {
           if (data === undefined) {
             outerController.enqueue({ type: 'event', event })
@@ -535,9 +541,10 @@ export function chatStream(characterId, message, clientMsgId, imageMode = 'smart
         })
         outerController.close()
       } catch (err) {
-        if (err.name !== 'AbortError') outerController.error(err)
-      }
+        outerController.error(err)
+      } finally { detachResponseAbort() }
     },
+    cancel() { controller.abort() },
   })
   return { stream, abort: () => controller.abort() }
 }

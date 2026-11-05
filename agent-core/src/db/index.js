@@ -181,6 +181,10 @@ function initSchema(db) {
       user_raw_id INTEGER PRIMARY KEY, conversation_id TEXT NOT NULL, scene TEXT NOT NULL,
       task_id INTEGER NOT NULL, raw_id INTEGER NOT NULL, message_id INTEGER NOT NULL, snapshot_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS private_chat_replies (
+      user_raw_id INTEGER PRIMARY KEY REFERENCES raw_messages(id) ON DELETE CASCADE,
+      raw_id INTEGER NOT NULL REFERENCES raw_messages(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS private_chat_tool_calls (
       id INTEGER PRIMARY KEY AUTOINCREMENT, user_raw_id INTEGER NOT NULL, call_id TEXT NOT NULL,
       assistant_json TEXT NOT NULL, arguments_json TEXT NOT NULL, result_json TEXT NOT NULL, task_id INTEGER,

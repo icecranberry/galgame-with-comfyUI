@@ -170,8 +170,19 @@ export function queuePrivateImage(db, { conversationId, userRawId, scene, snapsh
 
 // A queued picture and its spoken reply are one assistant turn. Preserve the
 // image carrier ID even if generation finishes before the text continuation.
+export function getSavedPrivateChatReply(db, userRawId) {
+  const row = db.prepare('SELECT p.raw_id FROM private_chat_replies p JOIN raw_messages r ON r.id=p.raw_id WHERE p.user_raw_id=?').get(userRawId);
+  if (!row) return null;
+  const saved = db.prepare(`SELECT id,content,images FROM messages WHERE raw_id=?
+    AND id NOT IN (SELECT message_id FROM private_chat_image_turns WHERE user_raw_id=?) ORDER BY seq,id`).all(row.raw_id, userRawId)
+    .map(m => ({ id: m.id, p: { content: m.content, images: JSON.parse(m.images || '[]') } }));
+  return { rawId: row.raw_id, saved, lastMessageId: saved.at(-1)?.id };
+}
+
 export function savePrivateChatReply(db, { conversationId, userRawId, content, segments }) {
   return db.transaction(() => {
+    const completed = getSavedPrivateChatReply(db, userRawId);
+    if (completed) return completed;
     const binding = db.prepare('SELECT raw_id,message_id FROM private_chat_image_turns WHERE user_raw_id=?').get(userRawId);
     let rawId = binding?.raw_id;
     if (rawId && db.prepare('SELECT content FROM raw_messages WHERE id=?').get(rawId)?.content?.trim()) {
@@ -185,6 +196,7 @@ export function savePrivateChatReply(db, { conversationId, userRawId, content, s
     const insert = db.prepare("INSERT INTO messages(conversation_id,raw_id,role,content,images,seq) VALUES (?,?,'assistant',?,?,?)");
     const saved = parts.map((p, seq) => ({ p, id: insert.run(conversationId, rawId, p.content, p.images.length ? JSON.stringify(p.images) : null, seq).lastInsertRowid }));
     if (binding) db.prepare('UPDATE messages SET seq=? WHERE id=?').run(parts.length, binding.message_id);
+    db.prepare('INSERT INTO private_chat_replies(user_raw_id,raw_id) VALUES (?,?)').run(userRawId, rawId);
     return { rawId, saved, lastMessageId: saved.at(-1)?.id || binding?.message_id };
   })();
 }

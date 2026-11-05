@@ -59,7 +59,7 @@ import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../s
 import { buildPrivateMomentContext } from '../services/privateMomentContext.js';
 import { listRecentMailboxLetters } from '../services/privateMailboxContext.js';
 import { getTownState } from '../services/town/townService.js';
-import { streamPrivateChatImages, queuePrivateImage, savePrivateChatReply, getPrivateChatImageResume } from '../services/privateChatImageTools.js';
+import { streamPrivateChatImages, queuePrivateImage, savePrivateChatReply, getSavedPrivateChatReply, getPrivateChatImageResume } from '../services/privateChatImageTools.js';
 import { SHARED_IMAGE_PROMPT_RULE, buildSharedImageTask } from '../services/privateChatImagePrompt.js';
 
 const router = Router();
@@ -218,6 +218,7 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
       try {
         db.prepare(`DELETE FROM messages WHERE raw_id = ?`).run(lastRawId);
         db.prepare(`DELETE FROM rolling_summaries WHERE conversation_id = ? AND end_msg_id >= ?`).run(conversationId, lastRawId);
+        db.prepare('DELETE FROM private_chat_replies WHERE raw_id=? OR user_raw_id=?').run(lastRawId, lastRawId);
         db.prepare(`DELETE FROM raw_messages WHERE id = ?`).run(lastRawId);
       } finally {
         db.pragma('foreign_keys = ON');
@@ -248,6 +249,7 @@ router.delete('/characters/:id/messages/last-round', (req, res, next) => {
       db.prepare(`DELETE FROM messages WHERE conversation_id = ? AND raw_id >= ?`)
         .run(conversationId, lastUserRawId);
 
+      db.prepare(`DELETE FROM private_chat_replies WHERE user_raw_id IN (SELECT id FROM raw_messages WHERE conversation_id=? AND id>=?) OR raw_id IN (SELECT id FROM raw_messages WHERE conversation_id=? AND id>=?)`).run(conversationId,lastUserRawId,conversationId,lastUserRawId);
       db.prepare(`DELETE FROM raw_messages WHERE conversation_id = ? AND id >= ?`)
         .run(conversationId, lastUserRawId);
     } finally {
@@ -284,7 +286,7 @@ router.get('/characters/:id/messages', (req, res) => {
   const conversationId = convId(req.params.id);
 
   const messages = db.prepare(`
-    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id
+    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id, r.client_msg_id
     FROM messages m
     LEFT JOIN raw_messages r ON r.id = m.raw_id
     WHERE m.conversation_id = ?
@@ -303,6 +305,9 @@ router.get('/characters/:id/messages', (req, res) => {
 
   res.json({
     messages,
+    completedClientMsgIds: db.prepare(`SELECT u.client_msg_id FROM private_chat_replies p
+      JOIN raw_messages u ON u.id=p.user_raw_id JOIN raw_messages a ON a.id=p.raw_id
+      WHERE u.conversation_id=? AND u.client_msg_id IS NOT NULL`).all(conversationId).map(r => r.client_msg_id),
     imageTasks: db.prepare(`SELECT t.*, p.message_id, p.user_raw_id FROM private_chat_image_turns p JOIN image_tasks t ON t.id=p.task_id JOIN messages m ON m.id=p.message_id WHERE p.conversation_id=? AND t.status != 'done'`).all(conversationId).map(t => ({
       ...t,
       created_at: toISODate(t.created_at),
@@ -365,8 +370,10 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
   const emojiMap = getCharacterEmojiMap(characterId, db);
   const emojiNote = buildEmojiNote([...emojiMap.keys()]);
   const parsedUserMessage = parseEmojiText(message, emojiMap);
+  const priorUser = client_msg_id ? db.prepare('SELECT id FROM raw_messages WHERE client_msg_id=? AND conversation_id=?').get(client_msg_id, conversationId) : null;
+  const completedReply = priorUser ? getSavedPrivateChatReply(db, priorUser.id) : null;
   // ── 日程系统：回复队列拦截 ──
-  if (config.features.schedule !== false) {
+  if (!completedReply && config.features.schedule !== false) {
     const delayInfo = getReplyDelay(characterId);
     if (delayInfo.delay > 0 || delayInfo.delay === -1) {
       // 非即时回复 → 保存用户消息，写入 reply_queue，不启动 SSE 流
@@ -394,7 +401,7 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
       // 幂等检查：client_msg_id 已存在则跳过写入（前端重试保护）
       let userRawId, userMsgId;
       if (client_msg_id) {
-        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ? AND conversation_id = ?').get(client_msg_id, conversationId);
         if (existing) {
           // 重试请求：用户消息已写入，检查 reply_queue 是否已有 waiting 条目
           console.log(`[chat] idempotent (sleeping): skipping duplicate user message (client_msg_id=${client_msg_id})`);
@@ -473,7 +480,7 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
       // 保存用户消息 + 写入回复队列（同上面的 sleeping 路径）
       let userRawId, userMsgId;
       if (client_msg_id) {
-        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+        const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ? AND conversation_id = ?').get(client_msg_id, conversationId);
         if (existing) {
           console.log(`[chat] idempotent (sleeping fallback): skipping duplicate (client_msg_id=${client_msg_id})`);
           userRawId = existing.id;
@@ -554,13 +561,13 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     let userMsgId;
     let userRawMsgId;
     if (client_msg_id) {
-      const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ?').get(client_msg_id);
+      const existing = db.prepare('SELECT id FROM raw_messages WHERE client_msg_id = ? AND conversation_id = ?').get(client_msg_id, conversationId);
       if (existing) {
         // 重试请求：用户消息已写入，直接复用（避免 DB 重复记录）
         console.log(`[chat] idempotent: skipping duplicate user message (client_msg_id=${client_msg_id})`);
         userRawMsgId = existing.id;
         userMsgId = db.prepare(`SELECT id FROM messages WHERE raw_id = ? AND role = 'user' ORDER BY id ASC LIMIT 1`).get(existing.id)?.id;
-        send('msg_saved', { id: userMsgId, role: 'user', created_at: new Date().toISOString() });
+        send('msg_saved', { id: userMsgId, role: 'user', client_msg_id: client_msg_id || null, created_at: new Date().toISOString() });
       }
     }
     if (!userRawMsgId) {
@@ -573,6 +580,20 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
         send('msg_saved', { id: userMsgId, role: 'user', client_msg_id: client_msg_id || null, content: parsedUserMessage.content, images: parsedUserMessage.images.length > 0 ? parsedUserMessage.images : undefined, leadingSticker: parsedUserMessage.leadingSticker, created_at: new Date().toISOString() });
       }
 
+
+    // 完成确认丢失后的重试只回放已存回复，不再请求模型或生成第二轮。
+    if (completedReply) {
+      for (const { id, p } of completedReply.saved) {
+        send('token', { content: p.content, ...(p.images.length ? { images: p.images } : {}) });
+        send('bubble_break', {});
+        send('msg_saved', { id, raw_id: completedReply.rawId, role: 'assistant', content: p.content, images: p.images });
+      }
+      send('response_end', {});
+      send('dialogue_saved', { raw_id: completedReply.rawId });
+      getStandingDisplay().complete(standingTurn);
+      res.end();
+      return;
+    }
 
     // 1.5 用户发送新消息 → 重置回复猜想冷却，本轮的 assistant 回复可以触发一次猜想
     guessCooldowns.delete(conversationId);
@@ -1169,7 +1190,13 @@ ${coreRules}
         record: (call, assistant, result) => { hadToolCalls = true; db.prepare('INSERT INTO private_chat_tool_calls (user_raw_id,call_id,assistant_json,arguments_json,result_json,task_id) VALUES (?,?,?,?,?,?)').run(userRawMsgId,call.id,JSON.stringify(assistant),call.function.arguments,JSON.stringify(result),result.task_id || null); },
         onUnavailable: () => send('image_unavailable', { message: '当前渠道不支持图片工具，本轮灵性配图不可用' }),
       }) : chatStream(requestMessages, { ...streamOpts, signal });
+      let lastActivityAt = 0;
       for await (const chunk of stream) {
+        // 分句尚未凑齐时也报告真实上游活动；没有新内容就不续命。
+        if (chunk && Date.now() - lastActivityAt >= 5_000) {
+          send('stream_activity', {});
+          lastActivityAt = Date.now();
+        }
         const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
         streamState.fullContent += cleanChunk;
 

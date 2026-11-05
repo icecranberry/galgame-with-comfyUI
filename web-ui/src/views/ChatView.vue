@@ -183,6 +183,7 @@
         </div>
       </Transition>
 
+      <ChatRetryNotice />
       <div class="input-area">
         <div class="force-img-wrap">
           <div
@@ -631,6 +632,7 @@ import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
 import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import ChatModeSwitch from '../components/chat/ChatModeSwitch.vue'
+import ChatRetryNotice from '../components/chat/ChatRetryNotice.vue'
 import GalgameDialogue from '../components/chat/GalgameDialogue.vue'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import * as api from '../api/index.js'

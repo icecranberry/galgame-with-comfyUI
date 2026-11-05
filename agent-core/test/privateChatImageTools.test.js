@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { readAgentResponse, buildAgentRequest } from '../src/llm/agentStream.js';
-import { CHAT_IMAGE_TOOLS, streamPrivateChatImages, queuePrivateImage, validateImageCall, savePrivateChatReply, getPrivateChatImageResume } from '../src/services/privateChatImageTools.js';
+import { CHAT_IMAGE_TOOLS, streamPrivateChatImages, queuePrivateImage, validateImageCall, savePrivateChatReply, getSavedPrivateChatReply, getPrivateChatImageResume } from '../src/services/privateChatImageTools.js';
 import { getSplitHistory } from '../src/services/contextAssembler.js';
 
 const call = (scene = '我拍一张厨房饼干给你', id = 'call-1', extra = {}) => ({ id, type: 'function', function: { name: 'request_chat_image', arguments: JSON.stringify({ image_source: 'camera', include_self: false, scene, ...extra }) } });
@@ -188,6 +188,7 @@ test('image-first acceptance becomes one raw assistant turn; history orders spee
   const db = new Database(':memory:');
   db.exec(`CREATE TABLE raw_messages(id INTEGER PRIMARY KEY,conversation_id TEXT,role TEXT,content TEXT,prompt TEXT);
     CREATE TABLE messages(id INTEGER PRIMARY KEY,conversation_id TEXT,raw_id INTEGER,role TEXT,content TEXT,images TEXT,seq INTEGER);
+    CREATE TABLE private_chat_replies(user_raw_id INTEGER PRIMARY KEY,raw_id INTEGER);
     CREATE TABLE private_chat_image_turns(user_raw_id INTEGER,raw_id INTEGER,message_id INTEGER);
     INSERT INTO raw_messages VALUES(1,'char_5','user','给我看',NULL),(2,'char_5','assistant','','frozen scene');
     INSERT INTO messages VALUES(1,'char_5',1,'user','给我看',NULL,0),(2,'char_5',2,'assistant','','["/photo.png"]',0);
@@ -199,7 +200,7 @@ test('image-first acceptance becomes one raw assistant turn; history orders spee
   assert.deepEqual(db.prepare("SELECT content,prompt FROM raw_messages WHERE role='assistant'").all(), [{ content: '给你看看！我赢啦！', prompt: 'frozen scene' }]);
   assert.equal(db.prepare('SELECT images FROM messages WHERE id=2').get().images, '["/photo.png"]');
   const query = readFileSync(new URL('../src/routes/chat.js', import.meta.url), 'utf8').match(/SELECT m.id, m.conversation_id[\s\S]*?ORDER BY[^`]+/)[0];
-  db.exec('ALTER TABLE messages ADD COLUMN created_at TEXT; ALTER TABLE messages ADD COLUMN event_id INTEGER;');
+  db.exec('ALTER TABLE raw_messages ADD COLUMN client_msg_id TEXT; ALTER TABLE messages ADD COLUMN created_at TEXT; ALTER TABLE messages ADD COLUMN event_id INTEGER;');
   assert.deepEqual(db.prepare(query).all('char_5').map(m => m.id), [1,3,4,2]);
   const replay = savePrivateChatReply(db, { conversationId: 'char_5', userRawId: 1, content: '给你看看！我赢啦！', segments: [] });
   assert.deepEqual(replay.saved.map(m => m.id), [3,4]);
@@ -251,5 +252,23 @@ test('retry history ends at its user input even when an image placeholder or a n
   const latest = getSplitHistory(db, 'char_1');
   assert.equal(latest.checkpoint.end_msg_id, 3);
   assert.equal(latest.checkpointHistory.at(-1).content, '下一轮');
+  db.close();
+});
+
+
+test('纯文字回复以原用户消息幂等，丢失完成确认后可回放而不重复落库', () => {
+  const db = new Database(':memory:');
+  db.exec(`CREATE TABLE raw_messages(id INTEGER PRIMARY KEY,conversation_id TEXT,role TEXT,content TEXT);
+    CREATE TABLE messages(id INTEGER PRIMARY KEY,conversation_id TEXT,raw_id INTEGER,role TEXT,content TEXT,images TEXT,seq INTEGER);
+    CREATE TABLE private_chat_image_turns(user_raw_id INTEGER,raw_id INTEGER,message_id INTEGER);
+    CREATE TABLE private_chat_replies(user_raw_id INTEGER PRIMARY KEY,raw_id INTEGER);
+    INSERT INTO raw_messages VALUES(1,'char_1','user','你好');`);
+  const first = savePrivateChatReply(db,{conversationId:'char_1',userRawId:1,content:'你好呀',segments:[{content:'你好呀',images:[]}]});
+  const repeated = savePrivateChatReply(db,{conversationId:'char_1',userRawId:1,content:'不应覆盖',segments:[{content:'不应覆盖',images:[]}]});
+  assert.equal(repeated.rawId,first.rawId);
+  assert.equal(repeated.saved[0].p.content,'你好呀');
+  assert.equal(getSavedPrivateChatReply(db,1).rawId,first.rawId);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM messages').get().n,1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM raw_messages').get().n,2);
   db.close();
 });
