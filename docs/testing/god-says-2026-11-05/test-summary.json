@@ -1,0 +1,245 @@
+{
+  "date": "2026-11-05",
+  "node": "v22.16.0",
+  "tools": 94,
+  "moduleTools": 78,
+  "routes": 554,
+  "moduleCoveredRoutes": 77,
+  "confirmedTools": 21,
+  "god": {
+    "tests": 147,
+    "pass": 122,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 1,
+    "todo": 24,
+    "duration_ms": 13943.0683
+  },
+  "frontend": {
+    "tests": 608,
+    "pass": 605,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 3,
+    "todo": 0,
+    "duration_ms": 7030.2521
+  },
+  "acceptance": {
+    "tests": 37,
+    "pass": 13,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 24,
+    "duration_ms": 2733.585
+  },
+  "backendSerial": {
+    "tests": 1366,
+    "pass": 1336,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 6,
+    "todo": 24,
+    "duration_ms": 289931.1968
+  },
+  "backendInitial": {
+    "tests": 1328,
+    "pass": 1322,
+    "fail": 1,
+    "cancelled": 0,
+    "skipped": 5,
+    "todo": 0,
+    "duration_ms": 69342.6143
+  },
+  "backendConcurrentRecheck": {
+    "tests": 1361,
+    "pass": 1331,
+    "fail": 1,
+    "cancelled": 0,
+    "skipped": 6,
+    "todo": 23,
+    "duration_ms": 90150.1763
+  },
+  "speechSingle": {
+    "tests": 17,
+    "pass": 17,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "duration_ms": 4133.7134
+  },
+  "httpAndMediaSingle": {
+    "tests": 12,
+    "pass": 12,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "duration_ms": 1738.7518
+  },
+  "live": {
+    "cases": 27,
+    "passed": 26,
+    "unstable": 1
+  },
+  "modules": [
+    {
+      "mount": "/api",
+      "total": 32,
+      "covered": 3
+    },
+    {
+      "mount": "/api/character-reactions",
+      "total": 7,
+      "covered": 0
+    },
+    {
+      "mount": "/api/characters",
+      "total": 51,
+      "covered": 9
+    },
+    {
+      "mount": "/api/characters/emoji",
+      "total": 16,
+      "covered": 6
+    },
+    {
+      "mount": "/api/cohabitation",
+      "total": 5,
+      "covered": 0
+    },
+    {
+      "mount": "/api/config",
+      "total": 64,
+      "covered": 4
+    },
+    {
+      "mount": "/api/diaries",
+      "total": 3,
+      "covered": 3
+    },
+    {
+      "mount": "/api/events",
+      "total": 12,
+      "covered": 2
+    },
+    {
+      "mount": "/api/god-says",
+      "total": 24,
+      "covered": 0
+    },
+    {
+      "mount": "/api/groups",
+      "total": 10,
+      "covered": 4
+    },
+    {
+      "mount": "/api/images",
+      "total": 21,
+      "covered": 4
+    },
+    {
+      "mount": "/api/items",
+      "total": 8,
+      "covered": 6
+    },
+    {
+      "mount": "/api/library",
+      "total": 14,
+      "covered": 4
+    },
+    {
+      "mount": "/api/logs",
+      "total": 2,
+      "covered": 0
+    },
+    {
+      "mount": "/api/maibot",
+      "total": 16,
+      "covered": 0
+    },
+    {
+      "mount": "/api/mailbox",
+      "total": 6,
+      "covered": 2
+    },
+    {
+      "mount": "/api/media",
+      "total": 26,
+      "covered": 9
+    },
+    {
+      "mount": "/api/memory",
+      "total": 13,
+      "covered": 2
+    },
+    {
+      "mount": "/api/moments",
+      "total": 15,
+      "covered": 4
+    },
+    {
+      "mount": "/api/newspaper",
+      "total": 9,
+      "covered": 4
+    },
+    {
+      "mount": "/api/notifications",
+      "total": 4,
+      "covered": 0
+    },
+    {
+      "mount": "/api/portraits",
+      "total": 8,
+      "covered": 1
+    },
+    {
+      "mount": "/api/presets",
+      "total": 7,
+      "covered": 1
+    },
+    {
+      "mount": "/api/relationships",
+      "total": 5,
+      "covered": 3
+    },
+    {
+      "mount": "/api/schedule",
+      "total": 14,
+      "covered": 3
+    },
+    {
+      "mount": "/api/stream",
+      "total": 1,
+      "covered": 0
+    },
+    {
+      "mount": "/api/town",
+      "total": 114,
+      "covered": 0
+    },
+    {
+      "mount": "/api/tts",
+      "total": 40,
+      "covered": 3
+    },
+    {
+      "mount": "/api/user-relationships",
+      "total": 4,
+      "covered": 0
+    },
+    {
+      "mount": "/api/workflows",
+      "total": 3,
+      "covered": 0
+    }
+  ],
+  "isolation": {
+    "fixtureDatabase": ":memory: and OS temporary paths",
+    "incidentalProductionConnectionDuringNegativeCheck": true,
+    "productionBusinessSqlExecuted": false,
+    "notes": "初版 CommonJS 缓存拦截未能保护 ESM 负向验证；未执行查询或业务写入；已改为 native binding 拦截并复核。",
+    "nativeBindingGuardNegativeCheckPassed": true
+  }
+}
