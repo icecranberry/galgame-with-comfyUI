@@ -1,14 +1,14 @@
 <template>
-  <Teleport to="body">
-    <div class="gift-overlay" @click.self="onOverlayClick">
-      <div class="gift-panel">
-        <div class="gift-header">
+  <linshe-modal :visible="modalVisible" title="送个礼物" :close-disabled="loading" @close="modalVisible = false" @after-leave="finishClose" panel-class="gift-modal">
+    <template #title>
+      <div class="modal-heading-content">
           <span class="gift-title">
             <svg class="gift-title-icon" viewBox="0 0 24 24" width="18" height="18" fill="var(--accent)"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             送个礼物
           </span>
-          <linshe-button variant="icon" aria-label="关闭送礼面板" :disabled="loading" @click="$emit('close')">✕</linshe-button>
+
         </div>
+    </template>
 
         <Transition name="step-slide" mode="out-in">
           <!-- Step 1: Selection -->
@@ -136,12 +136,13 @@
             </div>
           </div>
         </Transition>
-      </div>
-    </div>
-  </Teleport>
+
+  </linshe-modal>
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { sendGift, getGiftCooldowns } from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
@@ -155,6 +156,12 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'sent'])
+const modalVisible = ref(true)
+let sentResult = null
+function finishClose() {
+  if (sentResult) emit('sent', sentResult)
+  emit('close')
+}
 
 const step = ref('select')
 const cooldowns = reactive({ small: 0, large: 0 })
@@ -257,10 +264,6 @@ function selectGift(type) {
   selectedType.value = type
 }
 
-function onOverlayClick() {
-  if (!loading.value) emit('close')
-}
-
 async function doSend() {
   if (!selectedType.value || loading.value) return
   loading.value = true
@@ -270,8 +273,8 @@ async function doSend() {
     if (res.success) {
       cooldowns.small = res.cooldowns?.small ?? cooldowns.small
       cooldowns.large = res.cooldowns?.large ?? cooldowns.large
-      emit('sent', res)
-      emit('close')
+      sentResult = res
+      modalVisible.value = false
     } else {
       error.value = res.error || '送礼失败'
       if (res.cooldowns) {
@@ -288,32 +291,9 @@ async function doSend() {
 </script>
 
 <style scoped>
-.gift-overlay {
-  position: fixed; inset: 0; z-index: 2000;
-  background: rgba(46, 42, 39, 0.35);
-  backdrop-filter: blur(4px);
-  display: flex; align-items: flex-end; justify-content: center;
-  padding-bottom: 100px;
-}
-.gift-panel {
-  background: #fcfaf8;
-  border-radius: 20px;
-  padding: 22px 24px 24px;
-  width: 480px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 132px);
-  overflow-y: auto;
-  box-shadow: 0 12px 48px rgba(46, 42, 39, 0.18);
-  animation: giftUp 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
-}
 @keyframes giftUp {
   from { opacity: 0; transform: translateY(28px) scale(0.95); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.gift-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 4px;
 }
 .gift-title {
   font-size: 16px; font-weight: 600; color: #2c2c2c;
@@ -675,4 +655,5 @@ async function doSend() {
 .btn-appear-leave-active { transition: all 0.2s ease; }
 .btn-appear-enter-from { opacity: 0; transform: translateY(8px) scale(0.92); }
 .btn-appear-leave-to { opacity: 0; transform: translateY(-4px); }
+:global(.linshe-modal.gift-modal) { width: min(480px, 94vw); }
 </style>

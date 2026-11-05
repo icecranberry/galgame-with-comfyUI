@@ -1,12 +1,11 @@
 <template>
-  <Teleport to="body">
-    <Transition name="tpd-fade">
-      <div v-if="visible" class="tpd-mask" @click.self="close">
-        <div class="tpd-panel" role="dialog" aria-label="编辑提示词并重生成">
-          <div class="tpd-head">
+  <linshe-modal :visible="visible" :title="title || '编辑提示词并重生成'" wide :close-disabled="busy" :z-index="12000" @close="close" panel-class="asset-prompt-modal" body-class="modal-form-body">
+    <template #title>
+      <div class="modal-heading-content">
             <span class="tpd-title">{{ title || '编辑提示词并重生成' }}</span>
-            <linshe-button variant="icon" size="sm" aria-label="关闭" @click="close">✕</linshe-button>
+
           </div>
+    </template>
 
           <div class="tpd-current" v-if="currentPrompt">
             <div class="tpd-label">当前生效的完整提示词</div>
@@ -48,19 +47,18 @@
             </div>
           </div>
 
-          <div class="tpd-actions">
+    <template #footer>
             <linshe-button variant="ghost" size="sm" @click="close">取消</linshe-button>
             <linshe-button variant="primary" size="sm" :loading="busy" @click="regen">
               {{ draft.trim() ? '按新提示词重生成并覆盖' : '按当前提示词重生成' }}
             </linshe-button>
-          </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+    </template>
+  </linshe-modal>
 </template>
 
 <script setup>
+import LinsheModal from '../ui/LinsheModal.vue'
+
 import { ref, watch } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
@@ -130,32 +128,6 @@ async function regen() {
 </script>
 
 <style scoped>
-.tpd-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  /* 必须高于素材详情弹窗 .tam-mask(1160) 与生成配置浮层 .ie-info(1170)，
-     否则本弹窗会被素材详情盖在下面；低于保存提示 .ie-saved-tip(1200) */
-  z-index: 1180;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.tpd-panel {
-  width: min(540px, calc(100vw - 40px));
-  max-height: min(84vh, 720px);
-  overflow-y: auto;
-  background: #f4f1eeed;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tpd-head { display: flex; align-items: center; justify-content: space-between; }
 .tpd-title { font-size: 14px; font-weight: 700; color: var(--text-bright); }
 
 .tpd-label { font-size: 11px; color: var(--text-primary); display: flex; flex-direction: column; gap: 2px; }
@@ -192,4 +164,5 @@ async function regen() {
 
 .tpd-fade-enter-active, .tpd-fade-leave-active { transition: opacity 0.2s ease; }
 .tpd-fade-enter-from, .tpd-fade-leave-to { opacity: 0; }
+:global(.linshe-modal.asset-prompt-modal) { width: min(540px, 96vw); }
 </style>

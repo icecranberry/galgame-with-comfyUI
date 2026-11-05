@@ -1,22 +1,34 @@
 <template>
-  <!-- 固定弹窗根节点，外层关闭过渡不参与选图 / 裁剪内容的替换。 -->
-  <div :class="[cropImage ? 'crop-overlay' : 'avpicker-overlay', { 'is-themed': themed }]" @click.self="!cropImage && tryClose()">
+  <linshe-modal
+    :visible="modalVisible"
+    :title="cropImage ? '裁剪头像 — 拖拽移动图片、滚轮缩放' : title"
+    :close-disabled="isGenerating || cropSaving"
+    :close-on-backdrop="!cropImage"
+    :before-close="beforeClose"
+    :z-index="11002"
+    :transition-ms="300"
+    wide
+    @close="tryClose"
+    @after-leave="emit('close')"
+  >
   <Transition name="av-content" mode="out-in" :duration="300">
     <div v-if="!cropImage" key="picker" class="avpicker-panel">
-      <div class="avpicker-header">
-        <span>{{ title }}</span>
-        <linshe-button variant="icon" :disabled="isGenerating" @click="tryClose">&times;</linshe-button>
-      </div>
-      <div v-if="showRecentTab || showGenerateTab" class="avpicker-tabs">
-        <div role="button" tabindex="0" :class="['avtab', { active: avTab === 'upload', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && (avTab = 'upload')" @keydown.enter.prevent="!isGenerating && (avTab = 'upload')" @keydown.space.prevent="!isGenerating && (avTab = 'upload')">上传图片</div>
-        <div v-if="showRecentTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'recent', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && switchToRecent()" @keydown.enter.prevent="!isGenerating && switchToRecent()" @keydown.space.prevent="!isGenerating && switchToRecent()">最近图片</div>
-        <div v-if="showGenerateTab" role="button" tabindex="0" :class="['avtab', { active: avTab === 'generate', 'is-disabled': isGenerating }]" :aria-disabled="isGenerating" @click="!isGenerating && (avTab = 'generate')" @keydown.enter.prevent="!isGenerating && (avTab = 'generate')" @keydown.space.prevent="!isGenerating && (avTab = 'generate')">生成头像</div>
-      </div>
+        <linshe-tabs
+          v-if="showRecentTab || showGenerateTab"
+          :model-value="avTab"
+          :options="tabOptions"
+          :disabled="isGenerating"
+          size="md"
+          aria-label="头像来源"
+          @update:model-value="switchTab"
+        />
 
       <p v-if="selectionError" class="crop-save-error" role="alert">{{ selectionError }}</p>
 
+        <div class="avtab-stage">
+          <Transition name="av-tab" :duration="300">
       <!-- 上传 tab -->
-      <div v-if="avTab === 'upload'" class="avtab-body">
+            <div v-if="avTab === 'upload'" key="upload" class="avtab-body" role="tabpanel" aria-label="上传图片">
         <label class="av-upload-zone">
           <input type="file" accept="image/*" @change="onFilePicked" hidden ref="fileInput" />
           <div class="av-upload-inner">
@@ -34,7 +46,7 @@
       </div>
 
       <!-- 最近图片 tab -->
-      <div v-if="showRecentTab && avTab === 'recent'" class="avtab-body av-gallery">
+            <div v-else-if="showRecentTab && avTab === 'recent'" key="recent" class="avtab-body av-gallery" role="tabpanel" aria-label="最近图片">
         <div v-if="recentLoading" class="av-loading">加载中...</div>
         <div v-else-if="recentImages.length === 0" class="av-empty">暂无生成的图片</div>
         <img
@@ -52,7 +64,7 @@
       </div>
 
       <!-- 生成头像 tab -->
-      <div v-if="showGenerateTab && avTab === 'generate'" class="avtab-body">
+            <div v-else-if="showGenerateTab && avTab === 'generate'" key="generate" class="avtab-body" role="tabpanel" aria-label="生成头像">
         <div v-if="genError" class="gen-error">
           <div class="gen-error-icon">⚠️</div>
           <div class="gen-error-text">{{ genError }}</div>
@@ -77,13 +89,11 @@
           <div class="gen-progress-hint">正在超速思考，请耐心等待...</div>
         </div>
       </div>
+          </Transition>
+        </div>
     </div>
     <!-- 头像裁剪编辑器 -->
     <div v-else key="crop" class="crop-panel">
-      <div class="crop-header">
-        <span>裁剪头像 — 拖拽移动图片、滚轮缩放</span>
-        <linshe-button variant="icon" @click="cancelCrop">&times;</linshe-button>
-      </div>
       <div class="crop-body">
         <canvas
 ref="cropCanvas" class="crop-canvas"
@@ -103,6 +113,9 @@ ref="cropCanvas" class="crop-canvas"
         </div>
       </div>
       <p v-if="saveError" class="crop-save-error" role="alert">{{ saveError }}</p>
+      </div>
+    </Transition>
+    <template v-if="cropImage" #footer>
       <div class="crop-actions">
         <!-- 无角色（群头像 / 用户头像）时没有可重新生成的对象，不摆这个死按钮 -->
         <linshe-button
@@ -116,12 +129,14 @@ ref="cropCanvas" class="crop-canvas"
         <div v-else></div>
         <linshe-button variant="primary" @click="saveCrop" :disabled="cropSaving">{{ cropSaving ? '保存中...' : '保存头像' }}</linshe-button>
       </div>
-    </div>
-  </Transition>
-  </div>
+    </template>
+  </linshe-modal>
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
+
 import { ref, shallowRef, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { generateAvatar } from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
@@ -136,12 +151,17 @@ const props = defineProps({
   recentLoading: { type: Boolean, default: false },
   generateHandler: { type: Function, default: null },
   saveHandler: { type: Function, default: null },
-  themed: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['close', 'save', 'switchToRecent'])
 
+const modalVisible = ref(false)
 const avTab = ref('upload')
+const tabOptions = computed(() => [
+  { label: '上传图片', value: 'upload' },
+  ...(props.showRecentTab ? [{ label: '最近图片', value: 'recent' }] : []),
+  ...(props.showGenerateTab ? [{ label: '生成头像', value: 'generate' }] : []),
+])
 const fileInput = ref(null)
 const recentImgErr = ref(new Set())
 
@@ -190,7 +210,12 @@ const isGenerating = computed(() => genStatus.value === 'generating')
 function tryClose() {
   if (isGenerating.value || cropSaving.value) return
   cancelImageLoad()
-  emit('close')
+  modalVisible.value = false
+}
+
+function beforeClose() {
+  if (cropImage.value) { cancelCrop(); return false }
+  return true
 }
 
 const genPhaseMessages = [
@@ -225,7 +250,7 @@ function onPaste(e) {
   loadImageFromFile(file)
 }
 
-onMounted(() => document.addEventListener('paste', onPaste))
+onMounted(() => { modalVisible.value = true; document.addEventListener('paste', onPaste) })
 onBeforeUnmount(() => { disposed = true; cancelImageLoad() })
 onUnmounted(() => {
   document.removeEventListener('paste', onPaste)
@@ -260,9 +285,10 @@ async function startGenerate() {
   }
 }
 
-function switchToRecent() {
-  avTab.value = 'recent'
-  emit('switchToRecent')
+function switchTab(value) {
+  if (isGenerating.value || value === avTab.value) return
+  avTab.value = value
+  if (value === 'recent') emit('switchToRecent')
 }
 
 function onRecentImgErr(i) {
@@ -280,14 +306,14 @@ function onFilePicked(e) {
 }
 
 function selectRecentImage(url) {
-  if (cropSaving.value || isGenerating.value) return
+  if (!modalVisible.value || cropSaving.value || isGenerating.value) return
   cancelImageLoad()
   selectionError.value = ''
   loadCropImage(url, imageRequest, true)
 }
 
 function loadImageFromFile(file) {
-  if (cropSaving.value || isGenerating.value) return
+  if (!modalVisible.value || cropSaving.value || isGenerating.value) return
   cancelImageLoad()
   selectionError.value = ''
   const request = imageRequest
@@ -500,6 +526,7 @@ function cancelCrop() { if (!cropSaving.value) { cancelImageLoad(); cropImage.va
 
 function regenerateAvatar() {
   cropImage.value = null
+  avTab.value = 'generate'
   nextTick(() => startGenerate())
 }
 
@@ -524,8 +551,11 @@ async function saveCrop() {
     ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, srcX, srcY, srcLen, srcLen, 0, 0, outSize, outSize)
     const base64 = tmpCanvas.toDataURL('image/png')
-    if (props.saveHandler) await props.saveHandler(base64)
-    else emit('save', base64)
+    if (props.saveHandler) {
+      await props.saveHandler(base64)
+      cancelImageLoad()
+      modalVisible.value = false
+    } else emit('save', base64)
   } catch (err) {
     saveError.value = err.message || '头像保存失败，请重试'
     console.error('[avatar] save crop failed:', err)
@@ -536,41 +566,21 @@ async function saveCrop() {
 <style scoped>
 .av-content-enter-active,.av-content-leave-active { transition:opacity .3s,transform .3s; }
 .av-content-enter-from,.av-content-leave-to { opacity:0; transform:scale(.95); }
-/* ── 选择器弹窗 ── */
-.avpicker-overlay {
-  position:fixed; inset:0; background:transparent;
-  display:flex; align-items:center; justify-content:center; z-index:11001;
-  animation: avFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
+/* 窗体皮肤与移动端边距由 LinsheModal 统一维护。 */
 .crop-save-error { margin:0; padding:10px 20px; color:var(--danger); font-size:var(--fs-sm); line-height:1.7; }
-.is-themed .avpicker-panel,.is-themed .crop-panel { background:var(--modal-bg); border:var(--modal-border); border-radius:var(--modal-radius); box-shadow:var(--modal-shadow); }
-.is-themed .avpicker-header,.is-themed .avpicker-tabs,.is-themed .crop-header { border-bottom:var(--modal-divider); }
-.is-themed .av-upload-zone { border-color:var(--border-strong); }
-.avpicker-panel {
-  width:676px; max-width:calc(100vw - 24px); max-height:80vh;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-radius:16px;
-  border:1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
-  display:flex; flex-direction:column; overflow:hidden;
-  animation: avScaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+.avtab-stage { display:grid; margin-top:16px; }
+.avtab-stage > .avtab-body { grid-area:1 / 1; min-width:0; align-self:start; }
+.av-tab-enter-active,.av-tab-leave-active { transition:opacity .3s var(--ease-standard),transform .3s var(--ease-standard); }
+.av-tab-enter-from { opacity:0; transform:translateY(8px); }
+.av-tab-leave-to { opacity:0; transform:translateY(-8px); }
+.av-tab-leave-active { pointer-events:none; }
+@media (prefers-reduced-motion: reduce) {
+  .av-tab-enter-active,.av-tab-leave-active,.av-content-enter-active,.av-content-leave-active { transition:none; transform:none; }
 }
-@keyframes avFadeIn  { from { opacity:0; } to { opacity:1; } }
-@keyframes avScaleIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
-
-.avpicker-header { padding:18px 23px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
-.avpicker-header span { font-size:19px; font-weight:600; color:var(--text-bright); }
-
-.avpicker-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.2); }
-.avtab { flex:1; padding:13px 0; border:none; border-radius:0; background:transparent; color:var(--text-secondary); font-size:17px; font-weight:500; font-family:inherit; text-align:center; cursor:pointer; transition:color 0.15s; border-bottom:2px solid transparent; user-select:none; }
-.avtab:hover:not(.is-disabled) { color:var(--text-bright); }
-.avtab.is-disabled { opacity:0.35; cursor:not-allowed; }
-.avtab.active { color:var(--accent); border-bottom-color:var(--accent); }
 
 .avtab-body { padding:21px; overflow-y:auto; max-height:494px; }
-.av-upload-zone { display:block; border:2px dashed rgba(255,255,255,0.25); border-radius:13px; cursor:pointer; transition:border-color 0.15s; }
+.av-upload-zone { display:block; border:2px dashed var(--border-strong); border-radius:13px; cursor:pointer; transition:border-color 0.15s; }
 .av-upload-zone:hover { border-color:var(--accent); }
 .av-upload-inner { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:62px 21px; gap:13px; }
 .av-upload-icon { font-size:52px; }
@@ -609,33 +619,16 @@ async function saveCrop() {
 .av-thumb-err { opacity:0.3; cursor:default; }
 
 /* ── 裁剪编辑器 ── */
-.crop-overlay {
-  position:fixed; inset:0; background:transparent;
-  display:flex; align-items:center; justify-content:center; z-index:11002;
-  animation: avFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.crop-panel {
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-radius:16px;
-  border:1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
-  overflow:hidden;
-  animation: avScaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.crop-header { padding:18px 23px; border-bottom:1px solid rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:space-between; }
-.crop-header span { font-size:18px; font-weight:600; color:var(--text-bright); }
 
-.crop-body { display:flex; gap:26px; padding:26px; align-items:flex-start; }
-.crop-canvas { display:block; border-radius:10px; cursor:grab; max-width:520px; }
+.crop-body { display:flex; gap:26px; align-items:flex-start; }
+.crop-canvas { display:block; width:100%; max-width:520px; min-width:0; height:auto; aspect-ratio:1; flex:1; border-radius:10px; cursor:grab; touch-action:none; }
 .crop-canvas:active { cursor:grabbing; }
-.crop-preview-container { display:flex; flex-direction:column; align-items:center; gap:10px; }
+.crop-preview-container { flex-shrink:0; display:flex; flex-direction:column; align-items:center; gap:10px; }
 .crop-preview-label { font-size:16px; color:var(--text-secondary); }
 .crop-preview { width:104px; height:104px; border-radius:50%; border:2px solid var(--border); }
 .crop-zoom-info { font-size:16px; color:var(--text-secondary); }
 
-.crop-actions { padding:18px 26px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.crop-actions { display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%; }
 
 /* ── 生成头像 Tab ── */
 .gen-idle {
@@ -690,16 +683,10 @@ async function saveCrop() {
 
 /* ── 移动端：裁剪台竖排，画布按视口宽度缩放（指针换算见 pointerScale） ── */
 @media (max-width: 767px) {
-  .avpicker-panel { max-height: 88vh; }
-  .avpicker-header { padding: 14px 16px; }
-  .avpicker-tabs .avtab { font-size: 15px; padding: 11px 0; }
   .avtab-body { padding: 14px; max-height: 60vh; }
   .av-upload-inner { padding: 40px 14px; }
-  .crop-header { padding: 14px 16px; }
-  .crop-header span { font-size: 15px; }
-  .crop-body { flex-direction: column; gap: 14px; padding: 16px; align-items: center; }
-  .crop-canvas { max-width: calc(100vw - 56px); }
+  .crop-body { flex-direction: column; gap: 14px; align-items: center; }
+  .crop-canvas { flex:none; max-width:100%; }
   .crop-preview-container { flex-direction: row; gap: 12px; }
-  .crop-actions { padding: 14px 16px; }
 }
 </style>

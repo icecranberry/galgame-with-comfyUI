@@ -103,6 +103,14 @@
 - **`LinsheModal`**：弹窗基础窗体统一使用，不写裸遮罩/面板。`v-model` 控制显隐，`title` 为标题，`wide` / `full` 控制面板宽度（`full` 宽度走 `--modal-full-width`，个别面板可用 `panel-class` 覆盖该 token，不改组件皮肤），`#header-extra` / `#footer` 为附加插槽；`anchor` 传宿主选择器（如 `anchor=".page-host"`）时遮罩 Teleport 进宿主并铺满它、面板改为相对宿主居中，用于「这个窗口属于某张页面而不是整个视口」的场景（如小镇的居民动态窗），留空＝默认相对视口居中；暖色为暖纸外壳 + 白色内衬（对齐 LoRA 设置窗：标题栏与底部操作区留在外壳上，白色内衬只包正文，`--modal-*` token），暗夜为 Cel Glow 深色玻璃。
 
 
+弹窗默认关闭按钮统一使用 `LinsheCloseButton`，内部复用 `LinsheButton variant="icon" tone="candy"`：与保存按钮同源的主题色实心糖面、同色深厚底和 12px 圆角方形，白色圆头 SVG 叉号，44px 点击范围，悬停果冻反馈与按下下沉。`label` 定义关闭目标，`disabled`、事件及定位 class 透传；专用纸面可显式传已有 `tone`，按钮皮肤仍只在 `LinsheButton` 内维护。业务页面的关闭按钮 class 只负责定位，不再覆盖尺寸、配色、圆角和阴影。
+
+普通表单、编辑器和双栏管理窗口使用 `LinsheModal`，默认渐入、渐出均为 300ms，退出后再卸载。`close-disabled` 同时拦截叉号、遮罩和 Esc；`before-close(reason)` 可同步或异步返回 `false` 拒绝关闭，异常通过 `close-error` 通知调用方；`close-on-backdrop` / `close-on-escape` 分别控制关闭入口。取消按钮应复用相同业务守卫。`#title` 用于带图标或状态的标题区域，`#header-extra` / `#footer` 承载附加操作；需要撑满内容的双栏或画布使用 `body-class="modal-workspace-body"`。
+
+共用弹窗按打开顺序与 `z-index` 协调层级，Esc 只作用于最上层，退出动画期间不穿透；窗口内循环键盘焦点，关闭后恢复入口焦点。覆盖独立灯箱、旧式浮层时可传 `suspended` 暂停底层键盘和关闭处理。`after-leave` 用于需要在动画完成后销毁整个业务组件的场景；关闭不等于取消后台任务，暂停、保存草稿等清理由业务处理。抽屉、立绘／阅读舞台保留专用容器，按需复用 `LinsheCloseButton`；已有漫画、木牌、图片灯箱等独立设计不强制换皮肤，返回、删除、移除不当作关闭按钮。世界观窗口、信箱／写信流程和信纸阅读均保留原容器、布局与关闭按钮，不参与本轮统一迁移。
+
+头像选择与裁剪共用 `AvatarCropper.vue` 内的同一个 `LinsheModal`，上传／最近图片／生成头像使用 `LinsheTabs`，页签内容以 300ms 淡入淡出切换；裁剪画布、预览和拖拽缩放保留，保存操作置于 `#footer`。裁剪页关闭返回选图，选图页关闭及保存成功都在 300ms 退出动画后卸载；各入口通过 `save-handler` 等待保存结果，失败保留裁剪与错误提示，不在父级提前销毁窗口。
+
 **通用约定**（随上游一并合入）：
 
 - 特殊交互元素（长按发送键、礼物卡片、视觉小说选项、下拉菜单项、整卡入口等已有独立设计的）用 `<div role="button">` + 自包含样式实现，不套通用组件，也不使用 `<button>` 标签。

@@ -13,7 +13,7 @@
                 <span>已誓约</span>
               </div>
             </div>
-            <linshe-button variant="icon" class="modal-close" aria-label="关闭" @click="requestClose">✕</linshe-button>
+            <linshe-close-button class="modal-close" label="关闭" @click="requestClose" />
           </div>
 
           <div class="modal-body modal-body-detail">
@@ -300,14 +300,15 @@
     </Transition>
 
     <!-- ── Lora 设置弹窗 ── -->
-    <Transition name="modal-fade">
-      <div v-if="showLoraModal" class="modal-overlay" @click.self="closeLoraModal">
-        <div class="modal-panel modal-wide">
-          <div class="modal-header">
+    <linshe-modal :visible="showLoraModal" :title="`LoRA 设置 — ${character?.display_name || ''}`" wide :z-index="11000" @close="closeLoraModal" panel-class="character-lora-modal">
+      <template #title>
+        <div class="modal-heading-content">
             <h3>LoRA 设置 — {{ character?.display_name }}</h3>
-            <linshe-button variant="icon" class="modal-close" @click="closeLoraModal">✕</linshe-button>
+
           </div>
-          <div class="modal-body">
+      </template>
+
+      <div class="modal-content-section">
             <div class="lora-body-card">
               <!-- ── Lora 列表 ── -->
               <TransitionGroup name="lora-card" tag="div" class="lora-list">
@@ -434,19 +435,19 @@
               </linshe-button>
             </div>
           </div>
-        </div>
-      </div>
-    </Transition>
+
+    </linshe-modal>
 
     <!-- ── 外观 / 形态设置弹窗 ── -->
-    <Transition name="modal-fade">
-      <div v-if="showOutfitModal" class="modal-overlay" @click.self="closeOutfitModal">
-        <div class="modal-panel modal-wide">
-          <div class="modal-header">
-            <h3>外观 / 形态 — {{ character?.display_name }}</h3>
-            <linshe-button variant="icon" class="modal-close" @click="closeOutfitModal">✕</linshe-button>
-          </div>
-          <div class="modal-body">
+    <linshe-modal :visible="showOutfitModal" :title="`外观 / 形态 — ${character?.display_name || ''}`" wide :z-index="11000" @close="closeOutfitModal" panel-class="character-outfit-modal">
+      <template #title>
+        <div class="modal-heading-content">
+          <h3>外观 / 形态 — {{ character?.display_name }}</h3>
+
+        </div>
+      </template>
+
+      <div class="modal-content-section">
             <div class="lora-body-card">
               <p class="outfit-intro">
                 配置该角色专属的额外形态、装甲或服装。启用后，角色生图时会优先穿着这里的外观，
@@ -498,9 +499,8 @@
               </linshe-button>
             </div>
           </div>
-        </div>
-      </div>
-    </Transition>
+
+    </linshe-modal>
 
     <!-- ── 修正外观弹窗（共享组件）：上传 / 粘贴 / 拖拽参考图，邻舍分析后重写「## 你的外观」── -->
     <AppearanceRefineModal
@@ -527,6 +527,8 @@
 </template>
 
 <script setup>
+import LinsheCloseButton from "./ui/LinsheCloseButton.vue"
+
 import VoiceManagerModal from './VoiceManagerModal.vue'
 import { ttsApi } from '../api/tts.js'
 import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'

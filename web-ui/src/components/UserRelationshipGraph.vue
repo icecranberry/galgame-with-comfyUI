@@ -1,16 +1,16 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="visible" class="rel-overlay" @click.self="$emit('close')">
-        <div class="rel-panel">
-          <!-- Header -->
-          <div class="rel-header">
+  <linshe-modal :visible="visible" title="我的关系图" full :z-index="11000" :suspended="inputDialog.show" @close="$emit('close')" panel-class="relationship-workspace" body-class="modal-workspace-body">
+    <template #title>
+      <div class="modal-heading-content">
             <h3>我的关系图</h3>
             <div class="rel-header-actions">
               <linshe-button variant="secondary" @click="$emit('auto-deduce')">推演关系</linshe-button>
-              <linshe-button variant="icon" @click="$emit('close')">&times;</linshe-button>
+
             </div>
           </div>
+    </template>
+
+    <!-- Header -->
 
           <!-- Canvas -->
           <div class="rel-canvas-wrap">
@@ -47,18 +47,18 @@
           <div class="rel-hint">
             💡 从你的头像按住拖拽到角色即可连线，例如你 —老板→ 小明，则小明是你的老板
           </div>
-        </div>
 
         <!-- ═══════════════════════════════════════════
              关系输入弹窗
              ═══════════════════════════════════════════ -->
-        <Transition name="dialog-fade">
-          <div v-if="inputDialog.show" class="rel-dialog-overlay" @mousedown.self="cancelInput">
-            <div class="rel-dialog">
-              <div class="rel-dialog-header">
+    <linshe-modal :visible="inputDialog.show" :title="inputDialog.isEdit ? '编辑关系' : '新建关系'" :z-index="11010" @close="cancelInput" panel-class="relationship-input-modal">
+      <template #title>
+        <div class="modal-heading-content">
                 <span>{{ inputDialog.isEdit ? '编辑关系' : '新建关系' }}</span>
-                <linshe-button variant="icon" @click="cancelInput">✕</linshe-button>
+
               </div>
+      </template>
+
               <div class="rel-dialog-body">
                 <p class="rel-dialog-desc">
                   我 → {{ `${inputDialog.targetName}——${inputDialog.targetName}是我的XX` }}
@@ -80,15 +80,15 @@
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </Transition>
-      </div>
-    </Transition>
-  </Teleport>
+
+    </linshe-modal>
+
+  </linshe-modal>
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+
 import { ref, reactive, computed, watch, nextTick, markRaw, inject, onMounted } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
@@ -436,31 +436,8 @@ async function deleteEdge() {
 
 <style scoped>
 /* ── Overlay ── */
-.rel-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 11000;
-}
-.rel-panel {
-  background: var(--bg-secondary);
-  border-radius: 18px;
-  width: min(96vw, 1152px);
-  height: min(90vh, 840px);
-  display: flex; flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
 
 /* ── Header ── */
-.rel-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  background: var(--glass-bg);
-}
-.rel-header h3 { margin: 0; font-size: 20px; font-weight: 700; color: var(--text-bright); }
 
 .rel-header-actions {
   display: flex; align-items: center; gap: 8px;
@@ -484,25 +461,6 @@ async function deleteEdge() {
 }
 
 /* ── Input dialog ── */
-.rel-dialog-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.35);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 12000;
-}
-.rel-dialog {
-  background: var(--bg-secondary);
-  border-radius: 14px;
-  width: min(90vw, 420px);
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-.rel-dialog-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 600; font-size: 15px; color: var(--text-bright);
-}
 .rel-dialog-body { padding: 16px 18px 18px; }
 .rel-dialog-desc {
   font-size: 13px; color: var(--text-secondary); margin: 0 0 10px;
@@ -523,7 +481,6 @@ async function deleteEdge() {
 .modal-fade-enter-active { transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
 .modal-fade-leave-active { transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
-.modal-fade-enter-active .rel-panel { animation: rel-pop 0.28s cubic-bezier(0.17, 0.89, 0.32, 1.25); }
 
 @keyframes rel-pop {
   0% { transform: scale(0.92); opacity: 0; }
@@ -535,20 +492,9 @@ async function deleteEdge() {
 .dialog-fade-leave-active {
   transition: opacity 0.2s ease;
 }
-.dialog-fade-enter-active .rel-dialog,
-.dialog-fade-leave-active .rel-dialog {
-  transition: transform 0.2s ease, opacity 0.2s ease;
-}
 .dialog-fade-enter-from,
 .dialog-fade-leave-to {
   opacity: 0;
 }
-.dialog-fade-enter-from .rel-dialog {
-  transform: scale(0.92);
-  opacity: 0;
-}
-.dialog-fade-leave-to .rel-dialog {
-  transform: scale(0.92);
-  opacity: 0;
-}
+:global(.linshe-modal.relationship-workspace) { --modal-full-width: min(1152px, 96vw); height: min(840px, 90vh); }
 </style>

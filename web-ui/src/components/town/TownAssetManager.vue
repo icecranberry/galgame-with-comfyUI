@@ -1,15 +1,15 @@
 <template>
-    <Transition name="tam-fade">
-      <div v-if="open" class="tam-mask" @click.self="close">
-        <div class="tam-panel" role="dialog" :aria-label="displayAsset?.name || '图片管理'">
-          <div class="tam-head">
+    <linshe-modal :visible="open" :title="displayAsset?.name || title || '图片管理'" wide :close-disabled="regenBusy || hiresBusy" :suspended="promptOpen" :z-index="11000" @close="close" panel-class="asset-manager-modal" body-class="modal-form-body">
+      <template #title>
+        <div class="modal-heading-content">
             <div class="tam-heading">
               <span class="tam-title">{{ displayAsset?.name || title || '图片管理' }}</span>
             </div>
             <div class="tam-head-actions">
-              <linshe-button variant="icon" size="sm" aria-label="关闭" @click="close">✕</linshe-button>
+
             </div>
           </div>
+      </template>
 
           <input
             ref="fileEl"
@@ -99,9 +99,8 @@
             <span v-if="error" class="tam-error">{{ error }}</span>
             <span v-else class="tam-status">{{ regenStatus }}</span>
           </div>
-        </div>
-      </div>
-    </Transition>
+
+    </linshe-modal>
 
     <TownAssetPromptDialog
       :visible="promptOpen"
@@ -113,6 +112,8 @@
 </template>
 
 <script setup>
+import LinsheModal from '../ui/LinsheModal.vue'
+
 import { computed, ref, watch } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
@@ -431,31 +432,6 @@ watch(() => props.open, async (open) => {
 </script>
 
 <style scoped>
-.tam-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1160;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.tam-panel {
-  width: min(1080px, calc(100vw - 40px));
-  max-height: min(98vh, 1080px);
-  background: #f4f1eeed;
-  border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.25);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-}
-
-.tam-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .tam-heading { min-width: 0; }
 .tam-title { font-size: 15px; font-weight: 700; color: var(--text-bright); }
 .tam-head-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
@@ -489,4 +465,5 @@ watch(() => props.open, async (open) => {
 
 .tam-fade-enter-active, .tam-fade-leave-active { transition: opacity 0.2s ease; }
 .tam-fade-enter-from, .tam-fade-leave-to { opacity: 0; }
+:global(.linshe-modal.asset-manager-modal) { width: min(1080px, 96vw); }
 </style>

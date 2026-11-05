@@ -8,11 +8,13 @@ import * as Vue from 'vue'
 const descriptor = parse(readFileSync(new URL('../src/components/ui/LinsheModal.vue', import.meta.url), 'utf8')).descriptor
 const code = compileScript(descriptor, { id: 'modal-mount-test', inlineTemplate: true }).content
   .replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g, (_, names) => `const { ${names.replace(/\bas\b/g, ':')} } = Vue`)
-  .replace(/import LinsheButton from ['"].*?['"]/g, '')
+  .replace(/^import .*from.*$/gm, '')
   .replace('export default', 'return')
-const Modal = new Function('Vue', 'LinsheButton', code)(
+const Modal = new Function('Vue', 'LinsheCloseButton', 'registerModal', 'nextModalLayer', code)(
   { ...Vue, Transition: Vue.BaseTransition },
-  (_, { slots }) => Vue.h('span', slots.default?.()),
+  () => Vue.h('span'),
+  () => () => {},
+  () => 10000,
 )
 
 function fixture(t, { anchor = '.page-modal-host', existingHost = false, initiallyOpen = false } = {}) {

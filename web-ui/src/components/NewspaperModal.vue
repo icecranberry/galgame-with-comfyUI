@@ -4,15 +4,7 @@
   <Teleport to="body">
     <Transition name="np-window">
       <div v-if="visible" class="np-overlay" @click.self="closeWindow">
-        <div
-          v-if="!detailArticle"
-          class="np-close"
-          role="button"
-          tabindex="0"
-          aria-label="关闭日报"
-          @click="closeWindow"
-          @keydown.enter="closeWindow"
-        >✕</div>
+        <linshe-close-button v-if="!detailArticle" class="np-close" label="关闭日报" @click="closeWindow" />
 
         <!-- 加载骨架 -->
         <div v-if="loading" class="np-gate">
@@ -313,6 +305,8 @@
 </template>
 
 <script setup>
+import LinsheCloseButton from "./ui/LinsheCloseButton.vue"
+
 // 《邻舍日报》——小镇预告报纸阅读窗。
 // 纸面视觉属于设计系统的「质感岛」例外家族（同信箱/世界观编辑器）：固定暖纸底 + 墨色文字，
 // 不随暗夜主题切换；不套 LinsheModal 外壳，四周留一圈暖纸衬底，纸面带报边做旧质感。
@@ -738,40 +732,17 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #f7f2e7 0%, #f3ecdc 100%);
 }
 
-/* 悬浮关闭钮：报头右上角的墨色圆章（质感岛内自包含样式，不套主题按钮） */
+/* 只保留报头右上角定位；按钮皮肤由 LinsheCloseButton 统一维护。 */
 .np-close {
   position: absolute;
   top: calc(var(--np-inset, 0px) + 10px + env(safe-area-inset-top, 0px));
   right: calc(var(--np-inset, 0px) + 12px + env(safe-area-inset-right, 0px));
   z-index: 20;
-  width: 40px;
-  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid rgba(58, 42, 26, 0.55);
-  border-radius: 50%;
-  background: rgba(255, 252, 245, 0.88);
-  color: #6b5a48;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 2px 10px rgba(58, 42, 26, 0.2);
   user-select: none;
-  transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
-.np-close:hover,
-.np-close:focus-visible {
-  background: #8c3b22;
-  border-color: #8c3b22;
-  color: #f5efe0;
-  transform: rotate(90deg);
-}
-.np-close:focus-visible {
-  outline: 2px solid rgba(140, 59, 34, 0.5);
-  outline-offset: 2px;
-}
-
 /* 窗口浮现（0.3s 口径）：衬底渐入渐出，纸面与报头关闭钮从底部往上浮。
    淡入淡出与上浮都走 --ease-out（cubic-bezier(0.22, 1, 0.36, 1)，先快后慢） */
 .np-window-enter-active,
@@ -785,16 +756,20 @@ onBeforeUnmount(() => {
 .np-window-enter-active .np-paper,
 .np-window-enter-active .np-gate,
 .np-window-leave-active .np-paper,
-.np-window-leave-active .np-gate,
+.np-window-leave-active .np-gate {
+  transition: transform 0.34s var(--ease-out);
+  will-change: transform;
+}
 .np-window-enter-active .np-close,
 .np-window-leave-active .np-close {
-  transition: transform 0.34s var(--ease-out);
   will-change: transform;
 }
 .np-window-enter-from .np-paper,
 .np-window-enter-from .np-gate,
 .np-window-leave-to .np-paper,
-.np-window-leave-to .np-gate,
+.np-window-leave-to .np-gate {
+  transform: translateY(var(--np-rise, 56px));
+}
 .np-window-enter-from .np-close,
 .np-window-leave-to .np-close {
   transform: translateY(var(--np-rise, 56px));
@@ -1420,8 +1395,6 @@ onBeforeUnmount(() => {
   .np-close {
     top: calc(var(--np-inset, 8px) + 8px + env(safe-area-inset-top, 0px));
     right: calc(var(--np-inset, 8px) + 10px + env(safe-area-inset-right, 0px));
-    width: 36px;
-    height: 36px;
   }
   /* 期号切换条：窄屏允许换行、隐藏目标期日期，避免横向溢出 */
   .np-edition-switch {

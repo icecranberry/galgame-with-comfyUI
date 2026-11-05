@@ -86,7 +86,7 @@ export function useGodAngelMedia(props, publish, { dirty = ref(false), confirm =
   }
   async function saveAvatar(base64) {
     avatarBusy.value = true
-    try { publish(await saveGodAngelAvatar(base64)); avatarOpen.value = false }
+    try { publish(await saveGodAngelAvatar(base64)) }
     finally { avatarBusy.value = false }
   }
   function shiftScene(step, existingOnly = false) {

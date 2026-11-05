@@ -226,7 +226,7 @@
         :recent-images="groupAlbumImages"
         :recent-loading="groupAlbumLoading"
         @close="showGroupAvatarPicker = false"
-        @save="onGroupAvatarSave"
+        :save-handler="onGroupAvatarSave"
         @switch-to-recent="loadGroupAvatarRecents"
       />
     </Teleport>
@@ -238,15 +238,7 @@
         <div class="gc-drawer" role="dialog" aria-modal="true" aria-label="群设置">
           <div class="gc-drawer-head">
             <h3>群设置</h3>
-            <linshe-button
-              variant="icon"
-              class="gc-drawer-close"
-              title="关闭"
-              aria-label="关闭群设置"
-              @click="showSettings = false"
-            >
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-            </linshe-button>
+            <linshe-close-button class="gc-drawer-close" label="关闭群设置" @click="showSettings = false" />
           </div>
 
           <div class="gc-drawer-body">
@@ -416,6 +408,8 @@
 </template>
 
 <script setup>
+import LinsheCloseButton from "../components/ui/LinsheCloseButton.vue"
+
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useGroupsStore } from '../stores/groups.js'
@@ -1108,10 +1102,10 @@ async function onGroupAvatarSave(base64) {
   groupAvatarSaving.value = true
   try {
     await store.setGroupAvatar(store.activeGroupId, base64)
-    showGroupAvatarPicker.value = false
     toast?.('群头像已更新', 'success')
   } catch (err) {
     toast?.(err.message || '群头像保存失败', 'error')
+    throw err
   } finally { groupAvatarSaving.value = false }
 }
 

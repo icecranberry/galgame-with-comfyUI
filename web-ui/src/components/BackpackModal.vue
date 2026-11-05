@@ -1,10 +1,7 @@
 <template>
-  <Teleport to="body">
-    <Transition name="backpack-fade">
-      <div v-if="visible" class="backpack-overlay" @click.self="close">
-        <div class="backpack-modal">
-          <!-- ── Header ── -->
-          <div class="backpack-header">
+  <linshe-modal :visible="visible" title="背包" full :suspended="!!detailItem || showCharPicker" @close="close" panel-class="backpack-workspace" body-class="modal-workspace-body">
+    <template #title>
+      <div class="modal-heading-content">
             <div class="header-left">
               <svg class="header-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M4 9a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v1H4V9z"/>
@@ -17,9 +14,12 @@
               </div>
             </div>
             <div class="header-actions">
-              <linshe-button variant="icon" @click="close" title="关闭">&times;</linshe-button>
+
             </div>
           </div>
+    </template>
+
+    <!-- ── Header ── -->
 
           <!-- ── Body ── -->
           <div class="backpack-body">
@@ -50,7 +50,7 @@
 
             <!-- ── Right: 道具网格 ── -->
             <div class="items-panel">
-              <Transition name="effects-panel">
+
                 <section class="active-effects" aria-labelledby="active-effects-title">
                   <div class="effects-heading">
                     <div class="effects-heading-main">
@@ -119,7 +119,6 @@
                     <span>目前没有正在生效的效果</span>
                   </div>
                 </section>
-              </Transition>
 
               <div v-if="store.loading && store.items.length === 0" class="loading-state">
                 <span class="loading-spinner"></span>
@@ -159,12 +158,13 @@
           </div>
 
           <!-- ── 道具详情（二级层） ── -->
-          <Transition name="detail-fade">
-            <div v-if="detailItem" class="item-detail-overlay" @click.self="detailItem = null">
-              <div class="item-detail-dialog">
-                <div class="detail-header">
+    <linshe-modal :visible="!!detailItem" title="道具详情" :z-index="11000" :suspended="showCharPicker" @close="detailItem = null" panel-class="item-detail-modal">
+      <template #title>
+        <div class="modal-heading-content">
                   <span>道具详情</span>
                 </div>
+      </template>
+
                 <div class="detail-body">
                   <div class="detail-image">
                     <img v-if="detailItem.image_url" :src="detailItem.image_url" alt=""/>
@@ -180,17 +180,18 @@
                     <linshe-button variant="primary" :disabled="detailItem.status !== 'ready'" @click="startUse(detailItem)">使用</linshe-button>
                   </div>
                 </div>
-              </div>
-            </div>
-          </Transition>
 
-          <!-- ── 角色选择（三级层） ── -->
-          <div v-if="showCharPicker" class="char-picker-overlay" @click.self="cancelPick">
-            <div class="char-picker-dialog">
-              <div class="char-picker-header">
-                <span>对谁使用「{{ pendingItem?.name }}」？</span>
-                <linshe-button variant="icon" @click="cancelPick">&times;</linshe-button>
+    </linshe-modal>
+
+    <!-- ── 角色选择（三级层） ── -->
+    <linshe-modal :visible="showCharPicker" title="选择角色" :z-index="11010" @close="cancelPick" panel-class="item-recipient-modal">
+      <template #title>
+        <div class="modal-heading-content">
+          <span>对谁使用「{{ pendingItem?.name }}」？</span>
+
               </div>
+      </template>
+
               <div class="char-grid">
                 <div v-for="char in characters" :key="char.id" class="char-card" @click="pickCharacter(char)">
                   <div class="char-card-inner">
@@ -200,14 +201,12 @@
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
+
+    </linshe-modal>
 
           <ConfirmDialog ref="confirmRef"/>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+
+  </linshe-modal>
 
   <!-- ── 全屏开箱演出（蓄力 → 图片生成完毕 → 开盖揭示） ── -->
   <!-- 礼物叙事：把小镇货摊买来的道具送给角色，图片 + 描述沿用小镇服务/打工的胶片样式 -->
@@ -225,6 +224,8 @@
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+
 import { ref, watch, onUnmounted, inject } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -281,36 +282,7 @@ function close() {
 </script>
 
 <style scoped>
-.backpack-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000;
-}
-.backpack-modal {
-  background: #f4f1eeed;
-  border-radius: 18px;
-  width: min(1280px, 96vw);
-  height: 86vh;
-  max-height: 92vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-  position: relative;
-}
-
 /* ── Header ── */
-.backpack-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 18px 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
-}
 .header-left { display: flex; align-items: center; gap: 12px; color: var(--text-primary); }
 .header-svg { color: var(--accent); }
 .header-left h3 { margin: 0; font-size: 18px; }
@@ -672,25 +644,6 @@ function close() {
 @keyframes bp-spin { to { transform: rotate(360deg); } }
 
 /* ── 道具详情（二级层）：近实心衬底，聚焦详情内容 ── */
-.item-detail-overlay {
-  position: absolute;
-  inset: 0;
-  background: #f6f2eef1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 6;
-}
-.item-detail-dialog {
-  background: #fffdf9;
-  border-radius: 16px;
-  padding: 16px;
-  width: min(430px, 90%);
-  max-height: 84%;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-}
 .detail-header {
   display: flex;
   justify-content: space-between;
@@ -720,38 +673,9 @@ function close() {
 
 /* 详情过渡：遮罩渐入渐出，面板从下方轻轻浮起 */
 .detail-fade-enter-active, .detail-fade-leave-active { transition: opacity 0.22s ease; }
-.detail-fade-enter-active .item-detail-dialog, .detail-fade-leave-active .item-detail-dialog { transition: transform 0.22s ease; }
 .detail-fade-enter-from, .detail-fade-leave-to { opacity: 0; }
-.detail-fade-enter-from .item-detail-dialog, .detail-fade-leave-to .item-detail-dialog { transform: scale(0.95) translateY(12px); }
 
 /* ── 角色选择层 ── */
-.char-picker-overlay {
-  position: absolute;
-  inset: 0;
-  background: #f6f2eef1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 7;
-}
-.char-picker-dialog {
-  background: #fffdf9;
-  border-radius: 16px;
-  padding: 16px;
-  width: min(420px, 88%);
-  max-height: 70%;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-}
-.char-picker-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 700;
-  color: var(--text-bright);
-  margin-bottom: 12px;
-}
 .char-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -775,10 +699,7 @@ function close() {
 
 /* ── 弹窗 Transition ── */
 .backpack-fade-enter-active, .backpack-fade-leave-active { transition: opacity 0.25s ease; }
-.backpack-fade-enter-active .backpack-modal, .backpack-fade-leave-active .backpack-modal { transition: transform 0.25s ease; }
 .backpack-fade-enter-from, .backpack-fade-leave-to { opacity: 0; }
-.backpack-fade-enter-from .backpack-modal { transform: scale(0.96) translateY(10px); }
-.backpack-fade-leave-to .backpack-modal { transform: scale(0.98); }
 
 .item-list-enter-active { transition: all 0.3s ease; }
 .item-list-enter-from { opacity: 0; transform: translateY(8px); }
@@ -807,11 +728,6 @@ function close() {
 .detail-body::-webkit-scrollbar-thumb { background: #ddd2c4; border-radius: 3px; }
 
 @media (max-width: 760px) {
-  .backpack-modal {
-    width: calc(100vw - 20px);
-    height: calc(100dvh - 20px);
-    max-height: calc(100dvh - 20px);
-  }
   .backpack-body {
     flex-direction: column;
     overflow-y: auto;
@@ -825,7 +741,6 @@ function close() {
 }
 
 @media (max-width: 460px) {
-  .backpack-header { padding: 14px 16px; }
   .backpack-body {
     margin: 12px;
     padding: 12px;
@@ -847,4 +762,6 @@ function close() {
   .effect-time.urgent .effect-time-dot,
   .effect-remove { animation: none; transition: none; }
 }
+:global(.linshe-modal.backpack-workspace) { --modal-full-width: min(1280px, 96vw); }
+.backpack-body { margin: 0; border-radius: 0; background: transparent; }
 </style>

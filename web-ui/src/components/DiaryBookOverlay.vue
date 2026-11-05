@@ -45,9 +45,7 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" /><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" /></svg>
                 <span>{{ store.generating ? '正在写…' : store.diary?.status === 'failed' ? '重试日记' : store.hasDiary ? '重新生成' : '写今天的日记' }}</span>
               </button>
-              <button type="button" class="db-close" title="合上日记" aria-label="合上日记" @click="requestClose">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-              </button>
+              <linshe-close-button class="db-close" label="合上日记" @click="requestClose" />
             </div>
           </div>
 
@@ -240,6 +238,8 @@
 </template>
 
 <script setup>
+import LinsheCloseButton from "./ui/LinsheCloseButton.vue"
+
 /**
  * 全屏日记本：内页是一整条流，正文段落与配图交错排布，再由 CSS 多栏均分成两列
  * （文字与图片混在一起、左右两列高度接近）；可滑动、可前后翻阅历史。
@@ -465,7 +465,7 @@ onUnmounted(() => {
 
 .db-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 /* 独立手账控件：薄纸签与墨色图标，不继承通用软糖按钮皮肤。 */
-.db-btn, .db-close, .nav-btn {
+.db-btn, .nav-btn {
   appearance: none;
   display: inline-flex;
   align-items: center;
@@ -487,19 +487,28 @@ onUnmounted(() => {
   box-shadow: none;
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
+.db-close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
+  white-space: nowrap;
+}
 .db-btn + .db-btn { border-color: var(--town-paper-line); }
 .db-btn:hover:not(:disabled), .db-btn.is-selected, .nav-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--town-paper-accent) 10%, transparent);
   color: var(--town-paper-accent);
 }
-.db-btn:focus-visible, .db-close:focus-visible, .nav-btn:focus-visible {
+.db-btn:focus-visible, .nav-btn:focus-visible {
   outline: 2px solid var(--town-paper-accent);
   outline-offset: 3px;
 }
-.db-btn:active:not(:disabled), .db-close:active, .nav-btn:active:not(:disabled) { transform: translateY(1px); }
+.db-btn:active:not(:disabled), .nav-btn:active:not(:disabled) { transform: translateY(1px); }
+.db-close:active { transform: translateY(1px); }
 .db-btn:disabled, .nav-btn:disabled { cursor: default; opacity: 0.48; transform: none; }
-.db-close { width: 40px; padding: 0; margin-left: 4px; border-left-color: var(--town-paper-line); border-radius: 0; }
-.db-close:hover { color: var(--town-paper-accent); background: color-mix(in srgb, var(--town-paper-accent) 10%, transparent); }
+.db-close { margin-left: 4px; }
 .db-btn[aria-busy="true"] svg { animation: cel-spin 1.4s linear infinite; }
 [data-theme="dark"] .diary-overlay { --diary-control-paper: var(--bg-primary); }
 [data-theme="dark"] .diary-bar,
@@ -834,8 +843,8 @@ onUnmounted(() => {
   .db-date-chip { display: none; }
   .db-who { flex: 1 1 100%; }
   .db-actions { width: 100%; gap: 6px; }
-  .db-btn, .db-close { min-height: 44px; }
-  .db-close { margin-left: auto; width: 44px; }
+  .db-btn { min-height: 44px; }
+  .db-close { margin-left: auto; }
   .diary-nav { width: 100%; grid-template-columns: 1fr minmax(0, 1.2fr) 1fr; gap: 2px; border-radius: 0; padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px)); }
   .nav-btn { min-width: 0; padding: 0 5px; font-size: 12px; }
   .nav-hint { font-size: 11px; }

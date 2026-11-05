@@ -24,9 +24,7 @@
                 </div>
                 <div v-else class="dr-now dr-no-data">还没安排日程</div>
               </div>
-              <linshe-button variant="icon" class="dr-close" @click="emit('close')">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-              </linshe-button>
+              <linshe-close-button class="dr-close" @click="emit('close')" />
             </div>
 
             <!-- 操作按钮：瞄一眼 -->
@@ -91,6 +89,8 @@
 </template>
 
 <script setup>
+import LinsheCloseButton from "../ui/LinsheCloseButton.vue"
+
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import LinsheButton from '../ui/LinsheButton.vue'
 import { useTooltip } from '../../composables/useTooltip.js'
@@ -181,7 +181,7 @@ function onDrawerKeydown(event) {
 .dr-no-data { color: var(--text-secondary); font-style: italic; }
 .dr-now-line { display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dr-now-line svg { flex-shrink: 0; opacity: 0.4; color: var(--text-secondary); }
-.dr-close { display: none; width: 34px; height: 34px; flex-shrink: 0; }
+.dr-close { display: none; flex-shrink: 0; }
 
 /* Row 2: action buttons */
 .dr-row2 { display: flex; gap: 8px; flex-wrap: wrap; }

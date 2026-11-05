@@ -4,7 +4,7 @@
       <linshe-button variant="secondary" @click="emit('resummon')">重新召唤</linshe-button>
     </template>
   </ResidentCharacterDetailModal>
-  <Teleport to="body"><Transition name="angel-overlay"><AvatarCropper v-if="visible && avatarOpen" themed title="天使头像" character-id="god:angel" :show-generate-tab="true" :recent-images="recentImages" :recent-loading="mediaLoading" :generate-handler="generateAvatar" :save-handler="saveAvatar" @switch-to-recent="refreshMedia" @close="cancelAvatar" /></Transition></Teleport>
+  <AvatarCropper v-if="visible && avatarOpen" title="天使头像" character-id="god:angel" :show-generate-tab="true" :recent-images="recentImages" :recent-loading="mediaLoading" :generate-handler="generateAvatar" :save-handler="saveAvatar" @switch-to-recent="refreshMedia" @close="cancelAvatar" />
   <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="lightboxVisible" :imgs="lightboxImage" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="lightboxVisible = false" /></div></Teleport>
 </template>
 
@@ -39,8 +39,3 @@ function close() {
   emit('close')
 }
 </script>
-
-<style scoped>
-.angel-overlay-enter-active,.angel-overlay-leave-active { transition:opacity .3s; }
-.angel-overlay-enter-from,.angel-overlay-leave-to { opacity:0; }
-</style>

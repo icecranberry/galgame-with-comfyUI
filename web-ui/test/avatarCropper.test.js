@@ -9,7 +9,7 @@ function fixture(t, overrides = {}) {
   const script = compileScript(parse(source).descriptor, { id: 'avatar-cropper-test' })
   const code = script.content.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g, (_, names) => `const { ${names} } = Vue`)
     .replace(/^import .* from .*$/gm, '').replace('export default', 'return')
-  const component = new Function('Vue', 'generateAvatar', 'LinsheButton', code)(Vue, () => { throw new Error('Unexpected resident API') }, {})
+  const component = new Function('Vue', 'generateAvatar', 'LinsheButton', 'LinsheModal', 'LinsheTabs', code)(Vue, () => { throw new Error('Unexpected resident API') }, {}, {}, {})
   const previous = Object.fromEntries(['window', 'document', 'Image', 'FileReader'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   const images = [], readers = [], draws = [], events = []
   class Image {
@@ -78,7 +78,9 @@ test('closing or unmounting cancels pending image callbacks', t => {
   h.state.tryClose()
   firstLoad()
   assert.equal(h.state.cropImage.value, null)
-  assert.deepEqual(h.events, [['close']])
+  assert.equal(h.state.modalVisible.value, false)
+  assert.deepEqual(h.events, [], 'close event waits for modal exit animation')
+  h.state.modalVisible.value = true
   h.state.selectRecentImage('/second.png')
   const secondLoad = h.images[1].onload
   h.unmount()
@@ -134,6 +136,8 @@ test('selected angel image saves a centered 512px crop through the supplied hand
   assert.deepEqual(h.draws[0], [h.images[0], 500, 0, 1000, 1000, 0, 0, 512, 512])
   assert.deepEqual(saved, ['data:image/png;base64,cropped'])
   assert.equal(h.state.cropSaving.value, false)
+  assert.equal(h.state.modalVisible.value, false)
+  assert.deepEqual(h.events, [], 'successful save waits for exit animation before emitting close')
 })
 
 test('generated angel avatar uses the same crop loader without calling the resident API', async t => {

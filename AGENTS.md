@@ -172,7 +172,7 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 
 ## git commit 提交
 
-commit提交必须按照功能划分，不要把其他功能的改动混在同一个commit中，每个commit中文注释作用或功能
+commit提交必须按照大功能划分，大功能里如果还有小功能点，划分到一起写进注释里的要点，不要把其他功能的改动混在同一个commit中，每个commit中文注释作用或功能
 
 ## 最终结论输出格式要求
 

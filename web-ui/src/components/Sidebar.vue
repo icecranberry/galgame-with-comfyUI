@@ -265,19 +265,13 @@
       </div>
     </Transition>
 
-    <Teleport to="body">
-      <Transition name="cg-pop">
-        <div v-if="showCreateGroup && !isMobile" class="cg-overlay" @click.self="showCreateGroup = false">
-          <section class="cg-dialog" role="dialog" aria-modal="true" aria-labelledby="create-group-title">
-            <div class="cg-dialog-header">
+    <linshe-modal :visible="showCreateGroup && !isMobile" title="发起群聊" @close="showCreateGroup = false" panel-class="create-group-modal">
+      <template #title>
+        <div class="modal-heading-content">
               <h3 id="create-group-title" class="cg-dialog-title">发起群聊</h3>
-              <linshe-button class="cg-close-btn" variant="icon" aria-label="关闭" @click="showCreateGroup = false">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </linshe-button>
+
             </div>
+      </template>
 
             <div class="cg-dialog-body">
               <div class="cg-form-col">
@@ -327,14 +321,14 @@
                 </linshe-button>
               </div>
             </div>
-          </section>
-        </div>
-      </Transition>
-    </Teleport>
+
+    </linshe-modal>
   </aside>
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
@@ -817,38 +811,6 @@ function formatTime(iso) {
 .cg-submit {
   padding: 12px 0;
 }
-
-.cg-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  background: rgba(42, 36, 30, 0.42);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-.cg-dialog {
-  width: min(880px, calc(100vw - 64px));
-  max-height: min(780px, calc(100vh - 64px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid rgba(var(--accent-rgb), 0.16);
-  background: var(--bg-secondary);
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2), 0 2px 8px rgba(var(--accent-rgb), 0.08);
-}
-.cg-dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 20px 28px;
-  border-bottom: 1px solid rgba(var(--accent-rgb), 0.12);
-}
 .cg-dialog-title {
   margin: 0;
   font-size: 20px;
@@ -951,18 +913,9 @@ function formatTime(iso) {
 .cg-pop-leave-active {
   transition: opacity 0.24s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.cg-pop-enter-active .cg-dialog,
-.cg-pop-leave-active .cg-dialog {
-  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.24s cubic-bezier(0.4, 0, 0.2, 1);
-}
 .cg-pop-enter-from,
 .cg-pop-leave-to {
   opacity: 0;
-}
-.cg-pop-enter-from .cg-dialog,
-.cg-pop-leave-to .cg-dialog {
-  opacity: 0;
-  transform: translateY(10px) scale(0.98);
 }
 
 /* ── 移动端底部 ── */
@@ -1152,4 +1105,5 @@ function formatTime(iso) {
     transform: translate3d(0, 0, 0);
   }
 }
+:global(.linshe-modal.create-group-modal) { width: min(880px, 96vw); }
 </style>

@@ -1,8 +1,8 @@
 <template>
   <Teleport to="body">
-    <div class="wiz-mask" @click.self="tryClose">
-      <div class="wiz-panel" role="dialog" aria-label="小镇初始化向导">
-        <div class="wiz-head">
+<linshe-modal :visible="modalVisible" :title="addingTown ? '再建一座小镇' : '小镇初始化'" wide :suspended="manager.open || restartVisible" @close="tryClose" @after-leave="finishClose" panel-class="town-init-modal" body-class="modal-workspace-body">
+  <template #title>
+    <div class="modal-heading-content">
           <span class="wiz-title">{{ addingTown ? '再建一座小镇' : '小镇初始化' }}</span>
           <span class="wiz-step-hint">{{ stepHint }}</span>
           <linshe-button
@@ -21,8 +21,9 @@
           >
             重新开始
           </linshe-button>
-          <linshe-button variant="icon" size="sm" aria-label="关闭" @click="tryClose">✕</linshe-button>
+
         </div>
+  </template>
 
         <!-- 白色内衬卡（对齐角色详情弹窗的 lora-body-card 风格） -->
         <div v-if="showInitAlphaBanner" class="wiz-alpha-banner" role="note">
@@ -438,12 +439,12 @@
           </Transition>
         </div>
         </div>
-      </div>
-    </div>
+
+</linshe-modal>
 
     <!-- 图片管理弹窗 -->
     <linshe-modal v-model="restartVisible" title="重新开始创建小镇？" :transition-ms="300">
-      <p>这会清除本次创建的暂存进度，回到配置步骤。已有的小镇不受影响。</p>
+      <p class="wizard-restart-description">这会清除本次创建的暂存进度，回到配置步骤。已有的小镇不受影响。</p>
       <template #footer>
         <linshe-button @click="restartVisible = false">继续当前进度</linshe-button>
         <linshe-button variant="danger" @click="restartWizard">确认重新开始</linshe-button>
@@ -485,6 +486,12 @@ const emit = defineEmits(['close', 'applied'])
 // 世界里已经有镇（管理面板「新建小镇」）时为真：这次是「再建一座」，
 // 不续跑上一次的完成态，直接从配置步重新选世界观。
 const props = defineProps({ newTown: Boolean })
+const modalVisible = ref(true)
+let appliedOnClose = false
+function finishClose() {
+  if (appliedOnClose) emit('applied')
+  emit('close')
+}
 const addingTown = ref(!!props.newTown)
 
 const town = useTownStore()
@@ -1375,14 +1382,14 @@ function confirmInit() {
 
 function finish() {
   stopAuto()
-  emit('applied')
-  emit('close')
+  appliedOnClose = true
+  modalVisible.value = false
 }
 
 function tryClose() {
   stopAuto()
   saveDraft()
-  emit('close')
+  modalVisible.value = false
 }
 
 //  自动推进：从当前步一路推进到开镇完成，可随时暂停 / 继续 
@@ -1703,33 +1710,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.wiz-mask {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 950;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.wiz-panel {
-  width: 620px;
-  max-width: calc(100vw - 32px);
-  max-height: min(88vh, 820px);
-  background: #f4f1eeed;
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(54, 42, 38, 0.2);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.wiz-panel:has(.wiz-split.is-npcs),
-.wiz-panel:has(.wiz-split.is-player) {
-  width: min(1020px, calc(100vw - 32px));
-}
-
 .wiz-overall-progress {
   height: 4px;
   background: rgba(240, 236, 232, 0.9);
@@ -1754,14 +1734,6 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   padding: 20px 0;
   justify-content: center;
-}
-
-.wiz-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 18px 8px;
 }
 
 .wiz-title { font-size: 16px; font-weight: 700; color: var(--text-bright); }
@@ -1795,10 +1767,7 @@ onBeforeUnmount(() => {
 .wiz-inner {
   flex: 1;
   min-height: 0;
-  margin: 4px 12px 12px;
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
+  margin: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2302,4 +2271,9 @@ onBeforeUnmount(() => {
 .wiz-confirm-body { display: flex; flex-direction: column; gap: 10px; }
 .wiz-step-tag { font-size: 12px; font-weight: 700; color: var(--text-bright); }
 .wiz-confirm-actions { display: flex; gap: 10px; }
+:global(.linshe-modal.town-init-modal) { width: min(620px, 96vw); }
+:global(.linshe-modal.town-init-modal:has(.wiz-split.is-npcs)),
+:global(.linshe-modal.town-init-modal:has(.wiz-split.is-player)) { width: min(1020px, 96vw); }
+
+.wizard-restart-description { font-size: var(--fs-base); line-height: 1.7; color: var(--text-primary); margin: 0; }
 </style>

@@ -1,9 +1,7 @@
 <template>
-  <Teleport to="body">
-    <Transition name="guide">
-      <div v-if="visible" class="guide-overlay" @click.self="close">
-        <section class="guide-card" role="dialog" aria-modal="true" :aria-label="title">
-          <header class="guide-head">
+  <linshe-modal :visible="visible" :title="title" :z-index="90000" @close="close" panel-class="install-guide-modal">
+    <template #title>
+      <div class="modal-heading-content">
             <div class="guide-mark" aria-hidden="true">
               <svg viewBox="0 0 20 20" fill="none">
                 <circle cx="10" cy="10" r="7.2" stroke="currentColor" stroke-width="1.6"/>
@@ -14,12 +12,9 @@
               <h3>{{ title }}</h3>
               <p v-if="intro">{{ intro }}</p>
             </div>
-            <linshe-button variant="icon" size="sm" class="guide-close" aria-label="关闭" @click="close">
-              <svg viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                <path d="M1.6 1.6l6.8 6.8M8.4 1.6 1.6 8.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-            </linshe-button>
-          </header>
+
+      </div>
+    </template>
 
           <div class="guide-body">
             <template v-if="steps.length">
@@ -40,17 +35,16 @@
             </template>
           </div>
 
-          <footer class="guide-foot">
+    <template #footer>
             <linshe-button variant="primary" class="guide-ok" @click="close">我已了解</linshe-button>
-          </footer>
-        </section>
-      </div>
-    </Transition>
-  </Teleport>
+    </template>
+  </linshe-modal>
 </template>
 
 <script setup>
-import { ref, watch, onBeforeUnmount } from 'vue'
+import LinsheModal from './ui/LinsheModal.vue'
+
+import { ref } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 
 const visible = ref(false)
@@ -71,60 +65,10 @@ function close() {
   visible.value = false
 }
 
-function onKeydown(event) {
-  if (event.key === 'Escape' && visible.value) close()
-}
-
-watch(visible, (isVisible) => {
-  if (isVisible) {
-    document.addEventListener('keydown', onKeydown)
-  } else {
-    document.removeEventListener('keydown', onKeydown)
-  }
-})
-
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
-
 defineExpose({ show, close })
 </script>
 
 <style scoped>
-.guide-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 90000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(46, 42, 39, 0.34);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-
-.guide-card {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  width: min(680px, 100%);
-  max-height: min(720px, calc(100dvh - 48px));
-  background: #F7F4EF;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border: 1px solid rgba(var(--accent-rgb), 0.18);
-  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: 18px;
-  box-shadow: 0 16px 44px rgba(50, 40, 35, 0.18);
-  overflow: hidden;
-}
-
-.guide-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 20px 22px 14px;
-  border-bottom: 1px solid rgba(var(--accent-rgb), 0.14);
-}
-
 .guide-mark {
   flex-shrink: 0;
   display: grid;
@@ -158,13 +102,6 @@ defineExpose({ show, close })
 }
 
 /* 皮肤交给 LinsheButton，仅保留布局与图标尺寸 */
-.guide-close {
-  flex-shrink: 0;
-}
-.guide-close svg {
-  width: 10px;
-  height: 10px;
-}
 
 .guide-body {
   flex: 1;
@@ -252,19 +189,12 @@ defineExpose({ show, close })
 .guide-enter-active {
   transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.guide-enter-active .guide-card {
-  animation: guide-pop-in 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
 .guide-leave-active {
   transition: opacity 160ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .guide-enter-from,
 .guide-leave-to {
   opacity: 0;
-}
-.guide-leave-to .guide-card {
-  transform: translateY(6px) scale(0.98);
-  transition: transform 160ms cubic-bezier(0.45, 0, 0.85, 0.6);
 }
 
 @keyframes guide-pop-in {
@@ -287,24 +217,9 @@ defineExpose({ show, close })
   .guide-leave-active {
     transition: opacity 140ms ease;
   }
-  .guide-enter-active .guide-card,
-  .guide-leave-to .guide-card {
-    animation: none;
-    transition: none;
-    transform: none;
-  }
 }
 
 @media (max-width: 640px) {
-  .guide-overlay {
-    padding: 12px;
-  }
-  .guide-card {
-    max-height: calc(100dvh - 24px);
-  }
-  .guide-head {
-    padding: 16px 16px 12px;
-  }
   .guide-body {
     padding: 14px 16px 16px;
   }
@@ -312,4 +227,6 @@ defineExpose({ show, close })
     padding: 10px 16px 14px;
   }
 }
+:global(.linshe-modal.install-guide-modal) { width: min(680px, 94vw); }
+.guide-title-wrap p { font-size: var(--fs-sm); line-height: 1.6; margin: 4px 0 0; color: var(--text-secondary); }
 </style>

@@ -338,17 +338,16 @@
     <!-- ═══════════════════════════════════════════
          招募弹窗
          ═══════════════════════════════════════════ -->
-    <Teleport to="body">
-      <Transition name="modal-fade">
-        <div v-if="recruit.show" class="modal-overlay">
-          <div class="modal-panel modal-wide">
-            <div class="modal-header">
+    <linshe-modal :visible="recruit.show" title="招募新角色" wide :close-on-backdrop="false" @close="closeRecruit" panel-class="recruit-modal">
+      <template #title>
+        <div class="modal-heading-content">
               <h3>招募新角色</h3>
-              <linshe-button class="modal-close" variant="icon" @click="closeRecruit">✕</linshe-button>
+
             </div>
+      </template>
 
             <!-- 步骤 0：输入描述 -->
-            <div v-if="recruit.step === 'input'" class="modal-body" style="position:relative;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:14px;padding:18px;margin:0 20px 20px">
+      <div v-if="recruit.step === 'input'" class="modal-content-section" style="position:relative">
               <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
               <linshe-input
                 type="textarea"
@@ -384,7 +383,7 @@
             </div>
 
             <!-- 步骤 1：预览确认 -->
-            <div v-if="recruit.step === 'preview'" class="modal-body" style="position:relative">
+      <div v-if="recruit.step === 'preview'" class="modal-content-section" style="position:relative">
               <div class="preview-card">
                 <div class="preview-name-row">
                   <linshe-input
@@ -447,10 +446,8 @@
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.name).replaceAll('_', '+')}`" target="_blank">animadex</a>直接补充tag
               </div>
             </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+
+    </linshe-modal>
 
     <!-- 招募预览的修正外观：结果回填到待确认的角色卡草稿（尚未创建角色，无最近图片入口） -->
     <AppearanceRefineModal
@@ -664,7 +661,7 @@
         :recent-images="recentImages"
         :recent-loading="recentLoading"
         @close="showCharAvatarPicker = false"
-        @save="onCharAvatarSave"
+        :save-handler="onCharAvatarSave"
         @switch-to-recent="switchToRecent"
       />
     </Teleport>
@@ -677,7 +674,7 @@
         :show-recent-tab="false"
         :show-generate-tab="false"
         @close="showUserAvatarPicker = false"
-        @save="onUserAvatarSave"
+        :save-handler="onUserAvatarSave"
       />
     </Teleport>
 
@@ -749,6 +746,8 @@
 </template>
 
 <script setup>
+import LinsheModal from '../components/ui/LinsheModal.vue'
+
 import WorldLorebookModal from '../components/WorldLorebookModal.vue'
 import WorldLanguageStyleModal from '../components/WorldLanguageStyleModal.vue'
 import PromptPresetModal from '../components/PromptPresetModal.vue'
@@ -953,7 +952,6 @@ const userAvatarStyle = computed(() => {
 
 async function onUserAvatarSave(base64) {
   await uploadUserAvatar(base64)
-  showUserAvatarPicker.value = false
 }
 
 // ── 姓名 ──
@@ -1686,7 +1684,6 @@ async function onCharAvatarSave(base64) {
   await chat.loadCharacters()
   const updated = chat.characters.find(x => x.id === id)
   if (updated) detailChar.value = updated
-  showCharAvatarPicker.value = false
   emitCharacterAvatarChanged({ characterId: id, previousVersion: before, nextVersion: updated?.avatar_path || '', ok: true })
 }
 

@@ -6,8 +6,8 @@
         <div class="ap-head">
           <linshe-button v-if="detail" variant="ghost" size="sm" @click="detail = null">← 返回</linshe-button>
           <span class="ap-title">{{ detail ? (detail.type === 'npc' ? detailName : detailName) : '小镇管理' }}</span>
-          <linshe-button v-if="!detail" variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
-          <linshe-button v-else variant="icon" size="sm" aria-label="关闭" @click="$emit('close')">✕</linshe-button>
+          <linshe-close-button v-if="!detail" label="关闭" @click="$emit('close')" />
+          <linshe-close-button v-else label="关闭" @click="$emit('close')" />
         </div>
 
         <div v-if="!detail" class="ap-tabs">
@@ -465,6 +465,8 @@ v-model="settings.npcMomentsDisabled" size="sm" :disabled="settingsLocked"
 </template>
 
 <script setup>
+import LinsheCloseButton from "../ui/LinsheCloseButton.vue"
+
 import { ref, reactive, computed, onBeforeUnmount, watch, nextTick, inject } from 'vue'
 import * as api from '../../api/index.js'
 import { useTownStore } from '../../stores/town.js'

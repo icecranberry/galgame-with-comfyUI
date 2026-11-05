@@ -27,9 +27,9 @@ for (const outcome of ['confirmed', 'cancelled', 'failed']) {
         return { ok: true }
       },
     }
-    const component = new Function('Vue', 'api', 'LinsheButton', 'ImageLightbox',
+    const component = new Function('Vue', 'api', 'LinsheButton', 'LinsheCloseButton', 'ImageLightbox',
       'useArticleClip', 'playNewspaperFlipSound', 'window', 'Date', code)(
-      Vue, api, {}, {}, () => {}, () => {},
+      Vue, api, {}, {}, {}, () => {}, () => {},
       { addEventListener() {}, removeEventListener() {} }, LocalDate,
     )
     let state
@@ -80,9 +80,9 @@ for (const initialDate of ['', '2026-10-16', '2026-10-15']) {
       listNewspaperEditions: async () => ({ editions: [today, past] }),
       getNewspaperByDate: async date => { requests.push(date); return { newspaper: past } },
     }
-    const component = new Function('Vue', 'api', 'LinsheButton', 'ImageLightbox',
+    const component = new Function('Vue', 'api', 'LinsheButton', 'LinsheCloseButton', 'ImageLightbox',
       'useArticleClip', 'playNewspaperFlipSound', 'window', 'Date', code)(
-      Vue, api, {}, {}, () => {}, () => {},
+      Vue, api, {}, {}, {}, () => {}, () => {},
       { addEventListener() {}, removeEventListener() {} }, LocalDate,
     )
     const props = Vue.reactive({ modelValue: false, initialDate })

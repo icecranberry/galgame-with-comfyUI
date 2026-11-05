@@ -366,16 +366,17 @@
     />
 
     <!-- 角色对用户的印象弹窗 -->
-    <Transition name="editor-fade">
-      <div v-if="showImpression" class="editor-overlay" @click.self="showImpression = false">
-      <div class="editor-panel impression-panel">
-        <div class="editor-header impression-header">
+    <linshe-modal :visible="showImpression" :title="`${chat.activeChar?.display_name || ''} 对你的印象`" wide @close="showImpression = false" panel-class="impression-modal" body-class="modal-workspace-body">
+      <template #title>
+        <div class="modal-heading-content">
           <span class="impression-title" :title="`${chat.activeChar?.display_name || ''} 对你的印象`">{{ chat.activeChar?.display_name }} 对你的印象</span>
           <div class="impression-header-actions">
             <linshe-button variant="ghost" size="sm" @click="openStandingDisplayPage">同步立绘展示 ↗</linshe-button>
-            <linshe-button variant="icon" class="editor-close" @click="showImpression = false">&times;</linshe-button>
+
           </div>
         </div>
+      </template>
+
         <div class="impression-body">
           <!-- 加载中 -->
           <div v-if="impressionLoading" class="impression-status">
@@ -578,9 +579,8 @@
           </div>  <!-- impression-content -->
 
         </div>
-      </div>
-    </div>
-    </Transition>
+
+    </linshe-modal>
 
     <!-- 角色头像选择器（设置面板） -->
     <Teleport to="body">
@@ -594,7 +594,7 @@
         :recent-images="recentImages"
         :recent-loading="recentLoading"
         @close="closeAvatarPicker"
-        @save="onAgentAvatarSave"
+        :save-handler="onAgentAvatarSave"
         @switch-to-recent="switchToRecent"
       />
     </Teleport>
@@ -611,6 +611,8 @@
 </template>
 
 <script setup>
+import LinsheModal from '../components/ui/LinsheModal.vue'
+
 import SpeechButton from '../components/SpeechButton.vue'
 import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
 import '../styles/speechBubble.css'
@@ -1453,7 +1455,6 @@ recentImages.value = d.images || []
 
 async function onAgentAvatarSave(base64) {
 await chat.uploadAvatar(base64)
-showAvatarPicker.value = false
 }
 
 const messageGroups = computed(() => {
@@ -2359,17 +2360,6 @@ function renderContent(text) {
 .sp-btn-icon { width:16px; height:16px; vertical-align:middle; margin-right:6px; display:inline-block; }
 
 /* ── 毛玻璃编辑弹窗 ── */
-.editor-overlay { position:fixed; inset:0; background:transparent; display:flex; align-items:center; justify-content:center; z-index:1001; }
-.editor-panel {
-  width:768px; max-height:90vh; height:80vh;
-  background: var(--bg-secondary);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-radius:16px;
-  border:1px solid var(--border);
-  box-shadow: 0 12px 48px rgba(0,0,0,0.1);
-  display:flex; flex-direction:column; overflow:hidden;
-}
 
 /* 编辑弹窗淡入缩放 */
 .editor-fade-enter-active,
@@ -2612,12 +2602,6 @@ function renderContent(text) {
   .input-area { padding: 8px 16px; padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 
   /* 手机端编辑弹窗全屏 */
-  .editor-overlay { background: rgba(0,0,0,0.3); }
-  .editor-panel {
-    width:100vw; max-width:100vw;
-    height:100vh; height:100dvh; max-height:100vh; max-height:100dvh;
-    border-radius:0; border:none;
-  }
   .editor-header { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
   .editor-actions { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 
@@ -2699,19 +2683,11 @@ function renderContent(text) {
 }
 
 /* ── 印象弹窗 ── */
-.impression-panel {
-  max-width: 720px;
-  max-height: 68vh;
-  height: auto;
-  display: flex;
-  flex-direction: column;
-}
 .impression-body {
   overflow-y: auto;
   flex: 1;
   padding: 0;
 }
-.impression-header { gap: 8px; }
 .impression-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .impression-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -2981,12 +2957,6 @@ function renderContent(text) {
 .impression-btn-save:hover { filter: brightness(1.08); }
 
 @media (max-width: 767px) {
-  .impression-panel {
-    width: 100vw; max-width: 100vw;
-    height: 100vh; height: 100dvh;
-    max-height: 100vh; max-height: 100dvh;
-    border-radius: 0; border: none;
-  }
   .impression-card { padding: 8px 10px; }
   .impression-content { flex-direction: column; }
   .impression-right { width: 100% !important; border-left: none; border-top: 1px solid var(--border); padding: 14px 0 0; min-width: 0; }
@@ -3261,4 +3231,7 @@ function renderContent(text) {
   .btn-header-settings { flex-shrink: 0; }
 }
 
+:global(.linshe-modal.impression-modal) { width: min(720px, 96vw); max-height: 68vh; }
+.impression-body { padding: 16px; min-height: 0; }
+@media (max-width: 767px) { :global(.linshe-modal.impression-modal) { height: 100%; max-height: 100%; } }
 </style>

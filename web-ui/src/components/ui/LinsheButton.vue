@@ -12,6 +12,7 @@
         'ls-btn--tone-paper': tone === 'paper',
         'ls-btn--tone-muted': tone === 'muted',
         'ls-btn--tone-ink': tone === 'ink',
+        'ls-btn--tone-candy': tone === 'candy',
         'ls-btn--jelly-enter': jellyPhase === 'enter',
         'ls-btn--jelly-leave': jellyPhase === 'leave',
         'ls-btn--loading': loading,
@@ -50,7 +51,7 @@ const props = defineProps({
   block: { type: Boolean, default: false },
   /** chip 变体的选中态 */
   active: { type: Boolean, default: false },
-  /** 色调覆盖：danger 转红色；paper 为白底图标按钮；muted 为弱操作的中性墨色；ink 为高对比图标操作 */
+  /** 色调覆盖：danger 转红色；paper 为白底图标按钮；muted 为弱操作的中性墨色；ink 为高对比图标操作；candy 为立体糖果图标钮 */
   tone: { type: String, default: 'default' },
 })
 
@@ -210,6 +211,29 @@ const endJelly = (event) => {
 .ls-btn--icon.ls-btn--md { width: 30px; height: 30px; min-height: 0; }
 .ls-btn--icon.ls-btn--lg { width: 38px; height: 38px; min-height: 0; }
 
+/* 弹窗关闭按需启用，与主操作按钮共用实心糖面和同色厚底。 */
+.ls-btn--icon.ls-btn--tone-candy,
+.ls-btn--icon.ls-btn--tone-candy:hover:not(:disabled) {
+  flex-shrink: 0;
+  color: var(--on-accent);
+  border: none;
+  border-radius: 12px;
+  background: var(--accent);
+  box-shadow: 0 var(--depth) 0 var(--accent-hover),
+    inset 0 1px 0 color-mix(in srgb, var(--on-accent) 35%, transparent);
+  transition: transform var(--dur-interaction) var(--ease-spring),
+    box-shadow var(--dur-interaction) var(--ease-standard),
+    filter var(--dur-interaction) var(--ease-standard);
+}
+.ls-btn--icon.ls-btn--tone-candy:hover:not(:disabled) {
+  filter: brightness(1.05) saturate(1.05);
+}
+.ls-btn--icon.ls-btn--tone-candy:active:not(:disabled) {
+  transform: translateY(var(--depth)) scale(var(--ls-jelly-x), var(--ls-jelly-y));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--on-accent) 25%, transparent);
+}
+.ls-btn--icon.ls-btn--tone-candy:disabled { box-shadow: none; }
+
 /* ── chips：胶囊糖 ── */
 .ls-btn--chip {
   background: transparent;
@@ -300,7 +324,9 @@ const endJelly = (event) => {
 
 /* ── 减弱动效 ── */
 @media (prefers-reduced-motion: reduce) {
-  .ls-btn { transition: none; }
+  .ls-btn,
+  .ls-btn--icon.ls-btn--tone-candy,
+  .ls-btn--icon.ls-btn--tone-candy:hover:not(:disabled) { transition: none; }
   .ls-btn--jelly-enter,
   .ls-btn--jelly-leave { animation: none; }
   .ls-btn__spinner { animation-duration: 1.5s; }

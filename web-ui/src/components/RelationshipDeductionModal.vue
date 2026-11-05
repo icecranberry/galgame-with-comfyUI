@@ -1,13 +1,13 @@
 <template>
-  <Teleport to="body">
-    <Transition name="modal-fade">
-      <div v-if="visible" class="modal-overlay">
-        <div class="modal-panel ded-modal">
-          <div class="modal-header">
+  <linshe-modal :visible="visible" :title="`推演${mode === 'user' ? '用户' : '角色'}关系`" wide :close-on-backdrop="false" :z-index="11010" @close="$emit('close')" panel-class="deduction-modal">
+    <template #title>
+      <div class="modal-heading-content">
             <h3>推演{{ mode === 'user' ? '用户' : '角色' }}关系 — {{ mode === 'user' ? userName : character?.display_name }}</h3>
-            <linshe-button variant="icon" @click="$emit('close')">&times;</linshe-button>
+
           </div>
-          <div class="modal-body">
+    </template>
+
+    <div class="modal-content-section">
             <Transition name="ded-collapse" mode="out-in">
               <div v-if="loading" key="loading" class="ded-loading">
                 <span class="ded-spinner"></span>
@@ -110,13 +110,13 @@
               </div>
             </Transition>
           </div>
-        </div>
-      </div>
-    </Transition>
-  </Teleport>
+
+  </linshe-modal>
 </template>
 
 <script setup>
+import LinsheModal from './ui/LinsheModal.vue'
+
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
 import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
@@ -459,4 +459,5 @@ watch(() => props.visible, (val) => {
   .ded-ctrl-right .ded-ctrl-icon { transform: rotate(90deg); }
   .ded-ctrl-left .ded-ctrl-icon { transform: rotate(270deg); }
 }
+:global(.linshe-modal.deduction-modal) { width: min(780px, 96vw); }
 </style>
