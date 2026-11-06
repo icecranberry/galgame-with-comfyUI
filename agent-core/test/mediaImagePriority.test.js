@@ -2,6 +2,10 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 
+// 本文件驱动完整媒体管线，提示词转储可达数万行；裸奔会在全量并发时撑爆 test runner
+// 的子进程 IPC（Unable to deserialize cloned data）。断言失败仍由 TAP 报告。
+for (const method of ['log', 'info', 'debug']) console[method] = () => {};
+
 process.env.DB_PATH = ':memory:';
 const calls = [];
 const responses = [];

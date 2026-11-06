@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 
+// 同 mediaImagePriority：媒体管线的提示词转储会撑爆 test runner 子进程 IPC，静音非错误日志。
+for (const method of ['log', 'info', 'debug']) console[method] = () => {};
+
 process.env.DB_PATH = ':memory:';
 let requests = 0;
 const imageModule = new URL('../src/services/imageSkill.js', import.meta.url).href;

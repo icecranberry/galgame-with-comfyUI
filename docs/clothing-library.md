@@ -36,4 +36,4 @@
 node scripts/import-clothing-library.mjs 'E:\Download\文生图创作\0-语料\服装'
 ```
 
-导入不会读取或修改图片，也不会修改原始文档、表格或 PDF。生成后的 JSON 随源码维护。回归测试为 `agent-core/test/clothingLibrary.test.js`、`web-ui/test/clothingDraft.test.js`，分别由两端 `npm test` 收集。
+导入不会读取或修改图片，也不会修改原始文档、表格或 PDF。生成后的 JSON 随源码维护。原回归测试（`agent-core/test/clothingLibrary.test.js`、`web-ui/test/clothingDraft.test.js`）已随 2026-11-06 测试精简移除，需要时从 git 历史取回。

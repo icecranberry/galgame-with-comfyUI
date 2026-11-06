@@ -53,7 +53,9 @@ test('私聊图片与发送锁：真实测试库、HTTP 与前端 store 联测',
     async *chatAgentStream(messages, options) {
       contexts.push(structuredClone(messages));
       const current = state;
-      if (!options.tools?.length) {
+      // 续写轮的判据是尾部追加了 tool 结果：实现刻意保留 tools 只为 provider 签名稳定，
+      // 仅把 toolChoice 置为 none，所以不能用 options.tools 判断是否续写。
+      if (messages.at(-1)?.role === 'tool') {
         mark('continuation_waiting');
         await current.textGate.promise;
         yield { type: 'text_delta', text: current.reply };

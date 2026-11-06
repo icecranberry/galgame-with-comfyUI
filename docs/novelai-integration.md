@@ -55,4 +55,4 @@ NovelAI 参数区顶部是一排配置胶囊，与「LLM 接口」的多配置�
 - 本地 SillyTavern 的 `src/endpoints/novelai.js`：原生参数、Bearer 认证、ZIP 图片处理。
 - 本地 SillyTavern 的 `src/request-proxy.js`：显式配置出站代理的思路。邻舍使用原生 fetch，采用 Undici dispatcher，不能照搬 `http.globalAgent`。
 - [NovelAI 当前官方 schema](https://image.novelai.net/docs/doc.json)：官方 JSON 响应与订阅路径；没有照搬本地旧酒馆的 `api.novelai.net/user/subscription`。
-- 回归验证：在 `agent-core` 执行 `node --test test/novelaiClient.test.js test/llmConfig.test.js`。测试使用本地 HTTP 代理及模拟上游，不调用付费生成。
+- 回归验证：在 `agent-core` 执行 `node --test test/llmConfig.test.js`（含 NovelAI 配置档案；原 `novelaiClient.test.js` 客户端专项测试已随 2026-11-06 测试精简移除，需要时从 git 历史取回）。测试使用本地 HTTP 代理及模拟上游，不调用付费生成。

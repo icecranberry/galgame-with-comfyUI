@@ -57,7 +57,7 @@ SQLite `prompt_presets` 保存适配后的文档、选定排序、名称、激�
 
 限制为 4 MiB 文档、2000 个提示词、32 层嵌套宏、30000 次展开操作、单段/变量 2 MiB，以及累计展开上限。超限报错，不截断后发送残缺提示词。
 
-正式测试：`agent-core/test/promptPresets.test.js`、`agent-core/test/presetScopes.test.js`、`agent-core/test/llmOutputTokens.test.js`、`web-ui/test/promptPresets.test.js`。覆盖导入导出保留、排序/开关、嵌套变量、标记/废弃字段清理、限制、空注入、附件/历史不变、快照、CRUD/并发，以及捕获真实 SDK 的同步/流式/重试 HTTP 请求体。范围回归使用内存数据库激活预设，实际调用小镇素材、立绘、表情包、图片识别及评论构造器，验证辅助请求在开启/关闭预设时逐字一致，评论只增加一条 system1。
+正式测试：`agent-core/test/promptPresets.test.js`、`agent-core/test/llmOutputTokens.test.js`。覆盖导入导出保留、排序/开关、嵌套变量、标记/废弃字段清理、限制、空注入、附件/历史不变、快照、CRUD/并发，以及捕获真实 SDK 的同步/流式/重试 HTTP 请求体（原 `presetScopes.test.js` 与 `web-ui/test/promptPresets.test.js` 已随 2026-11-06 测试精简移除，需要时从 git 历史取回）。
 
 用户提供的 `8.13【可待-从头越】 直出版 (1).json` 离线验证：保留 195 条，所选排序 173 项、开启 86 项；普通生成下 12 段非空正文、63 项变量/空正文、11 项标记。预览输入“你好”时展开为 32088 字符，没有残留未展开的宏。该文件只用于本地验证，不收入仓库。
 
