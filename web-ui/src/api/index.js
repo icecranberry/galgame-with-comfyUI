@@ -2247,3 +2247,59 @@ export const getGodWork = session => request(`/god-says/work?session=${session}`
 export const decideGodChange = (id, version, decision) => request(`/god-says/changes/${id}/decision`, { method: 'POST', body: { version, decision } })
 
 export const stopGodBatch = id => request(`/god-says/batches/${id}/stop`, { method: 'POST' })
+
+// ── 破限规则集（Prompt Shield）────────────────────────────────────────────
+// 往每次 LLM 调用最前面注入一段「不拒答」system 提示词，避免模型拿
+// "世界观涉及成人/校园内容"为由拒答（真机上日程生成被拒两次 → 500）。
+// 开关走通用 feature 分支（key='jailbreak'），正文本体走规则集那一组端点。
+// GET  → { ok, enabled, source:'db'|'default', bytes, content, defaultContent }
+// PUT  → { enabled?, content?, reset? } 三者至少给一个；reset:true 恢复默认正文
+export async function getJailbreak() {
+  return request(`/config/jailbreak`)
+}
+
+export async function updateJailbreak(patch) {
+  return request(`/config/jailbreak`, { method: 'PUT', body: patch })
+}
+
+// GET /config/jailbreak/rules → { ok, rules[], activeId, active, targets[], availableTargets[], targetLabels{}, limits{} }
+export async function getJailbreakRules() {
+  return request(`/config/jailbreak/rules`)
+}
+
+// { name?, content?, targets? } → { ok, rule }
+export async function createJailbreakRule(payload) {
+  return request(`/config/jailbreak/rules`, { method: 'POST', body: payload })
+}
+
+export async function getJailbreakRule(id) {
+  return request(`/config/jailbreak/rules/${encodeURIComponent(id)}`)
+}
+
+// 内置规则集只允许改 name / targets（改 content 会 400）
+export async function updateJailbreakRule(id, patch) {
+  return request(`/config/jailbreak/rules/${encodeURIComponent(id)}`, { method: 'PUT', body: patch })
+}
+
+// 内置项与"最后一个自定义项"会 400
+export async function deleteJailbreakRule(id) {
+  return request(`/config/jailbreak/rules/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// 传空串 = 清掉激活标记，回落旧单正文键 / 代码默认
+export async function activateJailbreakRule(id) {
+  return request(`/config/jailbreak/rules/${encodeURIComponent(id)}/activate`, { method: 'POST' })
+}
+
+export async function getActiveJailbreakRule() {
+  return request(`/config/jailbreak/rules/active`)
+}
+
+// GET → { ok, targets[], available[], labels{} }
+export async function getJailbreakTargets() {
+  return request(`/config/jailbreak/targets`)
+}
+
+export async function setJailbreakTargets(targets) {
+  return request(`/config/jailbreak/targets`, { method: 'PUT', body: { targets } })
+}

@@ -7,6 +7,44 @@ import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 import { defaultMaxTokens, isValidMaxTokens } from './modelCapabilities.js';
 import { buildAgentRequest, readAgentResponse } from './agentStream.js';
+// 破限注入（services/promptShield.js）与拒答检测（services/refusalDetector.js）
+import { applyShield } from '../services/promptShield.js';
+import { isRefusal, REFUSAL_RETRY_INSTRUCTION } from '../services/refusalDetector.js';
+
+/**
+ * 把调用方的中文 `label` 映射到破限规则集的**投递目标 key**。
+ *
+ * 为什么要有它：全仓 100+ 个调用点各自传自己的中文 label（'私聊' / '群聊' / '奇遇生成'…），
+ * 让它们全都再传一个 `target` 是不现实的（改 100 处、且以后新调用点一定会忘）。
+ * 这里在收口处按前缀识别一次，`opts.target` 显式传了就以显式值优先。
+ *
+ * 认不出来的一律返回 `undefined` = **照常注入**（见 applyShield 的缺省投递语义），
+ * 所以漏映射的后果是"少一条过滤"，不是"破限词失效"。
+ */
+const LABEL_TARGET_PREFIXES = [
+  ['私聊', 'chat'],
+  ['群聊', 'group'],
+  ['奇遇', 'event'],
+  ['事件分支', 'event'],
+  ['事件结局', 'event'],
+  ['日程', 'schedule'],
+  ['朋友圈', 'moment'],
+  ['话题', 'moment'],
+  ['日记', 'diary'],
+  ['信箱', 'mailbox'],
+  ['信件', 'mailbox'],
+  ['媒体', 'media'],
+  ['小镇', 'town'],
+];
+
+function resolveShieldTarget(label) {
+  const text = String(label || '');
+  if (!text) return undefined;
+  for (const [prefix, target] of LABEL_TARGET_PREFIXES) {
+    if (text.startsWith(prefix)) return target;
+  }
+  return undefined;
+}
 import { applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
@@ -303,10 +341,40 @@ export async function chatSync(messages, opts = {}) {
     throw new TypeError('chatSync maxRetries must be a nonnegative integer');
   }
   messages = await compressLlmImageInputs(messages);
+  // 提示词破限：在这一处收口注入（所有 LLM 调用都过这里）。
+  // 未开开关 / 正文为空 / 本轮已注过 → 原样返回同一个数组引用，零开销。
+  // 放在 compressLlmImageInputs **之后**：那条路会重排/裁剪消息，先注入会被它打乱位置。
+  messages = applyShield(messages, {
+    label: opts.label || 'chatSync',
+    // 投递范围：显式 opts.target 优先，否则按 label 前缀识别（见 resolveShieldTarget）
+    target: opts.target !== undefined ? opts.target : resolveShieldTarget(opts.label),
+  });
+  // 所有非流式调用的唯一收口：网络失败由内层重试，**拒答**在这里兜一次。
+  const runOnce = (msgs) => (config.llm.freeEgg
+    ? _chatSyncFreeEgg(msgs, opts)
+    : _chatSyncInner(msgs, opts));
   try {
-    const result = config.llm.freeEgg
-      ? await _chatSyncFreeEgg(messages, opts)
-      : await _chatSyncInner(messages, opts);
+    let result = await runOnce(messages);
+    if (opts.refusalRetry !== false) {
+      const firstText = opts.returnMeta ? result.content : result;
+      if (isRefusal(firstText)) {
+        // 只重发一次：纠正指令贴在原消息之后，原有 system（角色/格式要求）继续生效。
+        console.warn(`[refusal] ▸ 模型拒答，追加纠正指令重发一次 (${opts.label || 'chatSync'})`);
+        try {
+          const retried = await runOnce([...messages, REFUSAL_RETRY_INSTRUCTION]);
+          const retriedText = opts.returnMeta ? retried.content : retried;
+          if (isRefusal(retriedText)) {
+            console.warn(`[refusal] ▸ 重发后仍是拒答，按原样返回 (${opts.label || 'chatSync'})`);
+          } else {
+            result = retried;
+          }
+        } catch (retryErr) {
+          // 重发失败不掩盖第一次的结果：上层拿到的仍是原始返回，行为与加检测前一致。
+          throwIfSyncAborted(opts.signal, retryErr);
+          console.warn(`[refusal] ▸ 重发失败，保留首次结果 (${opts.label || 'chatSync'}): ${retryErr?.message || retryErr}`);
+        }
+      }
+    }
     return opts.returnMeta ? result : result.content;
   } catch (err) {
     throwIfSyncAborted(opts.signal, err);
@@ -609,6 +677,11 @@ async function* _chatStreamFreeEgg(messages, opts) {
  */
 export async function* chatStream(messages, opts = {}) {
   messages = await compressLlmImageInputs(messages);
+  // 同 chatSync：破限注入收口。opts.label 已经带了调用方标识（如 '私聊'/'群聊'），直接透传。
+  messages = applyShield(messages, {
+    label: opts.label || 'chatStream',
+    target: opts.target !== undefined ? opts.target : resolveShieldTarget(opts.label),
+  });
   let anyYielded = false;
   try {
     if (config.llm.freeEgg) {

@@ -47,6 +47,12 @@ const DB_ONLY_KEYS = new Set([
   'emoji_style_mode',
   'standing_prompt_mode',
   'novelai_api_key',
+  // 破限规则集：正文（旧单正文键）+ 规则集列表 + 激活项 + 投递范围。
+  // 四个都是 DB-only 长文本/状态键，不注册这里 setSetting 会 warn，且重启后整组丢失。
+  'jailbreak_prompt',
+  'jailbreak_rules',
+  'jailbreak_active_rule_id',
+  'jailbreak_targets',
 ]);
 
 /** 写入单条系统设置 */
@@ -119,6 +125,9 @@ export const SETTING_TO_CONFIG = {
   feature_townAutoLLM:               { obj: 'features', key: 'townAutoLLM',           type: 'bool' },
   feature_bgmMuted:                  { obj: 'features', key: 'bgmMuted',              type: 'bool' },
   feature_groupIdleBudget:           { obj: 'features', key: 'groupIdleBudget',        type: 'int'  },
+  // 破限规则集开关：不注册这里的话 setSetting('feature_jailbreak') 重启后会丢，
+  // 加载时走到 setSetting 里那条 "key is not registered" 的 warn。
+  feature_jailbreak:                 { obj: 'features', key: 'jailbreak',               type: 'bool' },
   group_activity: { obj: 'groupChat', key: 'activity', type: 'int' },
   group_temperature:                 { obj: 'groupChat', key: 'temperature',           type: 'float' },
   group_summary_interval:            { obj: 'groupChat', key: 'summaryInterval',      type: 'int' },

@@ -19,6 +19,8 @@ import { triggerDisturbCheck } from '../services/disturbModeScheduler.js';
 import { restartWeatherScheduler, triggerUpdate as triggerWeatherUpdate } from '../services/weatherService.js';
 import { applyFromConfig } from '../services/llmConcurrency.js';
 import { BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { shieldStatus, setShieldPrompt, DEFAULT_PROMPT as SHIELD_DEFAULT_PROMPT, shieldRulesStatus, setActiveShieldRule, getShieldTargets, setShieldTargets } from '../services/promptShield.js';
+import { getRule as getJailbreakRule, createRule as createJailbreakRule, updateRule as updateJailbreakRule, deleteRule as deleteJailbreakRule, RULE_TARGETS as JAILBREAK_TARGETS, RULE_TARGET_LABELS as JAILBREAK_TARGET_LABELS } from '../services/jailbreakRules.js';
 import { getMemorySettings, saveMemorySettings, normalizeMemorySettings } from '../services/memory/memoryConfig.js';
 import { getPreferredMemoryEmbeddingProfile, testEmbeddingProvider, testRerankerProvider } from '../services/memory/memoryProviders.js';
 import { reindexAllMemories } from '../services/memory/memoryRepository.js';
@@ -315,6 +317,158 @@ router.put('/features', (req, res) => {
     restartWeatherScheduler();
   }
   res.json({ ok: true, features: config.features });
+});
+
+// ── 破限规则集（Prompt Shield）──────────────────────────────────────────────
+// 往每一次 LLM 调用最前面注入一段「不拒答」system 提示词，避免模型拿
+// "世界观涉及成人/校园内容"为由拒答，把奇遇/日程/朋友圈/亲密链路整条打断。
+// 开关走通用布尔分支（feature_jailbreak），正文本体存 DB-only 长文本键。
+
+// GET /api/config/jailbreak — 读开关 + 当前生效正文 + 代码默认正文
+router.get('/jailbreak', (req, res) => {
+  const st = shieldStatus();
+  res.json({
+    ok: true,
+    enabled: st.enabled,
+    source: st.source,
+    bytes: st.bytes,
+    content: st.content,
+    defaultContent: SHIELD_DEFAULT_PROMPT,
+  });
+});
+
+// PUT /api/config/jailbreak — 改开关 / 改正文 / 恢复默认
+// body: { enabled?: boolean, content?: string, reset?: true }
+router.put('/jailbreak', (req, res) => {
+  const { enabled, content, reset } = req.body ?? {};
+  if (enabled === undefined && content === undefined && reset !== true) {
+    return res.status(400).json({ error: 'at least one of enabled / content / reset is required' });
+  }
+  if (enabled !== undefined) {
+    updateFeatureFlag('jailbreak', enabled === true || enabled === 'true');
+  }
+  if (reset === true) {
+    // 空串 = 删掉 DB 里的正文 ⇒ 读的时候回落 DEFAULT_PROMPT
+    setShieldPrompt('');
+  } else if (content !== undefined) {
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'content must be a string' });
+    }
+    setShieldPrompt(content);
+  }
+  const st = shieldStatus();
+  res.json({
+    ok: true,
+    enabled: st.enabled,
+    source: st.source,
+    bytes: st.bytes,
+    content: st.content,
+    defaultContent: SHIELD_DEFAULT_PROMPT,
+  });
+});
+
+// ── 破限规则集（多提示词切换 + 按调用链投递）─────────────────────────────────
+// 旧的 GET/PUT /jailbreak 保留不动（只想改那唯一一份正文的用法继续可用），
+// 新增下面这组规则集端点。
+//
+// ⚠️ 路由顺序：`/jailbreak/rules/active` 必须排在 `/jailbreak/rules/:id` 之前，
+//    否则 "active" 会被当成 id 吃掉。
+
+// GET /api/config/jailbreak/rules — 规则集列表 + 激活项 + 投递范围（一次拉齐）
+router.get('/jailbreak/rules', (_req, res) => {
+  res.json({ ok: true, ...shieldRulesStatus() });
+});
+
+// GET /api/config/jailbreak/rules/active — 当前激活的规则集
+router.get('/jailbreak/rules/active', (_req, res) => {
+  const st = shieldStatus();
+  res.json({
+    ok: true, id: st.ruleId, name: st.ruleName, source: st.source, bytes: st.bytes, content: st.content,
+  });
+});
+
+// POST /api/config/jailbreak/rules — 新建规则集
+router.post('/jailbreak/rules', (req, res) => {
+  const { name, content, targets } = req.body ?? {};
+  if (name !== undefined && typeof name !== 'string') {
+    return res.status(400).json({ error: 'name must be a string' });
+  }
+  if (content !== undefined && typeof content !== 'string') {
+    return res.status(400).json({ error: 'content must be a string' });
+  }
+  if (targets !== undefined && !Array.isArray(targets)) {
+    return res.status(400).json({ error: 'targets must be an array' });
+  }
+  try {
+    res.json({ ok: true, rule: createJailbreakRule({ name, content, targets }) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/config/jailbreak/rules/:id — 单个读取
+router.get('/jailbreak/rules/:id', (req, res) => {
+  const rule = getJailbreakRule(req.params.id);
+  if (!rule) return res.status(404).json({ error: '规则集不存在' });
+  res.json({ ok: true, rule });
+});
+
+// PUT /api/config/jailbreak/rules/:id — 更新（内置项只允许改名称/targets）
+router.put('/jailbreak/rules/:id', (req, res) => {
+  const { name, content, targets } = req.body ?? {};
+  if (name === undefined && content === undefined && targets === undefined) {
+    return res.status(400).json({ error: 'at least one of name / content / targets is required' });
+  }
+  if (name !== undefined && typeof name !== 'string') return res.status(400).json({ error: 'name must be a string' });
+  if (content !== undefined && typeof content !== 'string') return res.status(400).json({ error: 'content must be a string' });
+  if (targets !== undefined && !Array.isArray(targets)) return res.status(400).json({ error: 'targets must be an array' });
+  let rule;
+  try {
+    rule = updateJailbreakRule(req.params.id, { name, content, targets });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (!rule) return res.status(404).json({ error: '规则集不存在' });
+  res.json({ ok: true, rule });
+});
+
+// DELETE /api/config/jailbreak/rules/:id — 删除（内置项与最后一个自定义项拒绝）
+router.delete('/jailbreak/rules/:id', (req, res) => {
+  let removed;
+  try {
+    removed = deleteJailbreakRule(req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (!removed) return res.status(404).json({ error: '规则集不存在' });
+  res.json({ ok: true, ...shieldRulesStatus() });
+});
+
+// POST /api/config/jailbreak/rules/:id/activate — 切换激活（id 传空串 = 清掉激活标记）
+router.post('/jailbreak/rules/:id/activate', (req, res) => {
+  try {
+    const active = setActiveShieldRule(req.params.id);
+    res.json({ ok: true, activeId: active.id, active });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// GET /api/config/jailbreak/targets — 投递范围（含可选项与中文标签）
+router.get('/jailbreak/targets', (_req, res) => {
+  res.json({ ok: true, targets: getShieldTargets(), available: JAILBREAK_TARGETS, labels: JAILBREAK_TARGET_LABELS });
+});
+
+// PUT /api/config/jailbreak/targets — 改写投递范围
+router.put('/jailbreak/targets', (req, res) => {
+  const { targets } = req.body ?? {};
+  if (!Array.isArray(targets)) return res.status(400).json({ error: 'targets must be an array' });
+  res.json({ ok: true, targets: setShieldTargets(targets), available: JAILBREAK_TARGETS, labels: JAILBREAK_TARGET_LABELS });
+});
+
+// GET /api/config/jailbreak/catalog — 可选项清单（前端渲染开关列表用）
+router.get('/jailbreak/catalog', (_req, res) => {
+  res.json({ ok: true, available: JAILBREAK_TARGETS, labels: JAILBREAK_TARGET_LABELS });
 });
 
 // PUT /api/config/proactive-freq — 更新主动聊天频率 0~1
