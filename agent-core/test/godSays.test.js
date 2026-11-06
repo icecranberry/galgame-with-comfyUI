@@ -248,7 +248,7 @@ test('deleting the final turn removes history and skips archiving without losing
 async function* chunks(values) { yield* values; }
 const delta = (data, finish_reason = null) => ({ choices: [{ delta: data, finish_reason }] });
 
-test('one daily session, singleton angel, idempotent sends, conflict rejection and midnight attribution', async t => {
+test('sessions survive midnight with singleton angel, idempotent sends and conflict rejection', async t => {
   const { db, repo, setTime } = fixture(t);
   assert.equal(repo.ensureAngel().id, repo.ensureAngel().id);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM characters').get().n, 3, 'angel never enters ordinary character pool');
@@ -262,12 +262,13 @@ test('one daily session, singleton angel, idempotent sends, conflict rejection a
   repo.message(run, 'assistant', '旧日回复');
   repo.finish(run.id, 'completed');
   const next = repo.start('request-003', '新的一天').run;
-  assert.notEqual(run.session_id, next.session_id);
+  assert.equal(run.session_id, next.session_id);
   const late = repo.message(run, 'assistant', '旧日回复');
   assert.equal(late.session_id, run.session_id);
-  assert.equal(repo.today().day, '2026-10-31');
-  repo.finish(run.id, 'completed');
-  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 2);
+  assert.equal(repo.today().day, '2026-10-30', 'creation date is preserved');
+  repo.finish(next.id, 'completed');
+  assert.equal(createGodRepository(db, { now: () => new Date('2026-11-02T00:00:00Z') }).snapshot().session.id, run.session_id, 'restart also retains the active conversation');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM god_sessions').get().n, 1);
 });
 
 test('world targets are frozen, busy groups queue, retries only failed recipients, and shared facts obey scope/expiry', async t => {
@@ -318,7 +319,7 @@ test('delivery recovery reconciles committed side effects without reposting', t 
   assert.equal(world.list(event.id)[0].deliveries.find(d => d.kind === 'group').result.partial, true);
 });
 
-test('daily history grows beyond the former window, ignores legacy compaction and resets at midnight', async t => {
+test('full history ignores legacy compaction and continues across midnight', async t => {
   const { repo, db, setTime } = fixture(t);
   const memory = createGodHistory(repo);
   const expected = [];
@@ -336,11 +337,10 @@ test('daily history grows beyond the former window, ignores legacy compaction an
   db.prepare("UPDATE god_sessions SET context_summary='旧版压缩摘要',context_last_message=99999 WHERE id=?").run(sessionId);
   assert.deepEqual(await memory.contextHistory(sessionId), { messages: expected });
   setTime('2026-10-30T16:01:00.000Z');
-  assert.equal(repo.today({ persist: false }).id, null);
+  assert.equal(repo.today({ persist: false }).id, sessionId);
   const next = repo.start('new-day-full-history', '新的一天').run;
-  assert.notEqual(next.session_id, sessionId);
-  assert.deepEqual(await memory.contextHistory(next.session_id), { messages: [{ role: 'user', content: '新的一天' }] });
-  assert.deepEqual((await memory.contextHistory(sessionId)).messages, expected);
+  assert.equal(next.session_id, sessionId);
+  assert.deepEqual((await memory.contextHistory(sessionId)).messages, [...expected, { role: 'user', content: '新的一天' }]);
 });
 
 
@@ -460,7 +460,11 @@ test('new conversations reuse a single draft and isolate history without summary
   assert.deepEqual((await createGodHistory(repo).contextHistory(second.session_id)).messages, [{ role: 'user', content: '新对话内容' }]);
   repo.finish(second.id, 'completed');
   setTime('2026-10-31T02:00:00Z');
-  assert.equal(repo.snapshot().session.id, null, 'midnight needs no summary');
+  assert.equal(repo.snapshot().session.id, second.session_id, 'midnight retains the current conversation');
+  assert.equal(repo.newSession().id, null);
+  const third = repo.start('new-next-day', '手动开启次日新对话').run;
+  assert.notEqual(third.session_id, second.session_id);
+  assert.equal(repo.snapshot().session.day, '2026-10-31');
   assert.equal(db.prepare('SELECT summary_attempts FROM god_sessions WHERE id=?').get(first.session_id).summary_attempts, 0);
   assert.equal(GOD_TOOLS.some(t => t.function.name === 'recall_memory'), false);
 });
@@ -481,7 +485,7 @@ test('same-day conversation pagination does not skip conversations beyond sixty'
 });
 
 
-test('all same-day conversations remain writable and continuation stays in the selected history', async t => {
+test('all conversations remain writable across dates and continuation stays in the selected history', async t => {
   const { repo, db, setTime } = fixture(t);
   const first = repo.start('resume-first', '第一段对话').run;
   repo.message(first, 'assistant', '第一段回复');
@@ -506,7 +510,10 @@ test('all same-day conversations remain writable and continuation stays in the s
   for (const bad of [0, -1, 1.5, '1']) assert.throws(() => repo.start('invalid-target', '消息', [], bad), { status: 400 });
   assert.throws(() => repo.start('unknown-target', '消息', [], 99999), { status: 404 });
   setTime('2026-10-30T16:01:00Z');
-  assert.equal(repo.snapshot(first.session_id).writable, false);
-  assert.throws(() => repo.start('yesterday-followup', '不能写入昨日', [], first.session_id), { status: 409 });
+  assert.equal(repo.snapshot(first.session_id).writable, true);
+  const followup = repo.start('yesterday-followup', '继续昨日对话', [], first.session_id).run;
+  assert.equal(followup.session_id, first.session_id);
+  repo.finish(followup.id, 'completed');
+  assert.equal(repo.snapshot().session.id, second.session_id);
   assert.equal(repo.start('resume-followup', '接着第一段说', [], first.session_id).duplicate, true, 'retry after midnight retrieves the already accepted result only');
 });

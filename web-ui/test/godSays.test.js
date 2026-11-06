@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { applyGodStreamEvent, useGodSaysStore } from '../src/stores/godSays.js';
 import { createPinia, setActivePinia } from 'pinia';
 import { webcrypto } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { godMessageImages } from '../src/utils/godSaysImages.js';
 import { splitAngelPersona, composeAngelPersona } from '../src/utils/angelPersonaEditor.js';
 
@@ -14,6 +15,24 @@ function mockGlobal(t, name, value) {
     else delete globalThis[name];
   });
 }
+
+test('background polling on an older conversation refreshes work without reloading or scrolling', async () => {
+  const source = readFileSync(new URL('../src/views/GodSaysView.vue', import.meta.url), 'utf8');
+  const body = source.match(/poll = setInterval\(async \(\) => \{([\s\S]*?)\n  \}, 5000\)/)?.[1];
+  assert.ok(body, 'exercise the actual page polling callback');
+  const calls = [];
+  const god = {
+    state: { session: { id: 1, day: '2020-01-01', time_zone: 'Asia/Shanghai' }, worldEvents: [{ deliveries: [{ status: 'pending' }] }] },
+    archiveId: null, loading: false, submitting: false,
+    refreshWork: () => calls.push('work'), refreshActivity: () => calls.push('activity'), refreshWorld: () => calls.push('world'),
+    load: () => assert.fail('background refresh must not replace the selected conversation'),
+  };
+  const poll = new (Object.getPrototypeOf(async function () {}).constructor)('god', 'goBottom', 'Intl', body);
+  const deviceIntl = { DateTimeFormat() { assert.fail('conversation polling must not depend on device date formatting'); } };
+  for (let i = 0; i < 3; i++) await poll(god, () => assert.fail('background refresh must not force the reading position'), deviceIntl);
+  assert.deepEqual(calls, Array(3).fill(['work', 'activity', 'world']).flat());
+  assert.equal(god.state.session.id, 1);
+});
 
 test('HTTP phone clients without randomUUID can send and reuse the request ID after a network failure', async t => {
   setActivePinia(createPinia());
@@ -230,7 +249,7 @@ test('failed creation preserves conversation and draft; history can return to th
 });
 
 
-test('same-day non-current sessions can send, retain selection and bind retries to the selected session', async t => {
+test('older non-current sessions can send, retain selection and bind retries to the selected session', async t => {
   setActivePinia(createPinia());
   const god = useGodSaysStore();
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -247,7 +266,7 @@ test('same-day non-current sessions can send, retain selection and bind retries 
     reads.push(url);
     const id = Number(new URL(url, 'http://localhost').searchParams.get('session'));
     assert.ok(id, 'reload must keep the selected session instead of loading the default');
-    return Response.json({ session: { id, day: today, time_zone: 'Asia/Shanghai', status: 'archived' }, today,
+    return Response.json({ session: { id, day: '2020-01-01', time_zone: 'Asia/Shanghai', status: 'archived' }, today,
       current: false, writable: true, runs: [], messages: [], calls: [], worldEvents: [], cursor: 0 });
   });
   await god.load(1);
@@ -267,7 +286,7 @@ test('same-day non-current sessions can send, retain selection and bind retries 
   assert.equal(god.draft, '');
 });
 
-test('yesterday sessions remain read-only and failed date refresh preserves the draft', async t => {
+test('explicit server read-only state blocks sends and failed sends preserve the draft', async t => {
   setActivePinia(createPinia());
   const god = useGodSaysStore();
   let posts = 0;

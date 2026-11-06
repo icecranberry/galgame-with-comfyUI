@@ -582,9 +582,7 @@ onMounted(async () => {
     if (!god.state) return
     void god.refreshWork()
     if (!god.archiveId) void god.refreshActivity()
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: god.state.session.time_zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    if (!god.archiveId && today !== god.state.session.day && !god.loading && !god.submitting) { await god.load(); await goBottom() }
-    else if (god.state.worldEvents.some(e => e.deliveries.some(d => ['pending', 'running'].includes(d.status)))) await god.refreshWorld()
+    if (god.state.worldEvents.some(e => e.deliveries.some(d => ['pending', 'running'].includes(d.status)))) await god.refreshWorld()
   }, 5000)
 })
 onBeforeUnmount(() => { mounted = false; leaveThinking(); clearInterval(poll); unsubscribe?.(); god.suspend() })

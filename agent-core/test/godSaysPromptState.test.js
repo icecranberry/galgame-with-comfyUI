@@ -88,7 +88,7 @@ test('three turns strictly append frozen user contexts, presets, lore, images an
   assert.equal(f.counts().compiled, 3);
 });
 
-test('deletion removes request fragments and midnight starts an independent prefix', async t => {
+test('deletion removes fragments; midnight preserves the prefix and manual new conversation resets it', async t => {
   const f = fixture(t);
   const first = f.repo.start('delete', '要删除的内容').run;
   await f.prepare(first);
@@ -106,8 +106,16 @@ test('deletion removes request fragments and midnight starts an independent pref
   f.setTime('2026-11-03T01:00:00Z');
   const tomorrow = f.repo.start('tomorrow', '新一天').run;
   const next = await f.prepare(tomorrow, { systemRules: '次日规则' });
-  assert.match(next.messages[0].content, /次日规则/);
-  assert.doesNotMatch(JSON.stringify(next.messages), /新输入|本轮要求：保留/);
+  assert.equal(tomorrow.session_id, third.session_id);
+  assert.equal(next.messages[0].content, replay.messages[0].content);
+  assert.match(JSON.stringify(next.messages), /新输入/);
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM god_prompt_prefixes').get().n, 1);
+  f.repo.finish(tomorrow.id, 'completed');
+  f.repo.newSession();
+  const fresh = f.repo.start('manual-new', '另开对话').run;
+  const freshRequest = await f.prepare(fresh, { systemRules: '次日规则' });
+  assert.match(freshRequest.messages[0].content, /次日规则/);
+  assert.doesNotMatch(JSON.stringify(freshRequest.messages), /新输入|本轮要求：保留/);
   assert.equal(f.db.prepare('SELECT COUNT(*) n FROM god_prompt_prefixes').get().n, 2);
 });
 

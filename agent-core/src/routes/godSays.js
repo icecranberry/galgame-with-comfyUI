@@ -13,7 +13,7 @@ router.get('/state', (req, res) => {
   const sessionId = req.query.session ? Number(req.query.session) : null;
   if (sessionId !== null && (!Number.isSafeInteger(sessionId) || sessionId < 1)) return res.status(400).json({ error: '日期标识无效' });
   const state = r.repo.snapshot(sessionId);
-  const schedule = state.session.day === r.repo.day() ? state.angel.schedule : parseJson(state.session.schedule_json, []);
+  const schedule = state.angel.schedule;
   state.scheduleEnabled = config.features.schedule !== false;
   state.activity = state.scheduleEnabled ? angelActivity(schedule, r.repo.now(), r.repo.timeZone) : null;
   state.worldEvents = state.session.id ? r.world.list(null, state.session.id) : [];

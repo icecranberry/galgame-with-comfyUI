@@ -75,7 +75,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
       if (generation !== epoch) return
       state.value = result
       cursor = result.cursor
-      const writable = result.writable ?? (result.session?.day && result.today ? result.session.day === result.today : result.current !== false)
+      const writable = result.writable !== false
       archiveId.value = writable ? null : result.session?.id ?? session
       if (activeRun.value) connect(activeRun.value)
     } catch (err) { if (generation === epoch) error.value = err.message }
@@ -99,13 +99,6 @@ export const useGodSaysStore = defineStore('god-says', () => {
     const text = draft.value.trim()
     const attachments = Array.isArray(images) ? images.filter(Boolean) : []
     if ((!text && !attachments.length) || busy.value || archiveId.value || deleting.value || loading.value) return
-    // 跨过午夜后先对齐到当天会话，避免这条消息落在旧会话后界面被切到只读历史。
-    const zone = state.value?.session?.time_zone || 'Asia/Shanghai'
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    if (state.value?.session?.day && state.value.session.day !== today) {
-      await load()
-      if (!state.value || archiveId.value || loading.value || error.value) return
-    }
     submitting.value = true; error.value = ''
     const generation = epoch
     const sessionId = state.value?.session?.id ?? null
@@ -118,7 +111,7 @@ export const useGodSaysStore = defineStore('god-says', () => {
       saveLocal('linshe.god.pending', null)
       if (generation !== epoch) return
       if (draft.value.trim() === text) setDraft('')
-      // 始终读回受理消息所属会话，继续当天较早的会话时不能跳到最新会话。
+      // 始终读回受理消息所属会话，继续历史会话时不能跳到最新会话。
       await load(run.session_id)
       return run
     } catch (err) { error.value = err.message }

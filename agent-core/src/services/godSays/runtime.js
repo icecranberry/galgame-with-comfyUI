@@ -95,7 +95,7 @@ export function getGodRuntime() {
     repo.setPersonalities(keys);
     try {
       const angel = await ensurePersona({ force: true, personalities: keys, custom });
-      // 重新召唤不覆盖当天已有对话：若当天已有内容，另开一条当天新会话承载新天使。
+      // 重新召唤不覆盖已有对话，另开新会话承载新天使。
       repo.summonSession();
       return angel;
     } catch (err) {
@@ -186,11 +186,9 @@ export function startGodSays() {
   const runtime = getGodRuntime();
   const deliveries = () => runtime.world.tick().catch(err => console.warn('[神谕投递]', err.message));
   const maintenance = async () => {
-    runtime.repo.today({ persist: false });
-    const session = runtime.repo.db.prepare('SELECT * FROM god_sessions WHERE day=?').get(runtime.repo.day());
-    if (session) await runtime.ensureSchedule(session);
+    await runtime.ensureSchedule();
   };
-  // 北京时间零点触发一次；启动时补处理离线期间错过的跨天。
+  // 只刷新天使日程，不归档或切换聊天会话；启动时补处理离线期间的日程更新。
   const scheduleMidnight = () => {
     const now = runtime.repo.now();
     const next = Date.parse(`${runtime.repo.day()}T00:00:00+08:00`) + 86400000;
