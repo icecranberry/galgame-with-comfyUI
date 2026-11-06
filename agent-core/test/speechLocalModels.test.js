@@ -16,7 +16,7 @@ test('IndexTTS 2.0 is the only supported local engine and uses its pinned cache 
 function fixture(overrides = {}) {
   const state = { mode: 'local', local_model: '2.0' }, children = [], commands = [], changes = [];
   const installed = { '2.0': false };
-  const manager = createLocalSpeechModelManager({ platform: 'win32', env: {}, settings: () => ({ ...state }),
+  const manager = createLocalSpeechModelManager({ platform: 'win32', env: {}, comfyUrl: () => 'http://127.0.0.1:8188', settings: () => ({ ...state }),
     configure: input => { changes.push(input.local_model); Object.assign(state, input); return { ...state }; },
     inspect: async () => Object.entries(installed).map(([id, value]) => ({ id, installed: value })),
     restart: async () => ({ online: true, ready: true, model_version: LOCAL_TTS_MODELS['2.0'].version }),
@@ -31,6 +31,7 @@ test('installation deduplicates requests, verifies completion and applies only t
   await assert.rejects(f.manager.use('2.0'), /等待/);
   const { args, config } = f.commands[0];
   assert.equal(args.at(-1), '2.0'); assert.equal(config.windowsHide, true); assert.equal(config.env.TTS_LOCAL_MODEL, '2.0');
+  assert.equal(config.env.TTS_COMFYUI_URL, 'http://127.0.0.1:8188');
   f.children[0].stdout.emit('data', 'download progress');
   assert.match((await f.manager.status()).installation.log, /download progress/);
   f.installed['2.0'] = true; f.children[0].emit('close', 0); await flush();

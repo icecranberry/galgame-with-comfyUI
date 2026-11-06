@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 . (Join-Path $PSScriptRoot 'runtime.ps1')
+& (Join-Path $PSScriptRoot 'install-comfy-guard.ps1') -CheckOnly:$CheckOnly
 if ($CheckOnly) { Initialize-TtsRuntime; exit 0 }
 
 # A complete selected engine is sufficient. Never fetch another model.

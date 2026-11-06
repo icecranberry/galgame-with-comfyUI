@@ -388,7 +388,7 @@ class GuardTests(unittest.IsolatedAsyncioTestCase):
         self.unloaded = []
         web = types.SimpleNamespace(middleware=lambda fn: fn, json_response=lambda data, status=200: {"status": status, **data})
         server = types.SimpleNamespace(PromptServer=types.SimpleNamespace(instance=types.SimpleNamespace(
-            app=types.SimpleNamespace(middlewares=[]), routes=types.SimpleNamespace(post=lambda path: lambda fn: fn),
+            app=types.SimpleNamespace(middlewares=[]), routes=types.SimpleNamespace(post=lambda path: lambda fn: fn, get=lambda path: lambda fn: fn),
             prompt_queue=types.SimpleNamespace(get_current_queue=lambda: self.queue))))
         mm = types.ModuleType("comfy.model_management")
         mm.unload_all_models = lambda: self.unloaded.append("models")
@@ -414,6 +414,15 @@ class GuardTests(unittest.IsolatedAsyncioTestCase):
         self.queue = ([], [])
         self.guard.submissions = 1
         self.assertEqual((await self.guard.acquire(self.request()))["status"], 409)
+        self.assertEqual(self.unloaded, [])
+
+    async def test_status_is_read_only_even_with_a_live_lease(self):
+        self.guard.lease = 'live-token'
+        result = await self.guard.status(self.request())
+        self.assertEqual(result['guard'], 'linshe_tts_guard')
+        self.assertEqual(len(result['source_sha256']), 64)
+        self.assertTrue(result['leased'])
+        self.assertEqual(self.guard.lease, 'live-token')
         self.assertEqual(self.unloaded, [])
 
     async def test_lease_blocks_external_prompt_until_release(self):

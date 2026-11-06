@@ -6,6 +6,7 @@ import path from 'node:path';
 import { LOCAL_TTS_MODELS, localTtsModel } from './localTtsModels.js';
 import { getSpeechSettings, setSpeechSettings } from './speechService.js';
 import { restartSpeechService } from './speechServiceProcess.js';
+import { speechComfyUrl } from './speechGpuPolicy.js';
 
 const root = fileURLToPath(new URL('../../../tts-service/', import.meta.url));
 const execute = promisify(execFile);
@@ -33,7 +34,7 @@ export async function inspectLocalModels() {
 
 export function createLocalSpeechModelManager({ inspect = inspectLocalModels, launch = spawn,
   restart = restartSpeechService, settings = getSpeechSettings, configure = setSpeechSettings,
-  platform = process.platform, env = process.env } = {}) {
+  platform = process.platform, env = process.env, comfyUrl = speechComfyUrl } = {}) {
   let installation = { status: 'idle', model: null, log: '', error: '' }, using = null;
   const status = async () => ({ selected: settings().local_model || '2.0', models: await inspect(), installation: { ...installation }, using });
   function install(model) {
@@ -45,7 +46,7 @@ export function createLocalSpeechModelManager({ inspect = inspectLocalModels, la
     const active = installation;
     try {
       const child = launch('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'setup.ps1'), '-ModelVersion', model],
-        { windowsHide: true, cwd: root, env: { ...env, TTS_LOCAL_MODEL: model }, stdio: ['ignore', 'pipe', 'pipe'] });
+        { windowsHide: true, cwd: root, env: { ...env, TTS_LOCAL_MODEL: model, TTS_COMFYUI_URL: env.TTS_COMFYUI_URL || comfyUrl() }, stdio: ['ignore', 'pipe', 'pipe'] });
       const append = chunk => { if (installation === active) installation.log = (installation.log + String(chunk)).slice(-12000); };
       child.stdout?.on('data', append); child.stderr?.on('data', append);
       child.once('error', error => { if (installation === active) { installation.status = 'failed'; installation.error = `安装启动失败：${error.message}`; } });

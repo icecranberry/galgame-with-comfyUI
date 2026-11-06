@@ -4,6 +4,8 @@ A lease blocks *all* HTTP prompt submissions until the Node coordinator has
 confirmed TTS worker termination. No unsafe TTL expiry while CUDA may be alive.
 """
 import asyncio
+import hashlib
+from pathlib import Path
 from aiohttp import web
 from server import PromptServer
 import comfy.model_management as mm
@@ -12,6 +14,14 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 lease = None
 submissions = 0
+SOURCE_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+@PromptServer.instance.routes.get("/linshe/gpu/status")
+async def status(request):
+    # Read-only: never acquire/recover a lease just to test installation.
+    return web.json_response({"guard": "linshe_tts_guard", "protocol": 1,
+                              "source_sha256": SOURCE_SHA256, "leased": lease is not None})
 
 
 @web.middleware

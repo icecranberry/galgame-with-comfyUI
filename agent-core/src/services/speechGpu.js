@@ -9,8 +9,9 @@ async function guard(route, body) {
     signal: AbortSignal.timeout(30000),
   });
   if (res.status === 409) return false;
-  if (res.status === 404) throw Object.assign(new Error('同机显存保护未就绪：请安装 tts-service/comfy_guard 并重启 ComfyUI'), { code: 'GUARD_MISSING' });
-  if (!res.ok) throw new Error('同机显存保护未就绪：请安装 tts-service/comfy_guard 并重启 ComfyUI');
+  const failure = `ComfyUI 显存守卫请求失败：POST /linshe/gpu/${route}，HTTP ${res.status}。请运行本地语音“安装／修复”，确认节点位于 ComfyUI/custom_nodes/linshe_tts_guard，并在绘图结束后重启 ComfyUI。`;
+  if (res.status === 404) throw Object.assign(new Error(failure), { code: 'GUARD_MISSING' });
+  if (!res.ok) throw new Error(failure);
   return res.json();
 }
 // One coordinator per application; injected dependencies keep lease recovery testable.

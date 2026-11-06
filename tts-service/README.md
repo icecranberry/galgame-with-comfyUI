@@ -95,7 +95,17 @@ tts-service/
 
 任一侧是远端时**不读取本机显存、也不向远端 ComfyUI 发送任何显存请求**——远端 ComfyUI 绝不会被要求释放 Anima 模型。
 
-`comfy_guard` 是**可选**插件：装上后，串行模式下语音会向本机 ComfyUI 取一份互斥 lease，拦住外部直接往 ComfyUI 提交的请求；未安装时自动降级为本地串行，不报错、不提示安装。并行模式不取 lease。同机首次使用仍会尝试清理旧 lease，连接失败等异常不会被当作无锁。安装方式：把 `tts-service/comfy_guard` 复制到 `ComfyUI/custom_nodes/linshe_tts_guard` 并重启 ComfyUI。
+`comfy_guard` 负责同机显存协调：串行模式下取得互斥 lease，等待绘图队列清空、卸载 ComfyUI 模型，并拦住外部直接提交的绘图请求。邻舍内部串行队列不能替代这些功能；同机小显存部署应安装守卫。远程服务不需要本机节点，并行模式不取 lease。现有 404 降级仅提供内部串行，不能保证外部绘图互斥；405、连接失败及其他异常不会被直接视为可安全跳过。
+
+“安装／修复”和 `setup.ps1` 会先调用 `install-comfy-guard.ps1`，包括已有完整离线包的快速返回分支。脚本根据 `launcher_config.json` 的有效 `comfyui_exe`，验证启动器所在目录或其 `ComfyUI` 子目录，将节点写入 `custom_nodes/linshe_tts_guard/__init__.py`；同版本跳过，更新前备份，不覆盖 ComfyUI 根目录文件。路径失效或存在歧义时只报告，不扫描磁盘猜测；依赖环境安装完成不代表守卫已加载，请查看安装日志。远程 ComfyUI 跳过本机安装。`setup.ps1 -CheckOnly` 对守卫只检查、不复制。
+
+也可单独运行（无需重新下载 TTS）：
+
+```powershell
+.\tts-service\install-comfy-guard.ps1 -ComfyRoot 'D:\实际路径\ComfyUI' -ComfyUrl 'http://127.0.0.1:8188'
+```
+
+文件安装后，等待绘图结束再重启 ComfyUI；脚本不会自动中断服务。只读 `GET /linshe/gpu/status` 返回节点标识、协议版本、已加载源码 SHA-256 和租约是否存在，安装器据此区分“文件已安装”和“当前服务已加载本版本”。没有服务地址时只确认文件。禁止把 `recover` 作为健康检查；最终应从邻舍正常试听入口验证完整链路。
 
 远程 `COMFYUI_URL` 默认视为另一台机器，生图地址无需改成本机。如该地址实际通过隧道指回本机，设置 `TTS_COMFYUI_URL=http://127.0.0.1:8188`，单独指定同机显存调度地址，不改变生图链路。本机回环地址、主机名及网卡 IP 自动识别为同机。
 
