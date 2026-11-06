@@ -442,7 +442,7 @@
             <div class="llm-field">
               <span class="llm-label">思考模式</span>
               <linshe-tabs v-model="llmThinkingMode" :options="thinkingModeOptions" size="sm" aria-label="思考模式" @update:model-value="markLlmDirty" />
-              <p class="llm-field-hint">{{ llmConnectionType === 'vertexai' ? '「不传」使用 Google 默认；Pro 无法完全关闭思考。' : '「不传」使用服务商默认设置。' }}</p>
+              <p class="llm-field-hint">{{ llmConnectionType === 'vertexai' ? '「不传」使用 Google 默认；Pro 无法完全关闭思考。' : '「不传」使用服务商默认设置。思考模式打开会增加大约30%的消耗，但是日志会很有意思' }}</p>
             </div>
           </div>
         </section>

@@ -9,7 +9,7 @@ export const MOMENT_FORMS = [
   { name: '抛个问题', desc: '确实有疑问或需要帮助时可以提问，带够场景让人能回答，不为互动强凑问题', len: '15-180字', weight: 0.9, nightBoost: false },
   { name: '颜文字体', desc: '符合角色习惯时可以用颜文字表达情绪，不用也可以，不挤掉具体感想', len: '1-80字', weight: 1.4, nightBoost: true },
   { name: '只发个语气词', desc: '确实只想给个反应时，可以只用语气词或表情；已有具体感想时保留它', len: '1-48字', weight: 0.2, nightBoost: true },
-  { name: '话说一半', desc: '念头自然停住时可以留白，不故意截断意思或强加省略号', len: '5-120字', weight: 0.8, nightBoost: false },
+  { name: '小事记一笔', desc: '顺口记下眼前一件小事，把动作、身体感觉和一个看得见的细节写清楚，停在真正想说的那句', len: '1-120字', weight: 0.8, nightBoost: false },
 ];
 
 /** 图文保持一个中心，日程与动因的主次由请求组装时确定。 */

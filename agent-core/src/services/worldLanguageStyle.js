@@ -29,15 +29,10 @@ ${style}
 }
 
 /**
- * 末尾重申（放在各生成入口的稳定前缀末尾，随前缀缓存命中）。
- * 完整风格在静态前缀里只放一次；这里只做一次短提醒，未配置时返回空串。
+ * 是否配置了激活世界观的语言风格（隐藏世界观时视为未配置）。
+ * 只用于 allowNarration 变体与末条 user 短指针等布尔判断，
+ * 不复制风格正文：完整风格只由 appendWorldLanguageStyle 注入一次。
  */
-export function buildWorldLanguageStyleReminder() {
-  const style = activeLanguageStyle();
-  if (!style) return '';
-  // 末尾只带风格开头的一小段要点：完整稿仍以静态前缀的 <additional_writing_style> 为准，
-  // 这样既把用户的具体方向送到末位，又不重复整份长规范。
-  const flat = style.replace(/\s+/g, ' ').trim();
-  const excerpt = flat.length > 160 ? `${flat.slice(0, 160)}……` : flat;
-  return `<writing_style_reminder>本轮正文按用户指定的 <additional_writing_style> 落笔（风格要点：${excerpt}）；句式、用词、节奏和感官密度必须实际出现在正文里，不能只在思考中提，也不要与默认文风折中。风格要求动作与感官时按当前场景篇幅调整密度：短消息可把感官点嵌在对话里，长段再展开第一人称叙述；“聊天软件里发消息、不是写舞台剧本”和“禁止旁白/括号动作”只拦括号舞台说明与替别人写的旁白，不拦风格要求的叙述。字数、篇幅和条数仍按原要求，不因风格放大。角色身份、情境事实、JSON 字段、输出格式与任务要求保持不变，imagePrompt 等英文画面描述不套用本风格。</writing_style_reminder>`;
+export function hasActiveWorldLanguageStyle() {
+  return Boolean(activeLanguageStyle());
 }

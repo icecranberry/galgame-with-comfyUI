@@ -16,6 +16,8 @@ const {
   splitAppearanceSection,
   extractEditableAppearanceBody,
   isAppearanceOnlyPromptChange,
+  extractCharacterIdentityTag,
+  ensureImagePromptIdentity,
 } = await import('../src/services/characterPersona.js');
 
 // 覆盖范围：
@@ -306,4 +308,45 @@ test('三种生效外观组合均遵循世界观着装规定，同时保留外�
     }
   }
   assert.equal(buildOutfitInjectionBlocks({ limited: [], exclusive: null }), null);
+});
+
+test('extractCharacterIdentityTag 从外观段提取 Name (Series)，限时服饰包裹也能提取', () => {
+  const char = {
+    base_prompt: '你是瑟莉姆（thelema nutriscu）。\n\n## 你的外观\n【限时服饰（当前生效）】\n1. 日常装：thelema nutriscu (Honkai Impact 3rd) has long silvery hair and striking purple eyes.\n\n【基础外观】silvery hair.',
+  };
+  assert.equal(extractCharacterIdentityTag(char), 'thelema nutriscu (Honkai Impact 3rd)');
+});
+
+test('extractCharacterIdentityTag 对原创角色返回空串', () => {
+  assert.equal(extractCharacterIdentityTag({
+    base_prompt: '你是星见雅。\n\n## 你的外观\n黑色长发，蓝色眼睛。',
+  }), '');
+});
+
+test('ensureImagePromptIdentity 缺失时补在开头，已有名字不重复补', () => {
+  const char = {
+    base_prompt: '你是三月七。\n\n## 你的外观\nMarch 7th (Honkai: Star Rail) has short fluffy pink hair and bright pink eyes.',
+  };
+  assert.equal(
+    ensureImagePromptIdentity('A dimly lit training hall with a young woman.', char),
+    'March 7th (Honkai: Star Rail). A dimly lit training hall with a young woman.',
+  );
+  assert.equal(
+    ensureImagePromptIdentity('March 7th (Honkai: Star Rail) stands in a training hall.', char),
+    'March 7th (Honkai: Star Rail) stands in a training hall.',
+  );
+  assert.equal(
+    ensureImagePromptIdentity('March 7th stands in a training hall.', char),
+    'March 7th stands in a training hall.',
+  );
+});
+
+test('ensureImagePromptIdentity 保留梦境前缀，不破坏 A surreal dreamscape scene:', () => {
+  const char = {
+    base_prompt: '你是三月七。\n\n## 你的外观\nMarch 7th (Honkai: Star Rail) has short fluffy pink hair.',
+  };
+  assert.equal(
+    ensureImagePromptIdentity('A surreal dreamscape scene: floating islands and a girl.', char),
+    'A surreal dreamscape scene: March 7th (Honkai: Star Rail). floating islands and a girl.',
+  );
 });

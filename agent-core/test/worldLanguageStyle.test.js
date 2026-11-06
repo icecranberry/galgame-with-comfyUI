@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { config } from '../src/config.js';
 import { initWorldRepository, migrateWorldLanguageStyle, createWorldSetting, updateWorldSetting, activateWorldSetting, getWorldSettingById } from '../src/db/worldRepository.js';
-import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from '../src/services/worldLanguageStyle.js';
+import { appendWorldLanguageStyle, hasActiveWorldLanguageStyle } from '../src/services/worldLanguageStyle.js';
 import { buildLanguageStylePolishRequest } from '../src/services/worldLanguageStylePolish.js';
 import { getChatRhythmRules, getCoreDialogueRules } from '../src/builtinRules.js';
 import { MOMENT_TONE_RULES, MOMENT_COMMENT_RULES } from '../src/services/momentForms.js';
@@ -64,8 +64,7 @@ test('私聊、群聊、朋友圈与评论保留原有示例，只追加一次�
   }
   const group = buildProtocolBlock();
   const inserted = appendWorldLanguageStyle('');
-  const groupReminder = buildWorldLanguageStyleReminder();
-  assert.equal(group.replace(inserted, '').replace(`\n\n${groupReminder}`, ''), groupOriginal, '群聊只插入风格与重申，原协议逐字保留');
+  assert.equal(group.replace(inserted, ''), groupOriginal, '群聊只插入风格，原协议逐字保留');
   assert.match(group, /禁止重复别人刚说过的意思\n\n<additional_writing_style>/);
   assert.match(group, /<\/additional_writing_style>\n- 爱发图：/);
   assert.equal(group.split(style).length, 2);
@@ -84,17 +83,16 @@ test('私聊、群聊、朋友圈与评论保留原有示例，只追加一次�
   assert.ok(guidance.endsWith(`用户指定的语言风格：\n${style}\n</additional_writing_style>`), '用户保存的风格原文完整保留');
 });
 
-test('末尾重申只在配置后出现，长度限制保持原样', () => {
-  const style = '用一点含蓄幽默接话';
-  assert.equal(buildWorldLanguageStyleReminder(), '');
-  updateWorldSetting(1, { language_style: style });
-  const short = buildWorldLanguageStyleReminder();
-  assert.match(short, /^<writing_style_reminder>/);
-  assert.match(short, /additional_writing_style/);
-  assert.ok(short.includes(style), '末尾重申带出风格开头的具体方向');
-  assert.match(short, /短消息可把感官点嵌在对话里/);
-  assert.match(short, /字数、篇幅和条数仍按原要求/);
-  assert.doesNotMatch(short, /写足再停|可以明显超出|默认回复长度提示可以让位/);
+test('hasActiveWorldLanguageStyle 只在配置后为真，隐藏世界观时为假', () => {
+  assert.equal(hasActiveWorldLanguageStyle(), false);
+  updateWorldSetting(1, { language_style: '用一点含蓄幽默接话' });
+  assert.equal(hasActiveWorldLanguageStyle(), true);
+  config.features.disturbMode = true;
+  Object.assign(config.disturb, { hideWorld: true, startTime: '00:00', endTime: '23:59', skipWeekends: false });
+  assert.equal(hasActiveWorldLanguageStyle(), false);
+  config.features.disturbMode = false;
+  updateWorldSetting(1, { language_style: '' });
+  assert.equal(hasActiveWorldLanguageStyle(), false);
 });
 
 test('隐藏世界观或无激活项时不注入，隐藏不会清除保存值', () => {
@@ -146,30 +144,24 @@ test('神说在原节奏示例后追加语言风格，保留历史、附件与�
     history: { messages: [{ role: 'user', content: '之前' }, { role: 'assistant', content: '你好' }, { role: 'user', content: '现在' }] },
     images: ['data:image/png;base64,example'],
   };
-  const build = (overrides = {}) => {
-    const reminder = buildWorldLanguageStyleReminder();
-    return buildGodChatContext({ ...input,
-      chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: Boolean(reminder) })),
-      languageStyleReminder: reminder, ...overrides });
-  };
+  const build = (overrides = {}) => buildGodChatContext({ ...input,
+    chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: hasActiveWorldLanguageStyle() })),
+    hasLanguageStyle: hasActiveWorldLanguageStyle(), ...overrides });
   const original = buildGodChatContext(input);
   assert.deepEqual(build(), original);
   updateWorldSetting(1, { language_style: '含蓄幽默' });
   const styled = build();
-  const reminder = buildWorldLanguageStyleReminder();
   const boundary = styled.lorebookOptions.cacheBoundary;
   const rhythm = styled.messages[boundary.index].content;
   assert.ok(rhythm.startsWith(getChatRhythmRules({ allowNarration: true }) + '\n\n<additional_writing_style>'));
   assert.match(rhythm, /<\/additional_writing_style>\n以上节奏适用于日常交流/);
-  assert.ok(rhythm.includes(reminder), '神说的稳定 rhythm 携带语言风格重申');
   assert.equal(boundary.offset, rhythm.length);
   assert.ok(styled.lorebookOptions.staticTexts.includes(rhythm));
   const restored = structuredClone(styled.messages);
   restored[boundary.index].content = rhythm
     .replace(appendWorldLanguageStyle(''), '')
     .replace('；<additional_writing_style> 要求的角色第一人称叙述性正文可以直接写，但字数、篇幅与上方的短句节奏限制保持原样', '')
-    .replace(getChatRhythmRules({ allowNarration: true }), getChatRhythmRules())
-    .replace(`\n\n${reminder}`, '');
+    .replace(getChatRhythmRules({ allowNarration: true }), getChatRhythmRules());
   const formatIndex = restored.findIndex(message => typeof message.content === 'string' && message.content.includes('<dialogue_format_rules>'));
   restored[formatIndex].content = restored[formatIndex].content
     .replace(getCoreDialogueRules({ userName: '吾神', allowNarration: true }), getCoreDialogueRules({ userName: '吾神' }));

@@ -1,4 +1,4 @@
-import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from '../worldLanguageStyle.js';
+import { appendWorldLanguageStyle, hasActiveWorldLanguageStyle } from '../worldLanguageStyle.js';
 /**
  * 镇民朋友圈生成器
  *
@@ -158,19 +158,19 @@ export async function generateTownNpcMoment(npc, opts = {}) {
 
   // 静态规则（含生图格式）放最前，形态字数、素材与天气等每次变化的内容压到后面，
   // 避免静态的「生图格式」被夹在动态字段之后反复重新计费。
-  // 风格重申放在形态字数之前，随这段静态前缀缓存命中，不追加到末条 user。
-  const styleReminder = buildWorldLanguageStyleReminder();
-  const styleTail = styleReminder
-    ? '\n最后：本轮正文必须遵循 <additional_writing_style> 的语言风格，句式和用词以它为准。'
+  // 语言风格只在 <additional_writing_style> 中完整出现一次，这里只决定末条 user 是否带短指针。
+  const hasLanguageStyle = hasActiveWorldLanguageStyle();
+  const styleTail = hasLanguageStyle
+    ? '\n最后：本轮正文按 <additional_writing_style> 的短文本底线写：至少 1 个具体身体部位或衣物状态、1 个身体触觉细节、1 个可见结果，禁止只写一句概括或单形容词。'
     : '';
   const formatPrompt = `规则：
 - 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
-${appendWorldLanguageStyle(MOMENT_TONE_RULES)}
-${MOMENT_IMAGE_RULES}
+${appendWorldLanguageStyle(`${MOMENT_TONE_RULES}
+${MOMENT_IMAGE_RULES}`)}
 
 生图格式：
-${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}${styleReminder ? `\n\n${styleReminder}` : ''}
+${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 
 ${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心', textLength: pickedForm.len })}
 
