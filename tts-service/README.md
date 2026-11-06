@@ -48,6 +48,10 @@ tts-service/
 
 安装不修改系统 Python 或 ComfyUI 环境，依赖按固定源码的 uv.lock 安装。模型下载保留官网 / 镜像回退、有限次数重试与 Hub 断点续传，失败不要删除 `.incomplete`。`TTS_HF_ENDPOINTS` 可指定逗号分隔的 HTTPS 下载站点，`HF_ENDPOINT` 可指定优先下载源。
 
+启动防护只修复应用内部可确定的问题：清除继承的 `PYTHONHOME`、设置本应用的 `PYTHONPATH`，从 Windows 系统目录取得子进程所需的系统路径，补齐 `PATHEXT` 的基础扩展名；不写入用户或系统级环境变量。搬家后的虚拟环境路径仍由 `prepare` 修复。迁移前先执行独立 Python 自检，随后分别检查部署文件与依赖；每步最多 60 秒，超时停止该步骤的 Python 子进程，不自动重装、下载或循环重试。
+
+诊断记录在 `tts-service/logs/tts-startup.log`，包含步骤、解释器路径、退出码及标准输出/错误；超过 5 MiB 时轮转保留一份 `.previous`。日志不主动收集环境变量或密钥，写入失败会提示且保留原始启动错误。缺失文件、Windows 启动错误和 Python 执行失败按实际证据报告，不推断为杀软拦截。修复脚本属于主程序，单独更新只含 `runtime/` 的依赖包不会更新这些启动防护。
+
 ## 离线下载与打包
 
 首次离线安装需要包含基础 Python、工具和 `indextts-2.0` 的完整包。将包解压到 `tts-service`，得到上述 `runtime/` 布局；不要再套一层包名目录。已有配套 Python 与工具时，也可以只放入完整的 `runtime/indextts-2.0` 模型目录。

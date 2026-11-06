@@ -50,7 +50,8 @@ export function createSpeechServiceRestarter({ run = executeSpeechLauncher, heal
         try {
           await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-File', path.join(serviceDir, 'restart.ps1'),
-            '-ModelVersion', model(), '-Port', url.port || '80', ...(onlyIfOffline ? ['-StartOnly'] : [])], { windowsHide: true, timeout: 45000, env });
+            // Five bounded deployment steps (60s each), plus process shutdown.
+            '-ModelVersion', model(), '-Port', url.port || '80', ...(onlyIfOffline ? ['-StartOnly'] : [])], { windowsHide: true, timeout: 330000, env });
         } catch (error) {
           throw new Error(`声音服务启动失败：${String(error.stderr || error.message).trim().slice(0, 1200)}`);
         }
