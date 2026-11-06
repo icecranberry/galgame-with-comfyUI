@@ -72,6 +72,8 @@ test('指定话题：未勾选、同名不同来源和空描述均按所选 id �
     assert.ok(selected.content.includes(`名称：${name}\n描述：${desc}`));
     assert.equal(messages.at(-1).role, 'user');
     assert.match(messages.at(-1).content, /围绕上方指定话题/);
+    assert.match(messages.at(-1).content, /你打开自己的朋友圈/);
+    assert.equal(messages.at(-1).content.match(/JSON/g)?.length, 1);
     assert.ok(!messages.at(-1).content.includes('【此刻正在做】'));
     assert.ok(!JSON.stringify(messages).includes('不应选到的系统描述'));
     const post = db.prepare('SELECT style, status FROM moment_posts ORDER BY id DESC LIMIT 1').get();
@@ -157,7 +159,7 @@ test('random topic source and focus determine schedule detail in the actual LLM 
     await assert.rejects(generateMomentPost(character, { backfill: true, activity }), /TEST_PROMPT_CAPTURED/);
     const messages = requests.at(-1).messages;
     const user = messages.at(-1).content;
-    assert.match(user, /【此刻正在做】.*裁缝店整理量尺/);
+    assert.match(user, /【此刻正在做】你此刻正在裁缝店整理量尺/);
     assert.match(user, /【本次发朋友圈动因】发现新手机壳/);
     assert.match(user, focus === 'schedule' ? /【本次内容主次】日程为主/ : /【本次内容主次】动因为主/);
     const all = messages.map(m => m.content).join('\n');
@@ -203,8 +205,9 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
     const messages = requests.at(-1).messages;
     assert.deepEqual(messages[0], { role: 'system', content: sharedSystem0 });
     assert.deepEqual(messages[1], { role: 'system', content: momentsSystem1 });
-    assert.match(messages.at(-1).content, /^请遵循<world_setting>来发朋友圈/);
-    assert.match(messages.at(-1).content, /则以<world_setting>最高优先级/);
+    assert.match(messages.at(-1).content, /你打开自己的朋友圈/);
+    assert.doesNotMatch(messages.at(-1).content, /<world_setting>|思考中的|格式提交/);
+    assert.equal(messages.at(-1).content.match(/JSON/g)?.length, 1);
     assert.equal(messages.filter(m => m.role === 'user').length, 1);
     assert.equal(messages.at(-1).role, 'user');
     const task = messages.find(m => m.content.startsWith('你正在发朋友圈。')).content;
@@ -231,7 +234,7 @@ test('发朋友圈 system2：生图格式留在静态区，随本次变化的字
 });
 
 
-test('日程赴约朋友圈：末条 user 仅在有世界观时恢复强化提醒', async t => {
+test('日程赴约朋友圈：末条 user 使用本人处境，世界观强化保留在 system', async t => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date(2030, 0, 1, 12).getTime() });
   const { runSpecialMomentCheck } = await import('./scheduleSpecialMoment.js');
   const { getLocalDateKey } = await import('../utils/localDate.js');
@@ -253,10 +256,11 @@ test('日程赴约朋友圈：末条 user 仅在有世界观时恢复强化提�
     const messages = requests.at(-1).messages;
     assert.equal(messages.filter(m => m.role === 'user').length, 1);
     assert.equal(messages.at(-1).role, 'user');
-    assert.match(messages.at(-1).content, /一起喝茶/);
+    assert.match(messages.at(-1).content, /【此刻正在做】你此刻正在茶馆一起喝茶/);
+    assert.match(messages.at(-1).content, /你打开自己的朋友圈/);
+    assert.doesNotMatch(messages.at(-1).content, /<world_setting>|思考中的|格式提交/);
+    assert.equal(messages.at(-1).content.match(/JSON/g)?.length, 1);
     if (world) {
-      assert.match(messages.at(-1).content, /^请遵循<world_setting>来发朋友圈/);
-      assert.match(messages.at(-1).content, /则以<world_setting>最高优先级/);
       assert.deepEqual(messages[1], { role: 'system', content: getWorldIntegrationRule('moments') });
     } else {
       assert.doesNotMatch(messages.at(-1).content, /<world_setting>/);

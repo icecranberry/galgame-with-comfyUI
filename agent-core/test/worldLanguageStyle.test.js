@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { config } from '../src/config.js';
 import { initWorldRepository, migrateWorldLanguageStyle, createWorldSetting, updateWorldSetting, activateWorldSetting, getWorldSettingById } from '../src/db/worldRepository.js';
-import { appendWorldLanguageStyle } from '../src/services/worldLanguageStyle.js';
+import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from '../src/services/worldLanguageStyle.js';
 import { buildLanguageStylePolishRequest } from '../src/services/worldLanguageStylePolish.js';
-import { getChatRhythmRules } from '../src/builtinRules.js';
+import { getChatRhythmRules, getCoreDialogueRules } from '../src/builtinRules.js';
 import { MOMENT_TONE_RULES, MOMENT_COMMENT_RULES } from '../src/services/momentForms.js';
 import { buildProtocolBlock } from '../src/services/groupChatEngine.js';
 import { buildChatContext } from '../src/services/contextAssembler.js';
@@ -64,11 +64,37 @@ test('私聊、群聊、朋友圈与评论保留原有示例，只追加一次�
   }
   const group = buildProtocolBlock();
   const inserted = appendWorldLanguageStyle('');
-  assert.equal(group.replace(inserted, ''), groupOriginal, '群聊只插入风格，原协议逐字保留');
+  const groupReminder = buildWorldLanguageStyleReminder();
+  assert.equal(group.replace(inserted, '').replace(`\n\n${groupReminder}`, ''), groupOriginal, '群聊只插入风格与重申，原协议逐字保留');
   assert.match(group, /禁止重复别人刚说过的意思\n\n<additional_writing_style>/);
   assert.match(group, /<\/additional_writing_style>\n- 爱发图：/);
   assert.equal(group.split(style).length, 2);
-  assert.equal(appendWorldLanguageStyle('原文'), `原文\n\n<additional_writing_style>\n以下为追加的语言风格：\n${style}\n</additional_writing_style>`, '包装只有一句说明和用户保存的内容');
+  const guidance = appendWorldLanguageStyle('原文');
+  assert.match(guidance, /用户主动指定的语言风格/);
+  assert.match(guidance, /不是可选参考/);
+  assert.match(guidance, /不限于亲密场景/);
+  assert.match(guidance, /示例是写法样本/);
+  assert.match(guidance, /优先于默认文风、口语短句习惯/);
+  assert.doesNotMatch(guidance, /默认回复篇幅|长度提示可随风格/);
+  assert.match(guidance, /字数、篇幅和条数限制内/);
+  assert.match(guidance, /禁止括号动作\/旁白/);
+  assert.match(guidance, /按当前场景的篇幅调整密度/);
+  assert.match(guidance, /短消息可以用一两句把感官点带出来/);
+  assert.match(guidance, /JSON 字段、消息结构、工具调用协议/);
+  assert.ok(guidance.endsWith(`用户指定的语言风格：\n${style}\n</additional_writing_style>`), '用户保存的风格原文完整保留');
+});
+
+test('末尾重申只在配置后出现，长度限制保持原样', () => {
+  const style = '用一点含蓄幽默接话';
+  assert.equal(buildWorldLanguageStyleReminder(), '');
+  updateWorldSetting(1, { language_style: style });
+  const short = buildWorldLanguageStyleReminder();
+  assert.match(short, /^<writing_style_reminder>/);
+  assert.match(short, /additional_writing_style/);
+  assert.ok(short.includes(style), '末尾重申带出风格开头的具体方向');
+  assert.match(short, /短消息可把感官点嵌在对话里/);
+  assert.match(short, /字数、篇幅和条数仍按原要求/);
+  assert.doesNotMatch(short, /写足再停|可以明显超出|默认回复长度提示可以让位/);
 });
 
 test('隐藏世界观或无激活项时不注入，隐藏不会清除保存值', () => {
@@ -80,6 +106,19 @@ test('隐藏世界观或无激活项时不注入，隐藏不会清除保存值',
   config.features.disturbMode = false;
   db.exec('UPDATE world_settings SET is_active=0');
   assert.equal(appendWorldLanguageStyle('原文'), '原文');
+});
+
+test('未配置风格时保持原规则字节；配置后换成允许第一人称叙述的规则变体', () => {
+  assert.equal(getChatRhythmRules({ allowNarration: false }), getChatRhythmRules());
+  assert.equal(getCoreDialogueRules({ userName: '吾神' }), getCoreDialogueRules({ userName: '吾神', allowNarration: false }));
+  const rhythm = getChatRhythmRules({ allowNarration: true });
+  assert.notEqual(rhythm, getChatRhythmRules());
+  assert.match(rhythm, /角色第一人称的叙述性正文/);
+  assert.match(rhythm, /口语化、短句/);
+  assert.match(rhythm, /拆条后总量仍要落在给定字数范围内/);
+  const format = getCoreDialogueRules({ userName: '吾神', allowNarration: true });
+  assert.match(format, /角色第一人称的叙述性正文/);
+  assert.doesNotMatch(format, /严禁以下格式/);
 });
 
 test('私聊语言风格稳定在摘要前，改变历史和当前任务不改前缀或消息角色', () => {
@@ -107,19 +146,33 @@ test('神说在原节奏示例后追加语言风格，保留历史、附件与�
     history: { messages: [{ role: 'user', content: '之前' }, { role: 'assistant', content: '你好' }, { role: 'user', content: '现在' }] },
     images: ['data:image/png;base64,example'],
   };
-  const build = (overrides = {}) => buildGodChatContext({ ...input, chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules()), ...overrides });
+  const build = (overrides = {}) => {
+    const reminder = buildWorldLanguageStyleReminder();
+    return buildGodChatContext({ ...input,
+      chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: Boolean(reminder) })),
+      languageStyleReminder: reminder, ...overrides });
+  };
   const original = buildGodChatContext(input);
   assert.deepEqual(build(), original);
   updateWorldSetting(1, { language_style: '含蓄幽默' });
   const styled = build();
+  const reminder = buildWorldLanguageStyleReminder();
   const boundary = styled.lorebookOptions.cacheBoundary;
   const rhythm = styled.messages[boundary.index].content;
-  assert.ok(rhythm.startsWith(getChatRhythmRules() + '\n\n<additional_writing_style>'));
+  assert.ok(rhythm.startsWith(getChatRhythmRules({ allowNarration: true }) + '\n\n<additional_writing_style>'));
   assert.match(rhythm, /<\/additional_writing_style>\n以上节奏适用于日常交流/);
+  assert.ok(rhythm.includes(reminder), '神说的稳定 rhythm 携带语言风格重申');
   assert.equal(boundary.offset, rhythm.length);
   assert.ok(styled.lorebookOptions.staticTexts.includes(rhythm));
   const restored = structuredClone(styled.messages);
-  restored[boundary.index].content = rhythm.replace(appendWorldLanguageStyle(''), '');
+  restored[boundary.index].content = rhythm
+    .replace(appendWorldLanguageStyle(''), '')
+    .replace('；<additional_writing_style> 要求的角色第一人称叙述性正文可以直接写，但字数、篇幅与上方的短句节奏限制保持原样', '')
+    .replace(getChatRhythmRules({ allowNarration: true }), getChatRhythmRules())
+    .replace(`\n\n${reminder}`, '');
+  const formatIndex = restored.findIndex(message => typeof message.content === 'string' && message.content.includes('<dialogue_format_rules>'));
+  restored[formatIndex].content = restored[formatIndex].content
+    .replace(getCoreDialogueRules({ userName: '吾神', allowNarration: true }), getCoreDialogueRules({ userName: '吾神' }));
   assert.deepEqual(restored, original.messages);
   assert.deepEqual(build({ now: new Date('2026-11-06T09:00:00Z') }).messages.slice(0, boundary.index + 1), styled.messages.slice(0, boundary.index + 1));
   updateWorldSetting(1, { language_style: '' });

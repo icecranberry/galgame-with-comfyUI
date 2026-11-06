@@ -97,7 +97,7 @@ Hard Rules:
 - ALL text in English. No Chinese characters anywhere.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
 - Multiple Characters — When there are 2+ characters, add an announcement of the total count explicitly (e.g. "Two people share the frame:" or "There are three people in the scene:"), then each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
-- MAX 1000 characters total.`,
+- MAX 1200 characters total.`,
   is_active: 1,
 };
 
@@ -171,12 +171,17 @@ export const JUDGE_PROMPT = `你是一个简洁的判断助手。你的唯一任
  * @param {object} [opts]
  * @param {string} [opts.userName] - 当前对话对象的称呼，用于身份锚定
  * @param {boolean} [opts.identityAnchor=true] - 是否包含身份锚定规则
+ * @param {boolean} [opts.allowNarration=false] - 配置语言风格时允许角色第一人称叙述正文
  * @returns {string}
  */
-export function getCoreDialogueRules({ userName, identityAnchor = true } = {}) {
+export function getCoreDialogueRules({ userName, identityAnchor = true, allowNarration = false } = {}) {
   const parts = [];
 
-  parts.push(`- **你在聊天软件里发消息，不是写舞台剧本**。严禁以下格式：①「（动作描述）台词」如"（靠近）你好""（压低声音）喂"；②第三人称旁白如"她停下脚步，凝视前方"。正确做法：像真人聊天一样直接说话，情绪通过台词、语气词和标点传达。如果真有动作要表达，用台词说出来，例如"你过来一下"而非"（招手）过来"。`);
+  // allowNarration：用户配置了语言风格，允许角色第一人称的叙述性正文；
+  // 括号舞台说明和替别人写的旁白仍然禁止，避免把“允许叙述”误解成可以写剧本。
+  parts.push(allowNarration
+    ? `- **你在聊天软件里发消息，但本轮有用户主动指定的语言风格**。括号舞台说明（「（动作描述）台词」）和替别人写的第三人称旁白仍然禁止；角色第一人称的叙述性正文——自己的身体、动作、感官与反应——可以直接写，不属于舞台剧本，也不必全部改写成台词。情绪仍通过台词、叙述、语气词和标点传达。`
+    : `- **你在聊天软件里发消息，不是写舞台剧本**。严禁以下格式：①「（动作描述）台词」如"（靠近）你好""（压低声音）喂"；②第三人称旁白如"她停下脚步，凝视前方"。正确做法：像真人聊天一样直接说话，情绪通过台词、语气词和标点传达。如果真有动作要表达，用台词说出来，例如"你过来一下"而非"（招手）过来"。`);
 
   if (identityAnchor) {
     const userLabel = userName ? `"${userName}"` : 'user';
@@ -194,10 +199,11 @@ export function getCoreDialogueRules({ userName, identityAnchor = true } = {}) {
 
 /**
  * 1v1 私聊的固定活人感规则（不含长度条，长度条由调用方按好感度动态生成）。
+ * @param {boolean} [opts.allowNarration=false] - 配置语言风格时，允许角色第一人称叙述正文（不改字数与短句节奏）
  * @returns {string}
  */
-export function getChatRhythmRules() {
-  return `<dialogue_rules>
+export function getChatRhythmRules({ allowNarration = false } = {}) {
+  const base = `<dialogue_rules>
 像真人聊天一样：
 - 口语化、短句，长短错落：很多回复只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；不要每条都是完整、工整的书面句
 - 可以省略主语、用半句话、停顿和口头衔接，例如“我刚才差点……”“不是，你先等会儿”“主要是吧”“算了当我没说”；但不要每次都同一个口癖
@@ -212,6 +218,11 @@ export function getChatRhythmRules() {
 - 禁止重复对方刚说过的意思；禁止“首先、其次、最后”这类条理分明的书面结构
 - 禁止括号动作描写、禁止方括号动作描写、禁止旁白；颜文字可以正常使用，但不能把动作藏进括号
 </dialogue_rules>`;
+  if (!allowNarration) return base;
+  // 配了语言风格：只放开“叙述性正文”这一条格式限制；
+  // 口语、短句、拆条字数等节奏规则保持原样，不改任何字数限制。
+  return base.replace('- 禁止括号动作描写、禁止方括号动作描写、禁止旁白；颜文字可以正常使用，但不能把动作藏进括号',
+    '- 禁止括号舞台说明和替别人写的第三人称旁白；配置了语言风格时，角色第一人称的叙述性正文（动作、身体、感官）可以直接写，不属于被禁止的旁白；颜文字可以正常使用');
 }
 
 // ═══════════════════════════════════════════════════════════

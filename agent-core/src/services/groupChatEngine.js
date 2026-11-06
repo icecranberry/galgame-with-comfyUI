@@ -1,4 +1,4 @@
-import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
+import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from './worldLanguageStyle.js';
 /**
  * 群聊引擎 — 批量剧本生成 + 流式行协议解析
  *
@@ -146,6 +146,9 @@ export function buildProtocolBlock() {
   const imageRulesBlock = imagePromptFieldGuide
     ? `\n\n<image_prompt_rules>\n（以下规范只决定 {} 里的英文画面描述怎么写。它是写作规范、不是要填进 {} 的内容，任何情况下都不得原样出现在群聊消息里）\n${imagePromptFieldGuide}\n</image_prompt_rules>`
     : '';
+  // 风格重申放在协议块末尾：群共享同一段稳定前缀，随前缀缓存命中，
+  // 不追加到每轮变化的 round_directive；未配置时为空串，保持原字节。
+  const styleReminder = buildWorldLanguageStyleReminder();
   return appendWorldLanguageStyle(`<group_chat_rules>
 你一个人扮演群聊中的【全部角色】，根据聊天记录续写接下来的群聊消息。
 
@@ -186,7 +189,7 @@ export function buildProtocolBlock() {
 - 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思`) + `
 - 爱发图：聊到正在做的事、看到的东西、吃的喝的、去过的地方、自拍表情包时，主动配一张图
 - 禁止括号动作描写、禁止方括号动作描写、禁止旁白、禁止总结式客套发言；颜文字可以正常使用，但不能把动作藏进括号
-${imageRulesBlock}
+${imageRulesBlock}${styleReminder ? `\n\n${styleReminder}` : ''}
 </group_chat_rules>`;
 }
 

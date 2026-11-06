@@ -1,4 +1,4 @@
-import { appendWorldLanguageStyle } from '../services/worldLanguageStyle.js';
+import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from '../services/worldLanguageStyle.js';
 import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
@@ -750,7 +750,10 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     // 静态活人感规则（<dialogue_rules>）与表情包清单（<emoji_stickers>）走下方 preSummarySystem，
     // 独立成一条 system 紧贴摘要之上；
     // 随好感度变化的长度条（<reply_length>）不进稳定层（见下方 dynamicBlocks），避免换档时挪动缓存前缀。
-    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户' });
+    // 配置了语言风格时，稳定前缀里的“不是写舞台剧本/禁止旁白”也要换成风格变体，
+    // 不能只靠后面的风格块覆盖——实测模型会把前排的硬禁止当成不可违背的规则。
+    const styleReminder = buildWorldLanguageStyleReminder();
+    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户', allowNarration: Boolean(styleReminder) });
     userInfoParts.push(`<dialogue_format_rules>
 ${coreRules}
 - **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
@@ -880,9 +883,13 @@ ${coreRules}
       if (affinity < 80) return '10~40个汉字';
       return '10~60个汉字';
     })();
+    // 配置了语言风格时，节奏规则换成允许第一人称叙述的变体；
+    // 风格重申放在这条稳定 system 的末尾（随前缀缓存命中），不追加到末条 user；
+    // 长度条保持原样，不因风格放大或缩小任何字数限制。
     const preSummarySystem = [
-      appendWorldLanguageStyle(getChatRhythmRules()),
+      appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: Boolean(styleReminder) })),
       emojiNote,
+      styleReminder,
     ];
     // 长度条放动态块最前，仍紧跟在规则区之后（<dynamic_context> 顶部）
     // 单独用 <reply_length>，与上方静态 <dialogue_rules> 区分：静态管怎么说话，这条只改本轮长度
@@ -1047,6 +1054,9 @@ ${coreRules}
         console.warn('[chat] soul state block skipped:', soulErr.message);
       }
     }
+
+    // ── 语言风格重申已并入上方 preSummarySystem 的稳定 system 末尾，
+    //    不再作为 dynamicBlock 追加到末条 user，避免每轮全价重算。
 
     // ── 关系深度一句话重申（固定动态块最末）：档位全文在第 5 位按变动频率排序，
     //    这行重申（~30 token）借用最末位置的注意力权重，让低好感恶劣态度压过情绪状态、

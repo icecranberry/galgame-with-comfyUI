@@ -2,7 +2,7 @@ import { generateReplacement } from './replacementGenerator.js';
 import { getDb, getSystemRules, getWorldSetting } from '../../db/index.js';
 import { config } from '../../config.js';
 import { getWorldIntegrationRule, getChatRhythmRules } from '../../builtinRules.js';
-import { appendWorldLanguageStyle } from '../worldLanguageStyle.js';
+import { appendWorldLanguageStyle, buildWorldLanguageStyleReminder } from '../worldLanguageStyle.js';
 import { chatAgentStream } from '../../llm/llm-client.js';
 import { prepareNarrativePrompt } from '../presets/narrative.js';
 import { getLocalDateKey } from '../../utils/localDate.js';
@@ -137,9 +137,13 @@ export function getGodRuntime() {
     signal?.throwIfAborted();
     const worldSetting = getWorldSetting();
     const schedule = config.features.schedule === false ? [] : angel.schedule;
+    // 语言风格生效时，节奏规则与对话格式规则同步换成允许叙述的变体，
+    // 不能只靠后置的风格块去覆盖前排的“不是写舞台剧本/禁止旁白”。
+    const languageStyleReminder = buildWorldLanguageStyleReminder();
     const context = buildGodChatContext({
       systemRules: getSystemRules({ roleplay: false }), worldSetting,
-      chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules()),
+      chatRhythmRules: appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: Boolean(languageStyleReminder) })),
+      languageStyleReminder,
       worldIntegrationRule: worldSetting ? getWorldIntegrationRule('interaction') : '', agentRules: AGENT_RULES,
       angel, user: config.user, history, schedule,
       scheduleEnabled: config.features.schedule !== false, now: new Date(run.created_at), timeZone: repo.timeZone,
