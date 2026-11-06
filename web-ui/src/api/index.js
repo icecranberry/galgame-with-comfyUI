@@ -1,5 +1,8 @@
 const BASE = '/api'
 
+export const getSystemRulesOverride = () => request('/config/system-rules')
+export const saveSystemRulesOverride = content => request('/config/system-rules', { method: 'PUT', body: { content } })
+
 export const getCohabitation = () => request('/cohabitation')
 export const createResidence = body => request('/cohabitation/rooms', { method: 'POST', body })
 export const renameResidence = (id, name) => request(`/cohabitation/rooms/${id}`, { method: 'PUT', body: { name } })
@@ -8,6 +11,7 @@ export const moveResidenceMember = (id, roomId) => request(`/cohabitation/member
 
 export const getGodSaysState = session => request(`/god-says/state${session ? `?session=${session}` : ''}`)
 export const getGodSaysSessions = (before, beforeId) => request(`/god-says/sessions${before ? `?before=${encodeURIComponent(before)}${beforeId ? `&before_id=${beforeId}` : ''}` : ''}`)
+export const deleteGodSaysSession = id => request(`/god-says/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const createGodSaysSession = () => request('/god-says/sessions', { method: 'POST' })
 export const sendGodSaysMessage = (client_id, text, images = [], session_id = null) => request('/god-says/runs', { method: 'POST', body: { client_id, text, images, session_id } })
 export const stopGodSaysRun = id => request(`/god-says/runs/${id}/stop`, { method: 'POST' })

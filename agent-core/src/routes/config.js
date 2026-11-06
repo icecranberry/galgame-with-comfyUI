@@ -25,7 +25,21 @@ import { reindexAllMemories } from '../services/memory/memoryRepository.js';
 import { buildLanguageStylePolishRequest } from '../services/worldLanguageStylePolish.js';
 import { chatSync as chatSyncWithLorebook } from '../services/lorebook/runtime.js';
 
+import { setSetting } from '../db/settings.js';
+
 const router = Router();
+
+router.get('/system-rules', (req, res) => {
+  res.json({ content: config.systemRules.content });
+});
+
+router.put('/system-rules', (req, res) => {
+  if (typeof req.body?.content !== 'string') return res.status(400).json({ error: '破限词必须是文本' });
+  const content = req.body.content.trim() ? req.body.content : '';
+  setSetting('system_rules_override', content);
+  config.systemRules.content = content;
+  res.json({ ok: true, content });
+});
 
 // 内置官方地址（仅 DeepSeek，其余走自定义中转站）。
 // 命中这些地址时视为官方直连：用于自动关闭「后台 LLM 任务队列」等仅自定义场景可用的开关。

@@ -21,6 +21,7 @@ export const FREE_EGG_MODELS = ['mimo-v2.5-free'];
 const FREE_EGG_MODEL = FREE_EGG_MODELS[0];
 
 export const config = {
+  systemRules: { content: '' },
   // 开发环境检测：生产启动（launcher / PM2）会注入 NODE_ENV=production；npm run dev 等开发启动不设置
   isDev: process.env.NODE_ENV !== 'production',
   port: parseInt(process.env.PORT, 10) || 3099,

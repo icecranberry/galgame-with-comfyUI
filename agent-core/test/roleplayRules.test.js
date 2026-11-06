@@ -9,6 +9,26 @@ const identityMatch = SYSTEM_RULES_CONTENT.match(/<roleplay>([\s\S]*?)<\/rolepla
 const identityBlock = identityMatch[0];
 const identity = identityMatch[1].trim();
 
+test('自定义破限词只替换 core_rules 之前的前缀，空白恢复默认', t => {
+  const saved = config.systemRules.content;
+  const mode = config.llm.thinkingMode;
+  t.after(() => { config.systemRules.content = saved; config.llm.thinkingMode = mode; });
+  for (const thinkingMode of ['enabled', 'disabled', 'omit']) {
+    config.llm.thinkingMode = thinkingMode;
+    for (const roleplay of [true, false]) {
+      config.systemRules.content = '';
+      const original = getSystemRules({ roleplay });
+      const end = original.indexOf('</core_rules>') + '</core_rules>'.length;
+      // 用户粘贴内容应按原文保留，包括与内置规则同名的标签和占位符。
+      const custom = '  自定义规则\n<roleplay>原样文本</roleplay>\n{{THINKING_CHAIN_ZH}}\n$&  ';
+      config.systemRules.content = custom;
+      assert.equal(getSystemRules({ roleplay }), custom + original.slice(end));
+      config.systemRules.content = ' \n\t ';
+      assert.equal(getSystemRules({ roleplay }), original);
+    }
+  }
+});
+
 test('启用时保留完整身份标签与正文，非扮演任务完整排除身份段', () => {
   const withoutRoleplay = getSystemRules({ roleplay: false });
   assert.equal(getSystemRules(), `${withoutRoleplay}\n\n${identityBlock}`);
@@ -42,6 +62,17 @@ test('身份段与世界观保持原边界，空世界观及非扮演路径不�
   const { getDb, closeDb, getSystemRulesWithWorld } = await import('../src/db/index.js');
   const db = getDb();
   t.after(closeDb);
+  const { setSetting, loadSystemSettings } = await import('../src/db/settings.js');
+  const savedOverride = config.systemRules.content;
+  t.after(() => { config.systemRules.content = savedOverride; });
+  setSetting('system_rules_override', '持久化的自定义规则');
+  config.systemRules.content = '';
+  loadSystemSettings(db);
+  assert.equal(config.systemRules.content, '持久化的自定义规则');
+  assert.ok(getSystemRules().startsWith('持久化的自定义规则\n'));
+  setSetting('system_rules_override', '');
+  loadSystemSettings(db);
+  assert.ok(getSystemRules().startsWith('<Supplementary_Rule>'));
   const world = '所有居民都是成年人。\n这里是海滨小镇。';
   db.prepare('UPDATE world_settings SET content = ? WHERE is_active = 1').run(world);
   for (const roleplay of [true, false]) {

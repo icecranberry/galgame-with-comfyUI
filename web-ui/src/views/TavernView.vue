@@ -564,7 +564,10 @@
               </div>
             </div>
             <div class="modal-actions world-modal-actions">
-              <linshe-button class="world-lorebook-button" variant="secondary" :disabled="!selectedWorldId" @click="showLorebook = true">管理SillyTavern世界书</linshe-button>
+              <div class="world-lorebook-button world-rule-actions">
+                <linshe-button variant="secondary" :disabled="!selectedWorldId" @click="showLorebook = true">管理SillyTavern世界书</linshe-button>
+                <linshe-button variant="secondary" @click="showSystemRules = true">破限词修改</linshe-button>
+              </div>
               <linshe-button variant="secondary" @click="closeWorldSetting">取消</linshe-button>
               <linshe-button
                 variant="primary"
@@ -729,6 +732,7 @@
       <VoiceLibraryModal v-model="showVoiceLibrary" :characters="sortedCharacters" />
 
     <WorldLorebookModal v-model="showLorebook" :world-id="selectedWorldId" :world-name="worldItems.find(item => item.id === selectedWorldId)?.name || ''" />
+    <SystemRulesModal v-model="showSystemRules" />
     <WorldLanguageStyleModal
       v-model="showLanguageStyle"
       :world-id="selectedWorldId"
@@ -749,6 +753,7 @@
 import LinsheModal from '../components/ui/LinsheModal.vue'
 
 import WorldLorebookModal from '../components/WorldLorebookModal.vue'
+import SystemRulesModal from '../components/SystemRulesModal.vue'
 import WorldLanguageStyleModal from '../components/WorldLanguageStyleModal.vue'
 import PromptPresetModal from '../components/PromptPresetModal.vue'
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
@@ -1290,6 +1295,7 @@ watch(showRelationGraph, async (val) => {
 // 世界观收藏（标签行 + textarea）
 // ═══════════════════════════════════════
 const showWorldModal = ref(false)
+const showSystemRules = ref(false)
 const showLorebook = ref(false)
 const worldItems = ref([])
 const showLanguageStyle = ref(false)
@@ -2261,6 +2267,7 @@ onMounted(async () => {
 }
 
 /* Footer 操作区 */
+.world-rule-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .world-lorebook-button {
   margin-right: auto;
 }

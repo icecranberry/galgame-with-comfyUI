@@ -13,12 +13,19 @@
         <div class="history-heading"><span>神说 · 对话</span><GodSacredButton v-if="isMobile" variant="icon" size="sm" tone="muted" aria-label="收起对话列表" @click="historyOpen = false"><svg class="gsb-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m10 4-4 4 4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></GodSacredButton></div>
         <div class="history-create"><GodSacredButton variant="line" size="sm" :touch-target="isMobile" :disabled="god.busy || god.loading || god.deleting || !angelSummoned" :loading="god.creating" @click="newConversation">新建对话</GodSacredButton></div>
         <nav class="history-days" aria-label="对话日期">
+          <TransitionGroup name="history-item">
           <div v-for="session in sessions" :key="session.id" class="history-day" :class="{ selected: session.id === god.state?.session.id }">
             <div role="button" tabindex="0" class="history-choice" :aria-current="session.id === god.state?.session.id ? 'page' : undefined" @click="selectSession(session)" @keydown.enter.prevent="selectSession(session)" @keydown.space.prevent="selectSession(session)">
               <span class="history-date">{{ session.day === god.state?.today ? '今天' : session.day }}</span><span v-if="session.day === god.state?.today" class="history-day-label">{{ session.day }}</span>
               <span class="history-preview">{{ session.preview || '对话' }}</span>
             </div>
+            <div class="history-delete">
+              <GodSacredButton variant="icon" tone="muted" size="xs" touch-target :aria-label="`删除对话：${session.preview || session.day}`" title="删除对话" :disabled="god.busy || god.deleting || god.loading || sessionsLoading" @click.stop="removeSession(session)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1l1-14M10 10v7M14 10v7" /></svg>
+              </GodSacredButton>
+            </div>
           </div>
+          </TransitionGroup>
           <p v-if="sessionsLoading" class="history-note" role="status">正在翻阅…</p>
           <GodSacredButton v-if="hasMoreSessions" variant="link" tone="muted" size="sm" :loading="sessionsLoading" @click="moreSessions">更早的对话</GodSacredButton>
           <p v-if="sessionsError" class="history-note" role="alert">{{ sessionsError }} <GodSacredButton variant="link" tone="muted" size="sm" @click="moreSessions">重试</GodSacredButton></p>
@@ -510,7 +517,7 @@ async function newConversation() {
   await goBottom({ immediate: true })
   if (!isMobile.value) composer.value?.focus()
 }
-async function selectSession(session) { historyOpen.value = false; await god.load(session.id); await goBottom({ immediate: true }) }
+async function selectSession(session) { if (god.deleting) return; historyOpen.value = false; await god.load(session.id); await goBottom({ immediate: true }) }
 async function openAngelPanel(schedule = false) {
   const request = ++angelRequest
   angelCharacter.value = { ...god.state?.angel, system_role: 'angel' }
@@ -556,6 +563,15 @@ async function doResummon(payload) {
 }
 
 function angelSaved(angel) { angelCharacter.value = angel; if (god.state) god.state.angel = angel }
+async function removeSession(session) {
+  if (god.busy || god.deleting || god.loading || sessionsLoading.value) return
+  if (!await confirm({ title: '删除这段对话？', message: '这段对话的全部提问、回复、思考和执行记录将被删除，无法恢复。已经执行的发帖、群聊等操作不会撤销。', okText: '删除对话', danger: true })) return
+  if (await god.deleteSession(session.id)) {
+    sessions.value = sessions.value.filter(item => item.id !== session.id)
+    await nextTick()
+    document.querySelector('.history-day.selected .history-choice, .history-choice, .history-create [role="button"]')?.focus({ preventScroll: true })
+  }
+}
 async function removeTurn(turn) {
   if (!await confirm({ title: '删除这一轮对话？', message: '这轮提问、回复、思考和执行记录将被删除。已经执行的发帖、群聊等操作不会撤销。', okText: '删除这一轮', danger: true })) return
   if (await god.deleteTurn(turn.id)) {
@@ -607,7 +623,20 @@ watch(() => [god.state?.session.id, god.turns[0]?.id, god.turns[0]?.input], () =
 .history-create { padding:0 16px 12px; }
 .god-history { display:flex; flex-direction:column; width:216px; flex-shrink:0; min-height:0; background:var(--bg-secondary); border-right:1px solid var(--border); }
 .history-heading { display:flex; align-items:center; justify-content:space-between; min-height:78px; padding:0 20px; font-size:var(--fs-sm); font-weight:600; box-sizing:border-box; letter-spacing:1px; }
-.history-days { flex:1; overflow-y:auto; padding:8px 10px; }.history-day { margin-bottom:5px; border-radius:var(--radius-md); transition:background .3s; }.history-day.selected { background:color-mix(in srgb,var(--accent) 11%,var(--bg-secondary)); }.history-choice { display:flex; flex-wrap:wrap; gap:6px 8px; padding:12px 10px; cursor:pointer; text-align:left; border-radius:var(--radius-md); }.history-choice:hover { background:var(--bg-sunken); }.history-choice:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }.history-date { font-size:var(--fs-sm); font-weight:600; }.history-day-label { color:var(--god-muted); font-size:var(--fs-xs); align-self:center; }.history-preview { display:block; width:100%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--god-muted); font-size:var(--fs-xs); line-height:1.7; }.history-note { padding:0 10px; color:var(--god-muted); font-size:var(--fs-sm); line-height:1.7; }.history-footer { border-top:1px solid var(--border); padding:16px 20px; }
+.history-days { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; padding:8px 6px 8px 10px; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--text-muted) 28%,transparent) transparent; }
+.history-days:hover,.history-days:focus-within { scrollbar-color:color-mix(in srgb,var(--text-muted) 48%,transparent) transparent; }
+.history-days::-webkit-scrollbar { width:6px; }
+.history-days::-webkit-scrollbar-track { background:transparent; }
+.history-days::-webkit-scrollbar-button { display:none; width:0; height:0; }
+@supports selector(::-webkit-scrollbar) { .history-days,.history-days:hover,.history-days:focus-within { scrollbar-width:auto; scrollbar-color:auto; } }
+.history-days::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--text-muted) 28%,transparent); border-radius:var(--radius-full); }
+.history-days::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb,var(--text-muted) 55%,transparent); }
+.history-delete { display:flex; align-items:center; justify-content:center; width:44px; height:44px; position:absolute; right:4px; top:50%; transform:translateY(-50%); opacity:0; pointer-events:none; transition:opacity .3s; }
+.history-day:hover .history-delete,.history-day:focus-within .history-delete { opacity:1; pointer-events:auto; }
+.history-item-enter-active,.history-item-leave-active { transition:opacity .3s,transform .3s; }
+.history-item-enter-from,.history-item-leave-to { opacity:0; transform:translateX(-12px); }
+@media (max-width:767px),(hover:none),(pointer:coarse) { .history-delete { opacity:1; pointer-events:auto; } }
+.history-day { position:relative; margin-bottom:5px; border-radius:var(--radius-md); transition:background .3s; }.history-day.selected { background:color-mix(in srgb,var(--accent) 11%,var(--bg-secondary)); }.history-choice { display:flex; flex-wrap:wrap; gap:6px 8px; padding:12px 50px 12px 10px; cursor:pointer; text-align:left; border-radius:var(--radius-md); }.history-choice:hover { background:var(--bg-sunken); }.history-choice:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }.history-date { font-size:var(--fs-sm); font-weight:600; }.history-day-label { color:var(--god-muted); font-size:var(--fs-xs); align-self:center; }.history-preview { display:block; width:100%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--god-muted); font-size:var(--fs-xs); line-height:1.7; }.history-note { padding:0 10px; color:var(--god-muted); font-size:var(--fs-sm); line-height:1.7; }.history-footer { border-top:1px solid var(--border); padding:16px 20px; }
 .god-history-enter-active,.god-history-leave-active { transition:opacity .3s,transform .3s; }.god-history-enter-from,.god-history-leave-to { opacity:0; transform:translateX(-20px); }
 .turn-actions { display:flex; justify-content:flex-start; padding:6px 4px 0; opacity:0; pointer-events:none; transition:opacity .3s var(--ease-standard); }
 .god-turn:hover .turn-actions,.god-turn:focus-within .turn-actions { opacity:1; pointer-events:auto; }

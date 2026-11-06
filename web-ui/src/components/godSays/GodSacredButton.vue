@@ -33,7 +33,7 @@
 <script setup>
 const props = defineProps({
   variant: { type: String, default: 'line' }, // line | ghost | link | icon | toolbar | pill | primary | ritual | sigil
-  size: { type: String, default: 'md' },      // sm | md | lg
+  size: { type: String, default: 'md' },      // xs（紧凑图标） | sm | md | lg
   tone: { type: String, default: 'gold' },    // gold | muted
   disabled: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
@@ -357,6 +357,12 @@ function onClick(event) {
 @keyframes gsb-light-orbit { to { transform: rotate(360deg); } }
 .gsb.is-touch { min-width: 44px; min-height: 44px; }
 .gsb--sigil.is-touch { min-width:92px; }
+/* 紧凑图标保留 44px 透明点击热区，视觉直径为原触屏按钮的一半。 */
+.gsb--icon.gsb--xs { width:22px; height:22px; min-width:22px; min-height:22px; overflow:visible; }
+.gsb--icon.gsb--xs :slotted(svg) { width:8px; height:8px; }
+.gsb--icon.gsb--xs::before { display:none; }
+.gsb--icon.gsb--xs.is-touch::after { inset:-11px; background:none; }
+
 
 /* ── 禁用 / 加载 ── */
 .gsb.is-disabled {

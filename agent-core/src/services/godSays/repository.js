@@ -106,6 +106,19 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
     message(run, 'user', input);
     return { run, duplicate: false };
   });
+  function runLogLabel(run) {
+    const key = getLocalDateKey(new Date(run.created_at), timeZone);
+    // UTC 前后各留一天，覆盖 IANA 时区的当地日期，再按实际时区精确筛选。
+    // rowid 限定到本任务；删除对话保留的任务墓碑仍参与计数，避免编号复用。
+    const midnight = Date.parse(`${key}T00:00:00.000Z`);
+    const rows = db.prepare(`SELECT created_at FROM god_runs
+      WHERE created_at >= ? AND created_at < ?
+      AND rowid <= (SELECT rowid FROM god_runs WHERE id=?)`).all(
+      new Date(midnight - 86400000).toISOString(), new Date(midnight + 172800000).toISOString(), run.id);
+    const number = rows.filter(row => getLocalDateKey(new Date(row.created_at), timeZone) === key).length;
+    const [, month, date] = key.split('-');
+    return `${Number(month)}月${Number(date)}日第${number}次对话`;
+  }
   function updateMessage(id, patch) {
     const row = db.prepare('SELECT * FROM god_messages WHERE id=?').get(id);
     const updated = { ...row, ...patch };
@@ -152,6 +165,18 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
       summary_attempts=0,summary_attempt_at=NULL,context_summary='',context_last_message=0 WHERE id=?`).run(run.session_id);
     return { ok: true, session_id: run.session_id };
   });
+  const deleteSession = db.transaction(id => {
+    if (!Number.isSafeInteger(id) || id < 1) throw Object.assign(new Error('会话编号无效'), { status: 400 });
+    if (!db.prepare('SELECT 1 FROM god_sessions WHERE id=?').get(id)) {
+      throw Object.assign(new Error('这段对话不存在'), { status: 404 });
+    }
+    if (db.prepare("SELECT 1 FROM god_runs WHERE session_id=? AND status='running'").get(id)) {
+      throw Object.assign(new Error('请等待当前回应结束或先停止，再删除对话'), { status: 409 });
+    }
+    for (const run of db.prepare('SELECT id FROM god_runs WHERE session_id=? AND deleted_at IS NULL').all(id)) deleteTurn(run.id);
+    db.prepare("UPDATE god_sessions SET status='archived' WHERE id=?").run(id);
+    return { ok: true, session_id: id };
+  });
   function updateAngel(input) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw Object.assign(new Error('角色资料格式无效'), { status: 400 });
     const name = typeof input.display_name === 'string' ? input.display_name.trim() : '';
@@ -185,5 +210,5 @@ export function createGodRepository(db, { now = () => new Date(), timeZone = GOD
       today: day(),
     };
   }
-  return { db, now, day, timeZone, timestamp, today, newSession, summonSession, pruneEmptySessions, listSessions, ensureAngel, setPersonalities, updateAngel, deleteTurn, emit, start, message, updateMessage, delta, finish, recover, snapshot };
+  return { db, now, day, timeZone, timestamp, runLogLabel, today, newSession, summonSession, pruneEmptySessions, listSessions, ensureAngel, setPersonalities, updateAngel, deleteTurn, deleteSession, emit, start, message, updateMessage, delta, finish, recover, snapshot };
 }

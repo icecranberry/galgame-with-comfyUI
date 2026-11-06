@@ -130,6 +130,21 @@ export const useGodSaysStore = defineStore('god-says', () => {
       if (activeRun.value?.id === target.id) { target.status = 'cancelled'; stopping.value = false }
     }, 6000)
   }
+  async function deleteSession(id) {
+    if (deleting.value || busy.value || loading.value) return false
+    deleting.value = true; error.value = ''
+    try {
+      await api.deleteGodSaysSession(id)
+      if (state.value?.session.id === id) {
+        // 清除已删除的内容，即使后续刷新失败也不再展示旧对话。
+        ++epoch; detach(); state.value = null; archiveId.value = null
+        saveLocal('linshe.god.pending', null)
+        await load()
+      }
+      return true
+    } catch (err) { error.value = err.message; return false }
+    finally { deleting.value = false }
+  }
   async function deleteTurn(id) {
     if (deleting.value || busy.value) return false
     deleting.value = true; error.value = ''
@@ -170,5 +185,5 @@ export const useGodSaysStore = defineStore('god-says', () => {
     if (index < 0) state.value.worldEvents.unshift(event)
     else state.value.worldEvents[index] = event
   }
-  return { state, loading, submitting, stopping, deleting, creating, reconnecting, error, draft, archiveId, activeRun, busy, turns, load, newConversation, send, stop, deleteTurn, setDraft, detach, suspend, refreshWorld, refreshActivity, refreshWork, updateWorld }
+  return { state, loading, submitting, stopping, deleting, creating, reconnecting, error, draft, archiveId, activeRun, busy, turns, load, newConversation, send, stop, deleteTurn, deleteSession, setDraft, detach, suspend, refreshWorld, refreshActivity, refreshWork, updateWorld }
 })

@@ -130,6 +130,12 @@ export function getSystemRules({ roleplay = true } = {}) {
     base = roleplay ? before + '\n\n' + rpMatch[0] : before;
   }
 
+  // 只替换默认前缀；先处理内置尾部，避免用户文本中的标签/占位符被误解析。
+  const custom = config.systemRules.content;
+  if (custom?.trim()) {
+    const prefixEnd = SYSTEM_RULES_CONTENT.indexOf('</core_rules>') + '</core_rules>'.length;
+    return custom + base.slice(prefixEnd);
+  }
   return base;
 }
 

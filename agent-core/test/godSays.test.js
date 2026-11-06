@@ -517,3 +517,46 @@ test('all conversations remain writable across dates and continuation stays in t
   assert.equal(repo.snapshot().session.id, second.session_id);
   assert.equal(repo.start('resume-followup', '接着第一段说', [], first.session_id).duplicate, true, 'retry after midnight retrieves the already accepted result only');
 });
+
+
+test('日志按当地日期编号，跨日续轮、重复发送、删除与仓库重建保持原编号', t => {
+  const { db, repo, setTime } = fixture(t, '2026-11-06T15:59:00.000Z');
+  const first = repo.start('log-first', '你好').run;
+  assert.equal(repo.runLogLabel(first), '11月6日第1次对话');
+  repo.finish(first.id, 'completed');
+  const second = repo.start('log-second', '继续').run;
+  assert.equal(repo.runLogLabel(second), '11月6日第2次对话');
+  assert.equal(repo.runLogLabel(repo.start('log-second', '继续').run), '11月6日第2次对话');
+  repo.finish(second.id, 'completed');
+  repo.deleteTurn(first.id);
+  const restarted = createGodRepository(db, { now: () => new Date('2026-11-06T15:59:30.000Z') });
+  const third = restarted.start('log-third', '重启后').run;
+  assert.equal(restarted.runLogLabel(third), '11月6日第3次对话');
+  restarted.finish(third.id, 'completed');
+  setTime('2026-11-06T16:01:00.000Z');
+  assert.equal(repo.runLogLabel(second), '11月6日第2次对话');
+  const nextDay = repo.start('log-next-day', '新的一天').run;
+  assert.equal(repo.runLogLabel(nextDay), '11月7日第1次对话');
+});
+
+
+test('整段删除原子清除全部轮次，保留其他对话及幂等墓碑', t => {
+  const { db, repo } = fixture(t);
+  const first = repo.start('session-delete-1', '第一轮').run;
+  repo.finish(first.id, 'completed');
+  const second = repo.start('session-delete-2', '第二轮').run;
+  assert.throws(() => repo.deleteSession(first.session_id), { status: 409 });
+  assert.equal(repo.snapshot(first.session_id).runs.length, 2);
+  repo.finish(second.id, 'completed');
+  repo.newSession();
+  const other = repo.start('session-keep', '保留').run;
+  repo.finish(other.id, 'completed');
+  assert.equal(repo.deleteSession(first.session_id).ok, true);
+  assert.equal(repo.snapshot(first.session_id).messages.length, 0);
+  assert.deepEqual(repo.listSessions().map(s => s.id), [other.session_id]);
+  assert.ok(db.prepare('SELECT deleted_at FROM god_runs WHERE id=?').get(first.id).deleted_at);
+  assert.throws(() => repo.start('session-delete-1', '第一轮'), { status: 409 });
+  assert.equal(repo.deleteSession(first.session_id).ok, true);
+  assert.throws(() => repo.deleteSession(-1), { status: 400 });
+  assert.throws(() => repo.deleteSession(999), { status: 404 });
+});

@@ -306,3 +306,28 @@ test('explicit server read-only state blocks sends and failed sends preserve the
   assert.equal(god.draft, '保留内容');
   assert.equal(god.error, 'offline');
 });
+
+
+test('整段删除仅在删除当前会话时刷新，失败保留内容', async t => {
+  setActivePinia(createPinia());
+  const god = useGodSaysStore();
+  god.state = { session: { id: 1 }, runs: [], messages: [], calls: [] };
+  const calls = [];
+  let fail = false;
+  mockGlobal(t, 'fetch', async (url, options) => {
+    calls.push([url, options?.method]);
+    if (fail) return new Response(JSON.stringify({ error: '仍有工作正在执行' }), { status: 409 });
+    return new Response(JSON.stringify(options?.method === 'DELETE' ? { ok: true } : { session: { id: null }, runs: [], messages: [], calls: [], cursor: 0 }));
+  });
+  assert.equal(await god.deleteSession(2), true);
+  assert.equal(god.state.session.id, 1);
+  assert.equal(calls.length, 1);
+  fail = true;
+  assert.equal(await god.deleteSession(1), false);
+  assert.equal(god.state.session.id, 1);
+  assert.equal(god.deleting, false);
+  fail = false;
+  assert.equal(await god.deleteSession(1), true);
+  assert.equal(god.state.session.id, null);
+  assert.deepEqual(calls.at(-1), ['/api/god-says/state', 'GET']);
+});

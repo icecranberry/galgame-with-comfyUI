@@ -44,6 +44,22 @@ router.get('/sessions', (req, res) => {
   res.json(repo.listSessions(before, beforeId));
 });
 router.post('/sessions', (req, res) => res.json(getGodRuntime().repo.newSession()));
+router.delete('/sessions/:id', (req, res) => {
+  const { repo } = getGodRuntime();
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: '会话编号无效' });
+  const result = repo.db.transaction(() => {
+    const active = repo.db.prepare(`SELECT 1 FROM god_changes c JOIN god_runs r ON r.id=c.run_id
+      WHERE r.session_id=? AND c.status='applying'
+      UNION ALL SELECT 1 FROM god_batches b JOIN god_runs r ON r.id=b.run_id
+      WHERE r.session_id=? AND b.status='running' LIMIT 1`).get(id, id);
+    if (active) throw Object.assign(new Error('这段对话仍有工作正在执行，请先停止批量任务或等待提交结束'), { status: 409 });
+    const deleted = repo.deleteSession(id);
+    repo.db.prepare("UPDATE god_changes SET status='rejected' WHERE status='pending' AND run_id IN (SELECT id FROM god_runs WHERE session_id=?)").run(id);
+    return deleted;
+  })();
+  res.json(result);
+});
 // 旧客户端不再读取记忆或启动总结请求。
 router.get('/memories', (req, res) => res.json([]));
 router.post('/sessions/:id/summarize', (req, res) => res.status(410).json({ error: '神说已停用记忆总结' }));

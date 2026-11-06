@@ -19,12 +19,13 @@ export async function runGodAgent(run, { repo, tools, stream, prepare, signal, m
     if (unavailable) { repo.message(run, 'assistant', unavailable); repo.finish(run.id, 'completed'); return; }
     prepared = await abortable(prepare(run, signal), signal);
     const messages = [...prepared.messages];
+    const logId = repo.runLogLabel?.(run) || run.id;
     // 一次模型回合：allowTools 为假时不提供工具，强制模型只能给出文本收尾。
     const turn = async allowTools => {
       signal?.throwIfAborted();
       current = repo.message(run, 'assistant', '', { status: 'streaming' });
       let response;
-      for await (const event of stream(messages, { tools: allowTools ? tools.definitions : undefined, signal, requestId: `${run.id}/round-${++attempt}` })) {
+      for await (const event of stream(messages, { tools: allowTools ? tools.definitions : undefined, signal, requestId: `${logId}/round-${++attempt}` })) {
         if (event.type === 'text_delta') repo.delta(current.id, 'content', event.text);
         else if (event.type === 'reasoning_delta') repo.delta(current.id, 'reasoning', event.text);
         else if (event.type === 'assistant_end') response = event.message;

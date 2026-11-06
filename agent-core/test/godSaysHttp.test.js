@@ -122,7 +122,7 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   // 静态时间规则会引用“当前日期时间”这个词，不能把规则本身误判为当次时间数据。
   assert.ok(requests[0].messages.filter(m => m.role === 'system').every(m => !m.content.replace(TIME_RULE, '').includes('当前日期时间') && !m.content.includes('"startTime"')));
   assert.equal(personaRequests.length, 1, 'tool rounds reuse the saved angel persona');
-  assert.match(logs.join('\n'), new RegExp(`${first.run.id}/round-1`));
+  assert.match(logs.join('\n'), new RegExp(`${repo.runLogLabel(first.run)}/round-1`));
   assert.match(logs.join('\n'), /思考链/);
   assert.match(logs.join('\n'), /工具调用/);
   assert.match(logs.join('\n'), /先确认工具的实际返回/);
@@ -194,6 +194,20 @@ test('HTTP native-tool loop streams, reconnects, and deduplicates without contac
   assert.equal((await fetch(`${base}/angel/image-jobs`).then(r => r.json())).jobs.length, 0);
   assert.equal((await fetch(`${base}/angel/image-jobs/not-a-job`)).status, 404);
   assert.equal((await fetch(`${base}/angel/image-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"kind":"bad"}' })).status, 400);
+  const deleteSession = id => fetch(`${base}/sessions/${id}`, { method: 'DELETE' });
+  assert.equal((await deleteSession('invalid')).status, 400);
+  assert.equal((await deleteSession(999999)).status, 404);
+  db.prepare("INSERT INTO god_batches(id,run_id,title,status,items_json,created_at) VALUES ('delete-block',?,'测试','running','[]',?)").run(first.run.id, repo.timestamp());
+  assert.equal((await deleteSession(first.run.session_id)).status, 409);
+  assert.equal(repo.snapshot(first.run.session_id).runs.length, 2);
+  db.prepare("UPDATE god_batches SET status='completed' WHERE id='delete-block'").run();
+  db.prepare("INSERT INTO god_changes(id,run_id,title,status,version,items_json,created_at) VALUES ('delete-pending',?,'测试','applying','1','[]',?)").run(first.run.id, repo.timestamp());
+  assert.equal((await deleteSession(first.run.session_id)).status, 409);
+  db.prepare("UPDATE god_changes SET status='pending' WHERE id='delete-pending'").run();
+  assert.equal((await deleteSession(first.run.session_id)).status, 200);
+  assert.equal(db.prepare("SELECT status FROM god_changes WHERE id='delete-pending'").get().status, 'rejected');
+  assert.equal(repo.snapshot(first.run.session_id).messages.length, 0);
+  assert.equal(repo.snapshot(other.session_id).runs.length, 1);
   assert.equal((await fetch(`${base}/runs/${continuation.run.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await fetch(`${base}/runs/${other.id}`, { method: 'DELETE' })).status, 200);
   assert.equal((await fetch(`${base}/runs/${first.run.id}`, { method: 'DELETE' })).status, 200);
