@@ -201,7 +201,10 @@ ${directionMsg}`;
 
       let schedule = parseAndValidateSchedule(rawResult, character.display_name);
       if (schedule) {
-        schedule = applySharedActivities(schedule, cohabitation.events, character.id);
+        // 批次的新提案在全部草稿完成后统一协调；已发布约定仍在此严格校验。
+        const enforced = options.persist === false && options.deferSharedActivities
+          ? cohabitation.events.filter(e => options.lockedSharedEventIds?.includes(e.sharedEventId)) : cohabitation.events;
+        schedule = applySharedActivities(schedule, enforced, character.id);
         if (cohabitation.room) schedule = schedule.map(a => a.replyDelay === -1 ? { ...a, residence: cohabitation.room } : a);
         assertCompleteDay(schedule);
         const json = JSON.stringify(schedule);

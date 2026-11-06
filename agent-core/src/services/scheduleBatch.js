@@ -7,7 +7,7 @@ import { enterScheduleBatch, isScheduleBatchRunning } from './scheduleGeneration
 import { generateSchedule, assignNextRefreshTime, snapshotTodaySchedule } from './scheduleGenerator.js';
 import { writeScheduleTemplate } from './cohabitationPersistence.js';
 import { planResidence } from './cohabitationPlanner.js';
-import { splitResidenceSleep, assertCompleteDay, overlaps } from './cohabitationSchedule.js';
+import { splitResidenceSleep, assertCompleteDay, overlaps, reconcileSharedActivities } from './cohabitationSchedule.js';
 import { reapplyActiveEventSchedule, reserveEventTime } from './eventSchedule.js';
 import { intervals } from './cohabitationSchedule.js';
 import { broadcast } from './unifiedStreamBus.js';
@@ -96,7 +96,7 @@ export function startScheduleBatch({ kind = 'manual', direction = '', resume = f
         frozenSchedules,
         planningCharacters: db.prepare("SELECT id,display_name,short_prompt FROM characters WHERE name!='default' ORDER BY id").all(),
         relationships: db.prepare("SELECT from_character_id,to_character_id,relationship_text FROM character_relationships WHERE relationship_text!=''").all(),
-        fixed: protectedScheduleActivities(db, characterIds, getLocalDateKey(now)), events: [...carried.values()], completedRoomIds: [], drafts: {} };
+        fixed: protectedScheduleActivities(db, characterIds, getLocalDateKey(now)), events: [...carried.values()], lockedSharedEventIds: [...carried.keys()], completedRoomIds: [], drafts: {} };
       db.transaction(() => {
         // 旧版本的成功快照先保留，避免新草稿覆盖后丢失已生效的比较基准。
         if (previous?.status === 'done') saveAppliedResidences(db, previous.rooms);
@@ -136,7 +136,8 @@ export function startScheduleBatch({ kind = 'manual', direction = '', resume = f
       report({ phase: 'running', character_name: character.display_name, current: Object.keys(plan.drafts).length + 1, status: 'generating' });
       const room = plan.rooms.find(r => r.memberIds.includes(character.id)) || null;
       const events = plan.events.filter(e => e.participantIds.includes(character.id));
-      const result = await generator(character, plan.direction, { persist: false, resident: true, cohabitation: { room, events } });
+      const lockedSharedEventIds = plan.lockedSharedEventIds || plan.events.filter(e => !e.sharedEventId?.startsWith(`${plan.id}:`)).map(e => e.sharedEventId);
+      const result = await generator(character, plan.direction, { persist: false, resident: true, deferSharedActivities: true, lockedSharedEventIds, cohabitation: { room, events } });
       check();
       const schedule = JSON.parse(result.schedule_json);
       assertCompleteDay(schedule);
@@ -148,11 +149,18 @@ export function startScheduleBatch({ kind = 'manual', direction = '', resume = f
     if (getLocalDateKey() !== plan.date) throw new Error('生成期间已跨日，本轮草稿保留；请启动新一轮日程');
     plan.phase = 'sleep'; report({ status: 'generating' });
     const names = Object.fromEntries((plan.planningCharacters || plan.characters).map(c => [c.id, c.display_name]));
-    const schedules = splitResidenceSleep({ ...plan.frozenSchedules, ...plan.drafts }, plan.rooms, names);
+    const lockedIds = plan.lockedSharedEventIds || plan.events.filter(e => !e.sharedEventId?.startsWith(`${plan.id}:`)).map(e => e.sharedEventId);
+    const reconciled = reconcileSharedActivities({ ...plan.frozenSchedules, ...plan.drafts }, plan.events, plan.fixed, lockedIds, Object.keys(plan.frozenSchedules || {}).map(Number));
+    const schedules = splitResidenceSleep(reconciled.schedules, plan.rooms, names);
+    // 失败重试仍从原提案和原草稿协调，不累计移动距离。
+    const proposedEvents = plan.events;
     for (const id of plan.characterIds) assertCompleteDay(schedules[id]);
-    assertSharedActivities(schedules, plan.events);
+    assertSharedActivities(schedules, reconciled.events);
+    plan.events = reconciled.events;
+    plan.adjustments = reconciled.adjustments;
+    for (const adjustment of plan.adjustments) console.info(`[scheduleBatch] 共同活动协调 ${adjustment.sharedEventId} ${adjustment.from.join('-')} -> ${adjustment.to?.join('-') || '无共同空档，省略本轮提案'}`);
     const next = nextRefresh(new Date(), random);
-    db.transaction(() => {
+    try { db.transaction(() => {
       check();
       const freshFixed = protectedScheduleActivities(db, plan.characterIds, plan.date);
       if (fixedFingerprint(freshFixed) !== fixedFingerprint(plan.fixed)) { plan.invalidated = true; throw new Error('生成期间已有约定发生变化，原日程保留，请重新规划'); }
@@ -185,7 +193,7 @@ export function startScheduleBatch({ kind = 'manual', direction = '', resume = f
       saveAppliedResidences(db, plan.rooms);
       db.prepare(`INSERT INTO schedule_refresh_cycle(id,next_refresh_at,last_batch_id) VALUES(1,?,?)
         ON CONFLICT(id) DO UPDATE SET next_refresh_at=excluded.next_refresh_at,last_batch_id=excluded.last_batch_id,retry_at=NULL`).run(next, plan.id);
-    })();
+    })(); } catch (error) { plan.events = proposedEvents; throw error; }
     const manager = await import('./scheduleManager.js');
     for (const id of Object.keys(schedules).map(Number)) {
       manager.invalidateCache(id);

@@ -2,7 +2,7 @@ import { getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { chatSync } from './lorebook/runtime.js';
 import { config } from '../config.js';
-import { intervals, overlaps } from './cohabitationSchedule.js';
+import { intervals, fitSharedActivity } from './cohabitationSchedule.js';
 
 export const COHABITATION_RULES = `你是共同生活日程编排助手。为下方居室成员规划本轮作息中自然发生的共同活动，供稍后各角色编排完整日程时遵守。
 根据世界观、居室成员的简短人格及关系原文决定活动。关系有方向：分别保留双方的关系认知；友好、疏远、竞争、敌对、依赖、单方面关系都按原文应用。敌对或竞争可以体现对峙、争执、谈判、有理由的暂时合作等，不能将原关系直接改写成友好关系。
@@ -67,8 +67,10 @@ export function validateCohabitationResult(raw, { room, candidateIds, occupancy,
     // 模型有时把已确认的约定原样再列一遍：视为引用，保留最初版本，不重复预约也不浪费一次重试。
     if ([...occupancy, ...events].some(b => b.sharedEventId && b.startTime === event.startTime && b.endTime === event.endTime
       && b.location === event.location && JSON.stringify([...b.participantIds].sort((x, y) => x - y)) === JSON.stringify(participantIds))) continue;
-    if ([...occupancy, ...events].some(b => b.participantIds.some(id => participantIds.includes(id)) && overlaps(event, b))) throw new Error(`「${event.activity}」与已有约定冲突`);
-    events.push(event);
+    const fitted = fitSharedActivity(event, [...occupancy, ...events]);
+    if (!fitted) console.info(`[cohabitation] 省略无共同空档的提案 ${event.sharedEventId} ${event.startTime}-${event.endTime}`);
+    else if (fitted.startTime !== event.startTime) console.info(`[cohabitation] 提案改期 ${event.sharedEventId} ${event.startTime}-${event.endTime} -> ${fitted.startTime}-${fitted.endTime}`);
+    if (fitted) events.push(fitted);
   }
   return events;
 }

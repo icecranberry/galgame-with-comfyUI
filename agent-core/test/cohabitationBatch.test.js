@@ -111,7 +111,7 @@ test('取消不保存已生成的个人日程，原模板继续可用', async ()
   assert.deepEqual(db.prepare('SELECT * FROM schedule_templates ORDER BY character_id').all(), beforeTemplates);
 });
 
-test('时间冲突、非法参与者被拒绝，单个居室重试沿用已占用事实', async () => {
+test('共同活动时间冲突由逻辑就近改期，不消耗模型重试', async () => {
   const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
   const room = listResidences(db)[1];
   const occupied = { startTime: '14:00', endTime: '15:00', participantIds: [ids[0], ids[2]], activity: '已约定' };
@@ -122,7 +122,26 @@ test('时间冲突、非法参与者被拒绝，单个居室重试沿用已占�
     if (++calls === 1) return JSON.stringify({ activities: [{ ...occupied, location: '街区', description: '冲突活动' }] });
     return '{"activities":[]}';
   } });
-  assert.equal(calls, 2); assert.deepEqual(result, []);
+  assert.equal(calls, 1); assert.equal(result.length, 1);
+  assert.equal(result[0].startTime, '15:00'); assert.equal(result[0].endTime, '16:00');
+});
+
+test('整批真实生成入口延后新提案校验，睡眠冲突只调用一次模型并统一改期', async () => {
+  let planned = false, calls = 0;
+  const result = await startScheduleBatch({ db, random: () => .99,
+    planner: async input => {
+      if (planned) return []; planned = true;
+      return [{ startTime: '07:30', endTime: '08:30', activity: '共同散步', location: '街区', description: '两位室友沿街散步。',
+        participantIds: ids.slice(0, 2), sharedEventId: `${input.batchId}:walk`, replyDelay: 0 }];
+    },
+    generator: (c, d, options) => generateSchedule(c, d, { ...options, chat: async () => {
+      calls++; return JSON.stringify({ activities: base(options.cohabitation.room, c.id === ids[1]) });
+    } }),
+  }).promise;
+  assert.equal(calls, ids.length);
+  assert.equal(result.events[0].startTime, '08:00'); assert.equal(result.events[0].endTime, '09:00');
+  for (const id of ids.slice(0, 2)) assert.equal(readTemplate(db, id).find(a => a.sharedEventId).startTime, '08:00');
+  assert.equal(readCohabitationPlan(db).adjustments.length, 1);
 });
 
 test('规划加载全体室友short及全部方向关系，但不注入室外人格；动态资料不改变静态前缀', () => {
