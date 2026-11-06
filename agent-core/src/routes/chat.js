@@ -19,6 +19,8 @@ import { curateChatMemories } from '../services/memoryExtractor.js';
 import { deleteByConversation } from '../services/vectorClient.js';
 import { clearConversationMemories, rollbackMemoriesFromRawId } from '../services/memory/memoryRepository.js';
 import { extractImagePromptResponse, requestNonEmptyImagePrompt } from '../services/imagePromptResponse.js';
+// 拒答检测：流式输出里命中拒答话术时追加纠正指令重写一次（见 services/refusalDetector.js）
+import { isRefusal, REFUSAL_RETRY_INSTRUCTION, REFUSAL_FALLBACK_TEXT } from '../services/refusalDetector.js';
 import { maybeSummarize, getRecentSummaries } from '../services/summarizer.js';
 import { maybeExtractPortrait } from '../services/portraitExtractor.js';
 import {
@@ -1352,6 +1354,39 @@ ${coreRules}
           send('token', { content: fallbackText });
           send('bubble_break', {});
         }
+      }
+    }
+
+    // ── 拒答守卫 ──
+    // 位置：流结束之后、正文后处理之前 —— 此时 streamState 里是"本轮最终那一版"。
+    // 为什么必须在这里：流式输出已经推给前端了，但**落库还没发生**。拒答一旦入库，
+    // 之后每轮都会作为历史回灌（实测同一条在 7 个请求里反复出现），所以这里是最低成本的自救点。
+    // 三条约束：① 只重写一次；② 重写失败/仍拒答 → 用兜底省略号，绝不保留拒答原文；
+    //          ③ 客户端已断开时不重试（没人看，白烧一次调用）。
+    if (!clientGone && streamState.collectedSegments.length > 0
+        && isRefusal(streamState.collectedSegments.join('\n'))) {
+      console.warn('[refusal] ▸ 主聊天流命中拒答，追加纠正指令重写一次');
+      try {
+        const refusalMsgs = [...msgs, REFUSAL_RETRY_INSTRUCTION];
+        streamState.fullContent = '';
+        streamState.splitter = new SentenceSplitter();
+        streamState.collectedSegments.length = 0;
+        streamState.wasStopped = false;
+        await consumeStream(refusalMsgs, upstreamAbort.signal);
+        const retriedText = streamState.collectedSegments.join('\n');
+        if (!retriedText.trim() || isRefusal(retriedText)) {
+          throw new Error('refusal retry produced empty or refusal content');
+        }
+        console.log('[refusal] 重写成功 chars=' + streamState.fullContent.length);
+      } catch (err) {
+        if (clientGone) throw err;
+        // 二次仍拒（或重写请求失败）：换成兜底正文。与既有"AI 没有返回有效文本"的兜底一致，
+        // 宁可让用户看到一个省略号，也不能把拒答写进历史。
+        console.warn('[refusal] 重写失败，改用兜底正文:', err.message);
+        streamState.fullContent = REFUSAL_FALLBACK_TEXT;
+        streamState.splitter = new SentenceSplitter();
+        streamState.collectedSegments.length = 0;
+        streamState.collectedSegments.push(REFUSAL_FALLBACK_TEXT);
       }
     }
 

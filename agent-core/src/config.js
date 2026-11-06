@@ -114,6 +114,12 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
   features: {
     emotion: process.env.FEATURE_EMOTION !== 'false',
     memory: process.env.FEATURE_MEMORY !== 'false',
+    // **默认开**：往每一次 LLM 调用的 messages 最前面插一条 system 提示词（不拒答底稿），
+    // 避免模型拿"世界观涉及校园/成人内容"为由拒答，把奇遇 / 日程 / 朋友圈 / 亲密整条链路打断。
+    // 实现收口 services/promptShield.js，挂载点 src/llm/llm-client.js。
+    // 关掉＝与加这个功能前逐字节一致（applyShield 直接返回原数组，零拷贝零开销）。
+    // 正文默认值在 promptShield.DEFAULT_PROMPT，可在设置页编辑（存 system_settings.jailbreak_prompt）。
+    jailbreak: process.env.FEATURE_JAILBREAK !== 'false',
     replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
     imageGenMode: process.env.FEATURE_FORCE_IMAGE_GEN === 'true' ? 'force' : 'smart', // 'off' | 'smart' | 'force'

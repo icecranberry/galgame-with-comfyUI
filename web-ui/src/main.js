@@ -26,6 +26,7 @@ import MailboxView from './views/MailboxView.vue'
 import BackpackView from './views/BackpackView.vue'
 import SettingsView from './views/SettingsView.vue'
 import MemorySettingsView from './views/MemorySettingsView.vue'
+import JailbreakSettingsView from './views/JailbreakSettingsView.vue'
 import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
@@ -49,6 +50,7 @@ const routes = [
   { path: '/backpack', component: BackpackView },
   { path: '/settings', component: SettingsView },
   { path: '/settings/memory', component: MemorySettingsView },
+  { path: '/settings/jailbreak', component: JailbreakSettingsView },
   { path: '/settings/maibot', component: MaibotBridgeView },
 ]
 
