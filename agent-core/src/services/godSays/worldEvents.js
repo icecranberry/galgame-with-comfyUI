@@ -45,7 +45,7 @@ export function createWorldEventService(repo, { publishMoment, discussGroup, gro
   const create = db.transaction((args, { runId, effectKey }) => {
     const existing = db.prepare('SELECT id FROM god_world_events WHERE effect_key=?').get(effectKey);
     if (existing) return list(existing.id)[0];
-    let characters = db.prepare("SELECT id,display_name FROM characters WHERE name != 'default' ORDER BY id").all();
+    let characters = db.prepare("SELECT id,display_name FROM characters ORDER BY id").all();
     if (args.character_ids?.length) {
       const ids = new Set(args.character_ids);
       if (args.character_ids.some(id => !characters.some(c => c.id === id))) throw new Error('事件范围中有不存在的角色，请重新查询');

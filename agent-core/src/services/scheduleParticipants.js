@@ -9,7 +9,7 @@ export function resolveScheduleParticipants(characterId, activity, { db = getDb(
   const explicit = Array.isArray(activity.participantIds);
   const ids = explicit ? activity.participantIds : detect([activity.activity, activity.location, activity.description].filter(Boolean).join('\n'), Number(characterId)).map(c => c.id);
   return [...new Set(ids.map(Number))].filter(id => Number.isSafeInteger(id) && id !== Number(characterId))
-    .map(id => db.prepare("SELECT * FROM characters WHERE id=? AND name!='default'").get(id)).filter(Boolean);
+    .map(id => db.prepare("SELECT * FROM characters WHERE id=?").get(id)).filter(Boolean);
 }
 
 export function scheduleMomentCompanions(characterId, activity, options = {}) {

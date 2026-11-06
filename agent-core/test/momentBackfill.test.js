@@ -14,12 +14,13 @@ test('补发跳过今日两条、禁用角色；保留未到期日程，拒绝�
   db.prepare('UPDATE characters SET moments_disabled = 1').run();
   const seed = (name, disabled = 0) => {
     const id = Number(db.prepare(`INSERT INTO characters (name, display_name, base_prompt, moments_disabled, next_schedule_refresh_at)
-      VALUES (?, ?, '测试人格', ?, datetime('now', '+2 days'))`).run(name, name, disabled).lastInsertRowid);
+      VALUES (?, ?, '测试人格', ?, datetime('now', '+2 days'))
+      ON CONFLICT(name) DO UPDATE SET moments_disabled=excluded.moments_disabled, next_schedule_refresh_at=excluded.next_schedule_refresh_at RETURNING id`).get(name, name, disabled).id);
     db.prepare('INSERT INTO schedule_templates (character_id, schedule_json) VALUES (?, ?)').run(id,
       JSON.stringify([{ startTime: '00:00', endTime: '24:00', activity: '测试活动', location: '家', replyDelay: 0 }]));
     return id;
   };
-  const empty = seed('empty'), one = seed('one'), two = seed('two'), disabled = seed('disabled', 1);
+  const empty = seed('default'), one = seed('one'), two = seed('two'), disabled = seed('disabled', 1);
   const stamp = sqlTime(backfillDay().start);
   for (const id of [one, two, two]) db.prepare("INSERT INTO moment_posts (character_id, content, status, created_at) VALUES (?, '已发', 'done', ?)").run(id, stamp);
   // 昨天的成功帖与今日失败帖均不占今日两条门槛。
@@ -66,6 +67,19 @@ test('补发跳过今日两条、禁用角色；保留未到期日程，拒绝�
   assert.equal(started, 1);
   assert.equal(getEditTask(stoppedId).result.cancelled, true);
   assert.match(getEditTask(stoppedId).result.summary, /已补发 1 条/);
+
+  // 首条生成中关闭朋友圈，不能再启动该角色的下一条；其他禁用角色也不参与。
+  db.prepare('UPDATE characters SET moments_disabled = 1').run();
+  db.prepare('UPDATE characters SET moments_disabled = 0 WHERE id=?').run(empty);
+  let disabledCalls = 0;
+  const disabledId = startMomentBackfill(async character => {
+    assert.equal(character.id, empty);
+    disabledCalls++;
+    db.prepare('UPDATE characters SET moments_disabled = 1 WHERE id=?').run(empty);
+  });
+  while (isMomentBackfillRunning()) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(disabledCalls, 1);
+  assert.equal(getEditTask(disabledId).status, 'ready');
 
   // 准备阶段停止不能启动任何生成。
   let releaseIdle;

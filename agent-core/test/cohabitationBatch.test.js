@@ -18,9 +18,10 @@ const ids = [];
 before(() => {
   const log = console.log; console.log = () => {};
   try { db = getDb(); } finally { console.log = log; }
+  // 复用内存库种入的默认助手作为阿甲，整套回归覆盖默认角色参与共同生活。
   for (const name of ['阿甲', '阿乙', '阿丙', '阿丁']) {
-    ids.push(Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt,loras) VALUES(?,?,?,?,?)')
-      .run(name, name, `## 人格\n${name}喜欢闲聊。\n## 你的外观\n你留着银色短发。`, `${name}喜欢做饭与散步。`, JSON.stringify([{ name: name + '.safetensors', strength: 0.7 }])).lastInsertRowid));
+    ids.push(Number(db.prepare('INSERT INTO characters(name,display_name,base_prompt,short_prompt,loras) VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET display_name=excluded.display_name,base_prompt=excluded.base_prompt,short_prompt=excluded.short_prompt,loras=excluded.loras RETURNING id')
+      .get(name === '阿甲' ? 'default' : name, name, `## 人格\n${name}喜欢闲聊。\n## 你的外观\n你留着银色短发。`, `${name}喜欢做饭与散步。`, JSON.stringify([{ name: name + '.safetensors', strength: 0.7 }])).id));
   }
   for (const [i, name] of ['晨光居室', '晚风居室'].entries()) {
     const room = db.prepare('INSERT INTO cohabitation_rooms(name) VALUES(?)').run(name).lastInsertRowid;
@@ -44,12 +45,15 @@ test('居室API搬迁保持唯一，拖到新建格在同一事务创建并入�
   const app = express(); app.use(express.json()); app.use('/rooms', (await import('../src/routes/cohabitation.js')).default);
   const server = app.listen(0); t.after(() => new Promise(resolve => server.close(resolve)));
   const url = `http://127.0.0.1:${server.address().port}/rooms`;
+  const listed = await (await fetch(url)).json();
+  assert.ok(listed.characters.some(c => c.id === ids[0]), '默认助手应出现在宿舍角色列表');
   const post = await fetch(url + '/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: '临时居室', characterId: ids[0] }) });
   assert.equal(post.status, 200); const data = await post.json();
   assert.equal(db.prepare('SELECT COUNT(*) n FROM cohabitation_members WHERE character_id=?').get(ids[0]).n, 1);
   await fetch(url + '/rooms/' + data.id, { method: 'DELETE' });
   assert.equal(db.prepare('SELECT COUNT(*) n FROM cohabitation_members WHERE character_id=?').get(ids[0]).n, 0);
-  db.prepare('INSERT INTO cohabitation_members VALUES(?,1)').run(ids[0]);
+  const moved = await fetch(url + '/members/' + ids[0], { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roomId: 1 }) });
+  assert.equal(moved.status, 200, '默认助手可以入住已有房间');
 });
 
 test('两居室串行传递跨居室约定，完成后统一发布；多人资料/LoRA沿用参与者ID', async () => {
@@ -70,8 +74,12 @@ test('两居室串行传递跨居室约定，完成后统一发布；多人资�
   const image = scheduleImageContext(db.prepare('SELECT * FROM characters WHERE id=?').get(ids[0]), shared);
   assert.equal(image.others[0].id, ids[2]); assert.equal(image.imageOptions.loras.length, 2);
   assert.ok(image.crossReference.includes('银色短发'));
+  assert.equal(scheduleMomentCompanions(ids[2], shared)[0].otherId, ids[0], '默认助手可作为同行者');
+  const reverseImage = scheduleImageContext(db.prepare('SELECT * FROM characters WHERE id=?').get(ids[2]), shared);
+  assert.equal(reverseImage.others[0].name, 'default');
+  assert.equal(reverseImage.imageOptions.loras.length, 2);
   assert.equal(readCohabitationPlan(db).status, 'done');
-  assert.equal(new Set(db.prepare("SELECT next_schedule_refresh_at FROM characters WHERE name!='default'").all().map(c => c.next_schedule_refresh_at)).size, 1);
+  assert.equal(new Set(db.prepare("SELECT next_schedule_refresh_at FROM characters").all().map(c => c.next_schedule_refresh_at)).size, 1);
 });
 
 test('失败不部分发布，恢复跳过已经完成的居室和个人草稿', async () => {
@@ -112,7 +120,7 @@ test('取消不保存已生成的个人日程，原模板继续可用', async ()
 });
 
 test('共同活动时间冲突由逻辑就近改期，不消耗模型重试', async () => {
-  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const characters = db.prepare("SELECT * FROM characters").all();
   const room = listResidences(db)[1];
   const occupied = { startTime: '14:00', endTime: '15:00', participantIds: [ids[0], ids[2]], activity: '已约定' };
   const input = { room, characters, relationships: db.prepare('SELECT * FROM character_relationships').all(), events: [occupied], batchId: 'test' };
@@ -145,7 +153,7 @@ test('整批真实生成入口延后新提案校验，睡眠冲突只调用一�
 });
 
 test('规划加载全体室友short及全部方向关系，但不注入室外人格；动态资料不改变静态前缀', () => {
-  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const characters = db.prepare("SELECT * FROM characters").all();
   const room = listResidences(db)[0];
   const relationships = db.prepare('SELECT * FROM character_relationships').all();
   const input = { room, characters, relationships, events: [], batchId: 'prefix-a', eligibleCharacterIds: ids.filter(id => id !== ids[1]) };
@@ -164,7 +172,7 @@ test('规划加载全体室友short及全部方向关系，但不注入室外人
 });
 
 test('共同活动最多三人，室外对象计入总人数，超限输出通过重试修正', async () => {
-  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const characters = db.prepare("SELECT * FROM characters").all();
   const input = {
     room: { id: 999, name: '人数校验', memberIds: ids.slice(0, 2) }, characters,
     relationships: ids.slice(1).map(id => ({ from_character_id: ids[0], to_character_id: id, relationship_text: '同事' })),
@@ -190,7 +198,7 @@ test('共同活动最多三人，室外对象计入总人数，超限输出通�
 });
 
 test('共同计划使用朋友圈句式表达有向关系，保留室外关系原文和动态缓存边界', () => {
-  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const characters = db.prepare("SELECT * FROM characters").all();
   const input = {
     room: { id: 999, name: '关系校验', memberIds: ids.slice(0, 2) }, characters, events: [], batchId: 'relation-text',
     relationships: [
@@ -217,7 +225,7 @@ test('共同计划使用朋友圈句式表达有向关系，保留室外关系�
 test('模型重复输出已确认约定时去重，新增非法参与者仍拒绝', async () => {
   const room = listResidences(db)[1];
   const event = { sharedEventId: 'previous:1', startTime: '14:00', endTime: '15:00', participantIds: [ids[0], ids[2]], activity: '共同讨论', location: '咖啡馆', description: '阿甲和阿丙讨论近期的问题。' };
-  const input = { room, characters: db.prepare("SELECT * FROM characters WHERE name!='default'").all(), relationships: db.prepare('SELECT * FROM character_relationships').all(), events: [event], batchId: 'duplicate' };
+  const input = { room, characters: db.prepare("SELECT * FROM characters").all(), relationships: db.prepare('SELECT * FROM character_relationships').all(), events: [event], batchId: 'duplicate' };
   let calls = 0;
   assert.deepEqual(await planResidence(input, { chat: async () => { calls++; return JSON.stringify({ activities: [event] }); } }), []);
   assert.equal(calls, 1);
@@ -317,7 +325,7 @@ test('重新启用一个角色仅初始化本人，复用已发布计划和全�
 });
 
 test('空房和单人房即使有室外关系对象也跳过共同行动模型', async () => {
-  const characters = db.prepare("SELECT * FROM characters WHERE name!='default'").all();
+  const characters = db.prepare("SELECT * FROM characters").all();
   for (const memberIds of [[], [ids[0]]]) {
     const result = await planResidence({ room: { id: 999, name: '独居', memberIds }, characters,
       relationships: [{ from_character_id: ids[0], to_character_id: ids[2], relationship_text: '经常相约的朋友' }], events: [], batchId: 'solo' }, {

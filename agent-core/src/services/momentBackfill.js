@@ -35,7 +35,9 @@ export function startMomentBackfill(generatePost, { waitForIdle = async () => {}
 
 async function runBackfill(task, generatePost, now, control) {
   const db = getDb();
-  const characters = db.prepare("SELECT * FROM characters WHERE name != 'default' AND moments_disabled = 0 ORDER BY id").all();
+  const characters = db.prepare("SELECT * FROM characters WHERE moments_disabled = 0 ORDER BY id").all();
+  // 长任务执行期间也尊重最新开关，关闭朋友圈后不再开始后续补发。
+  const enabled = db.prepare('SELECT 1 FROM characters WHERE id = ? AND moments_disabled = 0');
   const { start, end } = backfillDay(now);
   const countPosts = db.prepare("SELECT COUNT(*) AS count FROM moment_posts WHERE character_id = ? AND status = 'done' AND created_at >= ? AND created_at < ?");
   const failed = new Set();
@@ -46,6 +48,7 @@ async function runBackfill(task, generatePost, now, control) {
   // 补发只补齐缺失模板；到期整轮重排由日程调度器负责，不能在这里逐人绕过共同规划。
   for (const [index, character] of characters.entries()) {
     if (control.stopped) break;
+    if (!enabled.get(character.id)) continue;
     progress(`检查日程 ${index + 1}/${characters.length} · ${character.display_name}`, index / Math.max(1, characters.length) * 0.3);
     try {
       if (new Date() >= end) throw new Error('已跨日，请重新启动今日补发');
@@ -69,6 +72,7 @@ async function runBackfill(task, generatePost, now, control) {
   }
   for (const [index, character] of characters.entries()) {
     if (control.stopped) break;
+    if (!enabled.get(character.id)) { skipped++; continue; }
     if (failed.has(character.id)) continue;
     if (countPosts.get(character.id, sqlTime(start), sqlTime(end)).count >= 2) { skipped++; continue; }
     // 日程快照固定下来，跨午夜继续执行也不会读到次日日程。
@@ -76,6 +80,7 @@ async function runBackfill(task, generatePost, now, control) {
     const times = planBackfillTimes(now);
     for (const [postIndex, postedAt] of times.entries()) {
       if (control.stopped) break;
+      if (!enabled.get(character.id)) { skipped++; break; }
       progress(`补发 ${index + 1}/${characters.length} · ${character.display_name} · ${postIndex + 1}/${times.length}`, 0.3 + 0.7 * (index + postIndex / times.length) / characters.length);
       try {
         await generatePost(character, { backfill: true, postedAt, activity: activityAt(schedule, postedAt) });

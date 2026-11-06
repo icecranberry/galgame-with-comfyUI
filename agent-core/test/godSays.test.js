@@ -560,3 +560,16 @@ test('整段删除原子清除全部轮次，保留其他对话及幂等墓碑',
   assert.throws(() => repo.deleteSession(-1), { status: 400 });
   assert.throws(() => repo.deleteSession(999), { status: 404 });
 });
+
+
+test('世界事件的全体范围和指定范围均允许默认助手参与', t => {
+  const { db, repo } = fixture(t);
+  db.prepare("UPDATE characters SET name='default' WHERE id=1").run();
+  const run = repo.start('default-world', '世界事件').run;
+  const world = createWorldEventService(repo);
+  const all = world.create({ title: '彩虹', fact: '天空出现彩虹', moment_count: 3, group_count: 0 }, { runId: run.id, effectKey: 'default-all' });
+  assert.ok(all.deliveries.some(d => d.kind === 'moment' && d.target_id === 1));
+  const scoped = world.create({ title: '光', fact: '眼前出现光', character_ids: [1], moment_count: 1, group_count: 0 }, { runId: run.id, effectKey: 'default-scoped' });
+  assert.deepEqual(scoped.character_ids, [1]);
+  assert.equal(scoped.deliveries[0].target_id, 1);
+});
