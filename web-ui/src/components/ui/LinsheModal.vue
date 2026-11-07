@@ -140,17 +140,39 @@ onBeforeUnmount(() => {
 .modal-header { gap: 12px; }
 :slotted(.modal-heading-content) { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .modal-title { min-width: 0; overflow-wrap: anywhere; }
-.modal-header-extra { flex-wrap: wrap; }
 .linshe-modal:focus { outline: none; }
 .linshe-modal .modal-body.modal-workspace-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .linshe-modal .modal-body.modal-form-body { display: flex; flex-direction: column; gap: 12px; }
 .modal-form-body > :deep(*) { flex-shrink: 0; }
 .modal-header-extra {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px 12px;
+  min-width: 0;
   margin-left: auto;
-  margin-right: 10px;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+/* 统计内容只提供语义标记，排版与主题统一由弹窗维护。 */
+.modal-header-extra :deep(.modal-header-stat) {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.modal-header-extra :deep(.modal-header-stat-value) {
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  font-weight: 700;
+}
+.modal-header-extra :deep(.modal-header-stat-value.is-active) {
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-primary));
 }
 
 .linshe-modal-lining {
@@ -239,6 +261,11 @@ onBeforeUnmount(() => {
     display: flex;
     overflow: hidden;
   }
+}
+
+@media (max-width: 480px) {
+  .modal-header:has(.modal-header-extra) { flex-wrap: wrap; row-gap: 8px; }
+  .modal-header-extra { order: 1; flex-basis: 100%; }
 }
 
 /* 操作区自带底部留白；有 footer 时不再叠加内衬的底部间距。 */

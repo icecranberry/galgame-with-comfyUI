@@ -1,12 +1,12 @@
 <template>
-  <div class="item-card" :class="{ editing: item._editing, unchecked: selectable && item.checked === 0 }">
+  <div ref="cardRoot" class="item-card" :class="{ editing: item._editing, unchecked: selectable && item.checked === 0 }">
     <!-- 编辑态 -->
     <!-- 编辑态 / 展示态 -->
     <CardHeightTransition :editing="item._editing">
       <div v-if="item._editing" class="edit-form">
         <label class="edit-field">
           <span class="edit-label">名称</span>
-          <linshe-input v-model.trim="item.name" class="edit-input" size="sm" placeholder="名称" />
+          <linshe-input ref="nameInput" v-model.trim="item.name" class="edit-input" size="sm" placeholder="名称" />
         </label>
         <label v-if="isEvents" class="edit-field">
           <span class="edit-label">标签（逗号分隔）</span>
@@ -70,6 +70,18 @@ const props = defineProps({
 })
 const emit = defineEmits(['edit', 'cancel', 'save', 'remove', 'toggle-check', 'publish'])
 
+const cardRoot = ref(null)
+const nameInput = ref(null)
+function focusEditor() {
+  if (!props.item._editing) return
+  nameInput.value?.focus({ preventScroll: true })
+  cardRoot.value?.scrollIntoView({
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    block: 'center',
+  })
+}
+defineExpose({ focusEditor })
+
 // 标签以逗号分隔字符串编辑，实时同步回数组
 const funFromText = ref('')
 watch(
@@ -120,7 +132,8 @@ function onToggleEdit() {
 .card-desc {
   font-size: 12px; color: var(--text-primary, #555);
   line-height: 1.6; margin-top: 6px;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: var(--library-description-min-height, 0);
+  display: -webkit-box; -webkit-line-clamp: var(--library-description-lines, 3); -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag {

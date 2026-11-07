@@ -6,9 +6,10 @@
       @update:model-value="onLibraryVisibilityChange"
     >
       <template #header-extra>
-        <span class="lib-count">{{ items.length }} 条<span v-if="!isEvents"> · 已勾选 {{ checkedCount }}</span></span>
+        <span class="modal-header-stat"><strong class="modal-header-stat-value">{{ items.length }}</strong> 条</span>
+        <span v-if="!isEvents" class="modal-header-stat">已勾选 <strong class="modal-header-stat-value is-active">{{ checkedCount }}</strong></span>
       </template>
-      <div class="lib-body">
+      <div class="lib-body" :class="{ 'topic-library': !isEvents }">
           <!-- 生成器 -->
           <div class="gen-section" @paste="onScenePaste">
             <div class="gen-row">
@@ -39,6 +40,9 @@
               <linshe-button variant="secondary" size="sm" :loading="describingImage" :disabled="generating || saving || describingImage" @click="imagePicker?.$el?.click()">
                 {{ describingImage ? '正在识别场景…' : '上传图片还原场景' }}
               </linshe-button>
+              <Transition name="scene-import">
+                <linshe-button v-if="sceneImageReady && !isEvents" variant="secondary" size="sm" :disabled="!direction.trim() || loading || generating || saving || describingImage || addingSceneDraft" @click="addSceneDraft">单独入库</linshe-button>
+              </Transition>
               <span class="image-direction-hint" role="status">{{ describingImage ? '识别完成后自动填入上方，可继续修改' : '也可在上方输入框直接粘贴图片（Ctrl+V），最大 6MB；可先填写补充要求' }}</span>
             </div>
 
@@ -151,6 +155,7 @@
                 <LibraryItemCard
                   v-for="item in customItems"
                   :key="item.id || item._tempKey"
+                  :ref="card => setCustomCardRef(item.id || item._tempKey, card)"
                   :item="item"
                   :is-events="isEvents"
                   :selectable="!isEvents"
@@ -170,22 +175,48 @@
     </linshe-modal>
     <linshe-modal v-model="publishOpen" title="选择角色" :transition-ms="300">
       <div class="publish-fields">
-        <p class="publish-topic">{{ isEvents ? '奇遇话题' : '朋友圈话题' }}：{{ publishItem?.name }}</p>
+        <p class="publish-topic">
+          <span class="publish-topic-label">{{ isEvents ? '奇遇话题' : '朋友圈话题' }}</span>
+          <strong class="publish-topic-name">{{ publishItem?.name }}</strong>
+        </p>
         <p v-if="charactersLoading" class="publish-hint" role="status">正在加载角色…</p>
         <template v-else-if="charactersError">
           <p class="publish-hint" role="alert">{{ charactersError }}</p>
           <linshe-button size="sm" @click="loadPublishCharacters">重新加载</linshe-button>
         </template>
         <p v-else-if="!publishCharacters.length" class="publish-hint">还没有角色，先去酒馆招募吧。</p>
-        <linshe-select
-          v-else
-          v-model="publishCharacterId"
-          :options="publishCharacterOptions"
-          :disabled="publishing"
-          searchable
-          placeholder="选择发送的角色"
-          aria-label="发送角色"
-        />
+        <div v-else class="publish-characters" role="group" aria-label="发送角色">
+          <div
+            v-for="character in publishCharacters"
+            :key="character.id"
+            class="publish-character"
+            :class="{ 'is-selected': publishCharacterId === character.id, 'is-disabled': publishing }"
+            role="button"
+            :tabindex="publishing ? -1 : 0"
+            :aria-label="character.display_name || character.name || '未命名角色'"
+            :aria-pressed="publishCharacterId === character.id"
+            :aria-disabled="publishing"
+            @click="selectPublishCharacter(character.id)"
+            @keydown.enter.prevent="selectPublishCharacter(character.id)"
+            @keydown.space.prevent="selectPublishCharacter(character.id)"
+          >
+            <span class="publish-character-avatar" aria-hidden="true">
+              <img
+                v-if="character.avatar_path && !failedPublishAvatars.has(character.id)"
+                :src="character.avatar_path"
+                alt=""
+                loading="lazy"
+                draggable="false"
+                @error="failedPublishAvatars.add(character.id)"
+              />
+              <span v-else>{{ (character.display_name || character.name || '?').charAt(0) }}</span>
+              <svg class="publish-character-check" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                <path d="m5 10 3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="publish-character-name">{{ character.display_name || character.name || '未命名角色' }}</span>
+          </div>
+        </div>
         <p class="publish-hint" role="status">{{ publishing ? '正在生成，完成后会出现在列表中，可关闭此窗口等待。' : '角色将使用这个话题立即生成一条' + (isEvents ? '奇遇。' : '朋友圈。') }}</p>
       </div>
       <template #footer>
@@ -204,7 +235,6 @@ import CardHeightTransition from './CardHeightTransition.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 import LinsheButton from './ui/LinsheButton.vue'
-import LinsheSelect from './ui/LinsheSelect.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -225,7 +255,12 @@ const publishCharacters = ref([])
 const charactersLoading = ref(false)
 const charactersError = ref('')
 const publishing = ref(false)
-const publishCharacterOptions = computed(() => publishCharacters.value.map(c => ({ label: c.display_name, value: c.id })))
+const failedPublishAvatars = ref(new Set())
+
+function selectPublishCharacter(id) {
+  if (publishing.value) return
+  publishCharacterId.value = id
+}
 
 // 嵌套弹窗按 Esc 时只关闭角色选择窗，保留话题库。
 function onLibraryVisibilityChange(value) {
@@ -241,7 +276,11 @@ async function loadPublishCharacters() {
   charactersError.value = ''
   try {
     const result = await api.listCharacters()
-    publishCharacters.value = result.characters || []
+    publishCharacters.value = [...(result.characters || [])].sort((left, right) =>
+      (left.display_name || left.name || '').localeCompare(
+        right.display_name || right.name || '', 'zh-CN-u-co-pinyin', { sensitivity: 'base' },
+      ),
+    )
   } catch (err) {
     charactersError.value = err.message || '角色加载失败，请重试'
   } finally {
@@ -253,6 +292,7 @@ function openPublish(item) {
   if (publishing.value || !item.id) return
   publishItem.value = { ...item }
   publishCharacterId.value = null
+  failedPublishAvatars.value.clear()
   publishOpen.value = true
   loadPublishCharacters()
 }
@@ -290,12 +330,19 @@ const direction = ref('')
 const directionInput = ref(null)
 const imagePicker = ref(null)
 const describingImage = ref(false)
+const sceneImageReady = ref(false)
+const addingSceneDraft = ref(false)
+const customCardRefs = new Map()
+let sceneFocusTimer = null
 let imageRequest = null
 
 function cancelImageRecognition() {
   imageRequest?.abort()
   imageRequest = null
   describingImage.value = false
+  sceneImageReady.value = false
+  addingSceneDraft.value = false
+  clearTimeout(sceneFocusTimer)
 }
 
 watch(() => [props.modelValue, props.type], cancelImageRecognition)
@@ -339,7 +386,8 @@ async function recognizeSceneImage(file) {
     if (controller.signal.aborted || imageRequest !== controller) return
     if (!result.direction?.trim()) throw new Error('未识别到场景，请重试')
     direction.value = result.direction
-    toastFn('场景已填入，可修改后开始幻想', 'success')
+    sceneImageReady.value = true
+    toastFn(isEvents.value ? '场景已填入，可修改后开始幻想' : '场景已填入，可单独入库或继续幻想', 'success')
   } catch (err) {
     if (!controller.signal.aborted) toastFn(err.message || '图片识别失败，请重试', 'error')
   } finally {
@@ -558,6 +606,29 @@ async function savePreview() {
 
 // ── 列表条目：编辑 / 新增 / 删除 ──
 
+function setCustomCardRef(key, card) {
+  if (card) customCardRefs.set(key, card)
+  else customCardRefs.delete(key)
+}
+
+async function addSceneDraft() {
+  if (isEvents.value || !sceneImageReady.value || !direction.value.trim() || loading.value || generating.value || saving.value || describingImage.value || addingSceneDraft.value) return
+  addingSceneDraft.value = true
+  const draft = {
+    source: 'custom', name: '自定义事件', desc: direction.value,
+    _editing: true, _tempKey: `t_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  }
+  customOpen.value = true
+  items.value.unshift(draft)
+  await nextTick()
+  if (!props.modelValue || !addingSceneDraft.value) return
+  // 等分组展开与卡片入场完成，再定位，避免滚到仍被折叠区域裁切的位置。
+  sceneFocusTimer = setTimeout(() => {
+    customCardRefs.get(draft._tempKey)?.focusEditor()
+    addingSceneDraft.value = false
+  }, 300)
+}
+
 function startEdit(item) {
   item._original = JSON.stringify(item)
   item._editing = true
@@ -631,13 +702,102 @@ function addItem() {
 }
 
 .publish-fields { display: flex; flex-direction: column; gap: 12px; }
-.publish-topic { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.publish-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text-secondary) 6%, transparent);
+  overflow-wrap: anywhere;
+}
+.publish-topic-label {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.publish-topic-name {
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.6;
+}
 .publish-hint { margin: 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.6; }
+.publish-characters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  max-height: min(360px, 45dvh);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 3px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.publish-character {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
+}
+@media (hover: hover) {
+  .publish-character:not(.is-disabled):hover {
+    background: color-mix(in srgb, var(--text-secondary) 6%, transparent);
+  }
+}
+.publish-character.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.publish-character:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.publish-character.is-disabled { opacity: 0.6; cursor: not-allowed; }
+.publish-character-avatar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+.publish-character-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.publish-character-check {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--modal-lining-bg);
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--on-accent);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.publish-character.is-selected .publish-character-check { opacity: 1; transform: scale(1); }
+.publish-character-name { font-size: var(--fs-sm); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 
 /* 生成器 */
 .gen-section { margin-bottom: 20px; }
 .image-direction-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
 .image-direction-hint { color: var(--text-secondary); font-size: var(--fs-xs); }
+.scene-import-enter-active, .scene-import-leave-active { transition: opacity 0.3s ease; }
+.scene-import-enter-from, .scene-import-leave-to { opacity: 0; }
 .gen-row { display: flex; gap: 10px; align-items: stretch; }
 .gen-input-wrap { position: relative; flex: 1; min-width: 0; }
 .gen-input-wrap .gen-input { width: 100%; box-sizing: border-box; }
@@ -717,6 +877,10 @@ function addItem() {
 .add-card:hover { background: rgba(var(--accent-rgb),0.06); }
 
 /* 卡片网格 */
+.topic-library {
+  --library-description-lines: 6;
+  --library-description-min-height: 9.6em;
+}
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -739,7 +903,8 @@ function addItem() {
 .card-desc {
   font-size: 12px; color: var(--text-primary, #555);
   line-height: 1.6; margin-top: 6px;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  min-height: var(--library-description-min-height, 0);
+  display: -webkit-box; -webkit-line-clamp: var(--library-description-lines, 3); -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tag {

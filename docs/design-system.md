@@ -71,6 +71,8 @@
 - **弹窗（手机端 <768px）**：不换皮肤，只收留白 —— 遮罩内边距 20px → `8px + env(safe-area-inset-*)`（面板靠它避开刘海 / 挖孔 / 手势条），面板宽度铺满可用宽度、三档尺寸统一，`full` 撑满可用高度；**圆角、描边、白色内衬全部保留**，内衬留白走 `--modal-lining-margin-mobile`。移动端几何只写在 `LinsheModal.vue` 的移动端段落里，不要再用 `100vw/100dvh + border-radius:0` 做「全屏面板」（会被遮罩内边距推向一侧、贴边裁切并丢圆角，与 PC 观感不一致）。
 - **其他**：`.chip(.active/.chip-x)`、`.avatar(-fallback)`、`.empty`（波点+悬浮图标）、`.skeleton`、`.icon-tile(.t-purple/pink/orange/teal/blue/gold/violet)`、`.sheen`（hover 斜光扫过）、`.sparkle(.s-low)`、`.stagger`（列表错峰入场，fill=backwards 不阻塞 hover/FLIP）
 
+- **弹窗标题附加信息**：`LinsheModal` 的 `#header-extra` 统一使用小号次级文字、等宽数字与紧凑间距。统计组用 `modal-header-stat`，数值用 `modal-header-stat-value`，选中数可加 `is-active` 使用主题强调色；样式只在弹窗组件维护。480px 及以下附加信息移到标题与关闭按钮下方，右对齐并允许分组换行。
+
 ## 主题体系
 
 小镇图片管理中的大立绘、建筑、地皮与道路窗口使用 `LinsheModal` 的 `full-height`：桌面铺满视口高度，手机撑满统一安全区内的可用高度，保留圆角与主题内衬。大立绘画布随剩余空间伸缩，底部编辑工具在矮屏或展开时独立滚动。所有素材（立绘、地皮、道路、建筑、道具与小人）的提示词 / LoRA 配置由 `TownAssetManager` 在窗口内统一承载：宽屏左侧编辑、右侧 260px 配置列，各自滚动；900px 及以下改为编辑在前、配置在后的单列滚动，不悬浮遮挡画布。其他素材保持原有窗口高度，开合仍为 300ms。

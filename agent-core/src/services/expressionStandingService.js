@@ -97,7 +97,8 @@ export function previewStandingBatches({ mode, outfitScene = 'work' } = {}) {
 
 export function previewCharacterStandingBatch(id, { outfitScene = 'work', reusePrompts = false } = {}) {
   const char = character(id);
-  return inspectStandingOutfits(reusePrompts || busyCharacters.has(Number(id)) ? [] : [char], outfitScene);
+  const running = busyCharacters.has(Number(id)) && !batchControls.get(Number(id))?.paused;
+  return inspectStandingOutfits(reusePrompts || running ? [] : [char], outfitScene);
 }
 
 export function startAllStandingBatches({ mode, requirement = '', outfitScene = 'work', missingOutfitPolicy } = {}, dependencies) {
@@ -277,7 +278,22 @@ export function startStandingBatch(id, { slotIds, requirement = '', outfitScene 
     }
   };
   control.run = run;
-  control.restart = () => {
+  control.restart = (options = {}) => {
+    let nextScene = normalizeStandingOutfitScene(options.outfitScene ?? outfitScene);
+    const nextPolicy = options.missingOutfitPolicy;
+    validateMissingOutfitPolicy(nextPolicy);
+    const changedDirection = options.outfitScene !== undefined || options.requirement !== undefined;
+    let nextPersona = persona;
+    if (changedDirection) {
+      const missing = !hasStandingOutfit(id, nextScene);
+      if (missing && !nextPolicy) throw fail('角色缺少所选服装，请重新点击生成并确认补全或使用默认外观', 409);
+      if (missing && nextPolicy === 'fallback') nextScene = 'work';
+      nextPersona = missing && nextPolicy === 'generate' ? null : buildStandingPersona(character(id), nextScene);
+    }
+    requirement = String(options.requirement ?? requirement).trim().slice(0, 2000);
+    outfitScene = nextScene;
+    if (changedDirection) missingOutfitPolicy = nextPolicy;
+    persona = nextPersona;
     // Restart the whole batch, including slots already rendered before the pause.
     // Keep existing images until their replacements have been committed.
     db.transaction(() => {
@@ -302,7 +318,7 @@ export function startStandingBatch(id, { slotIds, requirement = '', outfitScene 
   return { jobId };
 }
 
-export function controlStandingBatch(id, jobId, action, dependencies) {
+export function controlStandingBatch(id, jobId, action, dependencies, options) {
   id = Number(id);
   const control = batchControls.get(id);
   if (!control && action === 'resume') {
@@ -336,7 +352,7 @@ export function controlStandingBatch(id, jobId, action, dependencies) {
     if (!control.paused) getDb().prepare(`UPDATE expression_standing_jobs SET status='stopping' WHERE id=?`).run(jobId);
   } else if (action === 'resume' || action === 'restart') {
     if (!control.paused) throw fail('请等待当前步骤完成后继续任务', 409);
-    if (action === 'restart') control.restart();
+    if (action === 'restart') control.restart(options);
     control.pauseRequested = false;
     control.paused = false;
     getDb().prepare(`UPDATE expression_standing_jobs SET status='queued' WHERE id=?`).run(jobId);

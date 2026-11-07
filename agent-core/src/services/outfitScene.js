@@ -1,5 +1,5 @@
 /**
- * outfitScene.js — 场景服装（工装 / 私服 / 居家 / 睡衣）
+ * outfitScene.js — 场景服装（默认 / 私服 / 居家 / 睡衣）
  *
  * ── 解决什么问题 ──
  *
@@ -25,7 +25,7 @@
 import { getDb, getWorldSetting } from '../db/index.js';
 import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
-import { splitAppearanceSection } from './characterPersona.js';
+import { splitAppearanceSection, buildCharacterAppearanceSection } from './characterPersona.js';
 import { buildSceneOutfitRequest, normalizeDesignScenes, parseSceneOutfitDesign } from './sceneOutfitPrompt.js';
 import { getLocalDateKey } from '../utils/localDate.js';
 import { chatSync } from './lorebook/runtime.js';
@@ -60,6 +60,26 @@ export function listSceneOutfits(characterId) {
      ORDER BY CASE scene WHEN 'work' THEN 0 WHEN 'casual' THEN 1 WHEN 'home' THEN 2 WHEN 'sleep' THEN 3 ELSE 9 END, id ASC`
   ).all(characterId);
   return rows.map(r => ({ ...r, sceneLabel: LABEL_BY_KEY[r.scene] || r.scene }));
+}
+
+/** 日程衣柜始终包含默认服饰；保留旧名称和 ID，但外观以人物卡为准，不补写服装表。 */
+export function buildScheduleOutfitCandidates(outfits, character = null) {
+  const savedDefault = outfits.find(o => o.scene === 'work');
+  const appearance = character ? buildCharacterAppearanceSection(character, { outfits: null }).trim() : '';
+  return [{
+    ...savedDefault,
+    scene: 'work',
+    sceneLabel: LABEL_BY_KEY.work,
+    name: savedDefault?.name || DEFAULT_NAME_BY_SCENE.work,
+    description: appearance || savedDefault?.description || '沿用人物卡中的默认外观与服饰。',
+  }, ...outfits.filter(o => o.scene !== 'work' && o.name?.trim() && o.description?.trim())];
+}
+
+function scheduleOutfits(characterId) {
+  if (!characterId) return [];
+  const character = getDb().prepare('SELECT base_prompt FROM characters WHERE id = ?').get(characterId);
+  if (!character) return [];
+  return buildScheduleOutfitCandidates(listSceneOutfits(characterId), character);
 }
 
 /** 批量写入场景服装（供「一键生成」用）。同名同场景则更新描述，避免重复堆叠 */
@@ -159,29 +179,27 @@ function findCurrentIndex(activities, minutes) {
  * 此刻该穿哪套场景服装。
  *
  * 判定顺序：
- *  1. 角色没有场景服装 → null（调用方回落原外观）
+ *  1. 日程衣柜包含人物卡的默认服饰，不要求服装表存在 work 行
  *  2. 当前时段是睡眠（replyDelay=-1）→ **强制** sleep 那套
- *  3. 否则从当前时段**向前回溯**，找最近一个有 outfit 标注的时段 → 按名字匹配
- *     （日程只在「换装的那一刻」标注 outfit，其余留空，这样换装次数天然被限制）
- *  4. 都没匹配上 → 回到该角色的第一套非睡眠服装（兜底，避免没衣服穿）
+ *  3. 清醒时向前回溯最近的有效换装点，遇到睡眠边界停止，避免醒来后沿用睡衣
+ *  4. 没日程或没匹配上 → 默认服饰；默认服饰不作为特殊换装重复注入
  *
  * @returns {{outfit: object, scene: string, source: string}|null}
  *          source 便于排查：'sleep' | 'schedule' | 'fallback'
  */
 export function getSceneOutfitForNow(characterId, date = new Date()) {
-  const outfits = listSceneOutfits(characterId);
+  const outfits = scheduleOutfits(characterId);
   if (!outfits.length) return null;
 
   const sleepOutfit = outfits.find(o => o.scene === 'sleep') || null;
-  const dayOutfits = outfits.filter(o => o.scene !== 'sleep');
+  const fallback = { outfit: outfits.find(o => o.scene === 'work'), scene: 'work', source: 'fallback' };
   const byName = new Map(outfits.map(o => [o.name, o]));
-  const byId = new Map(outfits.map(o => [String(o.id), o]));
+  const byId = new Map(outfits.filter(o => o.id != null).map(o => [String(o.id), o]));
 
   const acts = todayActivities(characterId, date);
   if (!acts.length) {
-    // 没有日程：用第一套非睡眠服装兜底（夜里则用睡衣）
-    const fallback = dayOutfits[0] || sleepOutfit;
-    return fallback ? { outfit: fallback, scene: fallback.scene, source: 'fallback' } : null;
+    // 没有日程就没有睡眠依据，不按墙钟猜测作息。
+    return fallback;
   }
 
   const idx = findCurrentIndex(acts, nowMinutes(date));
@@ -195,23 +213,26 @@ export function getSceneOutfitForNow(characterId, date = new Date()) {
   // ③ 向前回溯最近的换装点（含当前段）；上限防止绕一圈
   for (let step = 0; step < acts.length; step++) {
     const i = (idx - step + acts.length) % acts.length;
+    if (step > 0 && Number(acts[i]?.replyDelay) === -1) break;
     const o = acts[i]?.outfit;
     if (!o) continue;
     const text = String(o).trim();
     if (!text) continue;
     const hit = byName.get(text) || byId.get(text);
-    if (hit) return { outfit: hit, scene: hit.scene, source: 'schedule' };
+    if (hit) {
+      if (hit.scene === 'sleep' && Number(cur.replyDelay) !== -1) return fallback;
+      return { outfit: hit, scene: hit.scene, source: 'schedule' };
+    }
     // 标注了但匹配不到（LLM 编了个名字）→ 继续往前找，别停在一个无效值上
   }
 
   // ④ 兜底
-  const fallback = dayOutfits[0] || sleepOutfit;
-  return fallback ? { outfit: fallback, scene: fallback.scene, source: 'fallback' } : null;
+  return fallback;
 }
 
 /** 把当前场景服装包成 characterPersona 认的 outfits 结构（走 limited 通道） */
 export function asPersonaOutfits(sceneOutfit) {
-  if (!sceneOutfit?.outfit) return null;
+  if (!sceneOutfit?.outfit || sceneOutfit.outfit.scene === 'work') return null;
   return { limited: [{ name: sceneOutfit.outfit.name, description: sceneOutfit.outfit.description }], exclusive: null };
 }
 
@@ -223,33 +244,43 @@ export function asPersonaOutfits(sceneOutfit) {
  * @returns {string|null}
  */
 export function buildOutfitAnnotateLayer(characterId) {
-  return buildOutfitAnnotation(listSceneOutfits(characterId));
+  return buildOutfitAnnotation(scheduleOutfits(characterId));
 }
 
 /** 系统角色可显式提供独立衣柜，复用同一日程着装规范。 */
-export function buildOutfitAnnotation(outfits) {
+export function buildOutfitAnnotation(outfits, character = null) {
+  outfits = buildScheduleOutfitCandidates(outfits, character);
   if (outfits.length < 2) return null;   // 只有一套就没什么可分配的
 
-  const list = outfits.map(o => `- "${o.name}"（${LABEL_BY_KEY[o.scene] || o.scene}）：${o.description.slice(0, 60)}`).join('\n');
-  const hasSleep = outfits.some(o => o.scene === 'sleep');
-  const dayNames = outfits.filter(o => o.scene !== 'sleep').map(o => `"${o.name}"`).join(' / ') || '（无）';
+  const list = outfits.map(o => `- ${JSON.stringify(o.name)}（${LABEL_BY_KEY[o.scene] || o.scene}）：${o.description.slice(0, 60)}`).join('\n');
+  const defaultOutfit = outfits.find(o => o.scene === 'work');
+  const defaultName = JSON.stringify(defaultOutfit.name);
+  const sleepOutfit = outfits.find(o => o.scene === 'sleep');
+  const dayNames = outfits.filter(o => o.scene !== 'sleep').map(o => JSON.stringify(o.name)).join(' / ');
+  const example = { activities: [
+    { startTime: '07:00', endTime: '08:00', activity: '起床整理', location: '住处', replyDelay: 0, tags: ['日常'], description: '起床洗漱后换回平日的默认服饰，整理好衣领，在窗边吃过早餐，准备开始一天的活动。', outfit: defaultOutfit.name },
+    { startTime: '08:00', endTime: '18:00', activity: '日常事务与外出', location: '街区', replyDelay: 0, tags: ['日常'], description: '沿用默认服饰处理日常事务，午后沿街办事，与熟人打过招呼，傍晚收拾随身物品准备回家。', outfit: null },
+    { startTime: '18:00', endTime: '22:00', activity: '回家用餐与阅读', location: '住处', replyDelay: 0, tags: ['日常'], description: '回家后继续穿着默认服饰，准备晚餐并收拾餐桌，随后坐到窗边翻阅书页，安静度过晚间。', outfit: null },
+    { startTime: '22:00', endTime: '07:00', activity: '就寝', location: '住处卧室', replyDelay: -1, tags: ['睡眠'], description: '完成睡前整理后躺入柔软的被褥，闭上双眼放松身体，伴着窗外渐渐安静的夜色沉入睡眠。', outfit: sleepOutfit?.name || null },
+  ] };
 
   return `## 着装标注（额外要求）
-这个角色在一天中会换衣服。可选服装如下：
+默认服饰是角色清醒时的常态形象，只有明确理由才换其他衣服。可选服装如下：
 ${list}
 
 请在生成日程时，为**每个时段**额外输出一个字段 \`outfit\`：
-- 值为上面某套服装的**名称**（原样照抄，不要改写）。
-- **只在「换装的那一刻」填写**，其余时段填 \`null\`（表示沿用上一段的穿着）。
-  —— 也就是说，一天里 \`outfit\` 非 null 的时段应当只有 2~4 个。
-- 换装必须发生在**合理的时点**：起床后、出门前、回到家、准备就寝、以及活动性质明显变化时
-  （如「下班回家」「换上运动服去锻炼」）。不要在一天中频繁换装，最多 4 次。
-- 外出活动不要穿居家服出门，在家不要穿工装。${hasSleep ? `
-- **睡眠时段的 outfit 必须填 "${outfits.find(o => o.scene === 'sleep').name}"**（睡觉不会穿着上面的外出装）。` : ''}
-- 可用作白天的服装：${dayNames}。
+- outfit 只能是候选服装的名称字符串（原样照抄）或 JSON null，不得编造名称、使用字符串 "null" 或省略字段。
+- 默认服饰 ${defaultName} 是角色的招牌/常态形象，不等于工作制服；工作、普通外出、社交、短暂居家都优先穿默认服饰，在家也可以穿。
+- 起床整理后的首个清醒时段优先明确填写 ${defaultName}；若当时有明确换装理由，可填写对应候选。睡醒不能因 null 沿用睡衣。
+- 私服只在明确的休闲安排、约会需求或用户指定等理由下选择；不要仅因为出门或社交就自动切换。
+- 居家服只在长时间居家放松、沐浴后等确有舒适需求时选择；不要仅因为回家就自动切换，外出不穿居家服。
+- 选择非默认的清醒服饰时，在该活动的 description 中自然交代换装理由，保持原定字数约束。理由结束后在合适时点换回 ${defaultName}。
+- 只在初始着装或实际换装时填写名称，其余清醒时段填 null，表示沿用上段；没有换装理由就持续默认服饰。不要求每天用遍衣柜，不设最低换装次数或服装占比，避免无理由的频繁换装。${sleepOutfit ? `
+- 每个睡眠时段（replyDelay=-1）的 outfit 必须填写 ${JSON.stringify(sleepOutfit.name)}；睡衣只用于睡眠，不作为清醒活动的常态服饰。` : '\n- 没有睡衣候选时，不得编造睡衣名称；睡眠时段 outfit 填 null。'}
+- 可用作清醒活动的服装：${dayNames}。
 
-示例（仅示意 outfit 字段的密度，实际按角色真实日程）：
-{"startTime":"07:00","endTime":"07:30","activity":"晨间梳洗","location":"公寓浴室","replyDelay":0,"tags":["日常"],"description":"……","outfit":null}
-{"startTime":"08:00","endTime":"18:00","activity":"上班","location":"公司","replyDelay":0,"tags":["工作"],"description":"……","outfit":"${outfits.find(o => o.scene === 'work')?.name || outfits[0].name}"}
-{"startTime":"22:00","endTime":"07:00","activity":"就寝","location":"公寓卧室","replyDelay":-1,"tags":["睡眠"],"description":"……","outfit":${hasSleep ? `"${outfits.find(o => o.scene === 'sleep').name}"` : 'null'}}`;
+完整 JSON 示例（展示默认服饰贯穿清醒活动，实际活动和时段按角色日程生成）：
+${JSON.stringify(example)}
+字段约束：startTime/endTime 为 HH:MM，连续覆盖24小时；activity 为简短活动名；location 为实际地点；replyDelay 仅为0或-1；tags 为简短标签字符串数组；description 为26–52字的具体活动描述，省略主语或用角色名，不用我/你/她/他，非默认清醒换装需交代理由；outfit 按上述名称/null规则填写。保留其他日程要求中的附加字段。
+严格按示例的 JSON 对象结构输出，不输出解释、Markdown 或 JSON 以外的文字。`;
 }

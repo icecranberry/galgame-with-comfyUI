@@ -134,3 +134,48 @@ test('restart during clothing completion restores the decision and completes the
   assert.match(calls[0].persona, /Recovered clothing/);
   assert.equal(calls[0].requirement, 'green eyes');
 });
+
+for (const policy of ['generate', 'fallback', 'existing']) test(`paused restart applies edited direction and clothing (${policy})`, async () => {
+  const id = add('paused-edit', policy === 'existing' ? 'Existing red dress' : undefined);
+  const calls = [], designed = [];
+  const task = service.startStandingBatch(id, { slotIds: ['normal'], requirement: 'old direction' }, {
+    ...dependencies(calls),
+    outfitGenerator: async (_, options) => {
+      designed.push(options.scenes);
+      return [{ scene: 'casual', name: '新私服', description: 'New blue dress' }];
+    },
+  });
+  service.controlStandingBatch(id, task.jobId, 'stop');
+  const paused = await finished(task.jobId, 'paused');
+  const preview = service.previewCharacterStandingBatch(id, { outfitScene: 'casual' });
+  assert.equal(preview.targetCount, 1);
+  assert.equal(preview.missingCharacters.length, policy === 'existing' ? 0 : 1);
+  const options = { requirement: '  new direction  ', outfitScene: 'casual' };
+  if (policy !== 'existing') {
+    assert.throws(() => service.controlStandingBatch(id, task.jobId, 'restart', undefined, options), /缺少所选服装/);
+    assert.equal((await finished(task.jobId, 'paused')).request_json, paused.request_json);
+    options.missingOutfitPolicy = policy;
+  }
+  service.controlStandingBatch(id, task.jobId, 'restart', undefined, options);
+  const job = await finished(task.jobId);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].requirement, 'new direction');
+  assert.equal(calls[0].scene, policy === 'fallback' ? 'work' : 'casual');
+  assert.match(calls[0].persona, policy === 'fallback' ? /白色制服/ : policy === 'existing' ? /Existing red dress/ : /New blue dress/);
+  assert.deepEqual(designed, policy === 'generate' ? [['casual']] : []);
+  const snapshot = JSON.parse(job.request_json);
+  assert.equal(snapshot.requirement, 'new direction');
+  assert.equal(snapshot.outfitScene, calls[0].scene);
+  assert.equal(snapshot.persona, calls[0].persona);
+});
+
+test('resume ignores draft direction and keeps the original request', async () => {
+  const id = add('resume-original'), calls = [];
+  const task = service.startStandingBatch(id, { slotIds: ['normal'], requirement: 'original direction' }, dependencies(calls));
+  service.controlStandingBatch(id, task.jobId, 'stop');
+  await finished(task.jobId, 'paused');
+  service.controlStandingBatch(id, task.jobId, 'resume', undefined, { requirement: 'draft direction', outfitScene: 'casual' });
+  await finished(task.jobId);
+  assert.equal(calls[0].requirement, 'original direction');
+  assert.equal(calls[0].scene, 'work');
+});

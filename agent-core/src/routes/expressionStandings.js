@@ -34,7 +34,7 @@ router.put(`${base}/:slot/interaction-regions`, (req, res) => res.json(interacti
 router.get(base, (req, res) => res.json(listExpressionStandings(req.params.id)));
 router.post(`${base}/preflight`, (req, res) => res.json(previewCharacterStandingBatch(req.params.id, req.body)));
 router.post(`${base}/generate`, (req, res) => res.status(202).json(startStandingBatch(req.params.id, req.body)));
-router.post(`${base}/jobs/:jobId/:action`, (req, res) => res.json(controlStandingBatch(req.params.id, req.params.jobId, req.params.action)));
+router.post(`${base}/jobs/:jobId/:action`, (req, res) => res.json(controlStandingBatch(req.params.id, req.params.jobId, req.params.action, undefined, req.body)));
 router.patch(`${base}/:slot/prompt`, (req, res) => {
   updateStandingPrompt(req.params.id, req.params.slot, req.body.prompt, req.body.generation);
   res.json({ ok: true });

@@ -48,10 +48,11 @@ export function selectAngelOutfit(angel, request = {}) {
   const activities = angel.schedule || [];
   for (let step = 0; step < activities.length; step++) {
     const activity = step === 0 ? request.activity : activities[(index - step + activities.length) % activities.length];
+    if (step > 0 && Number(activity?.replyDelay) === -1) break;
     const label = activity?.outfit;
     if (!label) continue;
     const found = outfits.find(outfit => outfit.description && [outfit.name, outfit.scene, outfit.defaultName].includes(String(label).trim()));
-    if (found) return found;
+    if (found) return found.scene === 'sleep' ? outfits[0] : found;
   }
   return outfits[0];
 }

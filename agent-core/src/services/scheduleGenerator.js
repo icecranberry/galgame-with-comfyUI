@@ -162,10 +162,10 @@ ${direction}**
   msgs.push({ role: 'system', content: scheduleInst });
   // msgs[3]: 角色人格（随角色变化，不影响前缀缓存）
   msgs.push({ role: 'system', content: personaMsg });
-  // msgs[3.5]: 着装标注（仅当角色配了 ≥2 套场景服装时才有；没配则完全不加，原提示词不变）
+  // msgs[3.5]: 着装标注（默认服饰加至少一套已配置换装；仅有默认时不加）
   //   放在这里而非 scheduleInst：scheduleInst 是跨角色共享常量（吃 LLM 前缀缓存），
   //   服装列表每个角色都不同，塞进去会让缓存全部失效。
-  const outfitLayer = Array.isArray(options.outfits) ? buildOutfitAnnotation(options.outfits.filter(outfit => outfit.description)) : options.persist === false && !options.resident ? null : buildOutfitAnnotateLayer(character.id);
+  const outfitLayer = Array.isArray(options.outfits) ? buildOutfitAnnotation(options.outfits, character) : options.persist === false && !options.resident ? null : buildOutfitAnnotateLayer(character.id);
   if (outfitLayer) msgs.push({ role: 'system', content: outfitLayer });
   if (cohabitation.room || cohabitation.events.length) {
     msgs.push({ role: 'system', content: `【本轮已确定的共同生活安排】\n${JSON.stringify(cohabitation)}` });

@@ -41,7 +41,7 @@ v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asse
         <input ref="fileInput" class="es-file" type="file" accept="image/png,image/jpeg,image/webp" @change="upload">
       </section>
       <section v-else key="grid" class="es-overview">
-        <StandingGenerationDirection v-model="requirement" v-model:outfit-scene="outfitScene" input-id="standing-character-direction" :disabled="locked" />
+        <StandingGenerationDirection v-model="requirement" v-model:outfit-scene="outfitScene" input-id="standing-character-direction" :disabled="directionLocked" />
         <div class="es-toolbar">
           <linshe-button variant="primary" :disabled="(paused ? submitting || !!working : locked) || controlling || !targets.length" :loading="submitting || (paused && controlling)" @click="paused ? controlTask('restart') : generate()">{{ paused ? '重新生成' : busy ? '正在生成…' : imageCount > 0 ? '重新生成立绘' : '一键生成立绘' }}</linshe-button>
           <linshe-button v-if="busy || job?.resumable" size="sm" :loading="controlling" :disabled="job?.status === 'stopping' || controlling || submitting" @click="controlTask()">{{ paused || job?.resumable ? '继续任务' : job?.status === 'stopping' ? '正在停止…' : '停止任务' }}</linshe-button>
@@ -112,6 +112,7 @@ const locked = computed(() => busy.value || submitting.value || !!working.value)
 const job = computed(() => jobs.value[0])
 const paused = computed(() => job.value?.status === 'paused')
 const controlling = ref(false)
+const directionLocked = computed(() => (busy.value && !paused.value) || submitting.value || !!working.value || controlling.value)
 const pendingSlots = computed(() => {
   if (!busy.value || !job.value) return new Set()
   return new Set(JSON.parse(job.value.slots_json || '[]').slice(job.value.completed || 0))
@@ -120,7 +121,18 @@ async function controlTask(action = paused.value || job.value?.resumable ? 'resu
   if (controlling.value || submitting.value || !job.value) return
   error.value = ''
   controlling.value = true
-  try { await api.controlExpressionStandingTask(props.character.id, job.value.id, action); await refresh() }
+  try {
+    const characterId = props.character.id, jobId = job.value.id
+    let body
+    if (action === 'restart') {
+      body = { requirement: requirement.value, outfitScene: outfitScene.value }
+      const missingOutfitPolicy = await confirmStandingOutfits(() => api.preflightExpressionStandings(characterId, body))
+      if (missingOutfitPolicy === null) return
+      body.missingOutfitPolicy = missingOutfitPolicy
+    }
+    await api.controlExpressionStandingTask(characterId, jobId, action, body)
+    await refresh()
+  }
   catch (e) { error.value = e.message }
   finally { controlling.value = false }
 }
@@ -146,14 +158,20 @@ onBeforeUnmount(() => clearInterval(scanTipTimer))
 const statusLabels = { empty: '未生成', queued: '等待出图', generating: '正在出图', done: '已完成', failed: '失败' }
 const targets = computed(() => slots.value.map(s => s.id))
 const imageCount = computed(() => slots.value.filter(s => s.image_url).length)
-const jobText = computed(() => ({ queued: '等待任务', outfits: '正在自动补全所选服装，完成后继续生成立绘…', stopping: '当前步骤完成后停止，不再提交下一张', paused: '任务已停止，可继续剩余立绘，或按原生成方向重写本批次全部提示词并从头出图', prompts: '正在一次生成全部提示词…', generating: `正在逐张出图 ${job.value?.completed || 0}/${JSON.parse(job.value?.slots_json || '[]').length}`, done: '本批次已完成', partial_failed: '部分图片失败，可单独重试', failed: '任务失败' })[job.value?.status] || '')
-let timer, requestSeq = 0
+const jobText = computed(() => ({ queued: '等待任务', outfits: '正在自动补全所选服装，完成后继续生成立绘…', stopping: '当前步骤完成后停止，不再提交下一张', paused: '任务已停止，可按原设置继续剩余立绘，或修改服装与生成方向后重新生成本批次', prompts: '正在一次生成全部提示词…', generating: `正在逐张出图 ${job.value?.completed || 0}/${JSON.parse(job.value?.slots_json || '[]').length}`, done: '本批次已完成', partial_failed: '部分图片失败，可单独重试', failed: '任务失败' })[job.value?.status] || '')
+let timer, requestSeq = 0, directionJobId = ''
 async function refresh() {
   if (!props.open || !props.character?.id) return
   const seq = ++requestSeq
   try {
     const data = await api.listExpressionStandings(props.character.id)
     if (seq !== requestSeq) return
+    if ((data.busy || data.jobs[0]?.resumable) && data.jobs[0]?.id && data.jobs[0].id !== directionJobId) {
+      const request = JSON.parse(data.jobs[0].request_json || '{}')
+      requirement.value = request.requirement ?? ''
+      outfitScene.value = request.outfitScene ?? props.initialOutfitScene
+      directionJobId = data.jobs[0].id
+    }
     touchLines.value = data.touchLines || {status:"empty"}
     slots.value = data.slots; jobs.value = data.jobs; busy.value = data.busy
   } catch (e) { if (seq === requestSeq) error.value = e.message }
@@ -161,6 +179,7 @@ async function refresh() {
 watch(() => [props.open, props.character?.id], () => {
   chooseOutfitPolicy()
   clearInterval(timer); requestSeq++
+  directionJobId = ''
   showPrompt.value = false
   showTouchLines.value = false
   if (props.open) { outfitScene.value = props.initialOutfitScene; editingId.value = null; error.value = ''; refresh(); timer = setInterval(refresh, 2500) }

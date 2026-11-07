@@ -2101,7 +2101,7 @@ export const preflightExpressionStandings = (id, body) => request(expressionStan
 export const generateAllExpressionStandings = body => request('/expression-standings/generate', { method: 'POST', body })
 export const listExpressionStandings = id => request(expressionStandingPath(id))
 export const generateExpressionStandings = (id, body) => request(expressionStandingPath(id) + '/generate', { method: 'POST', body })
-export const controlExpressionStandingTask = (id, jobId, action) => request(expressionStandingPath(id) + `/jobs/${encodeURIComponent(jobId)}/${action}`, { method: 'POST' })
+export const controlExpressionStandingTask = (id, jobId, action, body) => request(expressionStandingPath(id) + `/jobs/${encodeURIComponent(jobId)}/${action}`, { method: 'POST', body })
 export const updateExpressionStandingPrompt = (id, slot, prompt, generation) => request(expressionStandingPath(id, slot) + '/prompt', { method: 'PATCH', body: { prompt, generation } })
 export const editExpressionStanding = (id, slot, action, body = {}) => request(expressionStandingPath(id, slot) + '/' + action, { method: 'POST', body })
 export const deleteExpressionStanding = (id, slot) => request(expressionStandingPath(id, slot), { method: 'DELETE' })
