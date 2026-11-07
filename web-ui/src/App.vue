@@ -76,7 +76,7 @@ import { useSettingsStore } from './stores/settings.js'
 import { useProactiveStore } from './stores/notifications.js'
 import { forceProactive } from './api/index.js'
 import { loadUserConfig } from './userConfig.js'
-import { playNotificationSound } from './utils/sound.js'
+import { playEncounterSound, playNotificationSound } from './utils/sound.js'
 import { useMailboxStore } from './stores/mailbox.js'
 import { useUpdateStore } from './stores/updateInfo.js'
 import { onEvent as onStreamEvent } from './stores/unifiedStream.js'
@@ -272,7 +272,8 @@ onMounted(async () => {
 
     // 非当前活跃角色 → 播放提示音
     if (data.character_id !== chat.activeCharId) {
-      playNotificationSound()
+      if (data.event_id != null) playEncounterSound()
+      else playNotificationSound()
     }
   })
 

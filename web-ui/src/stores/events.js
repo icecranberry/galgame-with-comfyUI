@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from './unifiedStream.js'
+import { playEncounterSound } from '../utils/sound.js'
 
 export const useEventsStore = defineStore('events', () => {
   const HISTORY_PAGE_SIZE = 20
@@ -338,7 +339,10 @@ export const useEventsStore = defineStore('events', () => {
     _unsubs = [
       onEvent('new_event', (data) => {
         const exists = activeEvents.value.find(e => e.id === data.id)
-        if (!exists) activeEvents.value.unshift(data)
+        if (!exists) {
+          activeEvents.value.unshift(data)
+          playEncounterSound()
+        }
         _bumpUnreadLocal()
       }),
       onEvent('event_update', (data) => {

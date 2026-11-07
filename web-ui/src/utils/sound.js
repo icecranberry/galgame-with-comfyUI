@@ -1,4 +1,20 @@
 let _audioCtx = null
+let _lastEncounterAt = -Infinity
+let _encounterPlayer = null
+const encounterSoundUrl = new URL('../assets/sounds/encounter-discovery.wav', import.meta.url).href
+
+/** 奇遇出现：掠过声接魔法钟音与回响；复用播放器，成批通知不叠响。 */
+export async function playEncounterSound() {
+  try {
+    if (typeof window === 'undefined') return
+    const now = Date.now()
+    if (now - _lastEncounterAt < 1800) return
+    _lastEncounterAt = now
+    if (!_encounterPlayer) _encounterPlayer = new Audio(encounterSoundUrl)
+    _encounterPlayer.currentTime = 0
+    await _encounterPlayer.play()
+  } catch { /* 自动播放受限或设备不支持时，不影响奇遇通知。 */ }
+}
 
 export function playNotificationSound() {
   try {
