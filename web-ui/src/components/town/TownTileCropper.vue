@@ -17,7 +17,7 @@
       </div>
       <div v-if="!loaded" class="ttc-loading">裁剪前原图加载中…</div>
       <Teleport to="body">
-        <aside class="ttc-info" :style="infoStyle" aria-label="图片生成配置">
+        <aside v-if="showGeneration" class="ttc-info" :style="[infoStyle, { zIndex: modalLayer + 1 }]" aria-label="图片生成配置">
           <TownPromptPanel
             :model-value="generationParams"
             :step="generationStep"
@@ -57,14 +57,14 @@
 
     <Teleport to="body">
       <Transition name="ttc-fade">
-        <div v-if="tip" class="ttc-tip">{{ tip }}</div>
+        <div v-if="tip" class="ttc-tip" :style="{ zIndex: modalLayer + 2 }">{{ tip }}</div>
       </Transition>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, inject } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
@@ -89,6 +89,7 @@ const props = defineProps({
   generationParams: { type: Object, required: true },
   isPortrait: { type: Boolean, default: false },
   configStatus: { type: String, default: '' },
+  showGeneration: { type: Boolean, default: true },
 })
 const emit = defineEmits(['cropped', 'update:generationParams'])
 
@@ -103,6 +104,7 @@ const view = reactive({ scale: 1, x: 0, y: 0 })
 /** 菱形包围框（原图像素坐标）：宽 w、高 w/2 */
 const diamond = reactive({ x: 0, y: 0, w: 0 })
 const infoStyle = ref({ top: '16px', right: '16px' })
+const modalLayer = inject('linsheModalLayer', 1169)
 
 let img = null
 let ctx = null
@@ -181,7 +183,7 @@ function diamondPoints() {
 }
 
 function updateInfoPosition() {
-  const panel = frameEl.value?.closest?.('.tam-panel')
+  const panel = frameEl.value?.closest?.('.modal-panel')
   const top = panel ? Math.max(12, panel.getBoundingClientRect().top + 12) : 16
   if (!panel) {
     infoStyle.value = { top: `${top}px`, right: '16px' }
@@ -459,7 +461,7 @@ watch(() => props.src, (v) => { if (v) loadImage(v) })
 
 onMounted(() => {
   nextTick(() => updateInfoPosition())
-  const panel = frameEl.value?.closest?.('.tam-panel')
+  const panel = frameEl.value?.closest?.('.modal-panel')
   if (panel && typeof ResizeObserver !== 'undefined') {
     infoResizeObserver = new ResizeObserver(() => updateInfoPosition())
     infoResizeObserver.observe(panel)

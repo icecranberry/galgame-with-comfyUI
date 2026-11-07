@@ -121,6 +121,7 @@ const sceneOptions = [
   { value: 'chat', label: '聊天' },
   { value: 'group', label: '群聊' },
   { value: 'portrait', label: '立绘' },
+  { value: 'town_portrait', label: '小镇立绘' },
   { value: 'moments', label: '朋友圈' },
   { value: 'events', label: '奇遇' },
   { value: 'sticker', label: '表情包' },
@@ -128,7 +129,7 @@ const sceneOptions = [
   { value: 'schedule', label: '日程' },
 ]
 
-// 表情包是后补作用范围；新增 LoRA 默认只勾选既有七类，显式打开后才生效。
+// 表情包需显式开启；其余范围（含小镇立绘）默认勾选。
 const defaultScenes = () => sceneOptions.filter(s => s.value !== 'sticker').map(s => s.value)
 
 const lorasFiles = ref([])

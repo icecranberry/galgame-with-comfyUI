@@ -18,7 +18,7 @@
       </div>
       <div v-if="!loaded" class="ie-loading" role="status">{{ loadError || loadingText || '加载中…' }}</div>
       <Teleport to="body">
-        <aside v-if="showGeneration" v-show="!gapOpen" class="ie-info" :style="infoStyle" aria-label="图片生成配置">
+        <aside v-if="showGeneration" v-show="!gapOpen" class="ie-info" :style="[infoStyle, { zIndex: modalLayer + 1 }]" aria-label="图片生成配置">
           <TownPromptPanel
             :model-value="generationParams"
             :step="generationStep"
@@ -100,14 +100,14 @@
 
     <Teleport to="body">
       <Transition name="ie-fade">
-        <div v-if="savedTip" class="ie-saved-tip">{{ savedTip }}</div>
+        <div v-if="savedTip" class="ie-saved-tip" :style="{ zIndex: modalLayer + 2 }">{{ savedTip }}</div>
       </Transition>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, useId } from 'vue'
+import { ref, shallowRef, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, useId, inject } from 'vue'
 import * as api from '../../api/index.js'
 import LinsheButton from '../ui/LinsheButton.vue'
 import TownPromptPanel from './TownPromptPanel.vue'
@@ -136,6 +136,7 @@ const props = defineProps({
 const emit = defineEmits(['saved', 'cropped', 'update:generationParams'])
 
 const frameEl = ref(null)
+const modalLayer = inject('linsheModalLayer', 1169)
 const canvasEl = ref(null)
 const loaded = ref(false)
 const loadError = ref('')
@@ -409,7 +410,7 @@ const canvasViewStyle = computed(() => ({ transform: `translate(${view.x}px, ${v
 
 /** 配置面板挂在主弹窗外侧；空间不足时保持右侧可见 */
 function updateInfoPosition() {
-  const panel = frameEl.value?.closest?.('.tam-panel')
+  const panel = frameEl.value?.closest?.('.modal-panel')
   const top = panel ? Math.max(12, panel.getBoundingClientRect().top + 12) : 16
   if (!panel) {
     infoStyle.value = { top: `${top}px`, right: '16px' }

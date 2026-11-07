@@ -2,7 +2,7 @@
   <Teleport :to="anchor || 'body'" defer>
     <!-- 首次直达页面时，anchor 宿主与弹窗同批挂载；等宿主插入后再解析目标。 -->
     <Transition name="modal-fade" :duration="transitionMs" @after-leave="afterLeave">
-      <div v-if="isOpen" ref="overlay" class="modal-overlay linshe-modal-overlay" :class="{ 'is-host-anchored': isAnchored, 'is-floating': floating }" :style="overlayStyle" @pointerdown="onBackdropPointerDown" @click.self="onBackdropClick">
+      <div v-if="isOpen" ref="overlay" class="modal-overlay linshe-modal-overlay" :class="{ 'is-host-anchored': isAnchored, 'is-floating': floating, 'is-full-height': fullHeight }" :style="overlayStyle" @pointerdown="onBackdropPointerDown" @click.self="onBackdropClick">
         <div ref="panel" class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full, 'modal-comic': variant === 'comic' }, panelClass]" role="dialog" :aria-modal="floating ? undefined : true" :aria-label="title || undefined" tabindex="-1" @click.stop>
           <div class="modal-header">
             <slot name="title"><h3 class="modal-title">{{ title }}</h3></slot>
@@ -31,7 +31,7 @@
 // 视觉走全局 modal 家族类 + 本组件的白色内衬（--modal-lining-*）。
 // 暖色沿用 v3.2 人物详情卡口径（暖纸外壳 + 白色内衬），暗夜保持 Cel Glow 深色玻璃。
 // 内容用 #default 插槽；需要自定义底部操作区时用 #footer；头部右侧附加内容用 #header-extra。
-import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount, provide } from 'vue'
 
 import LinsheCloseButton from './LinsheCloseButton.vue'
 import { registerModal, nextModalLayer } from './modalStack.js'
@@ -45,6 +45,7 @@ const props = defineProps({
   transitionMs: { type: Number, default: undefined },
   wide: { type: Boolean, default: false },   // 面板加宽（.modal-wide）
   full: { type: Boolean, default: false },   // 大型管理面板（.modal-full）
+  fullHeight: { type: Boolean, default: false }, // 撑满可用高度，宽度仍由原尺寸档位控制
   floating: { type: Boolean, default: false }, // 右下角无阻挡工具窗，复用统一面板皮肤
   panelClass: { type: [String, Array, Object], default: '' },
   bodyClass: { type: [String, Array, Object], default: '' },
@@ -71,6 +72,8 @@ const isOpen = computed(() => props.modelValue || props.visible)
 const isAnchored = computed(() => !!props.anchor)
 const overlay = ref(null), panel = ref(null), checkingClose = ref(false)
 const activeLayer = ref(undefined)
+// Teleport 到 body 的附属工具仍需跟随本窗口的动态栈层级。
+provide('linsheModalLayer', computed(() => activeLayer.value ?? props.zIndex ?? 10000))
 const overlayStyle = computed(() => ({
   ...(props.transitionMs !== undefined ? { '--linshe-modal-duration': `${props.transitionMs}ms` } : {}),
   ...(activeLayer.value !== undefined ? { zIndex: activeLayer.value } : {}),
@@ -188,7 +191,12 @@ onBeforeUnmount(() => {
 .linshe-modal-overlay.is-host-anchored .modal-panel { max-width: 100%; }
 
 /* 社交帖子与数字报刊共用阅读窗尺寸，移动端继续使用下方统一适配。 */
+.linshe-modal-overlay.is-full-height > .modal-panel {
+  height: 100%;
+  max-height: 100%;
+}
 @media (min-width: 768px) {
+  .linshe-modal-overlay.is-full-height { padding-block: 0; }
   .linshe-modal-overlay:has(> .media-reader-panel) {
     padding-block: 10px;
   }

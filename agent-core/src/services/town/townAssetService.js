@@ -489,8 +489,8 @@ async function generateIntoRow(row, guard) {
 
   try {
     const result = await generateImageRaw(prompt, {
-      // 大立绘按立绘场景过滤全局 LoRA，其余镇内素材按小镇场景；工作流仍按小镇场景选择
-      scene: isPortraitAsset(row) ? 'portrait' : 'town',
+      // 小镇大立绘使用独立 LoRA 范围，不影响普通立绘；工作流仍按小镇场景选择
+      scene: isPortraitAsset(row) ? 'town_portrait' : 'town',
       workflowScene: 'town',
       priority: 'high',
       disableRAG: true,
@@ -690,8 +690,8 @@ export async function refineAssetWithHires(id) {
       promptText: row.source_prompt,
       artist: meta.artist !== undefined ? meta.artist : config.comfyui.artist,
       loras: Array.isArray(meta.loras) ? meta.loras : [],
-      // 与生成时同口径：大立绘按立绘场景过滤全局 LoRA，工作流仍按小镇场景选择
-      scene: isPortraitAsset(row) ? 'portrait' : 'town',
+      // 与生成时同口径：小镇大立绘使用独立 LoRA 范围，工作流仍按小镇场景选择
+      scene: isPortraitAsset(row) ? 'town_portrait' : 'town',
       workflowScene: 'town',
     });
     assertAssetCurrent(guard);

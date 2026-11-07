@@ -57,9 +57,16 @@ function fixture(t, { anchor = '.page-modal-host', existingHost = false, initial
   insert(container, body)
   if (existingHost) insert(Object.assign(node('div'), { props: { class: 'page-modal-host' } }), body)
   const open = Vue.ref(initiallyOpen), title = Vue.ref('居民动态')
+  const zIndex = Vue.ref(11000)
+  const FloatingTool = { setup() {
+    const layer = Vue.inject('linsheModalLayer')
+    return () => Vue.h(Vue.Teleport, { to: 'body' }, Vue.h('aside', {
+      class: 'floating-tool', style: { zIndex: layer.value + 1 },
+    }))
+  } }
   const route = Vue.ref('town')
   const TownPage = { setup: () => () => Vue.h('section', { class: 'town-shell' }, [
-    Vue.h(Modal, { anchor, modelValue: open.value, title: title.value }, { default: () => Vue.h('p', '行动记录') }),
+    Vue.h(Modal, { anchor, modelValue: open.value, title: title.value, zIndex: zIndex.value }, { default: () => [Vue.h('p', '行动记录'), Vue.h(FloatingTool)] }),
     Vue.h(Modal, { anchor, modelValue: false, title: '全镇动态' }),
   ]) }
   const OtherPage = { setup: () => () => Vue.h('section', { class: 'settings-view' }, '设置') }
@@ -74,7 +81,8 @@ function fixture(t, { anchor = '.page-modal-host', existingHost = false, initial
   app.config.warnHandler = warning => warnings.push(warning)
   app.mount(container)
   t.after(() => app.unmount())
-  return { open, title, route, errors, warnings, earlyTargetLookups: () => earlyTargetLookups,
+  return { open, title, route, zIndex, errors, warnings, earlyTargetLookups: () => earlyTargetLookups,
+    tool: () => find(body, element => hasClass(element, 'floating-tool')),
     overlay: () => find(body, element => hasClass(element, 'modal-overlay')),
     target: () => anchor ? find(body, element => hasClass(element, anchor.slice(1))) : body,
   }
@@ -100,6 +108,22 @@ test('direct page mount resolves an initially closed anchored modal after its ho
   assert.equal(state.overlay()?.parent, state.target())
   assert.deepEqual(state.errors, [])
   assert.deepEqual(state.warnings, [])
+})
+
+test('teleported tool inherits its modal layer reactively and unmounts with the modal', async t => {
+  const state = fixture(t, { initiallyOpen: true })
+  await Vue.nextTick()
+  assert.equal(state.tool().props.style.zIndex, 11001)
+  state.zIndex.value = 13000
+  await Vue.nextTick()
+  assert.equal(state.tool().props.style.zIndex, 13001)
+  state.open.value = false
+  await Vue.nextTick()
+  assert.equal(state.tool(), undefined)
+  state.open.value = true
+  await Vue.nextTick()
+  assert.equal(state.tool().props.style.zIndex, 13001)
+  assert.deepEqual(state.errors, [])
 })
 
 test('leaving and reopening a page with multiple anchored modals never removes the route insertion anchor', async t => {

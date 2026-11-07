@@ -47,6 +47,7 @@ const DB_ONLY_KEYS = new Set([
   'emoji_style_mode',
   'standing_prompt_mode',
   'novelai_api_key',
+  'global_lora_town_portrait_migrated',
 ]);
 
 /** 写入单条系统设置 */
@@ -183,6 +184,24 @@ export function migrateGlobalLoraScenes(loras) {
 // 从 DB 读取 system_settings 覆盖 config 内存（DB 优先于代码默认值）
 export function loadSystemSettings(db) {
   const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
+  // 新范围对存量 LoRA 默认开启，迁移只运行一次，避免重启撤销用户之后的关闭操作。
+  if (!rows.some(row => row.setting_key === 'global_lora_town_portrait_migrated')) {
+    const row = rows.find(row => row.setting_key === 'comfy_global_lora');
+    const loras = row ? castValue(row.setting_value, 'json') : undefined;
+    db.transaction(() => {
+      if (Array.isArray(loras)) {
+        const migrated = migrateGlobalLoraScenes(loras).map(l => {
+          // 缺失 / 空范围原本代表全部生效，保留其语义。
+          if (!l || !Array.isArray(l.scenes) || !l.scenes.length || l.scenes.includes('town_portrait')) return l;
+          return { ...l, scenes: [...l.scenes, 'town_portrait'] };
+        });
+        const value = JSON.stringify(migrated);
+        db.prepare(`UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = 'comfy_global_lora'`).run(value);
+        row.setting_value = value;
+      }
+      db.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES ('global_lora_town_portrait_migrated', '1')`).run();
+    })();
+  }
   // 老客户已经明确保存过采样参数时，升级不能静默改成“跟随源工作流”。
   if (!rows.some(row => row.setting_key === 'comfy_hires_sampling_mode')
     && rows.some(row => ['comfy_hires_steps', 'comfy_hires_cfg'].includes(row.setting_key))) {

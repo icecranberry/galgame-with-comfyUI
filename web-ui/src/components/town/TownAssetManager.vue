@@ -1,5 +1,5 @@
 <template>
-    <linshe-modal :visible="open" :title="displayAsset?.name || title || '图片管理'" wide :close-disabled="regenBusy || hiresBusy" :suspended="promptOpen" :z-index="11000" @close="close" panel-class="asset-manager-modal" body-class="modal-form-body">
+    <linshe-modal :visible="open" :title="displayAsset?.name || title || '图片管理'" wide :full-height="fullHeightAsset" :close-disabled="regenBusy || hiresBusy" :suspended="promptOpen" :z-index="11000" @close="close" panel-class="asset-manager-modal" body-class="modal-form-body">
       <template #title>
         <div class="modal-heading-content">
             <div class="tam-heading">
@@ -19,7 +19,9 @@
             @change="onFilePicked"
           >
 
-          <div class="tam-editor">
+          <div class="tam-workspace">
+          <div class="tam-main">
+          <div class="tam-editor" :class="{ 'tam-editor-portrait': portraitConfig }">
             <!-- 地皮：单独一套菱形裁剪逻辑——在裁剪前原图上调菱形，而不是在已成型的 128×64 上裁 -->
             <TownTileCropper
               v-if="open && displayAsset?.id && useTileCropper"
@@ -31,6 +33,7 @@
               :generation-step="generationStep"
               :generation-params="generationParams"
               :is-portrait="portraitConfig"
+              :show-generation="false"
               :config-status="generationStatus"
               @update:generation-params="queueGenerationConfigSave"
               @cropped="refreshAsset"
@@ -63,7 +66,9 @@
               :generation-step="generationStep"
               :generation-params="generationParams"
               :is-portrait="portraitConfig"
+              :show-generation="false"
               :config-status="generationStatus"
+              :fit-container="portraitConfig"
               @update:generation-params="queueGenerationConfigSave"
               @saved="refreshAsset"
               @cropped="refreshAsset"
@@ -99,6 +104,18 @@
             <span v-if="error" class="tam-error">{{ error }}</span>
             <span v-else class="tam-status">{{ regenStatus }}</span>
           </div>
+          </div>
+          <aside class="tam-config" aria-label="图片生成配置">
+            <TownPromptPanel
+              :model-value="generationParams"
+              :step="generationStep"
+              :hide-prefix="portraitConfig"
+              :show-portrait-lora="portraitConfig"
+              @update:model-value="queueGenerationConfigSave"
+            />
+            <div v-if="generationStatus" class="tam-config-status" role="status">{{ generationStatus }}</div>
+          </aside>
+          </div>
 
     </linshe-modal>
 
@@ -120,6 +137,7 @@ import LinsheButton from '../ui/LinsheButton.vue'
 import TownImageEditor from './TownImageEditor.vue'
 import TownTileCropper from './TownTileCropper.vue'
 import TownAssetPromptDialog from './TownAssetPromptDialog.vue'
+import TownPromptPanel from './TownPromptPanel.vue'
 
 const ASSET_STEP_LABELS = { tiles: '地皮', buildings: '建筑/道具', npcs: '居民', player: '玩家' }
 
@@ -188,6 +206,7 @@ function generationStepForAsset(asset) {
 
 const generationStep = computed(() => generationStepForAsset(displayAsset.value))
 const portraitConfig = computed(() => displayAsset.value?.kind === 'portrait')
+const fullHeightAsset = computed(() => ['portrait', 'building', 'ground', 'road'].includes(displayAsset.value?.kind))
 const generationTypeName = computed(() => ASSET_STEP_LABELS[generationStep.value] || '通用')
 const stepConfig = computed(() => generationSettings.value?.generation?.steps?.[generationStep.value] || null)
 const generationParams = computed(() => {
@@ -443,7 +462,23 @@ watch(() => props.open, async (open) => {
 
 .tam-file { display: none; }
 
+.tam-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.tam-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: auto; }
+.tam-config { min-width: 0; min-height: 0; overflow: auto; }
+.tam-config-status { margin-top: 8px; font-size: var(--fs-sm); line-height: 1.5; color: var(--text-secondary); }
+
+.tam-editor-portrait { flex: 1; min-height: 0; }
+/* 矮屏和展开抠白工具时保留画布，工具区独立滚动。 */
+.tam-editor-portrait :deep(.ie-toolbar) { max-height: 50%; overflow-y: auto; }
+
 .tam-actions {
+  flex-shrink: 0;
   display: flex;
   align-items: flex-end;
   gap: 10px;
@@ -465,5 +500,10 @@ watch(() => props.open, async (open) => {
 
 .tam-fade-enter-active, .tam-fade-leave-active { transition: opacity 0.2s ease; }
 .tam-fade-enter-from, .tam-fade-leave-to { opacity: 0; }
-:global(.linshe-modal.asset-manager-modal) { width: min(1080px, 96vw); }
+:global(.linshe-modal.asset-manager-modal) { width: min(1360px, 96vw); }
+@media (max-width: 900px) {
+  .tam-workspace { display: flex; flex-direction: column; overflow: auto; }
+  .tam-main, .tam-config { flex: none; overflow: visible; }
+  .tam-editor-portrait { flex: none; height: 65dvh; min-height: 280px; }
+}
 </style>
