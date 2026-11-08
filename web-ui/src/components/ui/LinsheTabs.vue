@@ -32,6 +32,7 @@
         {{ option.eyebrow }}
       </span>
       {{ option.label }}
+      <span v-if="variant === 'filter' && option.count != null" class="ls-tabs__count">{{ option.count }}</span>
       <span v-if="option.badge" class="ls-tabs__badge">{{ option.badge }}</span>
     </div>
   </div>
@@ -168,8 +169,54 @@ function navigate(event, option) {
   pointer-events: none;
 }
 
+/* 轻量分类栏：不为每个分类加外壳，只突出当前项。 */
+.ls-tabs--filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+.ls-tabs--filter .ls-tabs__item {
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+.ls-tabs--filter .ls-tabs__item:hover:not(.ls-tabs__item--active) {
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+}
+.ls-tabs--filter .ls-tabs__item--active {
+  background: rgba(var(--accent-rgb), 0.09);
+  color: var(--accent-hover);
+  box-shadow: none;
+}
+.ls-tabs--filter .ls-tabs__item--active::after {
+  bottom: 0;
+}
+.ls-tabs--filter .ls-tabs__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ls-tabs__count {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.ls-tabs--filter .ls-tabs__item--active .ls-tabs__count { color: inherit; }
+@media (max-width: 767px) {
+  .ls-tabs--filter { gap: 2px 4px; }
+  .ls-tabs--filter .ls-tabs__item { min-height: 40px; padding: 9px 8px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ls-tabs__item {
+  .ls-tabs__item,
+  .ls-tabs--filter .ls-tabs__item {
     transition: none;
   }
 }

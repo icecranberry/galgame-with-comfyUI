@@ -6,9 +6,7 @@
           <div class="iet-modal-card">
             <div class="iet-modal-head">
               <div class="iet-modal-title">{{ actionLabel(modalTask.action) }}完成</div>
-              <linshe-button variant="icon" size="sm" class="iet-icon-btn" title="保留原图" @click="onDiscard(modalTask)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-              </linshe-button>
+              <linshe-close-button label="关闭并保留原图" :disabled="busy" @click="onDiscard(modalTask)" />
             </div>
             <div class="iet-modal-preview">
               <BeforeAfterSlider :before="modalTask.url" :after="modalTask.previewUrl" fit-mode="container" />
@@ -105,6 +103,7 @@ import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { useDiaryStore } from '../stores/diary.js'
 import BeforeAfterSlider from './BeforeAfterSlider.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import LinsheCloseButton from './ui/LinsheCloseButton.vue'
 import { stopBackfillMoments } from '../api/index.js'
 
 const store = useImageEditTasksStore()
@@ -492,10 +491,6 @@ async function onRetryDiary(task) {
 
 .iet-modal-title { font-size: 15px; font-weight: 600; color: #3E3A36; }
 
-.iet-icon-btn { opacity: 0.55; }
-.iet-icon-btn svg { width: 10px; height: 10px; }
-.iet-icon-btn:hover { opacity: 1; }
-
 .iet-modal-preview {
   padding: 0 18px;
   flex: 1;
@@ -577,9 +572,6 @@ async function onRetryDiary(task) {
   .iet-modal-head {
     padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 8px;
   }
-  /* 24px 的圆钮在手机上太难点，放大到 38px 热区（皮肤仍由 LinsheButton 决定） */
-  .iet-modal-head .iet-icon-btn { width: 38px; height: 38px; flex: none; }
-  .iet-modal-head .iet-icon-btn svg { width: 13px; height: 13px; }
   .iet-modal-preview {
     padding: 0 12px;
     overflow: hidden;

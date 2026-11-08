@@ -106,6 +106,7 @@
 
 - **`LinsheButton`**：表单与弹窗按钮不留裸 `<button>`。变体 `primary`（主操作实心，每屏至多一个）/ `secondary`（次要，默认）/ `danger` / `ghost`（描边幽灵）/ `icon`（圆形小图标钮，中性糖面 + 悬停转主题色，尺寸档位为正方形）/ `chip`（胶囊选择、页签）/ `link`（文字链接）。「软糖立体」＝亮面填充 + 深色厚底硬投影 + 按下下沉压扁，与 `.btn-primary` 贴纸按钮语言同源；实底色走 `--accent` / `--fun-*`，底厚与投影走 `--btn-lip` / `--shadow-hard` 系 token。
 - `LinsheButton` 的 `ghost` 保留描边、厚底与原有按压反馈，常态与悬停均使用 `--bg-secondary`（暖色为白底，暗夜沿用主题底色），搭配主／次文字混合的中性墨色及柔和描边；悬停只以珊瑚色强调文字与描边，不改变底色。配色随暖色／暗夜 token 切换，辅助操作保持低于 primary／secondary 的视觉权重。
+- 图库分类使用 `LinsheTabs variant="filter"`：透明轨道、无独立白底胶囊、描边与阴影，以留白组织文字分类；当前项使用浅主题色底与短下划线，数量以小号等宽数字附在名称旁。支持自然换行与键盘方向键，颜色反馈为 300ms；皮肤只在页签组件维护，其他页签不变。
 - **`LinsheInput`**：文本输入框 / 文本域统一使用平面轮廓：保留原有 `--bg-secondary` 主题底色（悬停、聚焦均不变色），1.5px `--border` 细描边、`--radius-md` 圆角（sm 用 `--radius-sm`），不使用凹陷阴影、高光或发光光晕。悬停描边加深至 `--border-strong`；聚焦只将同一圈边框变为 `--accent`，不叠加外圈，尺寸不变；错误态边框始终使用 `--danger`，禁用底色保持 `--bg-tertiary`。聊天输入框、信纸、透明嵌入输入等特殊输入界面保留独立设计，但皮肤色值应对齐 token。
 - **`LinsheAutoTextarea`**：需要自动增高、或收起时单行省略的长文本域使用（`collapsible` / `min-height`），皮肤与 `LinsheInput` 同源，不要自己写 auto-resize。
 - **`LinsheSelect`**：下拉选择统一使用。触发器与 LinsheInput 同皮肤；选项面板 Teleport 到 body 的轻量浮层，选中态用 `--accent`，空间不足自动向上翻转。

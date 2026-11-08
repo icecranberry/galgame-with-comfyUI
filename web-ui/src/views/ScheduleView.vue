@@ -302,17 +302,17 @@
     </linshe-modal>
 
     <!-- ═══ 重置世界线确认弹窗 ═══ -->
-    <linshe-modal :visible="showResetConfirm" title="全部重置" @close="showResetConfirm = false" panel-class="schedule-reset-modal">
-      <template #title>
-        <div class="modal-heading-content">
+    <Teleport to="body">
+      <Transition name="modal">
+        <div v-if="showResetConfirm" class="reset-overlay reset-confirm-overlay" @click.self="showResetConfirm = false">
+          <div class="reset-dialog" @click.stop>
+            <div class="reset-dialog-header">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="1,4 1,10 7,10" />
                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
               <span>全部重置</span>
             </div>
-      </template>
-
             <div class="reset-dialog-desc">
               <p>将重新生成全部 <b>{{ store.characters.length }}</b> 个角色的日程表。可输入方向来影响生成结果，留空则随机生成。</p>
               <linshe-input
@@ -325,12 +325,14 @@
                 @keydown.enter.exact="confirmResetAll"
               />
             </div>
-
-      <template #footer>
+            <div class="reset-dialog-actions">
               <linshe-button class="reset-btn-bg" variant="secondary" style="flex: 1" @click="confirmResetRandom">随机日程规划</linshe-button>
               <linshe-button class="reset-btn-confirm" variant="primary" @click="confirmResetAll" :disabled="!resetDirection.trim()">按此方向生成</linshe-button>
-      </template>
-    </linshe-modal>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- ═══ 重置世界线进度弹窗 ═══ -->
     <Teleport to="body">
@@ -1718,6 +1720,8 @@ function finishReset() {
 .modal-leave-to .peek-film { transform: scale(0.95) translateY(10px); }
 
 /* ── 重置世界线弹窗 ── */
+.reset-confirm-overlay.modal-enter-active,
+.reset-confirm-overlay.modal-leave-active { transition-duration: 0.3s; }
 .reset-overlay {
   position: fixed; inset: 0; z-index: 1200;
   background: rgba(0,0,0,0.3); backdrop-filter: blur(4px);

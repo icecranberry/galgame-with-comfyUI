@@ -24,18 +24,15 @@
       </div>
     </div>
 
-    <!-- 文件夹筛选按钮（常驻） -->
-    <div v-if="!loading && folderButtons.length > 1" class="folder-bar">
-      <linshe-button
-        v-for="f in folderButtons"
-        :key="f.key"
-        variant="chip"
-        :active="activeFolder === f.key"
-        @click="onFolderChange(f.key)"
-      >
-        <span class="folder-label">{{ f.label }}</span>
-        <span class="folder-count">{{ f.count }}</span>
-      </linshe-button>
+    <!-- 分类以轻量文字页签呈现，当前分类单独强调 -->
+    <div v-if="!loading && folderOptions.length > 1" class="folder-bar">
+      <linshe-tabs
+        :model-value="activeFolder"
+        :options="folderOptions"
+        variant="filter"
+        aria-label="图片分类"
+        @update:model-value="onFolderChange"
+      />
     </div>
 
     <!-- 按时间分组的图片网格 -->
@@ -111,6 +108,7 @@
       :visible="lightboxVisible"
       :imgs="lightboxImgs"
       :index="lightboxIndex"
+      @on-index-change="onPreviewIndexChange"
       @hide="lightboxVisible = false"
       @regenerated="onRegenerated"
       @upscaled="onRegenerated"
@@ -124,6 +122,7 @@ import { ref, computed, inject, onMounted } from 'vue'
 import { listGalleryImages, deleteImagesBatch } from '../api/index.js'
 import ImageLightbox from './ImageLightbox.vue'
 import LinsheButton from './ui/LinsheButton.vue'
+import LinsheTabs from './ui/LinsheTabs.vue'
 import { bustUrlIfOverwritten } from '../utils/imageUrlRefresh.js'
 import { useChatStore } from '../stores/chat.js'
 
@@ -150,8 +149,8 @@ const charScrollRef = ref(null)
 
 const chat = useChatStore()
 
-const folderButtons = computed(() => {
-  const all = { key: null, label: '全部', count: total.value }
+const folderOptions = computed(() => {
+  const all = { value: null, label: '全部', count: total.value }
   if (!activeFolder.value) all.count = total.value
   else {
     // when filtered, compute "全部" count from folders
@@ -159,7 +158,7 @@ const folderButtons = computed(() => {
     for (const f of folders.value) sum += f.count
     all.count = sum
   }
-  return [all, ...folders.value.map(f => ({ key: f.key, label: f.label, count: f.count }))]
+  return [all, ...folders.value.map(f => ({ value: f.key, label: f.label, count: f.count }))]
 })
 
 const allDayGroups = computed(() => {
@@ -227,6 +226,14 @@ const lightboxImgs = computed(() => {
 function onPreview(flatIndex) {
   lightboxIndex.value = flatIndex
   lightboxVisible.value = true
+  onPreviewIndexChange(null, flatIndex)
+}
+
+function onPreviewIndexChange(_oldIndex, index) {
+  // 打开末张或翻到末张时续页；追加列表不改预览索引，避免跳图。
+  if (lightboxVisible.value && index >= 0 && index === lightboxImgs.value.length - 1) {
+    return loadMore()
+  }
 }
 
 // ── 多选与批量删除 ──
@@ -512,15 +519,6 @@ defineExpose({ refresh, toggleSelectMode })
   padding: 4px 0 16px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
-}
-
-.folder-label {
-  font-weight: 500;
-}
-
-.folder-count {
-  font-size: 11px;
-  opacity: 0.7;
 }
 
 /* ── 空状态 ── */

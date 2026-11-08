@@ -71,7 +71,7 @@ const props = defineProps({
   zIndex: { type: Number, default: null },
 })
 
-const emit = defineEmits(['hide', 'update:visible', 'regenerated', 'upscaled', 'deleted'])
+const emit = defineEmits(['hide', 'update:visible', 'regenerated', 'upscaled', 'deleted', 'on-index-change'])
 const toastFn = inject('toast', null)
 const confirmFn = inject('confirm', null)
 const imageEditTasks = useImageEditTasksStore()
@@ -456,10 +456,20 @@ async function onDelete() {
 </script>
 
 <style>
+/* 图片与加载状态直接切换；保留外层灯箱开合与图片缩放、旋转过渡。 */
+.vel-modal > .vel-fade-enter-active,
+.vel-modal > .vel-fade-leave-active {
+  transition: none;
+}
+.vel-modal > .vel-fade-enter-from,
+.vel-modal > .vel-fade-leave-to {
+  opacity: 1;
+}
+
 /* ── 电脑端：遮罩右侧竖排操作栏（z-index 由内联样式动态设定，高于遮罩） ── */
 .vel-action-rail {
   position: fixed;
-  right: 22px;
+  right: 42px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
