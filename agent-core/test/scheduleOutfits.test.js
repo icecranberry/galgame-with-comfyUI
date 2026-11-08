@@ -162,3 +162,36 @@ test('独立天使衣柜同样在睡醒后回默认，保留睡眠与明确私�
   assert.equal(selectAngelOutfit(angel, { activity: day[1], activity_index: 1 }).scene, 'work');
   assert.equal(selectAngelOutfit(angel, { activity: { ...day[1], outfit: casual.name }, activity_index: 1 }).scene, 'casual');
 });
+
+test('日程格式连续四次错误后仍可成功，纠错只追加在最后 user 并始终关闭思考', async t => {
+  t.mock.method(console, 'warn', () => {});
+  const previous = config.features.scheduleDisableThinking;
+  config.features.scheduleDisableThinking = true;
+  t.after(() => { config.features.scheduleDisableThinking = previous; });
+  const requests = [];
+  const invalid = ['不是JSON', JSON.stringify({ activities: day.map(({ description, ...a }) => a) }),
+    JSON.stringify({ activities: day.slice(1) }), JSON.stringify({ activities: day.map(a => ({ ...a, replyDelay: 0 })) })];
+  const generated = await generateSchedule(character(), '', { persist: false, thinking: { type: 'enabled' }, chat: async (messages, options) => {
+    requests.push({ messages, options });
+    return invalid[requests.length - 1] ?? JSON.stringify({ activities: day });
+  } });
+  assert.equal(requests.length, 5);
+  assert.deepEqual(JSON.parse(generated.schedule_json), day);
+  for (const { messages, options } of requests) {
+    assert.equal(options.forceDisableThinking, true);
+    assert.deepEqual(options.thinking, { type: 'disabled' });
+    assert.deepEqual(messages.slice(0, -1), requests[0].messages.slice(0, -1));
+    assert.equal(messages.filter(m => m.role === 'user').length, 1);
+  }
+  assert.match(requests[1].messages.at(-1).content, /上次日程校验失败/);
+});
+
+test('日程错误达到五次后停止，失败不覆盖已有日程', async t => {
+  t.mock.method(console, 'warn', () => {});
+  const char = character([], day);
+  const before = db.prepare('SELECT * FROM daily_schedules WHERE character_id=?').all(char.id);
+  let calls = 0;
+  await assert.rejects(generateSchedule(char, '', { chat: async () => { calls++; return 'invalid'; } }), /after 5 attempts/);
+  assert.equal(calls, 5);
+  assert.deepEqual(db.prepare('SELECT * FROM daily_schedules WHERE character_id=?').all(char.id), before);
+});

@@ -11,7 +11,8 @@ export function applyForcedThinking(params, mode, llm) {
     delete params.temperature;
     params.reasoning_effort = enabled ? 'high' : 'none';
     params.max_completion_tokens = llm.maxTokens;
-  } else if (/gemini/.test(model) && llm.connectionType !== 'vertexai') {
+  } else if (/^group\//.test(model) || (/gemini/.test(model) && llm.connectionType !== 'vertexai')) {
+    // 中转分组名隐藏实际模型，不能靠模型家族识别；Chat 路由用此字段传递关闭意图。
     params.reasoning_effort = enabled ? 'high' : 'none';
   }
   if (/qwen/.test(model) || 'enable_thinking' in params) params.enable_thinking = enabled;

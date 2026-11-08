@@ -202,6 +202,8 @@ test('shared sync, stream and connection-test entry points route Vertex requests
     await client.chatSync(messages, { forceThinkingMode: mode, retries: 0 });
     assert.deepEqual(calls.at(-1).body.generationConfig.thinkingConfig, { thinkingBudget: mode === 'enabled' ? -1 : 0 });
   }
+  await client.chatSync(messages, { forceDisableThinking: true, forceThinkingMode: 'enabled', retries: 0 });
+  assert.deepEqual(calls.at(-1).body.generationConfig.thinkingConfig, { thinkingBudget: 0 });
   assert.deepEqual(config.llm.extraBody.generationConfig.thinkingConfig, { thinkingBudget: 2048 });
   config.llm.extraBody = {};
   config.llm.connectionType = 'openai';
@@ -292,15 +294,51 @@ test('all LLM request paths use the configured output allowance', async t => {
         assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
       }
       const extra = Object.freeze({ thinking: Object.freeze({ type: 'enabled' }),
+        enable_thinking: true, reasoning_effort: 'high',
+        chat_template_kwargs: Object.freeze({ enable_thinking: true, custom: 1 }),
+        reasoning: Object.freeze({ enabled: true, effort: 'high', max_tokens: 2048 }),
         generationConfig: Object.freeze({ thinkingConfig: Object.freeze({ thinkingBudget: 2048 }), temperature: 0.4 }) });
       config.llm.extraBody = extra;
       await client.chatSync(messages, { thinking: { type: 'enabled' }, forceDisableThinking: true });
       assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
       assert.deepEqual(requests.at(-1).generationConfig, { temperature: 0.4 });
+      assert.equal(requests.at(-1).enable_thinking, false);
+      assert.equal(requests.at(-1).reasoning_effort, 'none');
+      assert.deepEqual(requests.at(-1).chat_template_kwargs, { enable_thinking: false, custom: 1 });
+      assert.deepEqual(requests.at(-1).reasoning, { enabled: false, effort: 'none' });
+      for (const model of ['qwen3', 'gpt-5', 'gemini-2.5-flash', 'group/never-stuck']) {
+        await client.chatSync(messages, { model, forceDisableThinking: true, forceThinkingMode: 'enabled', fallbackToConfiguredThinking: true });
+        assert.equal(requests.at(-1).reasoning_effort, 'none');
+        assert.equal(requests.at(-1).enable_thinking, false);
+        assert.deepEqual(requests.at(-1).thinking, model === 'gpt-5' ? undefined : { type: 'disabled' });
+      }
       await client.chatSync(messages);
       assert.deepEqual(requests.at(-1).thinking, extra.thinking);
       assert.deepEqual(requests.at(-1).generationConfig, extra.generationConfig);
     } finally {
+      config.llm.thinkingMode = previousMode;
+      config.llm.extraBody = previousExtra;
+    }
+  });
+
+  await t.test('分组别名在无自定义参数时也明确关闭中转思考，日志不显示空思考链', async () => {
+    const previousMode = config.llm.thinkingMode;
+    const previousExtra = config.llm.extraBody;
+    config.llm.thinkingMode = 'enabled';
+    config.llm.extraBody = {};
+    try {
+      logs.length = 0;
+      await client.chatSync(messages, { model: 'group/never-stuck', forceDisableThinking: true });
+      assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
+      assert.equal(requests.at(-1).reasoning_effort, 'none');
+      assert.ok(logs.some(line => line.includes('[thinking-policy]') && line.includes('"reasoning_effort":"none"')));
+      assert.ok(!logs.some(line => line.endsWith(' 思考链]')));
+      assert.ok(!logs.includes('(服务商未返回思考内容)'));
+      reasoning = '服务商仍返回的思考必须保留';
+      await client.chatSync(messages, { model: 'group/never-stuck', forceDisableThinking: true });
+      assert.ok(logs.includes(reasoning));
+    } finally {
+      reasoning = undefined;
       config.llm.thinkingMode = previousMode;
       config.llm.extraBody = previousExtra;
     }

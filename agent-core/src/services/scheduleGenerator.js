@@ -53,6 +53,7 @@ function normalizeTags(tags) {
  */
 // 同一角色的自动刷新、手动刷新与补发任务共享正在执行的生成。
 const pendingSchedules = new Map();
+const MAX_GENERATION_ATTEMPTS = 5; // 首次生成 + 最多4次纠错重试
 export function generateSchedule(character, direction, options = {}) {
   const key = options.persist === false ? `detached:${character.id}` : character.id;
   if (pendingSchedules.has(key)) return pendingSchedules.get(key);
@@ -183,7 +184,7 @@ ${directionMsg}`;
 
   let rawResult = '';
   let validationError = '';
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
     try {
       const attemptMsgs = msgs.map(m => ({ ...m }));
       if (validationError) attemptMsgs.at(-1).content += `\n上次日程校验失败：${validationError}，请修正时间安排。`;
@@ -216,16 +217,16 @@ ${directionMsg}`;
         return { schedule_json: JSON.stringify(saved.schedule), version: db.prepare('SELECT version FROM schedule_templates WHERE character_id=?').get(character.id).version };
       }
 
-      console.warn(`[scheduleGen] Validation failed for ${character.display_name}, attempt ${attempt + 1}/2`);
-      validationError = '请使用合法时间，完整覆盖24小时，无重叠无空档，并保留睡眠。';
+      console.warn(`[scheduleGen] Validation failed for ${character.display_name}, attempt ${attempt + 1}/${MAX_GENERATION_ATTEMPTS}`);
+      validationError = '请严格输出包含 activities 数组的 JSON，每项包含全部必填字段和非空 description；使用合法时间，完整覆盖24小时，无重叠无空档，并保留 replyDelay=-1 的睡眠。';
     } catch (err) {
       validationError = err.message;
-      console.error(`[scheduleGen] Attempt ${attempt + 1} failed for ${character.display_name}:`, err.message);
-      if (attempt === 1) throw err;
+      console.error(`[scheduleGen] Attempt ${attempt + 1}/${MAX_GENERATION_ATTEMPTS} failed for ${character.display_name}:`, err.message);
+      if (attempt === MAX_GENERATION_ATTEMPTS - 1) throw err;
     }
   }
 
-  throw new Error(`Failed to generate valid schedule for ${character.display_name} after 2 attempts`);
+  throw new Error(`Failed to generate valid schedule for ${character.display_name} after ${MAX_GENERATION_ATTEMPTS} attempts: ${validationError}`);
 }
 
 /**

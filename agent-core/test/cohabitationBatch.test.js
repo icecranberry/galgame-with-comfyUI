@@ -134,6 +134,29 @@ test('共同活动时间冲突由逻辑就近改期，不消耗模型重试', as
   assert.equal(result[0].startTime, '15:00'); assert.equal(result[0].endTime, '16:00');
 });
 
+test('共同生活格式错误最多重试四次，保留强制关闭思考与稳定前缀', async t => {
+  const previous = config.features.scheduleDisableThinking;
+  config.features.scheduleDisableThinking = true;
+  t.after(() => { config.features.scheduleDisableThinking = previous; });
+  const input = { room: listResidences(db)[0], characters: db.prepare('SELECT * FROM characters').all(),
+    relationships: [], events: [], batchId: 'retry-test' };
+  const requests = [];
+  assert.deepEqual(await planResidence(input, { chat: async (messages, options) => {
+    requests.push({ messages, options });
+    return requests.length < 5 ? '{broken' : '{"activities":[]}';
+  } }), []);
+  assert.equal(requests.length, 5);
+  for (const { messages, options } of requests) {
+    assert.equal(options.forceDisableThinking, true);
+    assert.deepEqual(messages.slice(0, -1), requests[0].messages.slice(0, -1));
+    assert.equal(messages.filter(m => m.role === 'user').length, 1);
+  }
+  assert.match(requests[1].messages.at(-1).content, /上次输出未通过校验/);
+  let calls = 0;
+  await assert.rejects(planResidence(input, { chat: async () => { calls++; return '{broken'; } }), SyntaxError);
+  assert.equal(calls, 5);
+});
+
 test('整批真实生成入口延后新提案校验，睡眠冲突只调用一次模型并统一改期', async () => {
   let planned = false, calls = 0;
   const result = await startScheduleBatch({ db, random: () => .99,

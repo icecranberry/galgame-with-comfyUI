@@ -4,6 +4,8 @@ import { chatSync } from './lorebook/runtime.js';
 import { config } from '../config.js';
 import { intervals, fitSharedActivity } from './cohabitationSchedule.js';
 
+const MAX_GENERATION_ATTEMPTS = 5; // 首次生成 + 最多4次纠错重试
+
 export const COHABITATION_RULES = `你是共同生活日程编排助手。为下方居室成员规划本轮作息中自然发生的共同活动，供稍后各角色编排完整日程时遵守。
 根据世界观、居室成员的简短人格及关系原文决定活动。关系有方向：分别保留双方的关系认知；友好、疏远、竞争、敌对、依赖、单方面关系都按原文应用。敌对或竞争可以体现对峙、争执、谈判、有理由的暂时合作等，不能将原关系直接改写成友好关系。
 可以是部分成员组队，或成员与所提供的室外关系对象行动。每件共同活动总人数必须为2～3人（包含室外对象），最多3人一起行动；居室超过3人时分组安排，不生成超过3人的全员活动。每件活动至少有一名本居室成员和另一位角色参加。允许独处，独处留给个人日程，不在这里占一条共同活动。
@@ -80,7 +82,7 @@ export async function planResidence(input, { chat = chatSync } = {}) {
   const request = buildCohabitationRequest(input);
   if (request.candidateIds.size < 2) return [];
   let error;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt++) {
     const messages = request.messages.map(m => ({ ...m }));
     if (error) messages.at(-1).content += `\n上次输出未通过校验：${error.message}。请修正后重新输出。`;
     try {

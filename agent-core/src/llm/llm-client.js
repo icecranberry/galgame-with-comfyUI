@@ -104,15 +104,15 @@ function outputLogLimit(label) {
 }
 
 // 思考内容仅进入日志，不混入业务正文；完整打印，便于检查服务商实际返回的内容。
-function logReasoning(label, reasoning) {
+function logReasoning(label, reasoning, thinkingMode = config.llm.thinkingMode) {
   // 未开启思考且没有返回思考内容时，不输出空标题和缺失提示。
-  if (!reasoning && config.llm.thinkingMode !== 'enabled') return;
+  if (!reasoning && thinkingMode !== 'enabled') return;
   console.log(`[${providerLabel()} ← ${label} 思考链]`);
   console.log(reasoning || '(服务商未返回思考内容)');
 }
 
-function logResponse(label, content, reasoning) {
-  logReasoning(label, reasoning);
+function logResponse(label, content, reasoning, thinkingMode) {
+  logReasoning(label, reasoning, thinkingMode);
   console.log(`[${providerLabel()} ← ${label} 正文]`);
   const outputText = content || '';
   const outputLimit = outputLogLimit(label);
@@ -468,26 +468,25 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   if (extraBody && Object.keys(extraBody).length > 0) {
     Object.assign(params, extraBody);
   }
-  // 日程等业务明确要求关闭时，不能被全局自定义请求体重新开启。
-  if (forceDisableThinking) {
-    params.thinking = { type: 'disabled' };
-    if (params.generationConfig?.thinkingConfig) {
-      params.generationConfig = { ...params.generationConfig };
-      delete params.generationConfig.thinkingConfig;
-    }
-  }
   const configuredParams = { ...params };
-  if (forceThinkingMode === 'enabled' || forceThinkingMode === 'disabled') {
-    applyForcedThinking(params, forceThinkingMode, config.llm);
+  // 旧业务开关也走完整的提供商参数适配，并且优先于任何开启思考的参数。
+  const forcedMode = forceDisableThinking ? 'disabled' : forceThinkingMode;
+  if (forcedMode === 'enabled' || forcedMode === 'disabled') {
+    applyForcedThinking(params, forcedMode, config.llm);
   }
   applyOutputTokenLimit(params);
-  let canFallbackThinking = forceThinkingMode === 'enabled' && fallbackToConfiguredThinking;
+  let canFallbackThinking = forcedMode === 'enabled' && fallbackToConfiguredThinking;
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
   const logMsgs = compressLogMessages(messages);
   // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
   const requestLog =
     `\n══════════ [${providerLabel()} → ${label}] ══════════\n` +
+    (forcedMode ? `[thinking-policy] ${JSON.stringify({ model: params.model, forcedMode,
+      thinking: params.thinking, reasoning_effort: params.reasoning_effort,
+      enable_thinking: params.enable_thinking, reasoningEnabled: params.reasoning?.enabled,
+      reasoningEffort: params.reasoning?.effort, templateThinking: params.chat_template_kwargs?.enable_thinking,
+      thinkingConfig: params.generationConfig?.thinkingConfig })}\n` : '') +
     JSON.stringify(logMsgs, null, 2) + '\n' +
     '───────────────────────────────────────────────';
 
@@ -521,7 +520,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       // 请求+响应一起输出，保证每次调用的日志是完整的原子块
       console.log(requestLog);
       console.log(`[${providerLabel()} ← ${label}]`);
-      logResponse(label, content, choice.message.reasoning_content);
+      logResponse(label, content, choice.message.reasoning_content, forcedMode ?? config.llm.thinkingMode);
       logUsage(label, res.usage);
       recordLlmCall(label, res.usage);
       console.log('═════════════════════════════════════════════\n');
