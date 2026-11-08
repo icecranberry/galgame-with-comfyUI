@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
 import { refineImage } from '../services/imageRefine.js';
+import { readImageWorkflow, preserveImageWorkflow } from '../services/imageWorkflowMetadata.js';
+import sharp from 'sharp';
 import { startEditTask, listEditTasks, applyEditTask, discardEditTask, rerunEditTask } from '../services/imageEditTasks.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
@@ -715,44 +717,61 @@ async function startImageEditTask(action, url) {
   if (!target) throw taskHttpError(`invalid image url format: ${url}`, 400);
   const { category, filename } = target;
 
-  const params = lookupImageGenerationParams(filename);
+  let filePath = path.join(getImageDir(category), filename);
+  // 与静态图片服务保持一致：压缩后旧 PNG URL 仍指向同名 AVIF。
+  if (action === 'regenerate' && !fs.existsSync(filePath) && /\.png$/i.test(filePath)) {
+    const compressed = filePath.replace(/\.png$/i, '.avif');
+    if (fs.existsSync(compressed)) filePath = compressed;
+  }
+  const sourceWorkflow = action === 'regenerate' && fs.existsSync(filePath)
+    ? await readImageWorkflow(filePath) : null;
+  const params = sourceWorkflow ? {} : lookupImageGenerationParams(filename);
   const promptText = params.promptText;
-  if (!promptText || promptText.trim().length === 0) {
+  if (!sourceWorkflow && (!promptText || promptText.trim().length === 0)) {
     throw taskHttpError('prompt not found for this image', 404);
   }
-  const filePath = path.join(getImageDir(category), filename);
 
   const run = async ({ stageBase, onProgress }) => {
     if (action === 'regenerate') {
-      const opts = { ...categoryGenConfig(category) };
-      if (params.taskStyle !== null && params.taskResolution) {
-        const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
-        if (resolutionMatch) {
-          opts.width = Number(resolutionMatch[1]);
-          opts.height = Number(resolutionMatch[2]);
+      let genOpts = { sourceWorkflow, onProgress };
+      if (!sourceWorkflow) {
+        const opts = { ...categoryGenConfig(category) };
+        if (params.taskStyle !== null && params.taskResolution) {
+          const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
+          if (resolutionMatch) {
+            opts.width = Number(resolutionMatch[1]);
+            opts.height = Number(resolutionMatch[2]);
+          }
         }
+        genOpts = {
+          artist: resolveArtist(category, params),
+          width: opts.width,
+          height: opts.height,
+          scene: CATEGORY_SCENE[category] || 'chat',
+          alreadyPrepared: true,
+          disableRAG: true,
+          persistPreparation: false,
+          onProgress,
+        };
+        if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
+        if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
       }
-      const genOpts = {
-        artist: resolveArtist(category, params),
-        width: opts.width,
-        height: opts.height,
-        scene: CATEGORY_SCENE[category] || 'chat',
-        alreadyPrepared: true,
-        disableRAG: true,
-        persistPreparation: false,
-        onProgress,
-      };
-      if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
-      if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
-      const result = await generateImageRaw(promptText, genOpts);
+      const result = await generateImageRaw(promptText || '', genOpts);
       if (!result.success || !result.images?.length) {
         throw new Error(result.error || 'Image generation failed');
       }
       const img = result.images[0];
-      const ext = dataUriExt(img.base64);
-      const stagedName = path.basename(stageBase) + ext;
+      let ext = dataUriExt(img.base64);
       const base64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
-      fs.writeFileSync(stageBase + ext, Buffer.from(base64, 'base64'));
+      let buffer = Buffer.from(base64, 'base64');
+      // 已压缩图片原位覆盖时保持实际格式，不能把 PNG 字节写进 .avif 文件。
+      if (/\.avif$/i.test(filePath) && ext !== '.avif') {
+        const pipeline = await preserveImageWorkflow(sharp(buffer), buffer);
+        buffer = await pipeline.avif({ quality: 50, effort: 4 }).toBuffer();
+        ext = '.avif';
+      }
+      const stagedName = path.basename(stageBase) + ext;
+      fs.writeFileSync(stageBase + ext, buffer);
       return { filename: stagedName };
     }
 

@@ -11,6 +11,7 @@
  */
 
 import sharp from 'sharp';
+import { preserveImageWorkflow } from './imageWorkflowMetadata.js';
 import { readdir, stat, unlink, rename } from 'fs/promises';
 import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -163,7 +164,8 @@ async function compressOne(fileInfo) {
   try {
     if (isAvif) {
       const outPath = join(dir, `${baseName}.avif`);
-      await sharp(inputPath)
+      const pipeline = await preserveImageWorkflow(sharp(inputPath), inputPath);
+      await pipeline
         .avif({ quality: 50, effort: 4 })
         .toFile(outPath);
 
@@ -183,7 +185,8 @@ async function compressOne(fileInfo) {
       await unlink(inputPath);
     } else {
       const tmpPath = join(dir, `${name}.tmp`);
-      await sharp(inputPath)
+      const pipeline = await preserveImageWorkflow(sharp(inputPath), inputPath);
+      await pipeline
         .png({ compressionLevel: 9, palette: true, effort: 10 })
         .toFile(tmpPath);
 

@@ -17,7 +17,9 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { submitWorkflow, apiToGui } from './comfyClient.js';
+import { submitWorkflow, apiToGui, guiToApi } from './comfyClient.js';
+import { randomizeWorkflowSeeds } from './imageWorkflowMetadata.js';
+import { markLoraWorkflow, recomposeLoraWorkflow } from './imageLoraProvenance.js';
 import { config, getNovelaiApiKey } from '../config.js';
 import { generateNovelaiImage } from './novelaiClient.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
@@ -281,8 +283,14 @@ function buildWorkflow(promptText, overrides = {}) {
   }
 
   // 动态注入 LoraLoaderModelOnly 节点链
+  const originalIds = new Set(wf.nodes.map(n => n.id));
   if (hasLoras) {
     injectLoraNodes(wf, loras);
+  }
+  const loraIds = wf.nodes.filter(n => !originalIds.has(n.id)).map(n => n.id);
+  // 无有效模型链/触发词入口的自定义模板继续保留原行为，不声明可分类重生。
+  if (!hasLoras || loraIds.length === loras.length) {
+    markLoraWorkflow(wf, { globals: globalLoras, characters: providedLoras, scene: overrides.scene, loraIds });
   }
 
   console.log(`[imageSkill] Workflow built: ${path.basename(wfPath)} (${pathToMode(wfPath)})${hasLoras ? ` (${loras.length} lora(s))` : ''}`);
@@ -454,20 +462,28 @@ const MAX_SUBMIT_RETRIES = 2;
 async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
   loras, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
+  sourceWorkflow,
   imageProvider = config.comfyui.imageProvider,
 } = {}) {
-  if (imageProvider === 'novelai') {
+  if (!sourceWorkflow && imageProvider === 'novelai') {
     // NovelAI receives the same prepared scene description and artist tags as ComfyUI,
     // but does not use either character or global LoRA data.
     return submitNovelaiImage(rawPrompt, { artist, onProgress });
   }
 
   // 1. 最终阀门
-  let finalPrompt = finalizeCountTags(rawPrompt);
+  let finalPrompt = sourceWorkflow ? rawPrompt : finalizeCountTags(rawPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 2. 构建 workflow
-  const { wf, wfMode } = buildWorkflow(finalPrompt, {
+  const recomposed = sourceWorkflow ? recomposeLoraWorkflow(
+    sourceWorkflow.prompt || guiToApi(sourceWorkflow.workflow), sourceWorkflow.generation,
+    filterGlobalLoras(config.comfyui.globalLora || [], sourceWorkflow.generation?.scene),
+  ) : null;
+  let { wf, wfMode } = sourceWorkflow ? {
+    wf: randomizeWorkflowSeeds(recomposed.prompt),
+    wfMode: 'original',
+  } : buildWorkflow(finalPrompt, {
     artist, width, height, loras, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
   });
   if (onProgress) onProgress({ stage: 'submitting' });
@@ -478,6 +494,7 @@ async function submitWithRetry(rawPrompt, {
   for (let attempt = 0; attempt <= submitRetries; attempt++) {
     if (attempt > 0) {
       console.log(`[imageSkill] ComfyUI submit retry ${attempt}/${submitRetries} — re-randomizing seed`);
+      if (sourceWorkflow) wf = randomizeWorkflowSeeds(wf);
       for (const node of wf.nodes || []) {
         if (node.type === 'KSampler' && node.widgets_values.length > 1 && node.widgets_values[1] === 'randomize') {
           node.widgets_values[0] = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -489,7 +506,7 @@ async function submitWithRetry(rawPrompt, {
     try {
       const result = await submitWorkflow(wf, (p) => {
         if (onProgress) onProgress({ stage: 'generating', ...p });
-      });
+      }, recomposed?.generation);
       if (result.images.length > 0) {
         console.log(`\n🎨 [imageSkill] 图片生成完成: ${result.images.length} 张 (workflow: ${wfMode}, promptId: ${result.promptId})`);
         return { success: true, images: result.images, source: 'api', promptId: result.promptId, wfMode };
@@ -522,6 +539,14 @@ async function _execute(rawPrompt, opts) {
   activeTaskCount++;
   let slotAcquired = false;
   try {
+    // 原图重生完全跳过提示词加工与当前角色/全局配置，仍共用并发槽与提交重试。
+    if (opts.sourceWorkflow) {
+      if (_limitEnabled()) {
+        await acquireSlot();
+        slotAcquired = true;
+      }
+      return await submitWithRetry('', opts);
+    }
     const preparation = await prepareImagePrompt(rawPrompt, {
       ragQuery: opts.ragQuery,
       disableRAG: opts.disableRAG === true,

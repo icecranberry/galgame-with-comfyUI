@@ -3,6 +3,7 @@ import path from 'path';
 import WebSocket from 'ws';
 import { config } from '../config.js';
 import { withImageGpu } from './speechGpu.js';
+import { isApiWorkflow, attachPngWorkflow } from './imageWorkflowMetadata.js';
 
 const getBase = () => config.comfyui.url.replace(/\/+$/, '');
 const getWsBase = () => config.comfyui.url.replace(/^http/, 'ws');
@@ -454,18 +455,29 @@ function formatComfyUIError(errText, status) {
   return `ComfyUI returned ${status}: ${errText.slice(0, 300)}`;
 }
 
-export async function submitWorkflow(guiWorkflow, onProgress) {
-  return withImageGpu(() => submitWorkflowWithGpu(guiWorkflow, onProgress));
+export async function submitWorkflow(guiWorkflow, onProgress, generation = guiWorkflow.extra?.linsheGeneration) {
+  const apiPrompt = isApiWorkflow(guiWorkflow) ? guiWorkflow : guiToApi(guiWorkflow);
+  const result = await withImageGpu(() => submitWorkflowWithGpu(guiWorkflow, onProgress, generation, apiPrompt));
+  const snapshot = {
+    prompt: apiPrompt,
+    ...(Array.isArray(guiWorkflow.nodes) ? { workflow: guiWorkflow } : {}),
+    ...(generation ? { generation } : {}),
+  };
+  for (const image of result.images || []) {
+    const match = image.base64?.match(/^(data:image\/png;base64,)([\s\S]+)$/);
+    if (match) image.base64 = match[1] + attachPngWorkflow(Buffer.from(match[2], 'base64'), snapshot).toString('base64');
+  }
+  return result;
 }
 
-async function submitWorkflowWithGpu(guiWorkflow, onProgress) {
+async function submitWorkflowWithGpu(guiWorkflow, onProgress, generation, apiPrompt) {
   const clientId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const apiPrompt = guiToApi(guiWorkflow);
+  // 原图重生直接提交保存的 API 图，避免 API→GUI→API 丢失自定义节点参数。
 
   const body = {
     client_id: clientId,
     prompt: apiPrompt,
-    extra_data: { extra_pnginfo: { workflow: guiWorkflow } },
+    extra_data: { extra_pnginfo: { ...(Array.isArray(guiWorkflow.nodes) ? { workflow: guiWorkflow } : {}), ...(generation ? { linshe_generation: generation } : {}) } },
   };
 
   const res = await fetch(`${getBase()}/api/prompt`, {
