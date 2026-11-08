@@ -5,6 +5,7 @@ import { onEvent } from './unifiedStream.js'
 import { useChatStore } from './chat.js'
 import { useEventsStore } from './events.js'
 import { refreshImageUrls, recordOverwriteBust } from '../utils/imageUrlRefresh.js'
+import { playTaskCompletionSound } from '../utils/sound.js'
 
 function normalizeTask(data, existing = null) {
   return {
@@ -28,6 +29,19 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
   const tasks = ref([])
   let _unsubs = []
   let _connected = false
+  const completedTaskIds = new Set()
+  let lastCompletionSoundAt = -Infinity
+
+  function notifyCompletion(task, silent = false) {
+    if (!['ready', 'pending_confirm'].includes(task.status) || completedTaskIds.has(task.id)) return
+    completedTaskIds.add(task.id)
+    if (silent || task.result?.cancelled) return
+    // 同批任务集中完成时只响一次，避免提示音叠加。
+    const now = Date.now()
+    if (now - lastCompletionSoundAt < 800) return
+    lastCompletionSoundAt = now
+    playTaskCompletionSound()
+  }
 
   function _upsert(data) {
     if (!data?.id) return
@@ -35,6 +49,7 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
     const item = normalizeTask(data, idx >= 0 ? tasks.value[idx] : null)
     if (idx >= 0) tasks.value.splice(idx, 1, item)
     else tasks.value.push(item)
+    notifyCompletion(item)
   }
 
   function _remove(id) {
@@ -65,6 +80,10 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
       const { tasks: list } = await api.listImageEditTasks()
       const prev = new Map(tasks.value.map(t => [t.id, t]))
       tasks.value = (list || []).map(d => normalizeTask(d, prev.get(d.id)))
+      // 首次加载的旧任务不播报；刷新补到已知执行中任务的完成状态时仍提醒。
+      for (const task of tasks.value) {
+        notifyCompletion(task, prev.get(task.id)?.status !== 'running')
+      }
     } catch (err) {
       console.warn('[imageEditTasks] refresh failed:', err.message)
     }

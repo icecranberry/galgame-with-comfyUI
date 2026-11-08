@@ -1892,9 +1892,9 @@ const displayStandingPanel = computed(() => props.profileAdapter?.standing || st
   background: var(--side-panel-bg);
   border: var(--side-panel-border);
   box-shadow: var(--side-panel-shadow);
-  /* 主面板 modal-pop(0.28s) 结束后，再从面板背后向右弹出；
+  /* 左侧形象面板先入场，再从主面板背后向右弹出；
      初始多藏 60px，避免面板 0.92 缩放阶段露出右缘 */
-  animation: float-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.32s both;
+  animation: float-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.5s both;
 }
 @keyframes float-emerge {
   0%   { transform: translateX(calc(-100% - 60px)); }

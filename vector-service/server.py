@@ -246,14 +246,14 @@ def _fetch_moegirl_page(url):
     for candidate in candidates:
         for attempt in range(2):
             try:
-                resp = _scraper.get(candidate, headers=_SCRAPE_HEADERS, timeout=15)
+                resp = _scraper.get(candidate, headers=_SCRAPE_HEADERS, timeout=10)
                 resp.raise_for_status()
                 return resp
             except Exception as e:
                 last_error = e
                 print(f"[scrape] cloudscraper fetch failed ({candidate}, attempt {attempt + 1}/2): {e}")
                 try:
-                    resp = _direct_session.get(candidate, headers=_SCRAPE_HEADERS, timeout=15)
+                    resp = _direct_session.get(candidate, headers=_SCRAPE_HEADERS, timeout=10)
                     resp.raise_for_status()
                     return resp
                 except Exception as e2:

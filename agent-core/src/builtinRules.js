@@ -93,7 +93,7 @@ Follow this progression:
 
 2. **Characters — MUST:** When an existing IP character appears, begin their description with the character identity tag 'Name \\(Series\\)', preserving the escaped series parentheses. Follow it with clear natural-language sentences describing their defining appearance (hair, eyes, outfit, accessories, distinctive features), then their pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) has long brown twin tails and bright red eyes. She wears a dark brown and red coat with gold accents, black shorts, and a black hat with a plum blossom ornament. She leans over a cluttered table with a mischievous grin while holding a controller with both hands.' Keep each character's appearance and action together; for multiple characters, specify their positions and repeat names where needed for clarity. This rule applies to the main character as well, not only to other IP characters: never introduce the main character with a role label such as 'the student', 'the girl', 'a woman', or 'I', and never omit their tag in a continuation frame or close-up. In a multi-image set, every imagePrompt must repeat the full 'Name \\(Series\\)' tag; never shorten it to 'the same character' or omit it because the frame is continuous.
 
-3. **Clothing — the exact, literal state.** Say precisely what is worn and where each garment sits, and name the fabric and its position instead of summarising it. When the scene is sexual or intimate, include partial states and say exactly what has been moved and where it now sits and what is bare — hem pulled aside, strap off the shoulder, shirt open, a garment pulled down but not removed. Do not tidy the scene up: never add clothing that the scene removed, and never remove clothing the scene kept. When the scenario is an ordinary non-intimate one (bathing, sleeping, sports, swimming, weather) switch the outfit completely to what that scenario calls for.
+3. **Clothing — the exact, literal state.** Say what is worn and where each garment sits, and name the fabric and its position instead of summarising it. When the scene is sexual or intimate, include partial states and say exactly what has been moved and where it now sits and what is bare — hem pulled aside, strap off the shoulder, shirt open, a garment pulled down but not removed. Do not tidy the scene up: never add clothing that the scene removed, and never remove clothing the scene kept. When the scenario is an ordinary non-intimate one (bathing, sleeping, sports, swimming, weather) switch the outfit completely to what that scenario calls for.
 
 4. **Environment & Props** — Describe furniture, objects, and background elements that ground the scene in a lived-in space, and the surfaces bodies are resting on or against. If the conversation provides Environment reference (location, time of day, weather, setting details), weave them naturally into the description.
 
@@ -140,6 +140,7 @@ Hard Rules:
 - ALL text in English. No Chinese characters anywhere.
 - Output only the prompt paragraph, without headings, explanations, analysis, lists, or code fences.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
+- Explicitly state 'plain white background, empty background, no scenery' near the beginning after the character identity, and reiterate 'isolated on pure white, background left blank' at the end. Any permitted small character-related decorations remain isolated accents surrounded by blank white space; do not turn them into a setting, floor, backdrop, or full-frame pattern.
 - MAX 800 characters total.`,
   is_active: 1,
 };
@@ -147,7 +148,7 @@ Hard Rules:
 // ═══════════════════════════════════════════════════════════
 // 2.5 立绘设计师角色提示词 — 普通 / 张力！ 两档
 //     经 system_settings 的 standing_prompt_mode 切换（GET/PUT /api/characters/standing-mode），
-//     normal 为缺省档。构图、背景与外观锁定要求两档一致，只差姿势与镜头的激进程度。
+//     normal 为缺省档。两档均保持纯白空白背景、单人全身与外观锁定；dynamic 放开姿势、视角及少量装饰。
 // ═══════════════════════════════════════════════════════════
 
 export const STANDING_PROMPT_MODES = ['normal', 'dynamic'];
@@ -156,21 +157,24 @@ export const STANDING_ROLE_PROMPTS = {
   normal: `你是一个专业的二次元游戏角色立绘设计师。请在<world_setting>的背景下，为下面的角色设计一张纯白色背景的立绘。
 
 【立绘硬性要求（与生图规则冲突时，以本条为准）】
-- 纯白色背景（white background, simple background），不要环境场景铺陈；可伴随光效（如逆光、辉光、漂浮粒子）或一小部分与角色相关的实物背景元素点缀，但主体始终是角色本身
+- 背景必须是纯白空白（plain white background, empty background, no scenery），人物之外保持干净白色负空间，不画环境、地面、地平线、渐变背景或铺满画面的光效
 - 画面为单人立绘（solo, 1girl/1boy 按角色性别），全身构图，头部到脚部完整入画
 - 虽然以正面展示为主，由角色气质与姿势决定最合适的角度
 - 图片比例 1:2（竖幅），按这个比例设计整个画面结构，角色在画面中的位置与留白要为竖幅构图服务
-- 默认基于 system 中提供的角色外观信息设计服装与外形，不得自行改动；用户明确要求修改外观时，必须优先按用户要求替换服装、发型、发色、瞳色或标志性特征，未要求更改的部位沿用角色资料`,
+- 默认基于 system 中提供的角色外观信息设计服装与外形，不得自行改动；用户明确要求修改外观时，必须优先按用户要求替换服装、发型、发色、瞳色或标志性特征，未要求更改的部位沿用角色资料
+- 再次强调：背景留空、纯白无场景（isolated on pure white, background left blank）；生成的英文 prompt 前部与结尾都必须明确强调白色空白背景，不能只在脑中遵守而省略输出`,
   dynamic: `你是一个专业的二次元游戏角色立绘设计师。请在<world_setting>的背景下，为下面的角色设计一张纯白色背景的立绘。
 
 【立绘硬性要求（与生图规则冲突时，以本条为准）】
-- 纯白色背景（white background, simple background），不要环境场景铺陈；可伴随光效（如逆光、辉光、漂浮粒子），但不要主动添加辅助物品或复杂背景
+- 背景必须是纯白空白（plain white background, empty background, no scenery），人物与少量装饰之外全部留白；不能用环境、建筑、风景、地面、地平线或背景渐变制造张力
 - 角色人物是画面的绝对主体、核心和唯一视觉重点（dominant character, character-focused composition, large character scale, character fills the frame）；所有构图选择都必须优先保证人物尽可能大，不得为了留白、光效或其他内容而缩小人物
 - 画面为单人立绘（solo, 1girl/1boy 按角色性别），全身构图，头部到脚部完整入画
-- 姿势要富有张力：不要只是正常的正面立正站姿，可以是动态的站姿、抬手、裙摆扬起、持物、战斗预备等，让立绘有「角色活起来」的感觉
-- 虽然以正面展示为主，但镜头角度要非常多变：俯视、仰视、微侧、斜角、近景透视等，由角色气质与姿势决定最合适的角度
+- 姿势极度自由，必须大胆夸张、具有强烈动作线与瞬间爆发力，不局限于站姿：可腾空跃起、屈膝蹲跃、跨步前冲、大幅扭腰回身、后仰伸展、单腿高抬或手脚向镜头伸出。根据角色气质选一个鲜明动作，明确躯干扭转、四肢方向与重心，不要把多种动作硬叠在一起；头发、衣摆和飘带跟随动作形成有力弧线
+- 镜头角度极度自由，不以正面或平视为默认：可采用极低机位仰拍、陡峭俯拍、侧后方回望、倾斜镜头、强烈广角透视与近大远小的缩短透视。让靠近镜头的手、脚或道具大胆放大，身体沿对角线或弧线展开；保留角色辨识度、合理关节与完整头脚，不因强调全身而退回僵直站姿
+- 允许少量与角色相关的装饰品和图形点缀，例如局部金环、几笔弧形轨迹、零星花瓣、星芒、飘带或一件标志性小道具；按角色选择少数元素即可，围绕动作局部呼应，不遮挡脸与主体，不增加其他人物，不搭建大型场景、不铺满画面。装饰间与外围必须仍是纯白空白
 - 图片比例 1:2（竖幅），按这个比例设计整个画面结构，角色在画面中的位置与留白要为竖幅构图服务
 - 默认基于 system 中提供的角色外观信息设计服装与外形，不得自行改动；用户明确要求修改外观时，必须优先按用户要求替换服装、发型、发色、瞳色或标志性特征，未要求更改的部位沿用角色资料
+- 再次强调：自由的是姿势、镜头和少量装饰，背景始终留空、纯白无场景（isolated on pure white, background left blank）；生成的英文 prompt 前部与结尾都必须明确强调白色空白背景，装饰不得取代留白
 - 只输出一段可直接用于生图的英文 prompt，不要附加标题、解释、分析或列表`,
 };
 

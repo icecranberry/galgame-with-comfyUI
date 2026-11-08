@@ -260,7 +260,7 @@
 
       <div key="voice-manage" class="char-card emoji-manage-card" role="button" tabindex="0" @click="showVoiceLibrary = true" @keydown.enter.prevent="showVoiceLibrary = true" @keydown.space.prevent="showVoiceLibrary = true">
         <div class="emoji-manage-icon">
-          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="12" y="3" width="8" height="16" rx="4"/><path d="M7 14v2a9 9 0 0 0 18 0v-2M16 25v4M11 29h10"/></svg>
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><rect x="12" y="3" width="8" height="16" rx="4" /><path d="M7 14v2a9 9 0 0 0 18 0v-2M16 25v4M11 29h10" /></svg>
         </div>
         <span>音色管理</span>
       </div>
@@ -342,8 +342,7 @@
       <template #title>
         <div class="modal-heading-content">
               <h3>招募新角色</h3>
-
-            </div>
+</div>
       </template>
 
             <!-- 步骤 0：输入描述 -->
@@ -397,7 +396,10 @@
                     placeholder="英文名（英文/拼音，唯一）"
                   />
                 </div>
-                <div class="preview-prompt-label">-</div>
+                <div class="recruit-search-status" role="status" aria-live="polite">
+                  <span class="recruit-search-dot" :class="{ 'is-found': recruit.searchContext.trim() }" aria-hidden="true"></span>
+                  {{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : '未抓取到角色资料' }}
+                </div>
                 <linshe-input type="textarea" v-model="recruit.result.base_prompt" class="prompt-textarea" rows="12" />
 
                 <!-- 朋友圈开关 -->
@@ -446,8 +448,7 @@
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.name).replaceAll('_', '+')}`" target="_blank">animadex</a>直接补充tag
               </div>
             </div>
-
-    </linshe-modal>
+</linshe-modal>
 
     <!-- 招募预览的修正外观：结果回填到待确认的角色卡草稿（尚未创建角色，无最近图片入口） -->
     <AppearanceRefineModal
@@ -1140,12 +1141,6 @@ async function doGenerate() {
     recruit.searchContext = result.search_context || ''
     recruit.result = { ...result }
     recruit.step = 'preview'
-    // 冒泡提示搜索结果
-    if (result.search_found) {
-      showToast('已在网络上找到详细角色资料', 'success')
-    } else {
-      showToast('未找到相关资料，请检查IP角色名字输入是否正确或者重新尝试，如果是原创设定则无视本条提示', 'info')
-    }
   } catch (err) {
     recruit.error = '生成失败: ' + (err.message || '网络错误')
   } finally {
@@ -2815,7 +2810,24 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 
-.preview-prompt-label { font-size: 12px; color: var(--text-secondary); margin: 6px 0; }
+.recruit-search-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.recruit-search-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+  transition: background-color var(--dur-interaction) var(--ease-standard);
+}
+.recruit-search-dot.is-found { background: var(--success); }
 .preview-prompt {
   padding: 12px; border-radius: 10px;
   background: var(--bg-primary); border: 1px solid var(--glass-border);

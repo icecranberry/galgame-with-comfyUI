@@ -134,6 +134,10 @@ const props = defineProps({
 // 只保存过渡与轮播计时状态；角色与形象数据仍由父组件管理。
 const slideDirection = ref(1)
 const sceneSwitching = ref(false)
+const autoplayStoppedByWheel = ref(false)
+watch(() => props.character?.id, () => {
+  autoplayStoppedByWheel.value = false
+})
 const sceneKey = computed(() => `${props.character?.id ?? ''}:${props.ctl.sceneIndex ?? props.ctl.sceneLabel ?? ''}`)
 function switchScene(direction) {
   if (props.ctl.busy || props.ctl.uploading || sceneSwitching.value || (props.ctl.scenes?.length || 0) <= 1) return
@@ -147,6 +151,7 @@ function switchScene(direction) {
 let lastWheelSwitchAt = -Infinity
 function onSceneWheel(event) {
   if (event.ctrlKey || event.metaKey || event.shiftKey || !event.deltaY || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+  autoplayStoppedByWheel.value = true
   if (props.ctl.busy || props.ctl.uploading || (props.ctl.scenes?.length || 0) <= 1) return
   event.preventDefault()
   event.stopPropagation()
@@ -155,8 +160,9 @@ function onSceneWheel(event) {
   switchScene(event.deltaY > 0 ? 1 : -1)
 }
 
-// 收起操作时每两秒轮播已有图片；手动切换后重新计时，展开、关闭或卸载时清理。
+// 收起操作时每两秒轮播已有图片；滚轮浏览后停止本角色的自动轮播，切换角色后恢复。
 watch(() => [
+  autoplayStoppedByWheel.value,
   props.ctl.autoplayEnabled,
   props.ctl.funcOpen,
   props.ctl.busy,
@@ -164,9 +170,10 @@ watch(() => [
   sceneKey.value,
   ...(props.ctl.scenes?.map(scene => scene.image_url) || []),
 ], (_, __, onCleanup) => {
-  if (!props.ctl.autoplayEnabled || props.ctl.funcOpen || props.ctl.busy || props.ctl.uploading) return
+  if (autoplayStoppedByWheel.value || !props.ctl.autoplayEnabled || props.ctl.funcOpen || props.ctl.busy || props.ctl.uploading) return
   if ((props.ctl.scenes?.filter(scene => scene.image_url).length || 0) <= 1) return
   const timer = setTimeout(() => {
+    if (autoplayStoppedByWheel.value) return
     slideDirection.value = 1
     sceneSwitching.value = true
     props.ctl.nextExistingScene()
@@ -216,9 +223,9 @@ function onFileChange(e) {
   background: var(--side-panel-bg);
   border: var(--side-panel-border);
   box-shadow: var(--side-panel-shadow);
-  /* 主面板 modal-pop(0.28s) 结束后再延迟 0.5s，与右侧 float-emerge 镜像向左弹出；
+  /* 主面板入场结束后先向左弹出，再由右侧 float-emerge 跟进；
      初始多藏 60px，避免面板 0.92 缩放阶段露出左缘 */
-  animation: standing-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.5s both;
+  animation: standing-emerge 0.5s cubic-bezier(0.3, 1.35, 0.55, 1) 0.32s both;
 }
 @keyframes standing-emerge {
   0%   { transform: translateX(calc(100% + 60px)); }
