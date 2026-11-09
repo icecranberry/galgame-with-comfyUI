@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { buildCharacterAppearanceSection } from './characterPersona.js';
+import { buildCharacterImageAppearance, extractCharacterEnglishName, replaceAppearanceSection } from './characterPersona.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { getImageDir, buildImageUrl } from './imagePaths.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, resolveCustomWorkflowPath } from './workflowTemplates.js';
@@ -66,7 +66,7 @@ export function createPhotoStudioService({
   database = getDb,
   catalog = getPoseCatalog,
   capability = photoStudioCapability,
-  persona = character => buildCharacterAppearanceSection(character, { includeHeading: false }),
+  persona = buildCharacterImageAppearance,
   render = generateImage,
   save = savePhoto,
   random = values => values[Math.floor(Math.random() * values.length)],
@@ -74,23 +74,25 @@ export function createPhotoStudioService({
   const db = () => database();
   const job = id => db().prepare('SELECT * FROM photo_studio_jobs WHERE id = ?').get(id);
   const list = () => db().prepare('SELECT * FROM photo_studio_jobs ORDER BY created_at DESC, rowid DESC LIMIT 30').all();
+  const outfitScenes = ['work', 'casual', 'home', 'sleep'];
+  function listCharacters() {
+    const outfits = db().prepare("SELECT character_id, scene FROM character_outfits WHERE scene IN ('casual', 'home', 'sleep') AND TRIM(COALESCE(description, '')) != ''").all();
+    return db().prepare('SELECT id, name, display_name, avatar_path, standing_url FROM characters WHERE COALESCE(archived, 0) = 0 ORDER BY pinned DESC, id DESC').all().map(character => ({
+      ...character,
+      outfitScenes: outfitScenes.filter(scene => scene === 'work' || outfits.some(outfit => outfit.character_id === character.id && outfit.scene === scene)),
+    }));
+  }
 
-  async function submit({ id, characterId, secondCharacterId = null, poseId, instruction = '', width, height }) {
-    if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
+  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', poseId, instruction = '', width, height }) {
     if (typeof instruction !== 'string' || instruction.length > 1000) throw Object.assign(new Error('补充要求最多 1000 字'), { status: 400 });
     let dimensions;
     try { dimensions = photoStudioDimensions(width ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.width, height ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.height); }
     catch (error) { throw Object.assign(error, { status: 400 }); }
-    const previous = job(id);
-    if (previous) return previous;
-
     const poses = await catalog();
     const pose = poses.find(item => item.id === poseId);
     const first = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(characterId));
     if (!pose || !first) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
     if (!pose.posePrompt) throw Object.assign(new Error('该姿势的专属提示词尚未校准，请先选择已有完整描述的姿势'), { status: 400 });
-    const supported = await capability();
-    if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
 
     const duo = isPairPose(pose);
     let second = null;
@@ -106,11 +108,39 @@ export function createPhotoStudioService({
       }
     }
 
-    const characters = [first, ...(second ? [second] : [])].map(character => ({
-      name: character.display_name || character.name,
-      appearance: persona(character),
-    }));
+    const scenes = [outfitScene, secondCharacterId ? secondOutfitScene : 'work'];
+    const characters = [first, ...(second ? [second] : [])].map((character, index) => {
+      const scene = scenes[index];
+      if (!outfitScenes.includes(scene)) throw Object.assign(new Error('请选择有效的服装：默认、私服、居家或睡衣'), { status: 400 });
+      let selected = character;
+      if (scene !== 'work') {
+        const outfit = db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
+        if (!outfit?.description?.trim()) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
+        // Scene descriptions contain the complete appearance. Replace, rather than layer over, the default clothes.
+        selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, outfit.description) };
+      }
+      const name = extractCharacterEnglishName(selected) || extractCharacterEnglishName(character) || `the ${index === 0 ? 'first' : 'second'} character`;
+      const appearance = persona(selected);
+      if (!appearance) throw Object.assign(new Error(`${character.display_name || character.name}缺少可用的外观正文，请先完善人物详情卡`), { status: 400 });
+      return { name, appearance, aliases: [character.display_name, character.name] };
+    });
     const prompt = buildPhotoStudioPrompt({ pose, characters, instruction: instruction.trim() });
+    return { first, second, pose, prompt, dimensions };
+  }
+
+  async function preview(input) {
+    const { prompt, dimensions } = await prepare(input);
+    return { prompt, ...dimensions };
+  }
+
+  async function submit(input) {
+    const { id } = input;
+    if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
+    const previous = job(id);
+    if (previous) return previous;
+    const { first, second, pose, prompt, dimensions } = await prepare(input);
+    const supported = await capability();
+    if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
     const firstName = first.display_name || first.name;
     const secondName = second?.display_name || null;
     const created = db().transaction(() => {
@@ -161,7 +191,7 @@ export function createPhotoStudioService({
     }
   }
 
-  return { submit, job, list };
+  return { submit, preview, job, list, listCharacters };
 }
 
 async function savePhoto(dataUri, id) {

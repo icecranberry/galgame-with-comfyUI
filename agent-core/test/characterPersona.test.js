@@ -9,6 +9,8 @@ const { getUserName, matchUser } = await import('../src/services/userSearch.js')
 const {
   buildCharacterPersona,
   buildCharacterAppearanceSection,
+  buildCharacterImageAppearance,
+  extractCharacterEnglishName,
   buildOutfitInjectionBlocks,
   buildImageCrossRefInfo,
   buildUserImageCrossRefInfo,
@@ -377,4 +379,19 @@ test('ensureImagePromptIdentity 保留梦境前缀，不破坏 A surreal dreamsc
     ensureImagePromptIdentity('A surreal dreamscape scene: floating islands and a girl.', char),
     'A surreal dreamscape scene: March 7th (Honkai: Star Rail). floating islands and a girl.',
   );
+});
+
+test('direct image appearance keeps only default prose and strips legacy arbitration and duplicate tags', () => {
+  const base = 'Elysia (Honkai Impact 3rd) has pink hair, blue eyes, wearing a white shirt.';
+  const character = { name: 'elysia', base_prompt: 'Personality\n## 你的外观\n【限时服饰（当前生效）】\n1. 睡衣：pink pajamas\n【基础外观（仅用于填补）】elysia \\(coco\\) \\(honkai impact\\), ' + base + '\n【着装裁定（优先级）】\n忽略原衣服\n## 其他\nDo not send this.' };
+  assert.equal(buildCharacterImageAppearance(character), base);
+  assert.equal(extractCharacterEnglishName(character), 'Elysia');
+  assert.equal(buildCharacterImageAppearance({ base_prompt: '## 你的外观\n【限时服饰】a dress\n【着装裁定】rules' }), '');
+});
+
+test('direct image identity understands an original Chinese character with an English name in parentheses', () => {
+  const character = { name: '白芷清', base_prompt: '## 你的外观\n白芷清 (Bai Zhiqing) has grey hair, amber eyes, wearing a blue skirt.\n## 其他\nHidden persona.' };
+  assert.equal(buildCharacterImageAppearance(character), 'Bai Zhiqing has grey hair, amber eyes, wearing a blue skirt.');
+  assert.equal(extractCharacterEnglishName(character), 'Bai Zhiqing');
+  assert.equal(extractCharacterEnglishName({ name: 'original_character', base_prompt: '## 你的外观\nshort hair, blue eyes' }), 'original character');
 });

@@ -16,7 +16,22 @@
     <section v-else key="viewfinder" class="studio-body">
       <aside ref="posePanel" class="studio-pose" tabindex="-1"><div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">01</span>姿势底稿</h2></div><span v-if="recognizedPoses.length" class="rail-count">{{ recognizedPoses.length }} 张已识别</span></div><div class="pose-card" @click="poseOpen = true" @keydown.enter.prevent="poseOpen = true" @keydown.space.prevent="poseOpen = true" role="button" tabindex="0" aria-label="打开全屏姿势图库"><img v-if="selectedPose" :src="poseAsset(selectedPose.thumbnail)" :alt="selectedPose.name" /><div v-else class="pose-placeholder">姿势图库加载中…</div></div><div class="pose-caption"><strong>{{ selectedPose?.name || '请选择一个已识别的姿势' }}</strong><span>{{ selectedPose?.category }} · {{ selectedPose?.system }}</span></div><studio-button variant="secondary" size="sm" block :disabled="recognizedPoses.length < 2" @click="randomizePose"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01" stroke-linecap="round" stroke-width="3" /></svg>随机姿势</studio-button><div class="studio-settings"><h3>画幅设定<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" /></svg></h3><linshe-tabs class="size-ratios" variant="film" v-model="aspectRatio" size="sm" :options="aspectRatioOptions" aria-label="照片比例"><template #option="{ option }"><span class="ratio-option"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect :x="(28 - option.iconWidth) / 2" :y="(24 - option.iconHeight) / 2" :width="option.iconWidth" :height="option.iconHeight" rx="2" :stroke-dasharray="option.value === 'custom' ? '3 2' : undefined" /></svg><span>{{ option.label }}</span></span></template></linshe-tabs><div class="size-controls" aria-label="成片尺寸"><div class="size-control"><div><span>宽度</span><strong>{{ width }} px</strong></div><linshe-slider variant="film" :model-value="width" :min="dimensionControls.width.min" :max="dimensionControls.width.max" :step="dimensionControls.width.step" aria-label="成片宽度" @update:model-value="setWidth" /></div><div class="size-control"><div><span>高度</span><strong>{{ height }} px</strong></div><linshe-slider variant="film" :model-value="height" :min="dimensionControls.height.min" :max="dimensionControls.height.max" :step="dimensionControls.height.step" aria-label="成片高度" @update:model-value="setHeight" /></div></div></div></aside>
       <section class="studio-darkroom"><div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat"><span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><div v-if="activeJob" class="developing-state"><div class="spinner"></div><h3>{{ stageLabel(activeJob.stage) }}</h3><p>正在为 {{ jobCharacters(activeJob) }} 冲印 {{ activeJob.pose_name }}</p><div class="develop-track"><span :style="{ transform: `scaleX(${Math.max(.06, activeJob.progress || 0)})` }"></span></div></div><figure v-else-if="currentPhoto" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else class="empty-negative"><span class="negative-mark">✳</span><span>主角，就差你了。</span><p>选好姿势与角色，拍下这一幕。</p></div></div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><studio-button variant="primary" size="lg" :disabled="shootDisabled" :loading="shooting" @click="shoot"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div></section>
-      <aside ref="characterPanel" class="studio-characters" tabindex="-1"><div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">02</span>入镜人物</h2></div><span class="rail-count">{{ sortedCharacters.length }}</span></div><div class="character-slot-tools"><linshe-tabs v-model="characterSlot" variant="film" size="sm" :options="characterSlotOptions" aria-label="选择主角或搭档" /><studio-button v-if="characterSlot === 'second' && secondCharacterId" variant="ghost" size="sm" @click="secondCharacterId = ''">改为随机</studio-button></div><div class="character-grid"><div v-for="(character, characterIndex) in sortedCharacters" :key="character.id" class="character-choice" :title="character.display_name || character.name" :aria-label="character.display_name || character.name" :class="{ selected: isSelectedSlot(character), 'is-other-slot': isOtherSlot(character) }" role="button" tabindex="0" :aria-pressed="isSelectedSlot(character)" @click="selectCharacter(character)" @keydown.enter.prevent="selectCharacter(character)" @keydown.space.prevent="selectCharacter(character)"><div class="character-face"><img v-if="character.avatar_path || character.standing_url" :src="character.avatar_path || character.standing_url" alt="" loading="lazy" /><span v-else>{{ (character.display_name || character.name).slice(0, 1) }}</span><i v-if="characterSlotNumber(character)" :aria-label="characterSlotNumber(character) === 1 ? '主角' : '搭档'">{{ characterSlotNumber(character) === 1 ? '主角' : '搭档' }}</i></div><span class="contact-number" aria-hidden="true">{{ String(characterIndex + 1).padStart(2, '0') }}</span><span class="character-name">{{ character.display_name || character.name }}</span></div></div><div v-if="selectedPose?.system?.includes('双人')" class="reference-hint">双人姿势使用主角 + 搭档；未指定搭档时会随机选择一位。</div><div v-if="!characters.length" class="rail-empty">没有可选择的角色</div></aside>
+      <aside ref="characterPanel" class="studio-characters" tabindex="-1">
+        <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">02</span>入镜人物</h2></div><span class="rail-count">{{ sortedCharacters.length }}</span></div>
+        <div class="character-slot-tools"><linshe-tabs v-model="characterSlot" variant="film" size="sm" :options="characterSlotOptions" aria-label="选择主角或搭档" /><studio-button v-if="characterSlot === 'second' && secondCharacterId" variant="ghost" size="sm" @click="secondCharacterId = ''">改为随机</studio-button></div>
+        <div class="character-grid">
+          <studio-outfit-picker v-for="(character, characterIndex) in sortedCharacters" :key="character.id" :character-id="character.id" :model-value="characterOutfit(character)" @open="selectOutfitCharacter(character)" @update:model-value="selectOutfit(character, $event)">
+            <template #default="{ open, toggle, keydown, menuId, activeId }">
+              <div class="character-choice" :title="character.display_name || character.name" :aria-label="`${character.display_name || character.name}，${outfitLabel(character)}，选择服装`" :class="{ selected: isSelectedSlot(character), 'is-other-slot': isOtherSlot(character) }" role="combobox" tabindex="0" aria-haspopup="listbox" :aria-expanded="open" :aria-controls="open ? menuId : undefined" :aria-activedescendant="activeId" @click="toggle" @keydown="keydown">
+                <div class="character-face"><img v-if="character.avatar_path || character.standing_url" :src="character.avatar_path || character.standing_url" alt="" loading="lazy" /><span v-else>{{ (character.display_name || character.name).slice(0, 1) }}</span><i v-if="characterSlotNumber(character)" :aria-label="characterSlotNumber(character) === 1 ? '主角' : '搭档'">{{ characterSlotNumber(character) === 1 ? '主角' : '搭档' }}</i></div>
+                <div class="character-contact"><span class="contact-number" aria-hidden="true">{{ String(characterIndex + 1).padStart(2, '0') }}</span><span v-if="characterSlotNumber(character)" class="character-outfit">{{ outfitLabel(character) }}</span></div>
+                <span class="character-name">{{ character.display_name || character.name }}</span>
+              </div>
+            </template>
+          </studio-outfit-picker>
+        </div>
+        <div v-if="duoPose" class="reference-hint">双人姿势使用主角 + 搭档；未指定搭档时会随机选择一位。</div><div v-if="!characters.length" class="rail-empty">没有可选择的角色</div>
+      </aside>
     </section>
     </Transition>
 
@@ -29,6 +44,9 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { usePhotoStudio } from '../composables/usePhotoStudio.js'
 import StudioButton from '../components/photoStudio/StudioButton.vue'
+import StudioOutfitPicker from '../components/photoStudio/StudioOutfitPicker.vue'
+import { STUDIO_OUTFIT_LABELS } from '../utils/studioWardrobe.js'
+import { prepareCameraShutterSound, playCameraShutterSound } from '../utils/cameraShutterSound.js'
 import LinsheInput from '../components/ui/LinsheInput.vue'
 import LinsheSelect from '../components/ui/LinsheSelect.vue'
 import LinsheSlider from '../components/ui/LinsheSlider.vue'
@@ -44,8 +62,19 @@ function jumpToPanel(panel) {
   panel.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' })
 }
 const { catalog, characters, jobs, capability, load, poll, create } = usePhotoStudio()
+const pendingShutterJobs = new Set()
+watch(jobs, list => {
+  let completed = false
+  for (const job of list) {
+    if (job.status === 'running') pendingShutterJobs.add(job.id)
+    else if (pendingShutterJobs.delete(job.id) && job.status === 'done') completed = true
+  }
+  if (completed) playCameraShutterSound()
+})
 const saved = (() => { try { return JSON.parse(sessionStorage.getItem('photo-studio-selection') || '{}') } catch { return {} } })()
 const poseId = ref(saved.poseId || ''), characterId = ref(saved.characterId || ''), secondCharacterId = ref(saved.secondCharacterId || '')
+const characterOutfits = ref({})
+const outfitLabels = STUDIO_OUTFIT_LABELS
 const width = ref(clampPhotoDimension(saved.width || 1200)), height = ref(clampPhotoDimension(saved.height || 1600)), characterSlot = ref('first')
 const aspectRatio = ref([...PHOTO_ASPECT_RATIOS, 'custom'].includes(saved.aspectRatio) ? saved.aspectRatio : inferPhotoAspectRatio(width.value, height.value))
 const poseOpen = ref(false), photoOpen = ref(false), showHistory = ref(false), shooting = ref(false), photoFlash = ref(false)
@@ -130,10 +159,19 @@ function selectCharacter(character) {
     secondCharacterId.value = Number(character.id) === Number(characterId.value) ? '' : character.id
   }
 }
+function characterOutfit(character) { return characterOutfits.value[character.id] || 'work' }
+function outfitLabel(character) { return outfitLabels[characterOutfit(character)] }
+function selectOutfitCharacter(character) {
+  if (!characterSlotNumber(character)) selectCharacter(character)
+}
+function selectOutfit(character, scene) {
+  if (!characterSlotNumber(character)) selectCharacter(character)
+  characterOutfits.value[character.id] = scene
+}
 function jobCharacters(job) { return [job.character_name, job.character2_name].filter(Boolean).join(' + ') }
 function stageLabel(stage) { return ({ preparing: '正在架好相机', queued: '已进入暗房队列', generating: '正在拍摄', saving: '正在冲印照片' })[stage] || '正在拍摄' }
 function openPhoto(url) { lightboxUrl.value = url; photoOpen.value = true }
-async function shoot() { if (shootDisabled.value) return; shooting.value = true; lastFailure.value = ''; try { const job = await create({ id: crypto.randomUUID(), characterId: characterId.value, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null, poseId: poseId.value, width: width.value, height: height.value }); selectedJobId.value = job.id; sessionStorage.setItem('photo-studio-job', job.id); await poll() } catch (error) { lastFailure.value = error.message } finally { shooting.value = false } }
+async function shoot() { if (shootDisabled.value) return; prepareCameraShutterSound(); shooting.value = true; lastFailure.value = ''; try { const job = await create({ id: crypto.randomUUID(), characterId: characterId.value, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null, poseId: poseId.value, outfitScene: characterOutfit(selectedCharacter.value), secondOutfitScene: duoPose.value && selectedSecondCharacter.value ? characterOutfit(selectedSecondCharacter.value) : 'work', width: width.value, height: height.value }); selectedJobId.value = job.id; sessionStorage.setItem('photo-studio-job', job.id); await poll() } catch (error) { lastFailure.value = error.message } finally { shooting.value = false } }
 onMounted(async () => { await load(); if (disposed) return; if (!recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (!sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection(); pollTimer = setInterval(poll, 1800); listTimer = setInterval(load, 7000) })
 onBeforeUnmount(() => { disposed = true; clearInterval(pollTimer); clearInterval(listTimer); clearTimeout(flashTimer) })
 </script>
@@ -194,6 +232,8 @@ onBeforeUnmount(() => { disposed = true; clearInterval(pollTimer); clearInterval
 .character-choice.selected { border-color:var(--studio-shutter); box-shadow:none; background:var(--studio-film-edge); }.character-choice.is-other-slot { border-color:var(--studio-film-muted); }
 .character-choice.selected::after { content:''; position:absolute; inset:-2px; border:2px solid var(--studio-shutter); border-radius:35% 6% 30% 5%; transform:rotate(-4deg); pointer-events:none; }
 .character-face { width:100%; aspect-ratio:1; flex:none; position:relative; background:var(--studio-film-edge); }.character-face img,.character-face>span { display:block; width:100%; height:100%; object-fit:cover; }.character-face>span { display:grid; place-items:center; font-size:25px; color:var(--studio-film-text); }.character-face i { position:absolute; left:0; bottom:0; padding:2px 5px; background:var(--studio-shutter); color:var(--studio-film); font-size:10px; font-style:normal; font-weight:600; }
+.character-contact { width:100%; display:flex; align-items:center; justify-content:space-between; gap:4px; min-height:24px; }
+.character-outfit { font-size:var(--fs-xs); color:var(--studio-film-muted); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .contact-number { align-self:flex-start; font:italic 700 12px/1.6 monospace; color:var(--studio-shutter); letter-spacing:.1em; padding-top:3px; }
 .character-name { width:100%; flex:none; font-size:12px; line-height:1.5; min-height:25px; padding:0 0 5px; color:var(--studio-film-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
 .reference-hint,.rail-empty { font-size:12px; line-height:1.6; color:var(--studio-muted); }

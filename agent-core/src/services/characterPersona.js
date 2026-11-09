@@ -160,6 +160,30 @@ export function extractEditableAppearanceBody(basePrompt) {
   return range ? base.slice(range.bodyStart, range.end).trim() : '';
 }
 
+/** Direct image workflows need appearance prose, without LLM outfit arbitration or persona text. */
+export function buildCharacterImageAppearance(character) {
+  let text = extractEditableAppearanceBody(character?.base_prompt);
+  // Old saved cards can contain an injected outfit wrapper. Default still means the base appearance.
+  const legacyBase = /【基础外观[^】]*】([\s\S]*?)(?=【着装裁定|$)/.exec(text);
+  if (legacyBase) text = legacyBase[1].trim();
+  if (/【(?:限时服饰|角色专属形态|着装裁定)/.test(text)) return '';
+  // Original characters sometimes use "中文名 (English Name) has ..." instead of a series tag.
+  text = text.replace(/[\p{Script=Han}·]+\s*\(([A-Za-z][A-Za-z .'\-]{0,60})\)\s+(?=has\b|wearing\b)/u, '$1 ');
+  // Discard a legacy tag prefix when a complete English identity sentence is also present.
+  const identity = /[A-Za-z][A-Za-z0-9 .'\-:]{0,60}?\s*\([^()\r\n]{1,80}\)\s+(?:has|wearing)\b/.exec(text);
+  if (identity) text = text.slice(identity.index);
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+export function extractCharacterEnglishName(character) {
+  const appearance = buildCharacterImageAppearance(character);
+  const tagged = /^([A-Za-z][A-Za-z0-9 .'\-:]{0,60}?)\s*\([^()]+\)\s+(?:has|wearing)\b/.exec(appearance);
+  const plain = /^([A-Za-z][A-Za-z0-9 .'\-:]{0,60}?)\s+(?:has|wearing)\b/.exec(appearance);
+  const name = tagged?.[1] || plain?.[1];
+  if (name) return name.trim();
+  return /^[A-Za-z][A-Za-z0-9_ .'\-:]*$/.test(character?.name || '') ? character.name.replace(/_/g, ' ').trim() : '';
+}
+
 export function splitAppearanceSection(basePrompt) {
   const base = String(basePrompt || '');
   const range = editableAppearanceRange(base);

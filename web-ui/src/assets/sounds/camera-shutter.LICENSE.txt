@@ -1,0 +1,7 @@
+camera-shutter.wav
+Recording: camera_shutter.wav by ianjuby (an SLR camera taking a picture)
+Source: https://freesound.org/people/ianjuby/sounds/244968/
+Downloaded public HQ preview: https://cdn.freesound.org/previews/244/244968_384146-hq.mp3
+License: CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+Decoded to 16-bit PCM WAV; gain increased by 10 dB for audibility. No other effects added.
