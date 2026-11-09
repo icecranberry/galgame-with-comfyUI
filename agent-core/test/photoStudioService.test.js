@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { migratePhotoStudioSchema } from '../src/db/photoStudioSchema.js';
@@ -14,16 +15,30 @@ const pairPose = {
 test('the full catalog preserves uncalibrated entries while the studio catalog exposes only recognized poses', async () => {
   const catalog = await getPoseCatalog();
   assert.equal(catalog.length, 1439);
+  const { prompts } = JSON.parse(await fs.readFile(new URL('../assets/pose-gallery/pose-prompts.json', import.meta.url), 'utf8'));
+  const catalogIds = new Set(catalog.map(pose => pose.id));
+  for (const [id, description] of Object.entries(prompts)) {
+    assert.ok(catalogIds.has(id), `Unknown pose id: ${id}`);
+    if (/^pair/i.test(id)) {
+      assert.equal(typeof description?.posePrompt, 'string', id);
+      assert.ok(description.posePrompt.trim(), id);
+      assert.equal(description.characterRoles?.length, 2, id);
+      assert.ok(description.characterRoles.every(role => typeof role === 'string' && role.trim()), id);
+    } else {
+      assert.equal(typeof description, 'string', id);
+      assert.ok(description.trim(), id);
+    }
+  }
   const calibrated = catalog.filter(pose => pose.posePrompt);
-  assert.deepEqual(calibrated.map(pose => pose.id), [
+  assert.deepEqual(calibrated.map(pose => pose.id), catalog.filter(pose => Object.hasOwn(prompts, pose.id)).map(pose => pose.id));
+  const originalSingleIds = [
     'full_single_P001_front', 'full_single_P001_high', 'full_single_P001_low',
     'full_single_P001_side', 'full_single_P001_diag',
-    'pair60_P042_front', 'pair60_P051_front', 'pair60_P054_front',
-  ]);
-  assert.ok(calibrated.slice(0, 5).every(pose => pose.system === '全身单人・标准系' && pose.name === '后仰坐・单膝立起'));
+  ];
+  assert.ok(originalSingleIds.every(id => calibrated.some(pose => pose.id === id && pose.system === '全身单人・标准系' && pose.name === '后仰坐・单膝立起')));
   const studioCatalog = await getRecognizedPoseCatalog();
   assert.deepEqual(studioCatalog.map(pose => pose.id), calibrated.map(pose => pose.id));
-  assert.equal(studioCatalog.length, 8);
+  assert.equal(studioCatalog.length, Object.keys(prompts).length);
 
   const pair042 = studioCatalog.find(pose => pose.id === 'pair60_P042_front');
   assert.equal(pair042.name, '盘腿相拥');

@@ -362,3 +362,37 @@
   --media-rule: var(--media-ink);
 }
 [data-theme="dark"] { --media-rule: #a49aa9; }
+
+/* 照相馆：地下摄影厂牌，橙色印记、暖白纸面与墨黑胶卷。 */
+:root {
+  --studio-bg: #ded9d1;
+  --studio-paper: #f7f2e9;
+  --studio-ink: #201e1c;
+  --studio-muted: #625a52;
+  --studio-line: #bcb2a6;
+  --studio-accent: #a33b0d;
+  --studio-accent-soft: #f9d0ad;
+  --studio-film: #191817;
+  --studio-film-edge: #302b27;
+  --studio-film-text: #f7f0e7;
+  --studio-film-muted: #c8bdb1;
+  --studio-perforation: #d5c9b9;
+  --studio-shutter: #ff8a38;
+  --studio-tag: #b84418;
+  --studio-tape: #ff8a38;
+  --studio-shadow: #25180d40;
+}
+[data-theme="dark"] {
+  --studio-tag: #ff9d58;
+  --studio-bg: #201d1b;
+  --studio-paper: #302a26;
+  --studio-ink: #f6efe6;
+  --studio-muted: #cbbeb0;
+  --studio-line: #65564b;
+  --studio-accent: #ff9d58;
+  --studio-accent-soft: #51321e;
+  --studio-film: #121110;
+  --studio-film-edge: #29231f;
+  --studio-perforation: #a89582;
+  --studio-shadow: #00000066;
+}

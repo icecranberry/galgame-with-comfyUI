@@ -2,7 +2,7 @@
 
 姿势参考取自 [ai-pose-gallery-SKILL](https://github.com/aiyaoooo14/ai-pose-gallery-SKILL)，图片权利归原作者 ギア，原始站点为 ai-pose-gallery.pages.dev；上游 LICENSE 明确 `img/`、`thumbs/`、姿势 JSON 数据不适用 MIT，且**不得商用**。保留上游 LICENSE 与素材来源修订号/逐文件哈希清单。禁止用于商业用途；如权利人提出异议需移除素材。
 
-`agent-core/assets/pose-gallery/manifest.json` 记录上游 commit、每张源图 SHA-256、像素尺寸、源大小及 AVIF 大小；`img/` 的原始图像和 `thumbs/` 缩略图均转换为 AVIF。`catalog.json` 保存全部 1439 个姿势索引。当前已视觉核对并描述 5 张单人角度图和 3 张双人图，保存在 `pose-prompts.json`。照相馆 API 和界面只显示已有完整描述的姿势；未识别的条目不会进入图库或接受拍摄，避免选到没有动作描述的图片。维护/补拉图库：
+`agent-core/assets/pose-gallery/manifest.json` 记录上游 commit、每张源图 SHA-256、像素尺寸、源大小及 AVIF 大小；`img/` 的原始图像和 `thumbs/` 缩略图均转换为 AVIF。`catalog.json` 保存全部 1439 个姿势索引。完整视觉识别稿保存在 `pose-prompts.json`；仅已完成逐图视觉校准的条目才进入照相馆，未识别或待复核条目不会显示或接受拍摄，避免选到没有动作描述的图片。维护/补拉图库：
 
 ```powershell
 node agent-core/scripts/import-pose-gallery.mjs --source=<ai-pose-gallery-SKILL 本地工作副本>
@@ -10,7 +10,7 @@ node agent-core/scripts/import-pose-gallery.mjs --source=<ai-pose-gallery-SKILL 
 
 照相馆沿用系统当前的 Anima 工作流，不将图库图片或头像上传作图像参考。姿势图先由人工按轮廓和角度写成英文动作 tag，再与 `buildCharacterAppearanceSection` 取出的角色外观拼接，直接作为预备完成的画面描述传给 `generateImage`；不再额外调用模型改写提示词。双人姿势优先使用用户选定的搭档，未指定时从其他角色随机补一人。尺寸默认 1200×1600，用户可分别滑动调整宽高（512–2048，8px 步长），本次任务会冻结保存尺寸。最终照片以 AVIF 保存到 `/images/photo_studio/`；选择、描述、尺寸和状态保存在 `photo_studio_jobs`，底层图像任务同步记入 `image_tasks`。
 
-当前描述样本是 `full_single_P001` 的正面、俯视、仰视、侧面与斜侧五个角度，以及以下三张逐图核对过的双人姿势：
+原始描述样本是 `full_single_P001` 的正面、俯视、仰视、侧面与斜侧五个角度，以及以下三张逐图核对过的双人姿势：
 
 - `pair60_P042_front`「盘腿相拥」：第一人坐地盘腿作为支撑，第二人面对面坐在其腿上并环抱肩腰。
 - `pair60_P051_front`「耳边低语・手触脸颊」：第一人站前方抬手触碰后方伙伴脸颊，第二人靠近耳边并扶住其外侧髋部。

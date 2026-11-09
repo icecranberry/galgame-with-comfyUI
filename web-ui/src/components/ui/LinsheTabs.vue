@@ -31,7 +31,7 @@
       >
         {{ option.eyebrow }}
       </span>
-      {{ option.label }}
+      <slot name="option" :option="option" :selected="option.value === modelValue">{{ option.label }}</slot>
       <span v-if="variant === 'filter' && option.count != null" class="ls-tabs__count">{{ option.count }}</span>
       <span v-if="option.badge" class="ls-tabs__badge">{{ option.badge }}</span>
     </div>
@@ -297,4 +297,12 @@ function navigate(event, option) {
 .ls-tabs--comic.ls-tabs--md .ls-tabs__item:has(.ls-tabs__badge) { padding-right: 48px; }
 .ls-tabs--comic .ls-tabs__badge { position: absolute; right: 8px; top: 8px; padding: 3px 5px; border: 1px solid var(--media-ink); background: var(--media-light); color: var(--media-ink); transform: rotate(5deg); }
 @media (max-width: 767px) { .ls-tabs--comic.ls-tabs--md .ls-tabs__item:has(.ls-tabs__badge) { padding: 9px 4px; gap: 3px; } .ls-tabs--comic .ls-tabs__badge { position: static; font-size: 9px; padding: 1px 4px; transform: none; } }
+/* Opt-in photographic control rail; other tab variants keep their own skin. */
+.ls-tabs--film { background:var(--studio-bg); border:1px solid var(--studio-line); border-radius:5px; gap:3px; padding:4px; }
+.ls-tabs--film .ls-tabs__item { min-height:38px; border-radius:3px; color:var(--studio-muted); font-weight:600; transition:background-color .3s,color .3s,box-shadow .3s; }
+.ls-tabs--film .ls-tabs__item:hover:not(.ls-tabs__item--active) { color:var(--studio-ink); background:var(--studio-paper); }
+.ls-tabs--film .ls-tabs__item--active { color:var(--studio-ink); background:var(--studio-paper); box-shadow:0 1px 3px var(--studio-shadow),inset 0 -2px var(--studio-accent); }
+.ls-tabs--film .ls-tabs__item--active::after { display:none; }
+.ls-tabs--film .ls-tabs__item:focus-visible { outline:2px solid var(--studio-accent); outline-offset:1px; }
+@media(prefers-reduced-motion:reduce) { .ls-tabs--film .ls-tabs__item { transition:none; } }
 </style>
