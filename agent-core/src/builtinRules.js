@@ -120,7 +120,7 @@ Hard Rules:
 - ALL text in English. No Chinese characters anywhere.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
 - Multiple Characters — When there are 2+ characters, add an announcement of the total count explicitly (e.g. "Two people share the frame:" or "There are three people in the scene:"), then each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
-- MAX 1200 characters total.`,
+- MAX 1000 characters total.`,
   is_active: 1,
 };
 
@@ -169,8 +169,8 @@ export const STANDING_ROLE_PROMPTS = {
 - 背景必须是纯白空白（plain white background, empty background, no scenery），人物与少量装饰之外全部留白；不能用环境、建筑、风景、地面、地平线或背景渐变制造张力
 - 角色人物是画面的绝对主体、核心和唯一视觉重点（dominant character, character-focused composition, large character scale, character fills the frame）；所有构图选择都必须优先保证人物尽可能大，不得为了留白、光效或其他内容而缩小人物
 - 画面为单人立绘（solo, 1girl/1boy 按角色性别），全身构图，头部到脚部完整入画
-- 姿势极度自由，必须大胆夸张、具有强烈动作线与瞬间爆发力，不局限于站姿：可腾空跃起、屈膝蹲跃、跨步前冲、大幅扭腰回身、后仰伸展、单腿高抬或手脚向镜头伸出。根据角色气质选一个鲜明动作，明确躯干扭转、四肢方向与重心，不要把多种动作硬叠在一起；头发、衣摆和飘带跟随动作形成有力弧线
-- 镜头角度极度自由，不以正面或平视为默认：可采用极低机位仰拍、陡峭俯拍、侧后方回望、倾斜镜头、强烈广角透视与近大远小的缩短透视。让靠近镜头的手、脚或道具大胆放大，身体沿对角线或弧线展开；保留角色辨识度、合理关节与完整头脚，不因强调全身而退回僵直站姿
+- 姿势极度自由，必须大胆夸张、具有强烈动作线与瞬间爆发力，不局限于站姿：示例：可腾空跃起、屈膝蹲跃、跨步前冲、大幅扭腰回身、后仰伸展、或手脚向镜头伸出等等动态姿势。根据角色气质选一个鲜明动作，明确躯干扭转、四肢方向与重心，不要把多种动作硬叠在一起；头发、衣摆和飘带跟随动作形成有力弧线
+- 镜头角度极度自由，不以正面或平视为默认：可采用极低机位仰拍、陡峭俯拍、侧后方回望、倾斜镜头、强烈广角透视与近大远小的缩短透视等各种视角。让靠近镜头的手、脚或道具大胆放大，身体沿对角线或弧线展开；保留角色辨识度、合理关节与完整头脚，不因强调全身而退回僵直站姿
 - 允许少量与角色相关的装饰品和图形点缀，例如局部金环、几笔弧形轨迹、零星花瓣、星芒、飘带或一件标志性小道具；按角色选择少数元素即可，围绕动作局部呼应，不遮挡脸与主体，不增加其他人物，不搭建大型场景、不铺满画面。装饰间与外围必须仍是纯白空白
 - 图片比例 1:2（竖幅），按这个比例设计整个画面结构，角色在画面中的位置与留白要为竖幅构图服务
 - 默认基于 system 中提供的角色外观信息设计服装与外形，不得自行改动；用户明确要求修改外观时，必须优先按用户要求替换服装、发型、发色、瞳色或标志性特征，未要求更改的部位沿用角色资料

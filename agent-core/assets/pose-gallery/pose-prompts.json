@@ -1,0 +1,33 @@
+{
+  "version": 3,
+  "status": "pilot",
+  "source": "ai-pose-gallery-SKILL pose reference images, manually described and checked against each selected angle",
+  "prompts": {
+    "full_single_P001_front": "seated on the floor, torso leaning slightly backward, one knee raised beside the torso, the other bent leg angled forward toward the camera, one palm planted flat on the floor behind the hip on the viewer's left, the opposite hand resting over the raised knee on the viewer's right, relaxed shoulders, frontal view, full body, both feet visible, natural foreshortening",
+    "full_single_P001_high": "seated on the floor, torso leaning slightly backward, one knee raised close to the chest, the other bent leg extending diagonally toward the lower right of the frame, one palm planted on the floor behind the hip on the viewer's left, the opposite hand draped over the raised knee on the viewer's right, head gently inclined, high three-quarter camera looking down, full body, both feet visible",
+    "full_single_P001_low": "reclining seated pose on the floor, torso leaning back with chest lifted, one knee raised prominently near the viewer's right, the other bent leg extending toward the viewer's left foreground, one palm braced on the floor behind the hip on the viewer's left, opposite hand gripping the top of the raised knee, head tipped back, dramatic very low-angle view looking upward, full body, strong foreground foreshortening, both feet visible",
+    "full_single_P001_side": "side-profile seated pose on the floor facing right, torso leaning backward, head tipped back, one knee bent and raised in front of the torso, the other leg folded low and extended forward along the floor with both feet pointing right, one palm planted on the floor behind the hip for support, opposite hand resting on the raised knee, full body, clean side view",
+    "full_single_P001_diag": "seated on the floor in a relaxed three-quarter pose, torso leaning slightly backward, one knee lifted high near the chest, the other bent leg crossing diagonally into the foreground toward the lower right, one palm braced on the floor behind the hip on the viewer's left, opposite hand resting over the raised knee, head turned slightly toward the camera, full body, both feet visible, moderate foreshortening",
+    "pair60_P051_front": {
+      "posePrompt": "full-body frontal view, two people standing close together in a gentle back hug, both standing upright with all four feet on the ground, character 1 in the foreground slightly to the viewer's left, character 2 behind and slightly to the viewer's right, their torsos overlapping, character 1 tilts the head toward character 2, character 2 leans the face close to character 1's ear as if whispering, character 1 raises the arm on the viewer's right with the elbow bent and cups character 2's cheek beside the ear, character 1's other hand rests low across their own abdomen, character 2's visible hand gently holds character 1's outer hip on the viewer's right, both faces visible in three-quarter view, relaxed knees, affectionate standing portrait, fully clothed",
+      "characterRoles": [
+        "the person in front, slightly to the viewer's left; head turned toward the partner behind; raised hand on the viewer's right cupping the partner's cheek beside the ear; other hand resting across own lower abdomen; both feet planted on the ground",
+        "the person behind, slightly to the viewer's right; standing close behind character 1; leaning the face toward character 1's ear to whisper; visible hand gently resting on character 1's outer hip on the viewer's right; both feet planted on the ground"
+      ]
+    },
+    "pair60_P042_front": {
+      "posePrompt": "full-body frontal view, two people seated closely together on the floor, character 1 sits upright in front with both legs folded and crossed on the floor, character 2 faces character 1 and sits on their lap with both thighs wrapped around character 1's waist, character 2's arms loop over character 1's shoulders, character 1's arms support character 2 around the lower back and waist, their chests close and faces turned toward one another, both heads and all four arms visible, clearly interlaced seated embrace, both bodies grounded in a stable cross-legged seated pose, fully clothed",
+      "characterRoles": [
+        "the seated base in front; sitting upright on the floor with both legs folded and crossed; facing the partner; supporting the partner around the lower back and waist with both arms",
+        "the partner seated on character 1's lap facing them; both thighs wrapped around character 1's waist; both arms looped over character 1's shoulders; face close to character 1's face"
+      ]
+    },
+    "pair60_P054_front": {
+      "posePrompt": "full-body frontal view, a standing person carries their partner horizontally in a secure bridal carry, character 2 stands upright behind and supports character 1 with one forearm beneath the upper back and the other beneath the knees, character 1 reclines across both arms with the head and shoulders tilted backward toward the viewer's left, the torso arched gently, both legs extending together diagonally toward the viewer's right, character 1's nearer arm hangs relaxed downward, character 2 keeps both feet planted and looks toward the carried partner, show the entire carry from both heads to all feet, clearly separate the carrier's supporting arms from the carried person's limbs, fully clothed",
+      "characterRoles": [
+        "the carried partner; reclining horizontally across the other person's arms, head and shoulders tilted backward toward the viewer's left, both legs extending together toward the viewer's right, nearer arm hanging relaxed downward, not standing on the floor",
+        "the carrier behind; standing upright with both feet planted, one forearm firmly supporting character 1's upper back and the other forearm supporting character 1 beneath the knees"
+      ]
+    }
+  }
+}

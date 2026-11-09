@@ -11,6 +11,7 @@ const DATA_DIR = process.env.IMAGES_DIR
 const AVATARS_DIR = path.resolve(__dirname, '..', '..', 'data', 'avatars');
 
 export const IMAGE_CATEGORIES = {
+  photo_studio: { dir: 'photo_studio', label: '照相馆' },
   chat:      { dir: 'chat',      label: '聊天' },
   moments:   { dir: 'moments',   label: '朋友圈' },
   events:    { dir: 'events',    label: '奇遇' },

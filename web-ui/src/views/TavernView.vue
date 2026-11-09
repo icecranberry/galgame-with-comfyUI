@@ -137,6 +137,11 @@
         </div>
         <span class="relation-entry-arrow">›</span>
       </div>
+      <div class="relation-entry card" role="button" tabindex="0" @click="router.push('/photo-studio')" @keydown.enter.prevent="router.push('/photo-studio')" @keydown.space.prevent="router.push('/photo-studio')">
+        <div class="relation-entry-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l1.4-2h7.2L17 7h3a2 2 0 0 1 2 2v10H2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/><path d="M19 3v4m-2-2h4"/></svg></div>
+        <div class="relation-entry-text"><span class="relation-entry-title">照相馆</span><span class="relation-entry-hint">挑选姿势，为角色拍一张新照片</span></div>
+        <span class="relation-entry-arrow">›</span>
+      </div>
       <div class="relation-entry card" role="button" tabindex="0" @click="openWorldSetting" @keydown.enter.prevent="openWorldSetting" @keydown.space.prevent="openWorldSetting">
         <div class="relation-entry-icon world-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

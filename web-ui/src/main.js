@@ -30,6 +30,7 @@ import MaibotBridgeView from './views/MaibotBridgeView.vue'
 import GroupChatView from './views/GroupChatView.vue'
 import TownView from './views/TownView.vue'
 import GodSaysView from './views/GodSaysView.vue'
+import PhotoStudioView from './views/PhotoStudioView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
@@ -45,6 +46,7 @@ const routes = [
   { path: '/gallery', component: GalleryView },
   { path: '/media', component: MediaView },
   { path: '/tavern', component: TavernView },
+  { path: '/photo-studio', component: PhotoStudioView },
   { path: '/mailbox', component: MailboxView },
   { path: '/backpack', component: BackpackView },
   { path: '/settings', component: SettingsView },

@@ -20,6 +20,7 @@ import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
+import photoStudioRoutes from './src/routes/photoStudio.js';
 import charactersRoutes from './src/routes/characters.js';
 import emojiRoutes from './src/routes/emoji.js';
 import configRoutes from './src/routes/config.js';
@@ -103,6 +104,7 @@ app.use(cors());
 //   compression({ level: 1, brotli: { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 1 } } })
 //   （gzip 263→134ms、brotli 194→58ms，平衡点抬到 ≈134 MB/s）
 app.use(express.json({ limit: '10mb' }));
+app.use('/api/photo-studio', godCommitGuard, wrapRouterAsync(photoStudioRoutes));
 
 // 静态文件（Vue 前端，构建后）
 // 带内容哈希的资源（/assets/*，含字体）可长缓存；index.html 保持可即时更新

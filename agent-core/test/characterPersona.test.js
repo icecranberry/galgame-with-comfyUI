@@ -8,6 +8,7 @@ const { config } = await import('../src/config.js');
 const { getUserName, matchUser } = await import('../src/services/userSearch.js');
 const {
   buildCharacterPersona,
+  buildCharacterAppearanceSection,
   buildOutfitInjectionBlocks,
   buildImageCrossRefInfo,
   buildUserImageCrossRefInfo,
@@ -162,6 +163,33 @@ test('无生效外观时 short variant 与旧口径逐字节一致（short_promp
 
 test('无生效外观时 full variant 与旧口径逐字节一致（整卡原样）', () => {
   assert.equal(buildCharacterPersona(CHAR, { variant: 'full', outfits: null }), CHAR.base_prompt);
+});
+
+test('外观段默认保留标题，直接生图可仅移除标题而保留正文', () => {
+  assert.equal(
+    buildCharacterAppearanceSection(CHAR, { outfits: null }),
+    '## 你的外观\n小满有着栗色长发与琥珀色眼睛。\n',
+  );
+  for (const heading of ['## 你的外观\n', '##你的外观\r\n', '## 你的外观 ']) {
+    assert.equal(
+      buildCharacterAppearanceSection({ base_prompt: `人格正文\n${heading}Mobius has green hair, bright eyes.\n` }, { outfits: null, includeHeading: false }),
+      'Mobius has green hair, bright eyes.',
+    );
+  }
+  assert.equal(buildCharacterAppearanceSection({ base_prompt: '无外观段' }, { outfits: null, includeHeading: false }), '');
+  assert.equal(buildCharacterAppearanceSection({ base_prompt: '## 你的外观\n' }, { outfits: null, includeHeading: false }), '');
+});
+
+test('省略外观标题不丢失生效服饰、基础外观或着装优先级', () => {
+  const outfits = { limited: [{ name: '测试服饰', description: 'silver coat' }], exclusive: null };
+  for (const character of [CHAR, { base_prompt: '' }]) {
+    const section = buildCharacterAppearanceSection(character, { outfits });
+    const body = buildCharacterAppearanceSection(character, { outfits, includeHeading: false });
+    assert.equal(body, section.replace('## 你的外观', '').trim());
+    assert.doesNotMatch(body, /##\s*你的外观/);
+    assert.match(body, /silver coat/);
+    assert.match(body, /【着装裁定/);
+  }
 });
 
 test('无生效外观时 buildImageCrossRefInfo 与旧口径逐字节一致（身份行 + 外观段）', () => {

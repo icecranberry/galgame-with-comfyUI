@@ -201,16 +201,19 @@ export function isAppearanceOnlyPromptChange(oldBase, newBase) {
 }
 
 /**
- * 组装角色完整外观段（含标题「## 你的外观」与生效外观注入）。
- * 供需要单独拿外观段的场景使用（如表情包 system3，自行决定是否保留标题行）。
+ * 组装角色外观段（默认含标题「## 你的外观」与生效外观注入）。
+ * 供需要单独拿外观段的场景使用；直接生图时可省略标题，保留完整外观与注入正文。
  * @param {object} character - 至少含 base_prompt（注入查询需要 id）
- * @param {object} [opts] - 同 buildCharacterPersona 的 opts.outfits
+ * @param {object} [opts]
+ * @param {'auto'|null|Array|{limited,exclusive}} [opts.outfits='auto'] - 同 buildCharacterPersona 的 opts.outfits
+ * @param {boolean} [opts.includeHeading=true] - false 时只返回外观正文
  * @returns {string} base_prompt 无外观段且无生效外观时返回 ''
  */
 export function buildCharacterAppearanceSection(character, opts = {}) {
   const outfits = resolveOutfits(character, opts.outfits);
   const appearance = extractAppearanceSection(character?.base_prompt);
-  return injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(outfits));
+  const section = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(outfits));
+  return opts.includeHeading === false ? section.replace(APPEARANCE_HEADING_RE, '').trim() : section;
 }
 
 function resolveOutfits(character, outfits) {
