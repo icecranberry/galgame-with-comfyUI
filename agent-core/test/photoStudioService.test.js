@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { DEFAULT_STUDIO_BACKGROUND } from '../src/services/photoStudioBackgrounds.js';
 import { migratePhotoStudioSchema } from '../src/db/photoStudioSchema.js';
-import { createPhotoStudioService, getPoseCatalog, getRecognizedPoseCatalog } from '../src/services/photoStudioService.js';
+import { createPhotoStudioService, getPoseCatalog, getRecognizedPoseCatalog, savePhoto } from '../src/services/photoStudioService.js';
+import { getImageDir } from '../src/services/imagePaths.js';
+import { config } from '../src/config.js';
 
 const soloPose = { id: 'pose', system: '全身单人・标准系', name: 'Pose', angle: 'Front', posePrompt: 'seated on the floor, leaning back' };
 const pairPose = {
@@ -74,15 +78,108 @@ async function fixture(overrides = {}) {
     database: () => db,
     catalog: async () => [soloPose, pairPose],
     capability: async () => ({ available: true, engine: 'Anima · base' }),
+    polishContext: () => ({ systemRules: 'rules', model: 'test-model' }),
     persona: character => `appearance of ${character.display_name}`,
     render: async (prompt, options) => { calls.push({ prompt, options }); return { success: true, wfMode: 'base', images: [{ base64: bytes.toString('base64') }] }; },
     save: async () => '/images/photo_studio/test.avif',
+    publish: () => {},
     ...overrides,
   });
   return { db, service, calls };
 }
 
 const request = { id: 'test-request-123', characterId: 1, poseId: 'pose' };
+
+test('studio pushes progress and only publishes ready after the image and task are saved', async () => {
+  const events = [];
+  let finishSave, enteredSave;
+  const saving = new Promise(resolve => { enteredSave = resolve; });
+  const f = await fixture({
+    publish: (event, data) => events.push({ event, ...data }),
+    render: async (_, { onProgress }) => {
+      onProgress({ progress: 0.5 });
+      onProgress({ phase: 'executed' });
+      return { success: true, images: [{ base64: 'original' }] };
+    },
+    save: bytes => {
+      assert.equal(bytes, 'original');
+      enteredSave();
+      return new Promise(resolve => { finishSave = resolve; });
+    },
+  });
+  try {
+    await f.service.submit(request);
+    await saving;
+    assert.ok(events.some(({ job }) => job.stage === 'generating' && job.progress === 0.5));
+    assert.equal(events.at(-1).job.stage, 'saving');
+    assert.ok(events.every(({ event }) => event === 'photo_studio_progress'));
+    finishSave('/images/photo_studio/original.png');
+    const done = await waitForJob(f.service, request.id);
+    assert.equal(done.status, 'done');
+    assert.deepEqual(events.at(-1), { event: 'photo_studio_ready', job: done });
+    assert.deepEqual(JSON.parse(f.db.prepare('SELECT output_paths FROM image_tasks').get().output_paths), [done.output_url]);
+    const count = events.length;
+    await f.service.submit(request);
+    assert.equal(events.length, count, 'idempotent submission must not generate again');
+  } finally { f.db.close(); }
+});
+
+test('studio pushes terminal errors so the client does not wait for polling', async () => {
+  const events = [];
+  const f = await fixture({ publish: (event, data) => events.push({ event, ...data }), save: async () => { throw new Error('disk unavailable'); } });
+  try {
+    await f.service.submit(request);
+    const failed = await waitForJob(f.service, request.id);
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.error, 'disk unavailable');
+    assert.deepEqual(events.at(-1), { event: 'photo_studio_ready', job: failed });
+  } finally { f.db.close(); }
+});
+
+test('polish correction is visible and a returned prompt immediately enters one render', async () => {
+  const events = [];
+  let finishPolish, enteredRender;
+  const rendering = new Promise(resolve => { enteredRender = resolve; });
+  let renders = 0;
+  const f = await fixture({
+    publish: (event, data) => events.push({ event, ...data }),
+    polish: ({ onRetry }) => { onRetry(); return new Promise(resolve => { finishPolish = resolve; }); },
+    render: async (prompt, { onProgress }) => {
+      renders++; enteredRender(prompt);
+      onProgress({ stage: 'generating', phase: 'submitted' });
+      onProgress({ stage: 'generating', phase: 'started' });
+      return { success: true, images: [{ base64: 'original' }] };
+    },
+  });
+  try {
+    await f.service.submit({ ...request, polishPrompt: true });
+    assert.equal(events.at(-1).job.stage, 'polishing_retry');
+    assert.equal(renders, 0);
+    const prompt = 'Alice stands beside the window in soft morning light.';
+    finishPolish(prompt);
+    assert.equal(await rendering, prompt);
+    const done = await waitForJob(f.service, request.id);
+    assert.equal(done.status, 'done');
+    assert.equal(renders, 1);
+    assert.deepEqual(events.map(({ job }) => job.stage), ['preparing', 'polishing', 'polishing_retry', 'queued', 'queued', 'generating', 'saving', 'done']);
+    assert.equal(events.filter(({ event }) => event === 'photo_studio_ready').length, 1);
+  } finally { f.db.close(); }
+});
+
+test('studio saves original image bytes without an AVIF encoding pass', async () => {
+  const source = sharp({ create: { width: 16, height: 16, channels: 3, background: '#aabbcc' } });
+  for (const format of ['png', 'jpeg', 'webp']) {
+    const bytes = await source.clone().toFormat(format).toBuffer();
+    const id = `studio-test-${randomUUID()}`;
+    const filename = path.join(getImageDir('photo_studio'), `${id}.${format}`);
+    try {
+      const url = savePhoto(`data:image/${format};base64,${bytes.toString('base64')}`, id);
+      assert.equal(url, `/images/photo_studio/${id}.${format}`);
+      assert.deepEqual(await fs.readFile(filename), bytes);
+      await assert.rejects(fs.stat(path.join(getImageDir('photo_studio'), `${id}.avif`)), { code: 'ENOENT' });
+    } finally { await fs.rm(filename, { force: true }); }
+  }
+});
 
 test('studio forwards the selected actors LoRA weights and exact trigger words outside AI polishing', async () => {
   const main = { path: 'alice.safetensors', weight: 0.75, triggerWord: 'Alice_exact_tag, blue eyes' };
@@ -186,9 +283,10 @@ test('studio clothing translation receives only custom text and skips empty inpu
   } finally { f.db.close(); }
 });
 
-test('preset outfit tags bypass AI and stay exact after full photo polishing, bound to each actor', async () => {
+test('polishing receives both actors clothing and renders integrated prose without appending outfit blocks', async () => {
   const polishInputs = [];
-  const f = await fixture({ polish: async input => { polishInputs.push(input.prompt); return input.prompt; }, clothing: async () => { throw new Error('tag selection must not call AI'); } });
+  const refined = 'Two people share the frame: first wears striped_shirt, wet_shirt and sits in front. Second wears a red silk skirt, embracing first from behind.';
+  const f = await fixture({ polish: async input => { polishInputs.push(input); return refined; }, clothing: async () => { throw new Error('tag selection must not call AI'); } });
   try {
     const input = { ...request, poseId: 'pair-pose', secondCharacterId: 2, clothingTags: ['striped_shirt', 'wet_shirt'], secondClothingTags: ['skirt'], secondCustomClothingPrompt: 'red silk', polishPrompt: true };
     const preview = await f.service.preview(input);
@@ -197,9 +295,10 @@ test('preset outfit tags bypass AI and stay exact after full photo polishing, bo
     await f.service.submit(input);
     const job = await waitForJob(f.service, request.id);
     assert.equal(job.status, 'done');
-    assert.doesNotMatch(polishInputs[0], /striped_shirt|wet_shirt|red silk/);
-    assert.match(job.prompt, /Character 1 — Outfit: Replace first's original clothing[^\n]+\nClothing tags: \(striped_shirt, wet_shirt\)/);
-    assert.match(job.prompt, /Character 2 — Outfit: Replace second's original clothing[^\n]+\nClothing tags: \(skirt\)\nCustom clothing: \(red silk\)/);
+    assert.equal(polishInputs[0].prompt, preview.prompt);
+    assert.deepEqual(polishInputs[0].requiredTags, ['striped_shirt', 'wet_shirt', 'skirt', 'red silk']);
+    assert.equal(job.prompt, refined);
+    assert.doesNotMatch(job.prompt, /Character [12] — Outfit:|Clothing tags:/);
     assert.equal(job.prompt, f.calls[0].prompt);
     await assert.rejects(f.service.preview({ ...input, clothingTags: ['not-a-tag'] }), error => error.status === 400);
     await assert.rejects(f.service.preview({ ...input, customClothingPrompt: '未翻译' }), error => error.status === 400);
@@ -213,6 +312,125 @@ async function waitForJob(service, id) {
   while (service.job(id).status === 'running' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
   return service.job(id);
 }
+
+test('polish personas contain only short_prompt, never full cards or a default appearance fallback', async () => {
+  const inputs = [];
+  const f = await fixture({ persona: undefined, polish: async input => { inputs.push(input); return 'Alice sits beside Bella in soft light.'; } });
+  try {
+    f.db.prepare('UPDATE characters SET base_prompt = ?, short_prompt = ? WHERE id = 1')
+      .run('PRIVATE FULL PERSONALITY\n## 你的外观\nAlice has blue eyes, wearing a coat.', 'Alice short persona');
+    f.db.prepare('UPDATE characters SET base_prompt = ?, short_prompt = ? WHERE id = 2')
+      .run('SECOND PRIVATE PERSONALITY\n## 你的外观\nBella has green eyes, wearing a dress.', 'Bella short persona');
+    await f.service.submit({ ...request, poseId: 'pair-pose', secondCharacterId: 2, polishPrompt: true });
+    assert.equal((await waitForJob(f.service, request.id)).status, 'done');
+    assert.deepEqual(inputs[0].personas, ['Alice short persona', 'Bella short persona']);
+    assert.doesNotMatch(JSON.stringify(inputs[0]), /PRIVATE|## 你的外观/);
+    f.db.prepare("UPDATE characters SET short_prompt = '' WHERE id = 1").run();
+    await f.service.submit({ ...request, id: 'empty-short-123', polishPrompt: true });
+    await waitForJob(f.service, 'empty-short-123');
+    assert.deepEqual(inputs[1].personas, []);
+  } finally { f.db.close(); }
+});
+
+test('unchanged shots reuse successful polishing, while effective inputs and rules invalidate the cache', async () => {
+  let rewrites = 0;
+  let context = 'rules-v1';
+  const pose = { ...soloPose, posePrompt: 'leaning_back, (arms_up:1.2)' };
+  const inputs = [];
+  const f = await fixture({ catalog: async () => [pose, pairPose], polishContext: () => context,
+    persona: character => character.base_prompt || `appearance of ${character.display_name}`,
+    polish: async input => { inputs.push(input); return `A polished portrait number ${++rewrites} with the chosen clothes and pose.`; } });
+  let counter = 0;
+  const shoot = async extra => {
+    const id = `cached-request-${++counter}`;
+    await f.service.submit({ ...request, id, polishPrompt: true, ...extra });
+    const job = await waitForJob(f.service, id);
+    assert.equal(job.status, 'done');
+    return job;
+  };
+  try {
+    const first = await shoot({});
+    assert.deepEqual(inputs[0].requiredTags, ['leaning_back', '(arms_up:1.2)']);
+    assert.equal((await shoot({})).prompt, first.prompt);
+    assert.equal(rewrites, 1);
+    for (const extra of [
+      { instruction: 'warm light' }, { polishInstruction: '偏暖光线' },
+      { customClothingPrompt: 'blue wool coat' }, { clothingTags: ['skirt'] },
+      { customBackgroundPrompt: 'A quiet garden.' }, { appearanceOverride: 'Changed appearance' },
+      { characterId: 2 }, { poseId: 'pair-pose', secondCharacterId: 2 },
+      { poseId: 'pair-pose', secondCharacterId: 2, secondClothingTags: ['striped_shirt'] },
+    ]) {
+      const before = rewrites;
+      await shoot(extra);
+      assert.equal(rewrites, before + 1, JSON.stringify(extra));
+      await shoot(extra);
+      assert.equal(rewrites, before + 1, 'same effective input must reuse');
+    }
+    let before = rewrites;
+    f.db.prepare("UPDATE characters SET short_prompt = 'new short persona' WHERE id = 1").run();
+    await shoot({});
+    assert.equal(rewrites, ++before);
+    pose.posePrompt = 'standing with hands on hips';
+    await shoot({});
+    assert.equal(rewrites, ++before);
+    context = 'rules-v2';
+    await shoot({});
+    assert.equal(rewrites, ++before);
+    const plain = await shoot({ polishPrompt: false });
+    assert.match(plain.prompt, /^Pose:/);
+    assert.equal(rewrites, before);
+    assert.equal(f.calls.length, counter, 'every shutter press still renders a new image');
+  } finally { f.db.close(); }
+});
+
+test('turning polishing on after a plain shot polishes once, and resolution changes still render with that rewrite', async () => {
+  let rewrites = 0;
+  const f = await fixture({ polish: async () => { rewrites++; return 'Alice is sitting on the floor, leaning back in soft light.'; } });
+  const shoot = async (id, polishPrompt, width = 1152, height = 2048) => {
+    await f.service.submit({ ...request, id, polishPrompt, width, height });
+    const job = await waitForJob(f.service, id);
+    assert.equal(job.status, 'done');
+    assert.equal(f.calls.at(-1).options.width, width);
+    assert.equal(f.calls.at(-1).options.height, height);
+    return job;
+  };
+  try {
+    const plain = await shoot('plain-before-enable', false);
+    assert.equal(rewrites, 0);
+    const polished = await shoot('first-after-enable', true);
+    assert.equal(rewrites, 1);
+    assert.notEqual(polished.prompt, plain.prompt);
+    for (const [id, width, height] of [['same-config', 1152, 2048], ['width-only', 1024, 2048], ['height-only', 1152, 1024], ['both-dimensions', 864, 1536]]) {
+      const next = await shoot(id, true, width, height);
+      assert.equal(next.prompt, polished.prompt);
+      assert.equal(rewrites, 1);
+    }
+    assert.equal((await shoot('plain-after-enable', false)).prompt, plain.prompt);
+    assert.equal((await shoot('enabled-once-more', true)).prompt, polished.prompt);
+    assert.equal(rewrites, 1);
+    assert.equal(f.calls.length, 8, 'cache hits reuse only text, never skip rendering');
+  } finally { f.db.close(); }
+});
+
+test('failed polishing is retried, but a rendering failure keeps the successful rewrite reusable', async () => {
+  let rewrites = 0;
+  let renders = 0;
+  const f = await fixture({ polish: async () => {
+    if (++rewrites === 1) throw new Error('temporary polish failure');
+    return 'A successfully polished portrait in warm light.';
+  }, render: async () => { renders++; return { success: false, error: 'renderer offline' }; } });
+  try {
+    for (let index = 0; index < 3; index++) {
+      const id = `cache-failure-${index}`;
+      await f.service.submit({ ...request, id, polishPrompt: true });
+      const job = await waitForJob(f.service, id);
+      assert.equal(job.status, 'failed');
+      assert.match(job.error, index === 0 ? /polish failure/ : /renderer offline/);
+    }
+    assert.equal(rewrites, 2);
+    assert.equal(renders, 2);
+  } finally { f.db.close(); }
+});
 
 test('studio sends the composed prompt and exact dimensions to the existing Anima generation path', async () => {
   const f = await fixture();
@@ -235,6 +453,27 @@ test('studio sends the composed prompt and exact dimensions to the existing Anim
     assert.equal(task.status, 'done');
     assert.equal(task.workflow_template, 'photo-studio-anima-base');
   } finally { f.db.close(); }
+});
+
+test('studio reads the current moments artist for each shot and preserves an explicitly empty artist', async () => {
+  const previousArtist = config.comfyui.artist;
+  const previousMomentsArtist = config.comfyui.momentsArtist;
+  const f = await fixture({ polish: async ({ prompt }) => prompt });
+  try {
+    config.comfyui.artist = 'chat artist';
+    for (const [index, artist] of ['moments artist A', 'moments artist B', '', undefined].entries()) {
+      config.comfyui.momentsArtist = artist;
+      const id = `studio-artist-${index}`;
+      await f.service.submit({ ...request, id, polishPrompt: index % 2 === 1 });
+      assert.equal((await waitForJob(f.service, id)).status, 'done');
+      assert.equal(f.calls.at(-1).options.artist, artist ?? 'chat artist');
+      assert.equal(f.calls.at(-1).options.promptScene, 'standalone');
+    }
+  } finally {
+    config.comfyui.artist = previousArtist;
+    config.comfyui.momentsArtist = previousMomentsArtist;
+    f.db.close();
+  }
 });
 
 test('preview and submit use the same concise prompt, and preview never creates a job or image task', async () => {
@@ -396,5 +635,25 @@ test('invalid backgrounds fail before a job or image task is created', async () 
     assert.equal(f.service.list().length, 0);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM image_tasks').get().n, 0);
     assert.equal(f.calls.length, 0);
+  } finally { f.db.close(); }
+});
+
+
+test('extra requirements are validated, trimmed and forwarded only to polishing', async () => {
+  const inputs = [];
+  const f = await fixture({ polish: async input => { inputs.push(input); return 'A portrait in soft warm light.'; } });
+  try {
+    for (const polishInstruction of [null, {}, 'a'.repeat(1001)]) {
+      await assert.rejects(f.service.submit({ ...request, polishPrompt: true, polishInstruction }), error => error.status === 400);
+    }
+    assert.equal(f.service.list().length, 0);
+    await f.service.submit({ ...request, polishPrompt: true, polishInstruction: '  偏暖光线  ' });
+    assert.equal((await waitForJob(f.service, request.id)).status, 'done');
+    assert.equal(inputs[0].polishInstruction, '偏暖光线');
+    assert.doesNotMatch(inputs[0].prompt, /偏暖光线/);
+    await f.service.submit({ ...request, id: 'without-polish-123', polishPrompt: false, polishInstruction: '偏暖光线' });
+    const plain = await waitForJob(f.service, 'without-polish-123');
+    assert.equal(inputs.length, 1);
+    assert.doesNotMatch(plain.prompt, /偏暖光线/);
   } finally { f.db.close(); }
 });

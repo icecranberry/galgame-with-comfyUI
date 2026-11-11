@@ -8,8 +8,12 @@
       <section class="wardrobe-browser" aria-label="服装目录">
         <div class="wardrobe-filters">
           <studio-input v-model="query" placeholder="搜索服装、英文 tag 或材质" aria-label="搜索服装" />
-          <studio-select v-model="category" :options="categoryOptions" searchable label="服装分类" />
-          <studio-select v-model="subcategory" :options="subcategoryOptions" searchable label="服装子类" />
+          <studio-filter-options v-model="category" :options="categoryOptions" label="服装分类" />
+          <Transition name="wardrobe-content" @after-leave="checkScroll">
+            <div v-if="category !== 'all'">
+              <studio-filter-options v-model="subcategory" :options="subcategoryOptions" label="服装子类" />
+            </div>
+          </Transition>
         </div>
         <div class="wardrobe-index"><span>WARDROBE / INDEX</span><span>{{ filtered.length }} 个词条</span></div>
         <div ref="scrollRoot" class="wardrobe-scroll" @scroll.passive="checkScroll">
@@ -42,7 +46,7 @@ import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { getClothingLibrary, generateStudioClothingDraft } from '../../api/index.js'
 import LinsheModal from '../ui/LinsheModal.vue'
 import StudioInput from './StudioInput.vue'
-import StudioSelect from './StudioSelect.vue'
+import StudioFilterOptions from './StudioFilterOptions.vue'
 import StudioButton from './StudioButton.vue'
 
 const props = defineProps({ modelValue: Boolean, character: { type: Object, default: null }, outfit: { type: Object, default: null } })
@@ -137,7 +141,7 @@ async function apply() {
 <style scoped>
 .wardrobe-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;min-height:0;height:100%;color:var(--studio-ink)}
 .wardrobe-browser{display:flex;flex-direction:column;min-height:0;min-width:0;padding:20px;background:url('../../assets/studio-photocopy.svg'),var(--studio-paper)}
-.wardrobe-filters{display:grid;grid-template-columns:1fr 1fr;gap:10px}.wardrobe-filters>:first-child{grid-column:1/-1}
+.wardrobe-filters{display:flex;flex-direction:column;gap:10px;max-height:min(300px,38dvh);overflow:auto;flex-shrink:0;padding:4px;scrollbar-color:var(--studio-muted) var(--studio-paper)}.wardrobe-filters>*{flex-shrink:0}
 .wardrobe-index{display:flex;justify-content:space-between;gap:12px;padding:16px 0 10px;font:12px/1.5 monospace;color:var(--studio-muted);border-bottom:2px solid var(--studio-ink)}
 .wardrobe-scroll{flex:1;min-height:0;overflow:auto;padding:12px 3px}.wardrobe-tags{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:0 18px}
 .wardrobe-tag{padding:14px 4px;min-width:0;border-bottom:1px dashed var(--studio-line);cursor:pointer;text-align:left;transition:background .3s,color .3s,box-shadow .3s}.wardrobe-tag-top{display:flex;justify-content:space-between;gap:10px;font-size:15px}.wardrobe-tag-top>span{color:var(--studio-tag);font-weight:900}.wardrobe-tag code{display:block;margin-top:6px;font-size:12px;overflow-wrap:anywhere;color:var(--studio-muted)}.wardrobe-tag p{margin:7px 0 0;font-size:12px;line-height:1.6;color:var(--studio-muted)}
@@ -146,5 +150,5 @@ async function apply() {
 .wardrobe-content-enter-active,.wardrobe-content-leave-active{transition:opacity .3s,transform .3s}.wardrobe-content-enter-from,.wardrobe-content-leave-to{opacity:0;transform:translateY(5px)}
 .wardrobe-load-sentinel{height:1px}
 .wardrobe-prompt{font:12px/1.8 monospace;overflow-wrap:anywhere;white-space:pre-wrap;color:var(--studio-muted)}
-@media(max-width:700px){.wardrobe-layout{grid-template-columns:1fr;overflow:auto;height:auto}.wardrobe-browser,.wardrobe-draft{padding:14px}.wardrobe-browser{min-height:360px;max-height:56dvh;flex-shrink:0}.wardrobe-draft{border-left:0;border-top:2px solid var(--studio-ink);overflow:visible}.wardrobe-tags{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}.wardrobe-tag-top{font-size:14px}.wardrobe-tag p{font-size:12px}.wardrobe-footer-note{flex-basis:100%}}
+@media(max-width:700px){.wardrobe-layout{grid-template-columns:1fr;overflow:auto;height:auto}.wardrobe-browser,.wardrobe-draft{padding:14px}.wardrobe-browser{min-height:min(480px,62dvh);max-height:62dvh;flex-shrink:0}.wardrobe-filters{max-height:min(220px,28dvh)}.wardrobe-draft{border-left:0;border-top:2px solid var(--studio-ink);overflow:visible}.wardrobe-tags{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}.wardrobe-tag-top{font-size:14px}.wardrobe-tag p{font-size:12px}.wardrobe-footer-note{flex-basis:100%}}
 </style>

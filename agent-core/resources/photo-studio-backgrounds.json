@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "categories": [
     {
       "value": "几何抽象",
@@ -58,8 +58,8 @@
       "label": "办公室"
     },
     {
-      "value": "简单纹理",
-      "label": "简单纹理"
+      "value": "几何图案",
+      "label": "几何图案"
     },
     {
       "value": "纯色",
@@ -2029,283 +2029,283 @@
     },
     {
       "id": "bg-281",
-      "category": "简单纹理",
-      "label": "细麻布纹",
-      "description": "米白细麻布的交织纤维，低对比且均匀。",
-      "prompt": "A simple full-frame texture backdrop of ivory fine linen with evenly interwoven fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "糖果波点",
+      "description": "奶油黄底上均匀排列粉色与白色圆点，大小错落，构成轻快的二次元平面图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: evenly spaced pink and white polka dots of alternating sizes on a cream yellow field, playful spacing and a quiet central area. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-282",
-      "category": "简单纹理",
-      "label": "粗织帆布纹",
-      "description": "沙色粗帆布，经纬颗粒自然起伏。",
-      "prompt": "A simple full-frame texture backdrop of sand-colored coarse canvas with raised woven threads, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "黑白棋盘格",
+      "description": "黑白方格交替铺满画面，格线平直，呈现二次元插画常见的鲜明棋盘图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: a bold black and white checkerboard of alternating squares, straight aligned edges and a completely flat layout without perspective. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-283",
-      "category": "简单纹理",
-      "label": "棉纸纤维纹",
-      "description": "暖白棉纸，细小纤维散布在平整纸面。",
-      "prompt": "A simple full-frame texture backdrop of warm white cotton paper with delicate embedded fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "薄荷斜条纹",
+      "description": "薄荷绿与奶白宽条纹斜向交替，节奏均匀，清爽的平面配色衬托人物。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: alternating wide mint green and milky white diagonal stripes with regular spacing, crisp parallel edges and a fresh two-color palette. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-284",
-      "category": "简单纹理",
-      "label": "牛皮纸纹",
-      "description": "浅褐牛皮纸，柔和细褶与自然纸粒。",
-      "prompt": "A simple full-frame texture backdrop of light brown kraft paper with subtle creases and natural paper grain, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "粉蓝竖条纹",
+      "description": "浅粉与淡蓝竖条纹交替排列，辅以少量白色细线，构成柔和的二次元装饰背景。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: alternating pastel pink and baby blue vertical stripes separated by a few fine white lines, soft colors and an orderly graphic rhythm. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-285",
-      "category": "简单纹理",
-      "label": "宣纸晕染纹",
-      "description": "淡灰宣纸，浅墨边缘柔和晕开。",
-      "prompt": "A simple full-frame texture backdrop of pale gray rice paper with gently diffused ink wash edges, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "彩色菱格",
+      "description": "淡紫底上重复排列粉色、蓝色与白色菱形，构成活泼的二次元菱格图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: repeating pink, blue and white diamonds on a pale lavender field, aligned in a playful argyle-like arrangement made only of flat color shapes. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-286",
-      "category": "简单纹理",
-      "label": "灰泥刮痕纹",
-      "description": "浅灰抹灰墙，平缓刮刀痕迹交错。",
-      "prompt": "A simple full-frame texture backdrop of light gray plaster with broad overlapping trowel marks, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "清透方格线",
+      "description": "浅蓝底上用白色细线画出规整方格，点缀少量亮黄小方块，保持中央疏朗。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: a regular grid of fine white lines on a light blue field with sparse tiny yellow squares near the edges and generous central breathing room. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-287",
-      "category": "简单纹理",
-      "label": "细砂石纹",
-      "description": "暖砂岩平面，细小矿物颗粒均匀分布。",
-      "prompt": "A simple full-frame texture backdrop of warm sandstone with evenly scattered fine mineral grains, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "漫画半调圆点",
+      "description": "白底上以黑色圆点由密到疏排布，形成漫画网点式几何底纹，中央保留留白。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: clean black halftone circles on a white field, dots becoming smaller and sparser toward an open center, each dot drawn as a distinct flat shape. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-288",
-      "category": "简单纹理",
-      "label": "微水泥纹",
-      "description": "灰米色微水泥，低对比哑光云纹。",
-      "prompt": "A simple full-frame texture backdrop of greige microcement with low-contrast matte clouding, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "元气放射线",
+      "description": "柠檬黄与橙色三角色块从中心向外放射，边缘清晰，呈现漫画式元气背景。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: alternating lemon yellow and orange triangular rays radiating from a central point, broad clean wedges and an energetic manga burst composition. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-289",
-      "category": "简单纹理",
-      "label": "哑光皮革纹",
-      "description": "深棕皮革，细密毛孔与轻微折痕。",
-      "prompt": "A simple full-frame texture backdrop of dark brown matte leather with fine pores and shallow creases, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "环绕同心圆",
+      "description": "浅粉底上叠放珊瑚色与白色同心圆环，圆环间距均匀，形成平面的环绕节奏。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: evenly spaced coral and white concentric rings on a pale pink field, clean circular outlines and a calm open center. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-290",
-      "category": "简单纹理",
-      "label": "拉丝铝纹",
-      "description": "银灰金属表面，单向细密拉丝。",
-      "prompt": "A simple full-frame texture backdrop of silver-gray aluminum with fine parallel brushed lines, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "错位空心方框",
+      "description": "深蓝底上错位排列青色与紫色空心方框，部分方框在画面边缘被裁切。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: offset cyan and violet outlined squares on a deep blue field, varied sizes and a few frames cropped by the image edges, all in one flat plane. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-291",
-      "category": "简单纹理",
-      "label": "浅木直纹",
-      "description": "浅橡木平面，细长木纹纵向延伸。",
-      "prompt": "A simple full-frame texture backdrop of pale oak with slender straight grain running vertically, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "跳跃三角阵",
+      "description": "奶白底上散布粉、黄、蓝三角形，大小与朝向错落，保持轻盈的二次元图案感。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: scattered pink, yellow and blue triangles on a milky white field, varied sizes and rotations with airy spacing and fewer shapes near the center. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-292",
-      "category": "简单纹理",
-      "label": "深木环纹",
-      "description": "深胡桃木，年轮曲线自然盘绕。",
-      "prompt": "A simple full-frame texture backdrop of dark walnut with gently curving growth-ring patterns, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "孟菲斯几何",
+      "description": "浅青底上组合圆环、三角形、短横线与折线，使用粉黄黑撞色，呈现活泼的平面装饰。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: a Memphis arrangement of rings, triangles, short dashes and zigzags on a pale cyan field, pink and yellow accents with crisp black marks. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-293",
-      "category": "简单纹理",
-      "label": "细腻软木纹",
-      "description": "浅棕软木，碎颗粒密集但颜色柔和。",
-      "prompt": "A simple full-frame texture backdrop of light brown cork with densely packed soft-toned granules, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "双色人字折线",
+      "description": "桃粉与奶白粗折线横向重复，构成整齐的人字形几何图案，色块平整。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: repeating broad peach pink and creamy white chevrons arranged in horizontal rows, an even zigzag rhythm with crisp corners and flat color bands. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-294",
-      "category": "简单纹理",
-      "label": "黑白大理石纹",
-      "description": "白底石材，稀疏灰黑细脉穿过画面。",
-      "prompt": "A simple full-frame texture backdrop of white marble with sparse thin charcoal and gray veins, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "柔彩波浪线",
+      "description": "浅紫底上平行排列粉蓝白三色波浪线，曲线流畅、间距均匀，保持平面插画感。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: parallel flowing wavy lines in pink, blue and white on a pale lavender field, smooth repeating curves and evenly spaced bands. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-295",
-      "category": "简单纹理",
-      "label": "水磨石碎粒纹",
-      "description": "奶白底中散布低饱和彩色石屑。",
-      "prompt": "A simple full-frame texture backdrop of milky terrazzo with small scattered muted colored stone chips, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "交叠彩色圆片",
+      "description": "白底上以半透明粉、黄、青圆形互相交叠，交集形成新的平面色块，中央留白。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: overlapping translucent pink, yellow and cyan circles on a white field, intersections creating flat secondary color shapes around a spacious center. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-296",
-      "category": "简单纹理",
-      "label": "波纹磨砂玻璃",
-      "description": "半透明玻璃表面，竖向波纹柔化光线。",
-      "prompt": "A simple full-frame texture backdrop of translucent frosted glass with vertical ripples diffusing the light, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "闪亮星形阵",
+      "description": "淡蓝底上散布白色四角星与黄色小菱形，大小疏密错落，作为二次元装饰符号。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: scattered white four-point star symbols and small yellow diamonds on a pastel blue field, varied scales and airy spacing, crisp drawn shapes without glow. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-297",
-      "category": "简单纹理",
-      "label": "深灰毛毡纹",
-      "description": "深灰毛毡，短绒细密而平整。",
-      "prompt": "A simple full-frame texture backdrop of charcoal felt with a dense even layer of short fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "拼色六边形",
+      "description": "奶白底上排列淡粉、淡蓝与浅紫六边形，局部留空，形成轻盈的蜂巢几何图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: a light honeycomb arrangement of pastel pink, blue and lavender hexagons on a creamy white field, selected cells left empty for a spacious graphic pattern. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-298",
-      "category": "简单纹理",
-      "label": "釉面细裂纹",
-      "description": "淡青釉面，细微开片自然交织。",
-      "prompt": "A simple full-frame texture backdrop of pale celadon glaze with a delicate irregular crackle network, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "复古扇形纹",
+      "description": "深青底上用米白与浅金细线重复绘制半圆扇形，形成二次元和风装饰图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: repeated semicircular fan motifs outlined in ivory and pale gold on a deep teal field, nested clean arcs forming a flat Japanese-inspired decorative pattern. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-299",
-      "category": "简单纹理",
-      "label": "柔软绒面纹",
-      "description": "雾粉绒面，绒毛方向产生细微明暗。",
-      "prompt": "A simple full-frame texture backdrop of dusty pink suede with subtle tonal shifts from the nap direction, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "几何碎片雨",
+      "description": "淡粉底上散落彩色小方块、短线与三角碎片，以平面符号表现轻快的彩屑节奏。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: small colorful squares, short dashes and triangle confetti symbols scattered across a pale pink field, lively varied angles and a lightly populated center. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-300",
-      "category": "简单纹理",
-      "label": "细点胶片颗粒",
-      "description": "中性灰底，细密均匀胶片颗粒。",
-      "prompt": "A simple full-frame texture backdrop of neutral gray film grain with tiny evenly distributed speckles, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+      "category": "几何图案",
+      "label": "漫画速度线",
+      "description": "白底上用蓝色细长直线从边缘向中央收束，中心大幅留白，呈现漫画速度线图案。",
+      "prompt": "A flat two-dimensional geometric pattern background for an anime illustration: slender blue manga speed lines converging inward from the outer edges of a white field, leaving a broad clear center, sharp linear marks with no motion blur. Clean graphic shapes with no lettering, material texture or three-dimensional scenery."
     },
     {
       "id": "bg-301",
       "category": "纯色",
       "label": "纯白强烈阴影",
-      "description": "纯白无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid pure white studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "纯白单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid pure white background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-302",
       "category": "纯色",
       "label": "炭黑强烈阴影",
-      "description": "炭黑无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid charcoal black studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "炭黑单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid charcoal black background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-303",
       "category": "纯色",
       "label": "象牙白强烈阴影",
-      "description": "象牙白无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid ivory white studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "象牙白单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid ivory white background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-304",
       "category": "纯色",
       "label": "浅灰强烈阴影",
-      "description": "浅灰无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid light gray studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "浅灰单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid light gray background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-305",
       "category": "纯色",
       "label": "石墨灰强烈阴影",
-      "description": "石墨灰无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid graphite gray studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "石墨灰单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid graphite gray background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-306",
       "category": "纯色",
       "label": "米杏强烈阴影",
-      "description": "米杏无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid warm beige studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "米杏单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid warm beige background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-307",
       "category": "纯色",
       "label": "奶油黄强烈阴影",
-      "description": "奶油黄无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid cream yellow studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "奶油黄单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid cream yellow background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-308",
       "category": "纯色",
       "label": "柠檬黄强烈阴影",
-      "description": "柠檬黄无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid lemon yellow studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "柠檬黄单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid lemon yellow background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-309",
       "category": "纯色",
       "label": "焦橙强烈阴影",
-      "description": "焦橙无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid burnt orange studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "焦橙单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid burnt orange background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-310",
       "category": "纯色",
       "label": "朱红强烈阴影",
-      "description": "朱红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid vermilion red studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "朱红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid vermilion red background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-311",
       "category": "纯色",
       "label": "酒红强烈阴影",
-      "description": "酒红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid burgundy red studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "酒红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid burgundy red background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-312",
       "category": "纯色",
       "label": "樱粉强烈阴影",
-      "description": "樱粉无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid cherry blossom pink studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "樱粉单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid cherry blossom pink background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-313",
       "category": "纯色",
       "label": "玫红强烈阴影",
-      "description": "玫红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid magenta studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "玫红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid magenta background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-314",
       "category": "纯色",
       "label": "薰衣草紫强烈阴影",
-      "description": "薰衣草紫无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid lavender purple studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "薰衣草紫单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid lavender purple background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-315",
       "category": "纯色",
       "label": "深紫强烈阴影",
-      "description": "深紫无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid deep violet studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "深紫单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid deep violet background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-316",
       "category": "纯色",
       "label": "钴蓝强烈阴影",
-      "description": "钴蓝无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid cobalt blue studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "钴蓝单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid cobalt blue background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-317",
       "category": "纯色",
       "label": "天蓝强烈阴影",
-      "description": "天蓝无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid sky blue studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "天蓝单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid sky blue background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-318",
       "category": "纯色",
       "label": "薄荷绿强烈阴影",
-      "description": "薄荷绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid mint green studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "薄荷绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid mint green background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-319",
       "category": "纯色",
       "label": "森林绿强烈阴影",
-      "description": "森林绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid forest green studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "森林绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid forest green background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-320",
       "category": "纯色",
       "label": "青绿强烈阴影",
-      "description": "青绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
-      "prompt": "A seamless solid teal studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+      "description": "青绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
+      "prompt": "A plain solid teal background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
     }
   ]
 }

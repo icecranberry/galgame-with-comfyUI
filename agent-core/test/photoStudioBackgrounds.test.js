@@ -20,13 +20,31 @@ test('background library contains 320 distinct bilingual scenes across sixteen b
 
 test('new everyday categories and solid-color shadow instructions are available', () => {
   const { entries, categories } = getStudioBackgrounds();
-  for (const category of ['卧室', '家庭', '学校', '办公室', '简单纹理', '纯色']) {
+  for (const category of ['卧室', '家庭', '学校', '办公室', '几何图案', '纯色']) {
     assert.ok(categories.some(item => item.value === category));
   }
   for (const entry of entries.filter(item => item.category === '纯色')) {
     assert.match(entry.label, /强烈阴影/);
     assert.match(entry.description, /强烈阴影/);
     assert.match(entry.prompt, /hard directional lighting.*strong, sharply defined cast shadows/);
+    assert.match(entry.prompt, /cast shadows of the subject directly onto the flat color field/);
+    assert.doesNotMatch(entry.prompt, /\bstudio\b|\bwall\b|\bfloor\b|\bseamless\b/i);
+  }
+});
+
+test('former texture backgrounds use anime geometric patterns instead of physical materials', () => {
+  const { entries, categories } = getStudioBackgrounds();
+  assert.ok(!categories.some(item => item.value === '简单纹理'));
+  const patterns = entries.filter(item => item.category === '几何图案');
+  assert.deepEqual(patterns.map(entry => entry.id), Array.from({ length: 20 }, (_, index) => `bg-${281 + index}`));
+  for (const entry of patterns) {
+    assert.match(entry.prompt, /flat two-dimensional geometric pattern background for an anime illustration/);
+    assert.doesNotMatch(entry.prompt, /\b(linen|canvas|paper|plaster|sandstone|microcement|leather|aluminum|wood|cork|marble|terrazzo|glass|felt|glaze|suede)\b|film grain/i);
+    assert.doesNotMatch(entry.description, /纤维|毛孔|石屑|绒毛|材质/);
+  }
+  const prompts = patterns.map(entry => entry.prompt).join('\n');
+  for (const motif of ['polka dots', 'checkerboard', 'stripes', 'diamonds', 'rays', 'speed lines']) {
+    assert.ok(prompts.includes(motif), motif);
   }
 });
 

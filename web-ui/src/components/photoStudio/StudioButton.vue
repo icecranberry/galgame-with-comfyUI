@@ -56,14 +56,16 @@ function activate(event) {
 .studio-button--nav { color:var(--studio-ink); border:1px solid var(--studio-ink); background:var(--studio-paper); box-shadow:none; }
 
 .studio-button--chip { padding:6px 12px; box-shadow:none; border-color:var(--studio-line); background:transparent; font-weight:750; }
+.studio-button--chip.studio-button--xs { min-height:28px; padding:4px 10px; font-size:12px; }
 .studio-button--chip.is-active { color:var(--studio-tag); border-color:var(--studio-tag); background:color-mix(in srgb,var(--studio-tag) 10%,var(--studio-paper)); box-shadow:inset 0 -2px 0 var(--studio-tag); }
 .studio-button--ghost { background:transparent; box-shadow:none; }
 .studio-button--link { padding:6px 4px; border:0; background:transparent; box-shadow:none; color:var(--studio-accent); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:5px; }
-.studio-button--icon { width:44px; height:44px; padding:8px; border-radius:50%; }
+.studio-button--icon,.studio-button--icon-plain { width:44px; height:44px; padding:8px; border-radius:50%; }
+.studio-button--icon-plain { border:0; background:transparent; box-shadow:none; }
 .studio-button.is-block { width:100%; }
 @media(hover:hover) { .studio-button:hover:not(.is-disabled) { transform:translateY(-1px); border-color:var(--studio-accent); }.studio-button--link:hover:not(.is-disabled) { color:var(--studio-ink); } }
 .studio-button:active:not(.is-disabled) { transform:translateY(2px); box-shadow:inset 0 1px 3px var(--studio-shadow); }
-.studio-button--link:active:not(.is-disabled) { box-shadow:none; }
+.studio-button--link:active:not(.is-disabled),.studio-button--icon-plain:active:not(.is-disabled) { box-shadow:none; }
 .studio-button:focus-visible { outline:2px solid var(--studio-accent); outline-offset:4px; }
 .studio-button.is-disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
 .studio-button__spinner { width:16px; height:16px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:studio-button-spin .8s linear infinite; }

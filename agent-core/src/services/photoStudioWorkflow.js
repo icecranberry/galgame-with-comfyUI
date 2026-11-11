@@ -52,9 +52,8 @@ export function photoStudioSectionHeadings(prompt) {
   return sectionMatches(prompt).map(match => match[1]);
 }
 
-// Attach untouched clothing tags after the corresponding appearance, including
-// after AI polishing. This keeps actors bound to their own clothes and the
-// background at the end, without sending tags through the language model.
+// Attach clothing to its actor in the input draft. AI polishing receives this
+// complete draft and integrates clothes into prose; do not append after polishing.
 export function appendPhotoStudioOutfits(prompt, outfitBlocks = []) {
   const sections = sectionMatches(prompt);
   const insertions = outfitBlocks.flatMap((block, index) => {

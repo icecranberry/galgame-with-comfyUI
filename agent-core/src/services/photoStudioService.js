@@ -1,16 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import sharp from 'sharp';
+import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { buildCharacterImageAppearance, buildCharacterPersona, extractCharacterEnglishName, extractCharacterIdentityTag, replaceAppearanceSection } from './characterPersona.js';
+import { buildCharacterImageAppearance, extractCharacterEnglishName, extractCharacterIdentityTag, replaceAppearanceSection } from './characterPersona.js';
 import { resolveClothingTags } from './clothingLibrary.js';
 import { resolveStudioBackground } from './photoStudioBackgrounds.js';
 import { collectCharacterLoras } from './groupImageLoraMatcher.js';
-import { polishStudioPrompt, generateStudioClothing } from './photoStudioPolish.js';
+import { polishStudioPrompt, getStudioPolishContext, generateStudioClothing, splitStudioTags, studioPoseTags } from './photoStudioPolish.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
-import { getImageDir, buildImageUrl } from './imagePaths.js';
+import { saveBase64Image } from './imagePaths.js';
+import { broadcast } from './unifiedStreamBus.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, resolveCustomWorkflowPath } from './workflowTemplates.js';
 import { buildPhotoStudioPrompt, appendPhotoStudioOutfits, DEFAULT_PHOTO_STUDIO_DIMENSIONS, isPairPose, photoStudioDimensions } from './photoStudioWorkflow.js';
 
@@ -73,14 +74,20 @@ export function createPhotoStudioService({
   persona = buildCharacterImageAppearance,
   render = generateImage,
   save = savePhoto,
+  publish = broadcast,
   polish = polishStudioPrompt,
+  polishContext = getStudioPolishContext,
   clothing = generateStudioClothing,
   random = values => values[Math.floor(Math.random() * values.length)],
 } = {}) {
   const db = () => database();
   const job = id => db().prepare('SELECT * FROM photo_studio_jobs WHERE id = ?').get(id);
+  const notify = (id, terminal = false) => publish(terminal ? 'photo_studio_ready' : 'photo_studio_progress', { job: job(id) });
   const list = () => db().prepare('SELECT * FROM photo_studio_jobs ORDER BY created_at DESC, rowid DESC LIMIT 30').all();
   const outfitScenes = ['work', 'casual', 'home', 'sleep'];
+  // A bounded result cache survives navigation and image-render retries, but not
+  // a server restart. Store only successful rewrites, never failures.
+  const polishedPrompts = new Map();
   function listCharacters() {
     const outfits = db().prepare("SELECT character_id, scene FROM character_outfits WHERE scene IN ('casual', 'home', 'sleep') AND TRIM(COALESCE(description, '')) != ''").all();
     return db().prepare('SELECT id, name, display_name, avatar_path, standing_url FROM characters WHERE COALESCE(archived, 0) = 0 ORDER BY pinned DESC, id DESC').all().map(character => ({
@@ -89,7 +96,9 @@ export function createPhotoStudioService({
     }));
   }
 
-  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false }) {
+  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false, polishInstruction = '' }) {
+    if (typeof polishInstruction !== 'string' || polishInstruction.length > 1000) throw Object.assign(new Error('润色任务额外需求最多 1000 字'), { status: 400 });
+    polishInstruction = polishInstruction.trim();
     const backgroundPrompt = resolveStudioBackground({ backgroundId, customBackgroundPrompt });
     if (typeof polishPrompt !== 'boolean') throw Object.assign(new Error('AI 润色开关无效'), { status: 400 });
     for (const appearance of [appearanceOverride, secondAppearanceOverride]) {
@@ -156,9 +165,16 @@ export function createPhotoStudioService({
       ].join('\n');
     });
     const prompt = appendPhotoStudioOutfits(basePrompt, outfitBlocks);
-    const personas = polishPrompt ? [first, ...(second ? [second] : [])].map(character => buildCharacterPersona(character, { variant: 'full', outfits: null })) : [];
+    // This task explicitly needs short_prompt alone, not characterPersona's
+    // short variant (which also appends the default appearance and outfits).
+    const personas = polishPrompt ? [first, ...(second ? [second] : [])].map(character => character.short_prompt || '').filter(text => text.trim()) : [];
+    const poseText = basePrompt.slice('Pose: '.length, basePrompt.indexOf('\n\n'));
+    const requiredTags = [...new Set([
+      ...outfits.flatMap(outfit => [...outfit.tags.flatMap(splitStudioTags), ...splitStudioTags(outfit.custom)]),
+      ...studioPoseTags(poseText),
+    ])];
     const loras = collectCharacterLoras([first, ...(second ? [second] : [])]);
-    return { first, second, pose, prompt, dimensions, personas, loras, basePrompt, outfitBlocks };
+    return { first, second, pose, prompt, dimensions, personas, loras, requiredTags, polishInstruction };
   }
 
   async function preview(input) {
@@ -171,7 +187,7 @@ export function createPhotoStudioService({
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
     const previous = job(id);
     if (previous) return previous;
-    const { first, second, pose, prompt, dimensions, personas, loras, basePrompt, outfitBlocks } = await prepare(input);
+    const { first, second, pose, prompt, dimensions, personas, loras, requiredTags, polishInstruction } = await prepare(input);
     const supported = await capability();
     if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
     const firstName = first.display_name || first.name;
@@ -187,23 +203,45 @@ export function createPhotoStudioService({
         .run(id, first.id, second?.id ?? null, firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height);
       return true;
     })();
-    if (created) void execute(job(id), { polishPrompt: input.polishPrompt === true, personas, loras, basePrompt, outfitBlocks });
+    if (created) {
+      notify(id);
+      void execute(job(id), { polishPrompt: input.polishPrompt === true, personas, loras, requiredTags, polishInstruction });
+    }
     return job(id);
   }
 
-  async function execute(snapshot, { polishPrompt, personas, loras, basePrompt, outfitBlocks }) {
+  async function execute(snapshot, { polishPrompt, personas, loras, requiredTags, polishInstruction }) {
     const database = db();
     try {
       if (polishPrompt) {
-        database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing' WHERE id = ?").run(snapshot.id);
-        snapshot.prompt = appendPhotoStudioOutfits(await polish({ prompt: basePrompt, personas }), outfitBlocks);
+        const context = polishContext();
+        const key = createHash('sha256').update(JSON.stringify({
+          prompt: snapshot.prompt, personas, requiredTags, polishInstruction, context,
+          actors: [snapshot.character_id, snapshot.character2_id], poseId: snapshot.pose_id,
+          // Resolution belongs to rendering; it does not change the LLM input.
+          loras,
+        })).digest('hex');
+        if (polishedPrompts.has(key)) {
+          snapshot.prompt = polishedPrompts.get(key);
+        } else {
+          database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing' WHERE id = ?").run(snapshot.id);
+          notify(snapshot.id);
+          snapshot.prompt = await polish({ prompt: snapshot.prompt, personas, requiredTags, polishInstruction, context, onRetry: () => {
+            database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing_retry' WHERE id = ?").run(snapshot.id);
+            notify(snapshot.id);
+          } });
+          polishedPrompts.set(key, snapshot.prompt);
+          if (polishedPrompts.size > 32) polishedPrompts.delete(polishedPrompts.keys().next().value);
+        }
         database.prepare('UPDATE photo_studio_jobs SET prompt = ? WHERE id = ?').run(snapshot.prompt, snapshot.id);
         database.prepare('UPDATE image_tasks SET prompt_refined = ? WHERE id = ?').run(snapshot.prompt, snapshot.image_task_id);
       }
       database.prepare("UPDATE photo_studio_jobs SET stage = 'queued' WHERE id = ?").run(snapshot.id);
+      notify(snapshot.id);
       const result = await render(snapshot.prompt, {
         promptScene: 'standalone',
         alreadyPrepared: true,
+        artist: config.comfyui.momentsArtist ?? config.comfyui.artist,
         // Keep LoRA triggers out of AI rewriting; the shared workflow adds them
         // to its dedicated trigger node and loads the models with their saved weights.
         loras,
@@ -211,25 +249,30 @@ export function createPhotoStudioService({
         height: snapshot.height,
         onProgress: event => {
           const progress = Number(event.progress);
-          const stage = event.stage === 'submitting' ? 'queued' : 'generating';
+          const stage = event.phase === 'executed' || event.phase === 'done' ? 'saving'
+            : event.stage === 'submitting' || event.stage === 'retrying' || event.phase === 'submitted' || event.phase === 'waiting' ? 'queued' : 'generating';
           database.prepare('UPDATE photo_studio_jobs SET stage = ?, progress = MAX(progress, ?) WHERE id = ?')
             .run(stage, Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0, snapshot.id);
+          notify(snapshot.id);
         },
       });
       if (!result.success || !result.images?.[0]?.base64) throw new Error(result.error || 'Anima 工作流未返回图片');
       database.prepare("UPDATE photo_studio_jobs SET stage = 'saving' WHERE id = ?").run(snapshot.id);
+      notify(snapshot.id);
       const url = await save(result.images[0].base64, snapshot.id);
       database.transaction(() => {
         database.prepare("UPDATE photo_studio_jobs SET status = 'done', stage = 'done', progress = 1, output_url = ?, finished_at = datetime('now') WHERE id = ?").run(url, snapshot.id);
         database.prepare("UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?")
           .run(snapshot.prompt, JSON.stringify([url]), `photo-studio-anima-${result.wfMode || getLastWorkflowMode()}`, snapshot.image_task_id);
       })();
+      notify(snapshot.id, true);
     } catch (error) {
       database.transaction(() => {
         database.prepare("UPDATE photo_studio_jobs SET status = 'failed', stage = 'failed', error = ?, finished_at = datetime('now') WHERE id = ?").run(error.message, snapshot.id);
         database.prepare("UPDATE image_tasks SET status = 'failed', error_message = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?")
           .run(error.message, `photo-studio-anima-${getLastWorkflowMode()}`, snapshot.image_task_id);
       })();
+      notify(snapshot.id, true);
     }
   }
 
@@ -242,10 +285,10 @@ export function createPhotoStudioService({
   return { submit, preview, clothingDraft, job, list, listCharacters };
 }
 
-async function savePhoto(dataUri, id) {
-  const directory = getImageDir('photo_studio');
-  await fs.mkdir(directory, { recursive: true });
-  const base64 = String(dataUri).replace(/^data:image\/[^;]+;base64,/, '');
-  await sharp(Buffer.from(base64, 'base64')).avif({ quality: 65, effort: 4 }).toFile(path.join(directory, `${id}.avif`));
-  return buildImageUrl('photo_studio', `${id}.avif`);
+export function savePhoto(dataUri, id) {
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw new Error('拍摄请求编号无效');
+  // Match schedule peek: persist the original bytes, then push a small URL over
+  // SSE. Optional compression belongs to the shared background compressor.
+  const extension = String(dataUri).match(/^data:image\/(png|jpe?g|webp|avif);base64,/i)?.[1]?.toLowerCase() || 'png';
+  return saveBase64Image('photo_studio', `${id}.${extension}`, dataUri);
 }

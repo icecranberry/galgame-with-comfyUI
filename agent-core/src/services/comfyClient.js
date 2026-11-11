@@ -511,7 +511,7 @@ async function submitWorkflowWithGpu(guiWorkflow, onProgress, generation, apiPro
 
 // ── WebSocket 实时进度 + 结果监听 ──
 
-function wsProgressAndDownload(clientId, promptId, onProgress) {
+export function wsProgressAndDownload(clientId, promptId, onProgress) {
   const wsUrl = `${getWsBase()}/ws?clientId=${encodeURIComponent(clientId)}`;
   const wsOpts = config.comfyui.tlsVerify !== false ? {} : { rejectUnauthorized: false };
   const ws = new WebSocket(wsUrl, wsOpts);
@@ -549,6 +549,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
 
     // ── 收到 node:null → 立即结算（不等 WebSocket close）──
     async function onExecutionComplete() {
+      if (settled || done) return;
       done = true;
       // 通知调用方 ComfyUI 执行完毕（此时还没下载图片）
       if (onProgress) {
@@ -558,6 +559,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
       await new Promise(r => setTimeout(r, 100));
       try {
         const images = await downloadImagesFromHistory(promptId, /* retries */ 3);
+        if (settled) return;
         if (onProgress) {
           onProgress({ phase: 'done', promptId, imageCount: images.length, progress: 1 });
         }
@@ -574,7 +576,11 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
+        // ComfyUI can broadcast execution events to more than one client. Never
+        // attribute another prompt's progress, completion or error to this job.
+        if (settled || (msg.data?.prompt_id && msg.data.prompt_id !== promptId)) return;
         lastActivity = Date.now();
+        if (done) return;
 
         if (msg.type === 'progress') {
           const { value, max } = msg.data;
@@ -602,6 +608,8 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
             // node === null → 全部执行完毕，立即结算
             onExecutionComplete();
           }
+        } else if (msg.type === 'execution_success') {
+          void onExecutionComplete();
         } else if (msg.type === 'execution_error') {
           const errMsg = msg.data?.exception_message || msg.data?.traceback || 'Unknown execution error';
           settle({ error: `ComfyUI execution error: ${errMsg}` });
@@ -618,6 +626,7 @@ function wsProgressAndDownload(clientId, promptId, onProgress) {
         (async () => {
           try {
             const images = await downloadImagesFromHistory(promptId, 5);
+            if (settled || done) return;
             if (images.length > 0) {
               if (onProgress) onProgress({ phase: 'done', promptId, imageCount: images.length, progress: 1 });
               settle({ value: { images, promptId } });
