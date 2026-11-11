@@ -1,6 +1,7 @@
 import express from 'express';
 import { createPhotoStudioService, getRecognizedPoseCatalog, photoStudioCapability, POSE_GALLERY_DIR } from '../services/photoStudioService.js';
 import { getStudioBackgrounds, generateStudioBackground } from '../services/photoStudioBackgrounds.js';
+import { describeStudioPose } from '../services/photoStudioPose.js';
 
 const router = express.Router();
 const studio = createPhotoStudioService();
@@ -9,6 +10,10 @@ router.get('/catalog', async (_req, res) => res.json({ poses: await getRecognize
 router.get('/capability', async (_req, res) => res.json(await photoStudioCapability()));
 router.get('/characters', (_req, res) => res.json({ characters: studio.listCharacters() }));
 router.get('/backgrounds', (_req, res) => res.json(getStudioBackgrounds()));
+router.post('/describe-pose', async (req, res) => {
+  try { res.json(await describeStudioPose(req.body || {})); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 router.post('/background-draft', async (req, res) => {
   try { res.json(await generateStudioBackground(req.body?.description)); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }

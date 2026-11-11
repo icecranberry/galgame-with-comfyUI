@@ -1673,7 +1673,7 @@ onMounted(async () => {
   padding: 4px;
 }
 .tavern-life-group { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); min-height: 140px; padding: 12px; }
-.tavern-life-group .mailbox-card .relation-entry-icon { background: color-mix(in srgb, var(--tavern-coral) 12%, var(--tavern-surface)); border-radius: 14px; width: 44px; height: 44px; }
+.tavern-life-group .relation-entry-icon { background: color-mix(in srgb, var(--tavern-coral) 12%, var(--tavern-surface)); border-radius: 14px; width: 44px; height: 44px; }
 .tavern-config-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
 .relation-entry {
   position: relative;

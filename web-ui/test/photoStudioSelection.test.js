@@ -12,6 +12,166 @@ const bindings = Object.entries(script.imports).filter(([, entry]) => entry.sour
 const code = script.content.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g, (_, names) => `const { ${names} } = Vue`)
   .replace(/^import .* from .*$/gm, '').replace('export default', 'return')
 
+test('image pasting shares pose upload, preserves text paste and only handles the open library', async t => {
+  const listeners = new Map(), reads = [], calls = []
+  const result = { posePrompt: 'character 1 raises both arms and smiles.', personCount: 1, imageUrl: '/images/photo_studio/pose-ref-test.png' }
+  const globals = {
+    document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name) } },
+    sessionStorage: { getItem: () => null, setItem() {} }, localStorage: { getItem: () => null, setItem() {} },
+    FileReader: class { readAsDataURL(file) { reads.push(file); this.result = 'data:image/png;base64,dGVzdA=='; this.onload() } },
+  }
+  for (const [name, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name)
+    Object.defineProperty(globalThis, name, { configurable: true, value })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
+  }
+  let finish
+  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS,
+    describePhotoStudioPose: (image, signal) => { calls.push({ image, signal }); return new Promise(resolve => { finish = resolve }) },
+    usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
+  }
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  let state
+  const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+  const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
+  app.mount({}); t.after(() => app.unmount())
+  await Vue.nextTick()
+  const paste = listeners.get('paste')
+  assert.equal(typeof paste, 'function')
+  const file = { type: 'image/png', size: 42 }
+  const event = clipboardData => ({ clipboardData, defaultPrevented: false, preventDefault() { this.defaultPrevented = true } })
+  const picture = () => event({ items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] })
+  const closed = picture()
+  await paste(closed)
+  assert.equal(closed.defaultPrevented, false)
+  state.poseOpen.value = true
+  const text = event({ items: [{ kind: 'string', type: 'text/plain' }], files: [] })
+  await paste(text)
+  assert.equal(text.defaultPrevented, false)
+  const incoming = picture(), pending = paste(incoming)
+  await Promise.resolve()
+  assert.equal(incoming.defaultPrevented, true)
+  assert.equal(state.describingPose.value, true)
+  await paste(picture())
+  assert.equal(calls.length, 1, 'repeated image pasting must not start concurrent recognition')
+  finish(result); await pending
+  assert.deepEqual(state.customPose.value, result)
+  assert.equal(state.poseId.value, 'custom-upload')
+  assert.equal(state.duoPose.value, false, 'a recognized single-person image only uses the protagonist')
+  const fallback = event({ items: [], files: [file] }), next = paste(fallback)
+  const pairResult = { ...result, personCount: 2, posePrompt: 'character 1 holds the hand of character 2.' }
+  await Promise.resolve(); finish(pairResult); await next
+  assert.equal(state.duoPose.value, true, 'a recognized pair automatically enables the partner')
+  assert.equal(state.shotInput().customPose.personCount, 2)
+  assert.equal(fallback.defaultPrevented, true)
+  assert.deepEqual(reads, [file, file])
+  app.unmount()
+  assert.equal(listeners.has('paste'), false)
+});
+
+test('supplementary descriptions expand without a request, revise the saved image and preserve drafts on failure', async t => {
+  const stored = new Map(), calls = [], fetches = []
+  const original = { posePrompt: 'character 1 sits on a bench.', personCount: 1, imageUrl: '/images/photo_studio/pose-ref-test.png' }
+  stored.set('photo-studio-custom-pose', JSON.stringify(original))
+  let failure = false, focuses = 0, genericMime = false
+  const file = { type: 'image/png', size: 42 }
+  const globals = {
+    localStorage: { getItem: key => stored.get(key) || null, setItem: (key, value) => stored.set(key, value) },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    fetch: async (url, options) => { fetches.push({ url, signal: options.signal }); return { ok: true, blob: async () => genericMime ? new Blob(['test'], { type: 'application/octet-stream' }) : file } },
+    FileReader: class { readAsDataURL(value) { if (value !== file) assert.equal(value.type, 'image/avif'); this.result = 'data:image/png;base64,dGVzdA=='; this.onload() } },
+  }
+  for (const [name, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name)
+    Object.defineProperty(globalThis, name, { configurable: true, value })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
+  }
+  const result = { ...original, posePrompt: 'character 1 raises the right hand.', personCount: 2 }
+  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS,
+    describePhotoStudioPose: async (image, signal, direction) => { calls.push({ image, signal, direction }); if (failure) throw new Error('识别失败'); return result },
+    usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
+  }
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  let state
+  const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+  const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
+  app.mount({}); t.after(() => app.unmount()); await Vue.nextTick()
+  state.poseDescriptionInput.value = { focus() { focuses++ } }
+  await state.revisePose()
+  assert.equal(state.poseDescriptionOpen.value, true)
+  assert.equal(focuses, 1)
+  assert.equal(calls.length, 0)
+  state.poseDescription.value = '  右手抬高  '
+  assert.equal(JSON.parse(stored.get('photo-studio-custom-pose')).description, '  右手抬高  ')
+  const pending = state.revisePose()
+  assert.equal(state.describingPose.value, true)
+  await state.revisePose(); await pending
+  assert.equal(fetches.length, 1)
+  assert.equal(fetches[0].url, original.imageUrl)
+  assert.equal(calls[0].direction, '右手抬高')
+  assert.equal(state.customPose.value.posePrompt, result.posePrompt)
+  assert.equal(state.duoPose.value, true)
+  assert.equal(state.poseId.value, 'custom-upload')
+  failure = true
+  state.poseDescription.value = '左手保持原位'
+  await state.revisePose()
+  assert.equal(state.customPose.value.posePrompt, result.posePrompt)
+  assert.equal(state.poseDescription.value, '左手保持原位')
+  assert.equal(state.poseUploadError.value, '识别失败')
+  failure = false
+  genericMime = true
+  state.customPose.value.imageUrl = '/images/photo_studio/pose-ref-test.avif'
+  await state.revisePose()
+  assert.equal(state.poseUploadError.value, '')
+  assert.equal(calls.at(-1).direction, '左手保持原位')
+  await state.recognizePose(file)
+  assert.equal(calls.at(-1).direction, '')
+  assert.equal(state.poseDescriptionOpen.value, false)
+  assert.equal(state.poseDescription.value, '')
+});
+
+test('uploaded pose prompts save immediately, restore across mounts and reach only the selected pose payload', async t => {
+  const stored = new Map(), session = new Map()
+  for (const [key, map] of [['localStorage', stored], ['sessionStorage', session]]) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { configurable: true, value: { getItem: name => map.get(name) || null, setItem: (name, value) => map.set(name, value) } })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key] })
+  }
+  const upload = { posePrompt: 'character 1 raises the left arm, smiling beside a table.', personCount: 1, imageUrl: '/images/photo_studio/pose-ref-test.png' }
+  stored.set('photo-studio-custom-pose', JSON.stringify(upload))
+  session.set('photo-studio-selection', JSON.stringify({ poseId: 'custom-upload', characterId: 1 }))
+  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS, usePhotoStudio: () => ({
+    catalog: Vue.ref([{ id: 'pose', posePrompt: 'standing', system: '单人' }]), characters: Vue.ref([{ id: 1, name: 'Alice' }]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
+    load: async () => {}, poll: async () => {}, create: async () => {},
+  }) }
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const mount = () => {
+    let state
+    const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+    const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
+    app.mount({}); t.after(() => app.unmount()); return state
+  }
+  const state = mount()
+  await Vue.nextTick()
+  assert.equal(state.selectedPose.value.id, 'custom-upload', 'initial catalog loading must not reset a restored custom pose')
+  assert.equal(state.shootDisabled.value, false)
+  state.customPose.value.posePrompt = 'character 1 folds both arms and smiles.'
+  assert.equal(JSON.parse(stored.get('photo-studio-custom-pose')).posePrompt, state.customPose.value.posePrompt)
+  assert.deepEqual(state.shotInput().customPose, { posePrompt: state.customPose.value.posePrompt, personCount: 1 })
+  state.customPose.value.personCount = 2
+  assert.equal(state.duoPose.value, true)
+  state.selectPose({ id: 'pose' })
+  assert.equal(state.shotInput().customPose, undefined)
+  assert.equal(state.customPose.value.personCount, 2, 'switching to a normal pose keeps the uploaded draft')
+  state.poseId.value = 'custom-upload'
+  state.persistSelection()
+  const restored = mount()
+  assert.equal(restored.customPose.value.posePrompt, 'character 1 folds both arms and smiles.')
+  assert.equal(restored.poseId.value, 'custom-upload')
+  restored.customPose.value.posePrompt = '   '
+  assert.equal(restored.shootDisabled.value, true)
+});
+
 test('pose scrolling appends batches without losing selection, resets on filtering and stops when closed', async t => {
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => null, setItem() {} } })

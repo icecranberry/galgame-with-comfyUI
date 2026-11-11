@@ -37,6 +37,8 @@ Outlet 在缓存模式保留原占位符，以保证命中/未命中不修改前
 
 ## 新提示词的插槽约定
 
+照相馆上传姿势识图 `photoStudioPose.js`：system0 仅 `getSystemRules({ roleplay: false })` 破甲规则 → 固定姿势描述规范与完整 JSON 示例 → 唯一 user（简短任务与图片附件）。不传角色资料、世界观或强化，显式 `lorebook:false`，防止世界书引入世界内容；前两层逐字稳定，图片只在最终 user；「再次修改」的补充描述也只追加到该 user 的任务文本，要求按补充需求调整最终输出，不新增消息、不改变 system 前缀。该识图请求显式传 `thinking:{type:"disabled"}` 与 `forceDisableThinking:true`，强制关闭思考并覆盖全局及 extraBody 的开启参数。JSON 的 `personCount` 为1或2，`posePrompt` 为英文四肢动作、表情、简单场景与物品，禁止外貌和服装。成功后保存参考图，前端实时保存可编辑文本；预览、润色、拍摄统一把该文本作为普通姿势放入 `Pose:` 段，不再识图或翻译，character 1/2 沿用原有人物名称替换。
+
 照相馆自定义背景 `photoStudioBackgrounds.js`：世界规则与世界观 → 可选 photo 强化 → 固定背景转换规范 → 本次中英文背景描述 → 唯一 user。背景只描述环境，不加入角色、服装或动作；输出纯英文正文，不使用 JSON。`personaTexts` 为空，`staticTexts` 仅前三类规则，`cacheBoundary` 截止固定规范末尾；扫描 `history` 为实际背景材料与末条 user。确认后保存英文结果用于后续拼装，预置库直接按 ID 读取英文，不请求 LLM。拍摄润色中的 Background 属于动态拼装材料，明确保留其地点、光线等要求。
 
 照相馆提示词润色 `photoStudioPolish.js`：请求按基础规则（getSystemRules，roleplay:false，不含世界观）→ 固定润色任务要求 → 独立 system 的共用 `IMAGE_PROMPT_RULE` 生图规则 → 实际 `short_prompt` →【初步画面提示词】及需保留的 tag → 唯一 user（本次任务与可选【任务额外需求】）分层。不注入世界观及 photo 强化，并显式使用 `lorebook:false` 关闭世界书，防止关联世界内容重新进入；因此无需向运行时传 personaTexts、staticTexts、cacheBoundary。前三层组成稳定前缀，额外需求只放动态尾部。人物资料只传原始 `short_prompt`；缺失则省略，不回退完整卡，也不用会追加默认外观的 characterPersona short 变体。初步画面提示词里的外观仍由 characterPersona 的外观入口提取。任务规范只保留照相馆的服装覆盖、tag 保真、人物动作归属、背景保留及去除拼装标记等差异约束，通用格式与身份要求由生图规则负责。

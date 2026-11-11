@@ -91,6 +91,31 @@ async function fixture(overrides = {}) {
 
 const request = { id: 'test-request-123', characterId: 1, poseId: 'pose' };
 
+test('uploaded pose edits use the normal Pose section in preview and rendering for one or two actors', async () => {
+  const f = await fixture();
+  try {
+    const input = { ...request, poseId: 'custom-upload', customPose: { personCount: 2, posePrompt: 'character 1 raises the left arm toward character 2, who smiles beside a table.' }, secondCharacterId: 2 };
+    const preview = await f.service.preview(input);
+    assert.match(preview.prompt, /^Pose: .+ raises the left arm toward .+, who smiles beside a table\./);
+    assert.doesNotMatch(preview.prompt, /character [12]\b/);
+    assert.match(preview.prompt, /Character 1 — Appearance:/);
+    assert.match(preview.prompt, /Character 2 — Appearance:/);
+    assert.match(preview.prompt, /Background:/);
+    await f.service.submit(input);
+    const done = await waitForJob(f.service, request.id);
+    assert.equal(done.status, 'done');
+    assert.equal(done.prompt, preview.prompt);
+    assert.equal(f.calls[0].prompt, preview.prompt);
+    assert.equal(done.character2_id, 2);
+    assert.equal(done.pose_id, 'custom-upload');
+    const solo = await f.service.preview({ ...input, customPose: { personCount: 1, posePrompt: 'character 1 smiles with both hands on a table.' } });
+    assert.doesNotMatch(solo.prompt, /Character 2/);
+    await assert.rejects(f.service.preview({ ...input, customPose: { personCount: 1, posePrompt: '' } }), { status: 400 });
+    const normal = await f.service.preview({ ...request, customPose: input.customPose });
+    assert.ok(normal.prompt.startsWith(`Pose: ${soloPose.posePrompt}`), 'a retained custom draft must not override a normal library selection');
+  } finally { f.db.close(); }
+});
+
 test('studio pushes progress and only publishes ready after the image and task are saved', async () => {
   const events = [];
   let finishSave, enteredSave;

@@ -7,6 +7,7 @@ import { getDb } from '../db/index.js';
 import { buildCharacterImageAppearance, extractCharacterEnglishName, extractCharacterIdentityTag, replaceAppearanceSection } from './characterPersona.js';
 import { resolveClothingTags } from './clothingLibrary.js';
 import { resolveStudioBackground } from './photoStudioBackgrounds.js';
+import { resolveCustomStudioPose } from './photoStudioPose.js';
 import { collectCharacterLoras } from './groupImageLoraMatcher.js';
 import { polishStudioPrompt, getStudioPolishContext, generateStudioClothing, splitStudioTags, studioPoseTags } from './photoStudioPolish.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
@@ -96,7 +97,7 @@ export function createPhotoStudioService({
     }));
   }
 
-  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false, polishInstruction = '' }) {
+  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, customPose, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false, polishInstruction = '' }) {
     if (typeof polishInstruction !== 'string' || polishInstruction.length > 1000) throw Object.assign(new Error('润色任务额外需求最多 1000 字'), { status: 400 });
     polishInstruction = polishInstruction.trim();
     const backgroundPrompt = resolveStudioBackground({ backgroundId, customBackgroundPrompt });
@@ -108,8 +109,9 @@ export function createPhotoStudioService({
     let dimensions;
     try { dimensions = photoStudioDimensions(width ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.width, height ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.height); }
     catch (error) { throw Object.assign(error, { status: 400 }); }
-    const poses = await catalog();
-    const pose = poses.find(item => item.id === poseId);
+    const pose = poseId === 'custom-upload'
+      ? resolveCustomStudioPose(customPose)
+      : (await catalog()).find(item => item.id === poseId);
     const first = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(characterId));
     if (!pose || !first) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
     if (!pose.posePrompt) throw Object.assign(new Error('该姿势的专属提示词尚未校准，请先选择已有完整描述的姿势'), { status: 400 });

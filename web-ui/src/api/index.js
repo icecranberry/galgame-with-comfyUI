@@ -1,6 +1,7 @@
 const BASE = '/api'
 
 export const getPhotoStudioCatalog = () => request('/photo-studio/catalog')
+export const describePhotoStudioPose = (image, signal, direction = '') => request('/photo-studio/describe-pose', { method: 'POST', body: { image, direction }, signal })
 export const getPhotoStudioBackgrounds = () => request('/photo-studio/backgrounds')
 export const generatePhotoStudioBackground = ({ description, signal }) => request('/photo-studio/background-draft', { method: 'POST', body: { description }, signal })
 export const getPhotoStudioCapability = () => request('/photo-studio/capability')

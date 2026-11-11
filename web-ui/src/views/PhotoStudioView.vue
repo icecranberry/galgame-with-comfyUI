@@ -14,13 +14,17 @@
     <div v-if="showHistory" key="history" class="studio-history"><div class="history-heading"><h2>拍摄记录</h2><span>{{ jobs.length }} / 30</span></div><div v-if="jobs.length" class="history-grid"><article v-for="job in jobs" :key="job.id" class="history-item"><img v-if="job.output_url" :src="job.output_url" :alt="`${jobCharacters(job)} · ${job.pose_name}`" @click="openPhoto(job.output_url)" /><div v-else class="history-pending">{{ job.status === 'running' ? '冲印中…' : '拍摄失败' }}</div><div class="history-caption"><strong>{{ jobCharacters(job) }}</strong><span>{{ job.pose_name }}<template v-if="job.width && job.height"> · {{ job.width }} × {{ job.height }}</template></span><small v-if="job.error">{{ job.error }}</small></div></article></div><div v-else class="studio-empty">第一张照片还在等你拍摄。</div></div>
     <section v-else key="viewfinder" class="studio-body">
       <aside ref="posePanel" class="studio-pose" tabindex="-1">
-        <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">01</span>姿势底稿</h2></div><span v-if="recognizedPoses.length" class="rail-count">{{ recognizedPoses.length }} 张已识别</span></div><div class="pose-card" @click="poseOpen = true" @keydown.enter.prevent="poseOpen = true" @keydown.space.prevent="poseOpen = true" role="button" tabindex="0" aria-label="打开全屏姿势图库"><img v-if="selectedPose" :src="poseAsset(selectedPose.thumbnail)" :alt="selectedPose.name" /><div v-else class="pose-placeholder">姿势图库加载中…</div></div><div class="pose-caption"><strong>{{ selectedPose?.name || '请选择一个已识别的姿势' }}</strong><span v-if="selectedPose">{{ selectedPose.category }} · {{ selectedPose.system }}</span></div><div class="studio-pose-tools">
+        <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">01</span>姿势底稿</h2></div><span v-if="recognizedPoses.length" class="rail-count">{{ recognizedPoses.length }} 张已识别</span></div><div class="pose-card" @click="poseOpen = true" @keydown.enter.prevent="poseOpen = true" @keydown.space.prevent="poseOpen = true" role="button" tabindex="0" aria-label="打开全屏姿势图库"><img v-if="selectedPose" :src="selectedPose.id === 'custom-upload' ? customPose.imageUrl : poseAsset(selectedPose.thumbnail)" :alt="selectedPose.name" /><div v-else class="pose-placeholder">姿势图库加载中…</div></div><div class="pose-caption"><strong>{{ selectedPose?.name || '请选择一个已识别的姿势' }}</strong><span v-if="selectedPose">{{ selectedPose.category }} · {{ selectedPose.system }}</span></div><div class="studio-pose-tools">
           <studio-button size="compact" :disabled="recognizedPoses.length < 2" @click="randomizePose">随机姿势</studio-button>
           <studio-button size="compact" :title="background ? `${background.label}：${background.description}` : '默认白色背景，点击更换'" @click="backgroundOpen = true"><span class="studio-background-label">{{ background ? background.label : '白色背景 ↗' }}</span></studio-button>
         </div>
         <div class="studio-settings"><h3>画幅设定<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" /></svg></h3><linshe-tabs class="size-ratios" variant="film" v-model="aspectRatio" size="sm" :options="aspectRatioOptions" aria-label="照片比例"><template #option="{ option }"><span class="ratio-option"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect :x="(28 - option.iconWidth) / 2" :y="(24 - option.iconHeight) / 2" :width="option.iconWidth" :height="option.iconHeight" rx="2" :stroke-dasharray="option.value === 'custom' ? '3 2' : undefined" /></svg><span>{{ option.label }}</span></span></template></linshe-tabs><div class="size-controls" aria-label="成片尺寸"><div class="size-control"><div><span>宽度</span><strong>{{ width }} px</strong></div><linshe-slider variant="film" :model-value="width" :min="dimensionControls.width.min" :max="dimensionControls.width.max" :step="dimensionControls.width.step" aria-label="成片宽度" @update:model-value="setWidth" /></div><div class="size-control"><div><span>高度</span><strong>{{ height }} px</strong></div><linshe-slider variant="film" :model-value="height" :min="dimensionControls.height.min" :max="dimensionControls.height.max" :step="dimensionControls.height.step" aria-label="成片高度" @update:model-value="setHeight" /></div></div></div>
       </aside>
-      <section class="studio-darkroom"><div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat"><span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in"><div v-if="activeJob || shooting" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><figure v-else-if="currentPhoto" :key="currentPhoto.id" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else key="empty" class="empty-negative"><svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <section class="studio-darkroom">
+<div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat">
+<span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in">
+<div v-if="activeJob || shooting" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><figure v-else-if="currentPhoto" :key="currentPhoto.id" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else key="empty" class="empty-negative">
+<svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
   <g transform="rotate(9 48 48)" opacity=".35"><path d="M25 14h51v67H25z" /><path d="M30 20h41v44H30z" /></g>
   <g transform="rotate(-9 44 48)">
     <path d="M17 13h54v70H17z" fill="var(--studio-film)" />
@@ -32,7 +36,11 @@
   </g>
   <path d="m76 12 4-5m1 14 7-2M74 5l-1-3" stroke-width="2.5" />
   <path d="M13 72C4 76 10 87 38 89c17 1 36-4 39-10 2-5-6-8-14-8" stroke-width="1.5" />
-</svg><span>主角，就差你了。</span><p>选好姿势与角色，拍下这一幕。</p></div></Transition><div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div></div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><studio-button variant="primary" size="lg" :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting" @click="shoot"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div></section>
+</svg><span>主角，就差你了。</span><p>选好姿势与角色，拍下这一幕。</p>
+</div>
+</Transition><div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div>
+</div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><studio-button variant="primary" size="lg" :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting" @click="shoot"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div>
+</section>
       <aside ref="characterPanel" class="studio-characters" tabindex="-1">
         <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">02</span>入镜人物</h2></div><span class="rail-count">{{ sortedCharacters.length }}</span></div>
         <div class="character-slot-tools"><linshe-tabs v-model="characterSlot" variant="film" size="sm" :options="characterSlotOptions" aria-label="选择主角或搭档" /><studio-button v-if="characterSlot === 'second' && secondCharacterId" variant="ghost" size="sm" @click="secondCharacterId = ''">改为随机</studio-button></div>
@@ -54,7 +62,70 @@
     </section>
     </Transition>
 
-    <linshe-modal v-model="poseOpen" title="已识别姿势" variant="film" full full-height :transition-ms="300" body-class="modal-workspace-body"><template #title-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="14" cy="4" r="2" /><path d="m4 7 5 3 4-2 4 4 4-2M13 8l-3 7-6 5M10 15l6 1 2 5" /></svg></template><template #header-extra><span class="modal-header-stat">底稿<strong class="modal-header-stat-value">{{ filteredPoses.length }}</strong></span></template><template #close="{ close, disabled }"><studio-button variant="icon" :disabled="disabled" aria-label="关闭姿势图库" @click="close()"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></studio-button></template><div class="pose-library"><div class="library-tools"><studio-input v-model="query" placeholder="搜索动作、分类或编号…" aria-label="搜索姿势" /><div class="library-system-row"><studio-filter-options v-model="systemFilter" :options="systemOptions" label="姿势体系" /><Transition name="studio-content"><div v-if="systemFilter" class="library-system-categories"><studio-filter-options v-model="categoryFilter" :options="categoryOptions" label="姿势分类" size="xs" /></div></Transition></div><studio-filter-options v-model="angleFilter" :options="angleOptions" label="相机角度" /></div><Transition name="studio-content" mode="out-in" @after-enter="checkPoseScroll"><div ref="poseScrollRoot" :key="`${query}:${systemFilter}:${categoryFilter}:${angleFilter}`" class="pose-gallery-grid" @scroll.passive="checkPoseScroll"><article v-for="pose in visiblePoses" :key="pose.id" :aria-label="`${pose.name}，${pose.category}，${pose.angle}，已识别`" class="pose-option" :class="{ selected: pose.id === poseId }" role="button" tabindex="0" :aria-pressed="pose.id === poseId" @click="selectPose(pose)" @keydown.enter.prevent="selectPose(pose)" @keydown.space.prevent="selectPose(pose)"><div class="pose-option-image"><img :src="poseAsset(pose.thumbnail)" alt="" loading="lazy" decoding="async" /><span>{{ pose.angle }}</span><i v-if="pose.id === poseId">✓</i></div><div class="pose-option-heading"><small>{{ pose.id.split('_').slice(-2, -1)[0] || 'POSE' }}</small><strong>{{ pose.name }}</strong></div><span>{{ pose.category }} · {{ pose.group }}</span></article><div v-if="!filteredPoses.length" class="studio-empty">没有匹配的姿势，试试调整筛选。</div></div></Transition></div></linshe-modal>
+    <linshe-modal v-model="poseOpen" title="已识别姿势" variant="film" full full-height :transition-ms="300" body-class="modal-workspace-body">
+      <template #title-icon>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+          <circle cx="14" cy="4" r="2" /><path d="m4 7 5 3 4-2 4 4 4-2M13 8l-3 7-6 5M10 15l6 1 2 5" />
+        </svg>
+      </template>
+      <template #header-extra>
+        <span class="modal-header-stat">底稿<strong class="modal-header-stat-value">{{ filteredPoses.length }}</strong></span>
+      </template>
+      <template #close="{ close, disabled }">
+        <studio-button variant="icon" :disabled="disabled" aria-label="关闭姿势图库" @click="close()">
+          <StudioDevelopingIcon v-if="activeJob" />
+          <svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </studio-button>
+      </template>
+      <div class="pose-library">
+        <div class="library-tools">
+          <div class="pose-search-upload">
+            <studio-input v-model="query" placeholder="搜索动作、分类或编号…/粘贴或者上传图片自定义姿势" aria-label="搜索姿势" />
+            <studio-button :loading="describingPose" @click="poseFileInput?.click()">
+              <svg v-if="!describingPose" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5" /></svg>
+              {{ describingPose ? '识别中…' : '上传图片' }}
+            </studio-button>
+            <input ref="poseFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden @change="uploadPose" />
+          </div>
+          <p v-if="poseUploadError" class="pose-upload-error" role="alert">{{ poseUploadError }}</p>
+          <CollapseTransition :show="!!customPose">
+            <div v-if="customPose" class="custom-pose-editor">
+              <studio-input v-model="customPose.posePrompt" :disabled="describingPose" type="textarea" :rows="4" maxlength="6000" aria-label="自定义姿势英文提示词" />
+              <div class="custom-pose-actions">
+                <Transition name="pose-description">
+                  <div v-if="poseDescriptionOpen" class="pose-description-input">
+                    <studio-input id="pose-description-input" ref="poseDescriptionInput" v-model="poseDescription" :disabled="describingPose" maxlength="2000" placeholder="输入修改要求…" aria-label="姿势补充描述" @keyup.enter="!$event.isComposing && revisePose()" />
+                  </div>
+                </Transition>
+                <studio-button size="compact" :loading="describingPose" :disabled="poseDescriptionOpen && !poseDescription.trim()" :aria-expanded="poseDescriptionOpen" aria-controls="pose-description-input" @click="revisePose">{{ poseDescriptionOpen ? '再次修改' : '补充描述' }}</studio-button>
+              </div>
+            </div>
+          </CollapseTransition>
+          <div class="library-system-row">
+            <studio-filter-options v-model="systemFilter" :options="systemOptions" label="姿势体系" />
+            <Transition name="studio-content">
+              <div v-if="systemFilter" class="library-system-categories">
+                <studio-filter-options v-model="categoryFilter" :options="categoryOptions" label="姿势分类" size="xs" />
+              </div>
+            </Transition>
+          </div>
+          <studio-filter-options v-model="angleFilter" :options="angleOptions" label="相机角度" />
+        </div>
+        <Transition name="studio-content" mode="out-in" @after-enter="checkPoseScroll">
+          <div ref="poseScrollRoot" :key="`${query}:${systemFilter}:${categoryFilter}:${angleFilter}`" class="pose-gallery-grid" @scroll.passive="checkPoseScroll">
+            <article v-for="pose in visiblePoses" :key="pose.id" :aria-label="`${pose.name}，${pose.category}，${pose.angle}，已识别`" class="pose-option" :class="{ selected: pose.id === poseId }" role="button" tabindex="0" :aria-pressed="pose.id === poseId" @click="selectPose(pose)" @keydown.enter.prevent="selectPose(pose)" @keydown.space.prevent="selectPose(pose)">
+              <div class="pose-option-image">
+                <img :src="poseAsset(pose.thumbnail)" alt="" loading="lazy" decoding="async" />
+                <span>{{ pose.angle }}</span><i v-if="pose.id === poseId">✓</i>
+              </div>
+              <div class="pose-option-heading"><small>{{ pose.id.split('_').slice(-2, -1)[0] || 'POSE' }}</small><strong>{{ pose.name }}</strong></div>
+              <span>{{ pose.category }} · {{ pose.group }}</span>
+            </article>
+            <div v-if="!filteredPoses.length" class="studio-empty">没有匹配的姿势，试试调整筛选。</div>
+          </div>
+        </Transition>
+      </div>
+    </linshe-modal>
     <StudioBackgroundLibrary v-model="backgroundOpen" :value="background" @applied="background = $event" />
     <StudioClothingLibrary v-model="clothingOpen" :slot-key="characterSlot" :outfit="customOutfits[characterSlot] || null" :draft="clothingDrafts[characterSlot] ?? null" @draft-change="saveClothingDraft" @applied="applyClothing" />
     <linshe-modal v-model="promptOpen" title="拍摄提示词" variant="film" wide :transition-ms="300"><template #close="{ close }"><studio-button variant="icon" aria-label="关闭提示词" @click="close()">×</studio-button></template><p v-if="promptLoading" class="studio-prompt-note" role="status">正在拼装…</p><p v-else-if="promptError" class="studio-prompt-note" role="alert">{{ promptError }}</p><div v-else class="studio-prompt-text" tabindex="0">{{ promptText }}</div></linshe-modal>
@@ -70,8 +141,9 @@ import StudioDevelopingIcon from '../components/photoStudio/StudioDevelopingIcon
 import StudioOutfitPicker from '../components/photoStudio/StudioOutfitPicker.vue'
 import StudioBackgroundLibrary from '../components/photoStudio/StudioBackgroundLibrary.vue'
 import StudioClothingLibrary from '../components/photoStudio/StudioClothingLibrary.vue'
+import CollapseTransition from '../components/CollapseTransition.vue'
 import StudioPromptTools from '../components/photoStudio/StudioPromptTools.vue'
-import { getPhotoStudioPrompt, getPhotoStudioBackgrounds } from '../api/index.js'
+import { getPhotoStudioPrompt, getPhotoStudioBackgrounds, describePhotoStudioPose } from '../api/index.js'
 import { STUDIO_OUTFIT_LABELS } from '../utils/studioWardrobe.js'
 import { prepareCameraShutterSound, playCameraShutterSound } from '../utils/cameraShutterSound.js'
 import StudioInput from '../components/photoStudio/StudioInput.vue'
@@ -101,6 +173,90 @@ watch(jobs, list => {
   if (completed) playCameraShutterSound()
 })
 const saved = (() => { try { return JSON.parse(sessionStorage.getItem('photo-studio-selection') || '{}') } catch { return {} } })()
+const customPoseKey = 'photo-studio-custom-pose'
+const customPose = ref((() => {
+  try {
+    const value = JSON.parse(localStorage.getItem(customPoseKey) || 'null')
+    return value && typeof value.posePrompt === 'string' && [1, 2].includes(value.personCount) && typeof value.imageUrl === 'string' && value.imageUrl.startsWith('/images/photo_studio/pose-ref-') ? value : null
+  } catch { return null }
+})())
+const poseFileInput = ref(null), describingPose = ref(false), poseUploadError = ref('')
+const poseDescriptionOpen = ref(false), poseDescriptionInput = ref(null)
+const poseDescription = ref(typeof customPose.value?.description === 'string' ? customPose.value.description : '')
+watch(poseDescription, value => { if (customPose.value) customPose.value.description = value }, { flush: 'sync' })
+let poseRequest
+watch(customPose, value => {
+  try { localStorage.setItem(customPoseKey, JSON.stringify(value)) }
+  catch { poseUploadError.value = '自动保存失败，当前编辑仍可用于本次拍摄' }
+}, { deep: true, flush: 'sync' })
+function uploadPose(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  return recognizePose(file)
+}
+function pastePose(event) {
+  if (!poseOpen.value || event.defaultPrevented) return
+  const clipboard = event.clipboardData
+  const item = Array.from(clipboard?.items || []).find(item => item.kind === 'file' && item.type.startsWith('image/'))
+  const file = item?.getAsFile() || Array.from(clipboard?.files || []).find(file => file.type.startsWith('image/'))
+  if (!file) return
+  event.preventDefault()
+  return recognizePose(file)
+}
+async function recognizePose(source, direction = '') {
+  if (!source || describingPose.value) return
+  poseUploadError.value = ''
+  const controller = new AbortController()
+  poseRequest = controller
+  describingPose.value = true
+  try {
+    const file = typeof source === 'function' ? await source(controller.signal) : source
+    if (controller.signal.aborted || disposed) return
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'].includes(file.type)) throw new Error('请选择 PNG、JPG、WEBP、GIF 或 AVIF 图片')
+    if (file.size > 6 * 1024 * 1024) throw new Error('图片不能超过 6MB')
+    const image = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('图片读取失败，请重试'))
+      reader.readAsDataURL(file)
+    })
+    if (controller.signal.aborted) return
+    const result = await describePhotoStudioPose(image, controller.signal, direction)
+    if (controller.signal.aborted || disposed) return
+    customPose.value = { ...result, ...(direction ? { description: direction } : {}) }
+    poseDescription.value = direction
+    if (!direction) poseDescriptionOpen.value = false
+    poseId.value = 'custom-upload'
+    persistSelection()
+  } catch (error) {
+    if (!controller.signal.aborted && !disposed) poseUploadError.value = error.message || '姿势识别失败，请重试'
+  } finally {
+    if (poseRequest === controller) { poseRequest = null; describingPose.value = false }
+  }
+}
+async function revisePose() {
+  if (!customPose.value || describingPose.value || disposed) return
+  if (!poseDescriptionOpen.value) {
+    poseDescriptionOpen.value = true
+    await nextTick()
+    if (!disposed && poseDescriptionOpen.value) poseDescriptionInput.value?.focus()
+    return
+  }
+  const direction = poseDescription.value.trim()
+  if (!direction) return
+  const imageUrl = customPose.value.imageUrl
+  return recognizePose(async signal => {
+    const response = await fetch(imageUrl, { signal })
+    if (!response.ok) throw new Error('参考图读取失败，请重新上传图片')
+    const file = await response.blob()
+    // Older static servers return AVIF references as application/octet-stream.
+    if (!file.type || file.type === 'application/octet-stream') {
+      const extension = imageUrl.match(/\.(png|jpe?g|webp|gif|avif)$/i)?.[1]?.toLowerCase()
+      if (extension) return new Blob([file], { type: `image/${extension === 'jpg' ? 'jpeg' : extension}` })
+    }
+    return file
+  }, direction)
+}
 const poseId = ref(saved.poseId || ''), characterId = ref(saved.characterId || ''), secondCharacterId = ref(saved.secondCharacterId || '')
 // Migrate only the saved occupants once; future character changes never move clothing.
 function restoreSlotEntries(value) {
@@ -157,7 +313,7 @@ const aspectRatioOptions = PHOTO_ASPECT_RATIOS.map(value => {
   return { label: value, value, iconWidth: w * scale, iconHeight: h * scale }
 })
 aspectRatioOptions.push({ label: '自定义', value: 'custom', iconWidth: 19, iconHeight: 19 })
-const selectedPose = computed(() => catalog.value.find(item => item.id === poseId.value))
+const selectedPose = computed(() => poseId.value === 'custom-upload' && customPose.value ? { id: 'custom-upload', name: '自定义姿势', category: '上传参考图', system: customPose.value.personCount === 2 ? '双人' : '单人', posePrompt: customPose.value.posePrompt } : catalog.value.find(item => item.id === poseId.value))
 const recognizedPoses = computed(() => catalog.value.filter(item => !!item.posePrompt))
 const selectedCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(characterId.value)))
 const selectedSecondCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(secondCharacterId.value)))
@@ -218,7 +374,7 @@ const categoryOptions = computed(() => [{ label: '全部分类', value: '' }, ..
 const angleOptions = computed(() => [{ label: '全部角度', value: '' }, ...unique('angle').map(value => ({ label: value, value }))])
 const filteredPoses = computed(() => { const term = query.value.trim().toLowerCase(); return recognizedPoses.value.filter(item => (!systemFilter.value || item.system === systemFilter.value) && (!categoryFilter.value || item.category === categoryFilter.value) && (!angleFilter.value || item.angle === angleFilter.value) && (!term || `${item.name} ${item.category} ${item.group} ${item.system} ${item.id}`.toLowerCase().includes(term))) })
 const visiblePoses = computed(() => filteredPoses.value.slice(0, visiblePoseCount.value))
-const shootDisabled = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt || !selectedCharacter.value)
+const shootDisabled = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt?.trim() || !selectedCharacter.value)
 const dimensionControls = computed(() => photoDimensionControls(aspectRatio.value))
 const photoAspect = computed(() => Number(currentPhoto.value?.width) / Number(currentPhoto.value?.height) || 9 / 16)
 function unique(field) { return [...new Set(catalog.value.filter(item => field === 'system' || !systemFilter.value || item.system === systemFilter.value).map(item => item[field]))].sort((a, b) => a.localeCompare(b, 'zh')) }
@@ -307,7 +463,7 @@ function stageLabel(stage) { return ({ polishing: 'AI 正在润色提示词', po
 function openPhoto(url) { lightboxUrl.value = url; photoOpen.value = true }
 function shotInput() {
   return { characterId: characterId.value, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null,
-    poseId: poseId.value, outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value, 'first') : 'work',
+    poseId: poseId.value, ...(poseId.value === 'custom-upload' ? { customPose: { posePrompt: customPose.value?.posePrompt, personCount: customPose.value?.personCount } } : {}), outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value, 'first') : 'work',
     secondOutfitScene: duoPose.value ? (selectedSecondCharacter.value ? characterOutfit(selectedSecondCharacter.value, 'second') : slotOutfits.value.second || 'work') : 'work',
     clothingTags: customOutfits.value.first?.tags || [],
     customClothingPrompt: customOutfits.value.first?.customPrompt || '',
@@ -367,8 +523,10 @@ async function refreshSavedBackground() {
   } catch { /* Keep the current selection available when the catalog is offline. */ }
 }
 onMounted(refreshSavedBackground)
-onMounted(async () => { await load(); if (disposed) return; if (!recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (!sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection(); pollTimer = setInterval(poll, 15000) })
-onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollTimer); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
+onMounted(() => { globalThis.document?.addEventListener('paste', pastePose) })
+onBeforeUnmount(() => { globalThis.document?.removeEventListener('paste', pastePose) })
+onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (!sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection(); pollTimer = setInterval(poll, 15000) })
+onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(); clearInterval(pollTimer); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
 </script>
 
 <style scoped>
@@ -376,8 +534,9 @@ onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollT
 .studio-background-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.studio-pose-tools :deep(.studio-button__content){min-width:0;max-width:100%}
 
 .studio-history{max-width:1500px;margin:auto}.history-heading{display:flex;align-items:center;justify-content:space-between}.history-heading h2{font-family:var(--font-display,serif)}.history-heading>span{font-size:12px;color:var(--text-secondary)}.history-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px}.history-item{background:var(--studio-paper);padding:10px;border:1px solid var(--studio-line);box-shadow:0 4px 12px var(--studio-shadow)}.history-item>img,.history-pending{width:100%;aspect-ratio:3/4;object-fit:contain;border-radius:0}.history-item>img{cursor:zoom-in}.history-pending{display:grid;place-items:center;background:var(--bg-sunken);color:var(--text-secondary);font-size:13px}.history-caption{display:grid;gap:5px;padding:9px 3px 2px}.history-caption>span,.history-caption small{font-size:11px;color:var(--text-secondary)}.history-caption small{color:var(--fun-orange)}.studio-empty{padding:40px;text-align:center;color:var(--text-secondary)}
+.pose-search-upload{display:flex;align-items:center;gap:8px;min-width:0}.pose-search-upload>.studio-input{flex:1;width:0}.pose-search-upload>.studio-button{padding-inline:10px}.custom-pose-editor{display:grid;gap:8px;padding-top:8px}.custom-pose-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}.pose-description-input{flex:1;min-width:0;max-width:100%}.pose-description-enter-active,.pose-description-leave-active{overflow:hidden;transition:max-width .3s ease,opacity .3s ease}.pose-description-enter-from,.pose-description-leave-to{max-width:0;opacity:0}.pose-upload-error{margin:0;color:var(--studio-tag);font-size:var(--fs-sm);line-height:1.6}
 .pose-library{display:flex;flex-direction:column;min-height:0;height:100%;padding:12px}.pose-library>.library-tools{flex-shrink:0}
-.library-tools{display:flex;flex-direction:column;gap:10px;max-height:min(320px,40dvh);overflow:auto;padding:4px 4px 12px;scrollbar-color:var(--studio-muted) var(--studio-paper)}.library-tools>*{flex-shrink:0}
+.library-tools{display:flex;flex-direction:column;gap:10px;padding:4px 4px 12px;scrollbar-color:var(--studio-muted) var(--studio-paper)}.library-tools>*{flex-shrink:0}
 .library-system-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;min-width:0}.library-system-row>.studio-filter-options{flex:0 1 auto;max-width:100%}.library-system-categories{flex:1 1 220px;min-width:0}
 .pose-gallery-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));align-content:start;gap:24px 16px;padding:16px;background:var(--studio-film);scrollbar-color:var(--studio-shutter) var(--studio-film)}
 .pose-option{min-width:0;cursor:pointer;text-align:left;display:grid;gap:7px;padding:7px;border:1px solid transparent;color:var(--studio-film-text);position:relative;transition:background .3s,transform .3s,border-color .3s}.pose-option:hover{background:var(--studio-film-edge);transform:translateY(-3px)}.pose-option.selected{border-color:var(--studio-shutter)}.pose-option.selected::after{content:'';position:absolute;inset:-3px;border:2px solid var(--studio-shutter);border-radius:30% 3% 24% 4%;transform:rotate(-2deg);pointer-events:none}.pose-option:focus-visible{outline:2px solid var(--studio-shutter);outline-offset:3px}
@@ -390,7 +549,7 @@ onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollT
 @keyframes studio-curtain{0%{transform:translateY(-100%)}35%,55%{transform:translateY(0)}100%{transform:translateY(-100%)}}@keyframes studio-exposed{0%,25%{opacity:0;transform:translate(-50%,-50%) rotate(-10deg) scale(1.4)}40%,55%{opacity:1;transform:translate(-50%,-50%) rotate(-10deg) scale(1)}85%,100%{opacity:0;transform:translate(-50%,-65%) rotate(-10deg) scale(.98)}}
 
 /* Film darkroom: sprockets, contact prints and engraved camera controls. */
-.studio-page { position:absolute; inset:0; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; padding:22px 30px 30px; color:var(--studio-ink); background:url('../assets/studio-photocopy.svg'),repeating-linear-gradient(174deg,transparent 0 75px,color-mix(in srgb,var(--studio-ink) 4%,transparent) 76px,transparent 78px 150px),var(--studio-bg); animation:studio-enter .3s ease both; }
+.studio-page { position:absolute; inset:0; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; padding:22px 30px 10px; color:var(--studio-ink); background:url('../assets/studio-photocopy.svg'),repeating-linear-gradient(174deg,transparent 0 75px,color-mix(in srgb,var(--studio-ink) 4%,transparent) 76px,transparent 78px 150px),var(--studio-bg); animation:studio-enter .3s ease both; }
 .studio-header { width:100%; max-width:2200px; margin:0 auto 24px; padding:0 4px 12px; display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,286px); align-items:center; gap:32px; min-height:126px; background:transparent; border-bottom:0; position:relative; }
 
 .studio-heading { display:flex; flex-direction:column; align-items:flex-start; gap:4px; position:relative; padding:0; justify-self:start; }
@@ -425,7 +584,6 @@ onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollT
 .portrait-mat { flex:1; min-height:0; container-type:size; display:grid; place-items:center; position:relative; overflow:hidden; padding:18px 44px 20px; background:linear-gradient(90deg,var(--studio-film-edge) 30px,transparent 30px,transparent calc(100% - 30px),var(--studio-film-edge) calc(100% - 30px)); }
 .portrait-mat::before,.portrait-mat::after { content:''; position:absolute; top:12px; bottom:12px; width:12px; background:linear-gradient(var(--studio-perforation) 0 13px,transparent 13px 28px) 0 0 / 12px 28px repeat-y; pointer-events:none; opacity:.8; }.portrait-mat::before { left:9px; }.portrait-mat::after { right:9px; }
 .photo-print { margin:0; display:flex; flex-direction:column; gap:8px; max-width:100%; max-height:100%; width:min(100cqw,calc((100cqh - 46px) * var(--photo-aspect) + 20px)); padding:10px; background:var(--dialogue-photo-paper); box-shadow:7px 6px 0 color-mix(in srgb,var(--studio-film-text) 16%,transparent),0 10px 30px var(--studio-shadow); position:relative; }
-.photo-print::before { content:""; position:absolute; top:-9px; left:calc(50% - 44px); width:88px; height:20px; background:repeating-linear-gradient(90deg,transparent 0 5px,color-mix(in srgb,var(--studio-film) 14%,transparent) 6px 7px),var(--studio-tape); clip-path:polygon(0 8%,98% 0,100% 90%,2% 100%); transform:rotate(3deg); pointer-events:none; }
 .photo-print img { display:block; width:100%; min-height:0; max-height:calc(100cqh - 46px); object-fit:contain; cursor:zoom-in; }
 .photo-print figcaption { color:var(--dialogue-photo-caption); display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; font-size:12px; line-height:20px; }.photo-print figcaption strong,.photo-print figcaption span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }.photo-print figcaption span { font-size:11px; }
 .photo-print.is-peeking img { animation:photo-peek 420ms var(--ease-standard) both; }.photo-flash { position:absolute; inset:0; pointer-events:none; background:var(--dialogue-photo-paper); animation:photo-flash 420ms ease-out both; }
@@ -466,7 +624,7 @@ onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollT
 @media(max-width:520px) { .studio-page { padding:12px 12px 24px; }.studio-header { width:100%; margin-inline:0; padding:8px 0 0; grid-template-columns:1fr; gap:16px; margin-bottom:20px; }.studio-heading { grid-column:1; grid-row:1; justify-self:start; padding-left:6px; }.studio-heading h1 { font-size:58px; gap:22px; }.studio-header-actions { grid-row:2; justify-content:flex-end; }.studio-tagline { width:180px; height:18px; }.studio-club { font-size:10px; }.studio-body { grid-template-columns:1fr; gap:24px; }.studio-darkroom { height:max(510px,70dvh); }.film-frame-edge { padding-inline:26px; }.portrait-mat { padding:8px 26px 16px; background:linear-gradient(90deg,var(--studio-film-edge) 18px,transparent 18px,transparent calc(100% - 18px),var(--studio-film-edge) calc(100% - 18px)); }.portrait-mat::before,.portrait-mat::after { width:8px; background-size:8px 28px; }.portrait-mat::before { left:5px; }.portrait-mat::after { right:5px; }.portrait-actions { padding:12px; gap:10px; }.portrait-selection strong { font-size:16px; }.portrait-actions>.studio-button { margin-left:0; width:100%; }.photo-print figcaption span { display:none; }.studio-pose,.studio-characters { grid-column:1; }.studio-characters { grid-row:2; }.studio-pose,.studio-characters { transform:none; }.character-grid { grid-template-columns:repeat(3,minmax(0,1fr)); max-height:310px; }.character-name { font-size:13px; }.pose-card { height:260px; }.size-ratios { grid-template-columns:repeat(4,minmax(0,1fr)); }.size-controls { grid-template-columns:1fr 1fr; gap:16px; }.rail-title h2 { font-size:18px; }.portrait-selection>span { font-size:11px; } }
 .portrait-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.portrait-selection{grid-column:1;grid-row:1}.portrait-actions>.studio-button{grid-column:2;grid-row:1}.mobile-studio-links{grid-column:1/-1;grid-row:2;justify-self:end}
 @media(max-width:600px){.portrait-actions{grid-template-columns:1fr;gap:10px}.portrait-actions>.studio-button{grid-column:1;grid-row:2;width:100%}.mobile-studio-links{grid-row:3;justify-self:start;margin:0}}
-@media(prefers-reduced-motion:reduce) { .shutter-sweep{display:none}.studio-page,.studio-page * { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+@media(prefers-reduced-motion:reduce) { .pose-description-enter-active,.pose-description-leave-active{transition:none}.shutter-sweep{display:none}.studio-page,.studio-page * { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
 @keyframes studio-enter{from{opacity:0}to{opacity:1}}@keyframes studio-spin{to{transform:rotate(360deg)}}
 @keyframes photo-peek{0%{opacity:.18;filter:blur(6px) brightness(1.45);transform:scale(.975)}18%{opacity:1;filter:blur(0) brightness(1.12);transform:scale(1.015)}42%{filter:brightness(1)}100%{opacity:1;filter:none;transform:scale(1)}}
 @keyframes photo-flash{0%,100%{opacity:0}7%{opacity:.96}15%{opacity:.15}23%{opacity:.62}38%{opacity:0}}
