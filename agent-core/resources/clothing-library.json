@@ -6086,6 +6086,18 @@
       "kind": "outfit"
     },
     {
+      "tag": "complete nude, nipple, stomach, breast",
+      "label": "全裸",
+      "description": "不穿任何衣物的状态。",
+      "categories": [
+        "套装"
+      ],
+      "subcategories": [
+        "主题套装"
+      ],
+      "kind": "outfit"
+    },
+    {
       "tag": "mummy_costume",
       "label": "木乃伊装",
       "description": "以绷带缠绕的木乃伊形象为主题的装扮。",

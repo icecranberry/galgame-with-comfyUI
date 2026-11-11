@@ -1,8 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PHOTO_ASPECT_RATIOS, clampPhotoDimension, inferPhotoAspectRatio, photoDimensionControls, resizePhoto } from '../src/utils/photoStudioDimensions.js'
+import { PHOTO_ASPECT_RATIOS, DEFAULT_PHOTO_STUDIO_DIMENSIONS, initialPhotoStudioFrame, clampPhotoDimension, inferPhotoAspectRatio, photoDimensionControls, resizePhoto } from '../src/utils/photoStudioDimensions.js'
 
 test('new photo-studio sessions use the requested portrait default and every supported ratio', () => {
+  assert.deepEqual(DEFAULT_PHOTO_STUDIO_DIMENSIONS, { width: 1152, height: 2048 })
+  assert.deepEqual(initialPhotoStudioFrame(), { width: 1152, height: 2048, aspectRatio: '9:16' })
+  assert.deepEqual(initialPhotoStudioFrame({ width: 1200, height: 1600, aspectRatio: '3:4' }), initialPhotoStudioFrame())
+  assert.deepEqual(initialPhotoStudioFrame({ width: 1200, height: 1600, aspectRatio: '3:4', frameVersion: 2 }), { width: 1200, height: 1600, aspectRatio: '3:4' })
+  assert.deepEqual(initialPhotoStudioFrame({ width: 1288, height: 1736, aspectRatio: 'custom' }), { width: 1288, height: 1736, aspectRatio: 'custom' })
   assert.deepEqual({ width: 1200, height: 1600 }, resizePhoto({ width: 1200, height: 1600, ratio: '3:4' }))
   assert.equal(inferPhotoAspectRatio(1200, 1600), '3:4')
   assert.equal(inferPhotoAspectRatio(1200, 1700), 'custom')

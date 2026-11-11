@@ -3,7 +3,7 @@
     <!-- 首次直达页面时，anchor 宿主与弹窗同批挂载；等宿主插入后再解析目标。 -->
     <Transition name="modal-fade" :duration="transitionMs" @after-leave="afterLeave">
       <div v-if="isOpen" ref="overlay" class="modal-overlay linshe-modal-overlay" :class="{ 'is-host-anchored': isAnchored, 'is-floating': floating, 'is-full-height': fullHeight }" :style="overlayStyle" @pointerdown="onBackdropPointerDown" @click.self="onBackdropClick">
-        <div ref="panel" class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full, 'modal-comic': variant === 'comic' }, panelClass]" role="dialog" :aria-modal="floating ? undefined : true" :aria-label="title || undefined" tabindex="-1" @click.stop>
+        <div ref="panel" class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full, 'modal-comic': variant === 'comic', 'modal-film': variant === 'film' }, panelClass]" role="dialog" :aria-modal="floating ? undefined : true" :aria-label="title || undefined" tabindex="-1" @click.stop>
           <div class="modal-header">
             <slot name="title"><h3 class="modal-title">{{ title }}</h3></slot>
             <span v-if="$slots['header-extra']" class="modal-header-extra"><slot name="header-extra" /></span>
@@ -271,6 +271,26 @@ onBeforeUnmount(() => {
 /* 操作区自带底部留白；有 footer 时不再叠加内衬的底部间距。 */
 .linshe-modal-lining.has-footer { margin-bottom: 0; }
 /* 传媒的漫画阅读变体；默认弹窗不受影响。 */
+.modal-film {
+  --modal-bg: var(--studio-paper);
+  --modal-border: 1px solid var(--studio-ink);
+  --modal-radius: 4px;
+  --modal-shadow: 6px 6px 0 var(--studio-shadow);
+  --modal-backdrop: none;
+  --modal-lining-bg: var(--studio-paper);
+  --modal-lining-border: none;
+  --modal-lining-radius: 0;
+  --modal-lining-margin: 0 12px 12px;
+  --modal-lining-margin-mobile: 0 6px 6px;
+  --modal-lining-pad: 12px;
+  color: var(--studio-ink);
+}
+.modal-film .modal-header { padding:16px 24px; border-bottom:2px solid var(--studio-ink); background:url('../../assets/studio-photocopy.svg'),var(--studio-paper); }
+.modal-film .modal-title { color:var(--studio-ink); font-size:24px; font-weight:900; letter-spacing:-.04em; }
+.modal-film .modal-title::before { content:'✳'; color:var(--studio-tag); margin-right:10px; }
+.modal-film .modal-footer { border-top:1px dashed var(--studio-ink); padding:12px 24px; }
+.modal-film .modal-body { scrollbar-color:var(--studio-muted) transparent; }
+@media(max-width:600px) { .modal-film .modal-header,.modal-film .modal-footer { padding:12px; }.modal-film .modal-title { font-size:20px; } }
 .modal-comic {
   --modal-bg: var(--media-paper);
   --modal-border: 3px solid var(--media-ink);

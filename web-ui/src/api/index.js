@@ -1,11 +1,15 @@
 const BASE = '/api'
 
 export const getPhotoStudioCatalog = () => request('/photo-studio/catalog')
+export const getPhotoStudioBackgrounds = () => request('/photo-studio/backgrounds')
+export const generatePhotoStudioBackground = ({ description, signal }) => request('/photo-studio/background-draft', { method: 'POST', body: { description }, signal })
 export const getPhotoStudioCapability = () => request('/photo-studio/capability')
 export const getPhotoStudioCharacters = () => request('/photo-studio/characters')
 export const getPhotoStudioJobs = () => request('/photo-studio/jobs')
 export const getPhotoStudioJob = id => request(`/photo-studio/jobs/${encodeURIComponent(id)}`)
 export const createPhotoStudioJob = body => request('/photo-studio/jobs', { method: 'POST', body })
+export const getPhotoStudioPrompt = body => request('/photo-studio/prompt-preview', { method: 'POST', body })
+export const generateStudioClothingDraft = ({ signal, ...body }) => request('/photo-studio/clothing-draft', { method: 'POST', body, signal })
 
 export const getSystemRulesOverride = () => request('/config/system-rules')
 export const saveSystemRulesOverride = content => request('/config/system-rules', { method: 'PUT', body: { content } })

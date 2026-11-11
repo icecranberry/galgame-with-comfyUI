@@ -1,4 +1,14 @@
 export const PHOTO_ASPECT_RATIOS = ['3:2', '2:3', '4:3', '3:4', '16:9', '9:16']
+export const DEFAULT_PHOTO_STUDIO_DIMENSIONS = Object.freeze({ width: 1152, height: 2048 })
+
+export function initialPhotoStudioFrame(saved = {}) {
+  // Migrate the former implicit 3:4 default once; explicit new choices and custom sizes survive.
+  const formerDefault = saved.frameVersion !== 2 && Number(saved.width) === 1200 && Number(saved.height) === 1600 && (!saved.aspectRatio || saved.aspectRatio === '3:4')
+  if (!saved.width || !saved.height || formerDefault) return { ...DEFAULT_PHOTO_STUDIO_DIMENSIONS, aspectRatio: '9:16' }
+  const width = clampPhotoDimension(saved.width), height = clampPhotoDimension(saved.height)
+  const aspectRatio = [...PHOTO_ASPECT_RATIOS, 'custom'].includes(saved.aspectRatio) ? saved.aspectRatio : inferPhotoAspectRatio(width, height)
+  return { ...resizePhoto({ width, height, ratio: aspectRatio }), aspectRatio }
+}
 
 const MIN = 512
 const MAX = 2048

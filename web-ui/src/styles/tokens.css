@@ -396,3 +396,33 @@
   --studio-perforation: #a89582;
   --studio-shadow: #00000066;
 }
+
+/* 酒馆专用纸面，按用户指定独立皮肤。 */
+:root, [data-theme="warm"] {
+  --tavern-surface: #fcf8f3;
+  --tavern-paper-center: #fcf4ed;
+  --tavern-paper-edge: #f8ece2;
+  --tavern-paper-line: #c9aa94;
+  --tavern-paper-highlight: #fff9f2;
+  --tavern-paper-shadow: #ae8a6820;
+  --tavern-fold: #edd6c4;
+  --tavern-ink: #302a25;
+  --tavern-muted: #796657;
+  --tavern-coral: #b76c59;
+  --tavern-button-line: #ddc1ad;
+  --tavern-button-ink: #805e46;
+}
+[data-theme="dark"] {
+  --tavern-surface: #302831;
+  --tavern-paper-center: #302831;
+  --tavern-paper-edge: #251f28;
+  --tavern-paper-line: #806358;
+  --tavern-paper-highlight: #56443e;
+  --tavern-paper-shadow: #00000040;
+  --tavern-fold: #45333b;
+  --tavern-ink: #f0e2d5;
+  --tavern-muted: #c5ad99;
+  --tavern-coral: #db9a7f;
+  --tavern-button-line: #785e51;
+  --tavern-button-ink: #e0b995;
+}

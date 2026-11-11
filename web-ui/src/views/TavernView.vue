@@ -4,178 +4,116 @@
       <h2 @click="isMobile && toggleMobileSidebar?.()" :class="{ 'is-clickable': isMobile }">酒馆</h2>
     </div>
 
-    <!-- ═══════════════════════════════════════════
-         用户信息卡片
-         ═══════════════════════════════════════════ -->
-    <div class="user-row-wrapper">
-      <div class="user-row card">
-        <div
-          class="user-avatar clickable"
-          :style="userAvatarStyle"
-          @click="showUserAvatarPicker = true"
-        >
-{{ userAvatar ? '' : '我' }}
-</div>
-        <div class="user-info">
-        <!-- 姓名 -->
-        <div class="user-field-row">
-          <span class="field-label">称呼</span>
-          <div class="field-value-wrap">
-            <input
-              v-if="editingNickname"
-              ref="nicknameInput"
-              v-model="userNicknameInput"
-              class="inline-input nickname-input"
-              @blur="saveNickname"
-              @keydown.enter="saveNickname"
-              placeholder="给自己起个名字"
-            />
-            <span v-else class="field-value" @click="startEditNickname">{{ userNickname || '给自己起个名字' }}</span>
-            <div v-if="!editingNickname" class="edit-pen" role="button" tabindex="0" @click="startEditNickname" @keydown.enter.prevent="startEditNickname" @keydown.space.prevent="startEditNickname" title="编辑称呼">✎</div>
-          </div>
+    <linshe-modal v-model="showProfileEditor" title="编辑资料" :close-disabled="profileSaving">
+      <form id="tavern-profile-form" class="profile-edit-form" @submit.prevent="saveProfile">
+        <label class="profile-edit-field"><span>称呼</span><linshe-input v-model="userNicknameInput" :disabled="profileSaving" placeholder="给自己起个名字" /></label>
+        <label class="profile-edit-field"><span>性别</span><linshe-input v-model="userGenderInput" :disabled="profileSaving" placeholder="男 / 女 / ..." /></label>
+        <label class="profile-edit-field"><span>外观描述</span><linshe-input v-model="userAppearanceInput" :disabled="profileSaving" type="textarea" :rows="4" placeholder="外观描述越紧密越不容易和其他角色串，示例：小明（←改成你的名字）来自原创角色，小明（←改成你的名字）是长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔" /></label>
+        <label class="profile-edit-field"><span>其他</span><linshe-input v-model="userPersonaInput" :disabled="profileSaving" type="textarea" :rows="4" placeholder="性格、身份、经历等补充信息" /></label>
+      </form>
+      <template #footer>
+        <linshe-button variant="secondary" :disabled="profileSaving" @click="showProfileEditor = false">取消</linshe-button>
+        <linshe-button variant="primary" type="submit" form="tavern-profile-form" :loading="profileSaving">保存</linshe-button>
+      </template>
+    </linshe-modal>
+    <section class="tavern-lobby" aria-label="我的酒馆">
+      <div class="lobby-identity">
+        <div class="user-avatar clickable" role="button" tabindex="0" aria-label="更换我的头像" :style="userAvatarStyle" @click="showUserAvatarPicker = true" @keydown.enter.prevent="showUserAvatarPicker = true" @keydown.space.prevent="showUserAvatarPicker = true">{{ userAvatar ? '' : '我' }}</div>
+        <div class="lobby-profile" role="button" tabindex="0" aria-label="编辑个人资料" @click="openProfileEditor" @keydown.enter.prevent="openProfileEditor" @keydown.space.prevent="openProfileEditor">
+        <div class="lobby-person">
+        <h3 class="lobby-name">{{ userNickname || '给自己起个名字' }}</h3>
+        <span v-if="userGender" class="lobby-gender">{{ userGender }}</span>
         </div>
-        <!-- 性别 -->
-        <div class="user-field-row">
-          <span class="field-label">性别</span>
-          <div class="field-value-wrap">
-            <input
-              v-if="editingGender"
-              ref="genderInput"
-              v-model="userGenderInput"
-              class="inline-input field-input"
-              @blur="saveGender"
-              @keydown.enter="saveGender"
-              placeholder="男 / 女 / ..."
-            />
-            <span v-else class="field-value" @click="startEditGender">{{ userGender || '点击设置性别...' }}</span>
-            <div v-if="!editingGender" class="edit-pen" role="button" tabindex="0" @click="startEditGender" @keydown.enter.prevent="startEditGender" @keydown.space.prevent="startEditGender" title="编辑性别">✎</div>
-          </div>
-        </div>
-        <!-- 外观特征 -->
-        <div class="user-field-row">
-          <span class="field-label">外观描述</span>
-          <div class="field-value-wrap">
-            <textarea
-              v-if="editingAppearance"
-              ref="appearanceInput"
-              v-model="userAppearanceInput"
-              class="inline-input field-textarea"
-              rows="2"
-              @blur="saveAppearance"
-              @keydown.enter.exact="saveAppearance"
-              @keydown.escape="cancelEditAppearance"
-              placeholder="外观描述越紧密越不容易和其他角色串，示例：小明（←改成你的名字）来自原创角色，小明（←改成你的名字）是长着金色头发的贫乳大小姐，穿着白色蕾丝洛丽塔"
-            ></textarea>
-            <span v-else class="field-value" @click="startEditAppearance">{{ userAppearance || '点击描述你的外貌特征...' }}</span>
-            <div v-if="!editingAppearance" class="edit-pen" role="button" tabindex="0" @click="startEditAppearance" @keydown.enter.prevent="startEditAppearance" @keydown.space.prevent="startEditAppearance" title="编辑外观">✎</div>
-          </div>
-        </div>
-        <!-- 其他说明 -->
-        <div class="user-field-row">
-          <span class="field-label">其他</span>
-          <div class="field-value-wrap">
-            <textarea
-              v-if="editingPersona"
-              ref="personaInput"
-              v-model="userPersonaInput"
-              class="inline-input field-textarea"
-              rows="2"
-              @blur="savePersona"
-              @keydown.enter.exact="savePersona"
-              @keydown.escape="cancelEditPersona"
-              placeholder="性格、身份、经历等补充信息"
-            ></textarea>
-            <span v-else class="field-value" @click="startEditPersona">{{ userPersona || '点击补充其他信息...' }}</span>
-            <div v-if="!editingPersona" class="edit-pen" role="button" tabindex="0" @click="startEditPersona" @keydown.enter.prevent="startEditPersona" @keydown.space.prevent="startEditPersona" title="编辑其他说明">✎</div>
-          </div>
+        <p class="lobby-appearance" :title="userAppearance">{{ userAppearance || '点击补充外观描述' }}</p>
         </div>
       </div>
-      </div>
-      <div v-if="!isMobile" class="mailbox-card card" @click="showMailbox = true">
+    <div class="relation-entry-row">
+      <div class="tavern-feature-group tavern-life-group" role="group" aria-label="酒馆生活">
+        <div class="relation-entry" role="button" tabindex="0" @click="showUserRelationGraph = true" @keydown.enter.prevent="showUserRelationGraph = true" @keydown.space.prevent="showUserRelationGraph = true">
+          <div class="relation-entry-icon">
+            <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
+            <line x1="9" y1="6" x2="11" y2="14" /><line x1="15" y1="6" x2="13" y2="14" />
+          </svg>
+          </div>
+          <div class="relation-entry-text">
+            <span class="relation-entry-title">我的关系图</span>
+          </div>
+        </div>
+        <div class="relation-entry" role="button" tabindex="0" :title="cohabitationHint" @click="showCohabitation = true" @keydown.enter.prevent="showCohabitation = true" @keydown.space.prevent="showCohabitation = true">
+          <div class="relation-entry-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7" /></svg>
+          </div>
+          <div class="relation-entry-text">
+            <span class="relation-entry-title">宿舍安排</span>
+            <span v-if="cohabitationRoomCount !== null" class="relation-entry-hint">{{ cohabitationRoomCount }}间邻舍</span>
+          </div>
+        </div>
+        <div class="relation-entry" role="button" tabindex="0" @click="router.push('/photo-studio')" @keydown.enter.prevent="router.push('/photo-studio')" @keydown.space.prevent="router.push('/photo-studio')">
+          <div class="relation-entry-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l1.4-2h7.2L17 7h3a2 2 0 0 1 2 2v10H2V9a2 2 0 0 1 2-2Z" /><circle cx="12" cy="13" r="4" /><path d="M19 3v4m-2-2h4" /></svg>
+          </div>
+          <div class="relation-entry-text">
+            <span class="relation-entry-title">照相馆</span>
+          </div>
+        </div>
+      <div class="relation-entry mailbox-card" role="button" tabindex="0" @keydown.enter.prevent="showMailbox = true" @keydown.space.prevent="showMailbox = true" @click="showMailbox = true">
+        <div class="relation-entry-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="2" y="4" width="20" height="16" rx="2" />
           <path d="M2 4L12 13L22 4" />
         </svg>
-        <span class="mailbox-label">信箱</span>
+        </div><div class="relation-entry-text"><span class="mailbox-label">信箱</span></div>
         <span v-if="mailboxUnread > 0" class="mailbox-badge">{{ mailboxUnread > 99 ? '99+' : mailboxUnread }}</span>
       </div>
-      <div v-if="!isMobile" class="backpack-card card" @click="showBackpack = true">
+      <div class="relation-entry backpack-card" role="button" tabindex="0" @keydown.enter.prevent="showBackpack = true" @keydown.space.prevent="showBackpack = true" @click="showBackpack = true">
+        <div class="relation-entry-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 9a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v1H4V9z" />
           <path d="M4 10h16v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8z" />
           <path d="M10 13h4" />
         </svg>
-        <span class="mailbox-label">背包</span>
+        </div><div class="relation-entry-text"><span class="mailbox-label">背包</span></div>
         <span v-if="backpackChestReady" class="mailbox-badge backpack-dot" title="宝箱已就绪"></span>
       </div>
+</div>
     </div>
-
-    <!-- ═══════════════════════════════════════════
-         关系图与宿舍安排并排；下方世界观 / SillyTavern 预设各占一半
-         《邻舍日报》已并入「传媒」页（见 NavBar 的传媒标签）
-         ═══════════════════════════════════════════ -->
-    <div class="relation-entry-row">
-      <div class="relation-entry card" role="button" tabindex="0" @click="showUserRelationGraph = true" @keydown.enter.prevent="showUserRelationGraph = true" @keydown.space.prevent="showUserRelationGraph = true">
-        <div class="relation-entry-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="12" cy="17" r="3" />
-            <line x1="9" y1="6" x2="11" y2="14" /><line x1="15" y1="6" x2="13" y2="14" />
-          </svg>
-        </div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">我的关系图</span>
-          <span class="relation-entry-hint">查看和管理你与所有角色的关系</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-
-      <div class="relation-entry card" role="button" tabindex="0" @click="showCohabitation = true" @keydown.enter.prevent="showCohabitation = true" @keydown.space.prevent="showCohabitation = true">
-        <div class="relation-entry-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7M5 9v11h14V9M9 20v-7h6v7" /></svg></div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">宿舍安排</span>
-          <span class="relation-entry-hint">{{ cohabitationHint }}</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-      <div class="relation-entry card" role="button" tabindex="0" @click="router.push('/photo-studio')" @keydown.enter.prevent="router.push('/photo-studio')" @keydown.space.prevent="router.push('/photo-studio')">
-        <div class="relation-entry-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h3l1.4-2h7.2L17 7h3a2 2 0 0 1 2 2v10H2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="4"/><path d="M19 3v4m-2-2h4"/></svg></div>
-        <div class="relation-entry-text"><span class="relation-entry-title">照相馆</span><span class="relation-entry-hint">挑选姿势，为角色拍一张新照片</span></div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-      <div class="relation-entry card" role="button" tabindex="0" @click="openWorldSetting" @keydown.enter.prevent="openWorldSetting" @keydown.space.prevent="openWorldSetting">
-        <div class="relation-entry-icon world-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    </section>
+      <div class="tavern-feature-group tavern-config-group" role="group" aria-label="创作配置">
+        <div class="relation-entry" role="button" tabindex="0" @click="openWorldSetting" @keydown.enter.prevent="openWorldSetting" @keydown.space.prevent="openWorldSetting">
+          <div class="relation-entry-icon">
+            <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10" />
             <ellipse cx="12" cy="12" rx="4" ry="10" />
             <line x1="2" y1="12" x2="22" y2="12" />
             <line x1="12" y1="2" x2="12" y2="22" />
           </svg>
+          </div>
+          <div class="relation-entry-text">
+            <span class="relation-entry-title">世界观设置</span>
+            <span class="relation-entry-hint" :title="activeWorldName">{{ activeWorldName || '未设置世界观' }}</span>
+          </div>
+          <svg class="relation-entry-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
         </div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">世界观设置</span>
-          <span class="relation-entry-hint">{{ activeWorldName || '定义所有角色共处的世界背景' }}</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
-      </div>
-      <div class="relation-entry card" role="button" tabindex="0" @click="showPromptPresets = true" @keydown.enter.prevent="showPromptPresets = true" @keydown.space.prevent="showPromptPresets = true">
-        <div class="relation-entry-icon">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <div class="relation-entry" role="button" tabindex="0" @click="showPromptPresets = true" @keydown.enter.prevent="showPromptPresets = true" @keydown.space.prevent="showPromptPresets = true">
+          <div class="relation-entry-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 4h16M4 12h16M4 20h16" /><circle cx="8" cy="4" r="2" /><circle cx="16" cy="12" r="2" /><circle cx="10" cy="20" r="2" />
           </svg>
+          </div>
+          <div class="relation-entry-text">
+            <span class="relation-entry-title">SillyTavern 预设</span>
+          </div>
+
+          <svg class="relation-entry-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
         </div>
-        <div class="relation-entry-text">
-          <span class="relation-entry-title">SillyTavern 预设</span>
-          <span class="relation-entry-hint">导入、编辑与管理全局提示词预设</span>
-        </div>
-        <span class="relation-entry-arrow">›</span>
       </div>
-    </div>
 
     <!-- ═══════════════════════════════════════════
          角色卡片网格
          ═══════════════════════════════════════════ -->
     <div class="section-title">角色 ({{ folderScopedCharacters.length }})</div>
-    
+
     <!-- ═══════════════════════════════════════════
          文件夹筛选栏（单层分类：全部 / 未分类 / 各文件夹）
          ═══════════════════════════════════════════ -->
@@ -952,9 +890,6 @@ function onScroll(e) {
 // 用户信息
 // ═══════════════════════════════════════
 const showUserAvatarPicker = ref(false)
-const nicknameInput = ref(null)
-const appearanceInput = ref(null)
-const personaInput = ref(null)
 
 const userAvatarStyle = computed(() => {
   if (userAvatar.value) return { backgroundImage: `url(${userAvatar.value})`, backgroundSize: 'cover', backgroundPosition: 'center' }
@@ -965,87 +900,29 @@ async function onUserAvatarSave(base64) {
   await uploadUserAvatar(base64)
 }
 
-// ── 姓名 ──
-const editingNickname = ref(false)
+const showProfileEditor = ref(false)
+const profileSaving = ref(false)
 const userNicknameInput = ref('')
-
-function startEditNickname() {
-  userNicknameInput.value = userNickname.value
-  editingNickname.value = true
-  nextTick(() => nicknameInput.value?.focus())
-}
-
-async function saveNickname() {
-  editingNickname.value = false
-  const val = userNicknameInput.value.trim()
-  if (val !== (userNickname.value || '')) {
-    await saveUserConfig({ nickname: val })
-  }
-}
-
-// ── 性别 ──
-const editingGender = ref(false)
 const userGenderInput = ref('')
-const genderInput = ref(null)
-
-function startEditGender() {
-  userGenderInput.value = userGender.value
-  editingGender.value = true
-  nextTick(() => genderInput.value?.focus())
-}
-
-async function saveGender() {
-  editingGender.value = false
-  const val = userGenderInput.value.trim()
-  if (val !== (userGender.value || '')) {
-    await saveUserConfig({ gender: val })
-  }
-}
-
-// ── 外观 ──
-const editingAppearance = ref(false)
 const userAppearanceInput = ref('')
-
-function startEditAppearance() {
-  userAppearanceInput.value = userAppearance.value
-  editingAppearance.value = true
-  nextTick(() => appearanceInput.value?.focus())
-}
-
-async function saveAppearance() {
-  editingAppearance.value = false
-  const val = userAppearanceInput.value.trim()
-  if (val !== (userAppearance.value || '')) {
-    await saveUserConfig({ appearance: val })
-  }
-}
-
-function cancelEditAppearance() {
-  editingAppearance.value = false
-  userAppearanceInput.value = userAppearance.value
-}
-
-// ── 其他说明 ──
-const editingPersona = ref(false)
 const userPersonaInput = ref('')
-
-function startEditPersona() {
-  userPersonaInput.value = userPersona.value
-  editingPersona.value = true
-  nextTick(() => personaInput.value?.focus())
+function openProfileEditor() {
+  userNicknameInput.value = userNickname.value || ''
+  userGenderInput.value = userGender.value || ''
+  userAppearanceInput.value = userAppearance.value || ''
+  userPersonaInput.value = userPersona.value || ''
+  showProfileEditor.value = true
 }
-
-async function savePersona() {
-  editingPersona.value = false
-  const val = userPersonaInput.value.trim()
-  if (val !== (userPersona.value || '')) {
-    await saveUserConfig({ persona: val })
+async function saveProfile() {
+  profileSaving.value = true
+  try {
+    await saveUserConfig({ nickname: userNicknameInput.value.trim(), gender: userGenderInput.value.trim(), appearance: userAppearanceInput.value.trim(), persona: userPersonaInput.value.trim() })
+    showProfileEditor.value = false
+  } catch (error) {
+    toastFn?.(error.message || '保存资料失败，请重试', 'error')
+  } finally {
+    profileSaving.value = false
   }
-}
-
-function cancelEditPersona() {
-  editingPersona.value = false
-  userPersonaInput.value = userPersona.value
 }
 
 // ═══════════════════════════════════════
@@ -1749,190 +1626,107 @@ onMounted(async () => {
   padding: 20px 24px;
 }
 
-/* ── 用户行 ── */
-.user-row-wrapper {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 28px;
+/* A 稿：横向资料条、五入口托盘与配置条。 */
+.tavern-view { container-type: inline-size; }
+.page-header h2 { display: flex; align-items: center; gap: 14px; font-family: inherit; font-size: 24px; }
+.page-header h2::before { content: ''; width: 6px; height: 1em; border-radius: 6px; background: var(--tavern-coral); }
+.tavern-lobby { display: grid; gap: 18px; margin-bottom: 12px; }
+.lobby-identity, .tavern-life-group {
+  border-radius: 24px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 var(--glass-border), 0 4px 14px var(--tavern-paper-shadow);
 }
-.user-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 18px;
-  flex: 1;
-}
-.mailbox-card,
-.backpack-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px 18px;
-  cursor: pointer;
-  position: relative;
-  width: 150px;
-  flex-shrink: 0;
-}
-.mailbox-label {
-  font-size: 13px;
-  font-weight: 600;
-}
-.backpack-dot {
-  min-width: 10px;
-  width: 10px;
-  height: 10px;
-  padding: 0;
-  border-radius: 50%;
-}
-.mailbox-badge {
-  position: absolute;
-  top: -6px; right: -6px;
-  min-width: 18px; height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  line-height: 1;
-}
+.lobby-identity { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 18px; min-height: 128px; padding: 20px 24px; }
+.lobby-profile { display: grid; grid-template-columns: minmax(64px, auto) minmax(0, 1fr); align-items: center; gap: 18px; min-width: 0; min-height: 72px; cursor: pointer; border-radius: 12px; text-align: left; transition: color .3s; }
+.lobby-profile:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px; }
+.lobby-profile:hover .lobby-name { color: var(--accent); }
+.lobby-name { transition: color .3s; }
+.lobby-person { min-width: 0; display: flex; flex-direction: column; gap: 6px; max-width: 140px; }
+.user-avatar { width: 72px; height: 72px; border-radius: 50%; border: 3px solid var(--tavern-paper-center); box-shadow: 0 3px 6px var(--tavern-paper-shadow); display: grid; place-items: center; color: var(--tavern-ink); font-size: var(--fs-2xl); cursor: pointer; transition: transform .3s; }
+.user-avatar:hover { transform: translateY(-3px); }
+.user-avatar:focus-visible { outline: 2px solid var(--tavern-coral); outline-offset: 4px; }
+.lobby-name { margin: 0; font-family: inherit; font-weight: 700; font-size: 20px; line-height: 1.35; color: var(--tavern-ink); overflow-wrap: anywhere; }
+.lobby-gender { color: var(--tavern-muted); font-family: inherit; font-weight: 500; font-size: 13px; line-height: 1.4; }
+.lobby-appearance { margin: 0; min-width: 0; padding-left: 20px; border-left: 1px solid var(--tavern-button-line); font-family: inherit; font-weight: 500; font-size: 13px; line-height: 1.8; color: var(--tavern-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tavern-config-group { border: 1px solid color-mix(in srgb, var(--tavern-button-line) 60%, transparent); border-radius: 24px; background: linear-gradient(110deg, color-mix(in srgb, var(--tavern-paper-edge) 55%, transparent), color-mix(in srgb, var(--tavern-paper-center) 65%, transparent), color-mix(in srgb, var(--tavern-paper-edge) 55%, transparent)); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); box-shadow: 0 5px 14px var(--tavern-paper-shadow); padding: 8px 5%; }
+.tavern-config-group .relation-entry-text { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; }
+.tavern-config-group .relation-entry-title { white-space: nowrap; color: var(--tavern-ink); }
+.tavern-life-group .relation-entry-title, .mailbox-label { font-family: inherit; font-weight: 700; font-size: 13px; line-height: 1.4; color: var(--tavern-ink); }
+.tavern-life-group .relation-entry-icon svg { width: 24px; height: 24px; }
+.tavern-life-group .relation-entry-text { min-height: 40px; }
+.profile-edit-form { display: grid; gap: 16px; }
+.profile-edit-field { display: grid; gap: 8px; font-size: var(--fs-base); color: var(--text-secondary); }
+.mailbox-badge { position: absolute; top: 12px; right: 20%; min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-full); background: var(--accent); color: var(--bg-secondary); font-size: var(--fs-xs); display: grid; place-items: center; }
+.backpack-dot { min-width: 9px; width: 9px; height: 9px; padding: 0; }
 
-.user-avatar {
-  width: 56px; height: 56px;
-  border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 22px; font-weight: 700;
-  flex-shrink: 0;
-}
-.user-avatar.clickable { cursor: pointer; transition: opacity 0.15s; }
-.user-avatar.clickable:hover { opacity: 0.85; }
-
-.user-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-
-.user-field-row {
-  display: flex; align-items: baseline; gap: 10px;
-}
-.field-label {
-  font-size: 12px; font-weight: 600; color: var(--text-secondary);
-  min-width: 32px; padding-top: 4px; flex-shrink: 0;
-  user-select: none;
-}
-.field-value-wrap {
-  flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0;
-}
-.field-value {
-  font-size: 13px; color: var(--text-secondary);
-  cursor: pointer; padding: 2px 0; line-height: 1.5;
-  flex: 1; min-width: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.user-field-row:first-child .field-value {
-  font-size: 15px; font-weight: 600; color: var(--text-bright);
-}
-.field-value:hover { color: var(--accent); }
-
-.edit-pen {
-  background: none; border: none; color: var(--text-secondary);
-  cursor: pointer; font-size: 14px; padding: 2px 4px;
-  opacity: 0; transition: opacity 0.15s;
-  flex-shrink: 0;
-  user-select: none;
-}
-.user-field-row:hover .edit-pen { opacity: 1; }
-.edit-pen:hover { color: var(--accent); }
-
-/* ── 文本输入框 ── */
-.field-textarea {
-  width: 100%; resize: none;
-  font-size: 13px; line-height: 1.5;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px; padding: 6px 10px;
-  color: var(--text-bright);
-}
-.field-textarea:focus { outline: none; border-color: var(--accent); }
-.field-input {
-  font-size: 13px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px; padding: 4px 10px;
-  color: var(--text-bright); width: 120px;
-}
-.field-input:focus { outline: none; border-color: var(--accent); }
-.nickname-input {
-  font-size: 15px; font-weight: 600;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px; padding: 4px 10px;
-  color: var(--text-bright); width: 160px;
-}
-.nickname-input:focus { outline: none; border-color: var(--accent); }
-
-/* ── 关系图入口卡片 ── */
-/* 报纸 + 关系图同行两列；列间距沿用卡片纵向 20px 节奏 */
+/* ── 酒馆功能分组：生活三列 + 配置双行 ── */
 .relation-entry-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 20px;
-  margin-bottom: 20px;
-}
-.relation-entry-row .relation-entry {
   margin-bottom: 0;
 }
-
+.tavern-feature-group {
+  min-width: 0;
+  padding: 4px;
+}
+.tavern-life-group { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); min-height: 140px; padding: 12px; }
+.tavern-life-group .mailbox-card .relation-entry-icon { background: color-mix(in srgb, var(--tavern-coral) 12%, var(--tavern-surface)); border-radius: 14px; width: 44px; height: 44px; }
+.tavern-config-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 16px; }
 .relation-entry {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
-  margin-bottom: 20px;
-  border-radius: 16px;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
   cursor: pointer;
   text-align: left;
-  min-width: 0;
-  transition: all 0.2s;
+  transition: background-color .3s, color .3s;
 }
-.relation-entry:hover {
-  background: rgba(255, 255, 255, 0.2);
-  border-color: rgba(var(--accent-rgb), 0.2);
-  box-shadow: 0 2px 16px rgba(var(--accent-rgb), 0.08);
-}
-
+.relation-entry::after { content: ''; position: absolute; background: var(--tavern-button-line); opacity: .65; pointer-events: none; }
+.tavern-life-group .relation-entry:not(:last-child)::after { width: 1px; right: 0; top: 18px; bottom: 18px; }
+.tavern-config-group .relation-entry:not(:last-child)::after { width: 1px; right: 0; top: 12px; bottom: 12px; }
+.tavern-life-group .relation-entry { flex-direction: column; justify-content: center; gap: 6px; padding: 8px; text-align: center; }
 .relation-entry-icon {
-  width: 44px; height: 44px;
-  border-radius: 12px;
-  background: rgba(var(--accent-rgb), 0.1);
-  display: flex; align-items: center; justify-content: center;
-  color: var(--accent);
+  position: relative;
+  isolation: isolate;
+  width: 44px; height: 44px; border-radius: var(--radius-md);
+  background: transparent;
+  display: grid; place-items: center;
+  color: var(--tavern-coral);
   flex-shrink: 0;
+  transition: color .3s;
 }
-
-.relation-entry-text {
-  flex: 1;
-  display: flex; flex-direction: column;
-  gap: 2px;
+.relation-entry-icon::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  z-index: -1;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(var(--accent-rgb), .2), rgba(var(--accent-rgb), .08) 48%, rgba(var(--accent-rgb), 0) 74%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s ease;
 }
-.relation-entry-title {
-  font-size: 15px; font-weight: 600; color: var(--text-bright);
-}
-.relation-entry-hint {
-  font-size: 12px; color: var(--text-secondary);
-}
-
-.relation-entry-arrow {
-  font-size: 22px; color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-/* ── 世界观入口卡片 ── */
-.world-icon {
-  background: rgba(var(--accent-rgb), 0.08);
-  color: #c06a52;
+.tavern-config-group .relation-entry-icon { width: 24px; height: 24px; background: transparent; }
+.relation-entry-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tavern-life-group .relation-entry-text { min-height: 40px; align-items: center; }
+.tavern-config-group .relation-entry { justify-content: center; text-align: center; }
+.tavern-config-group .relation-entry-text { flex: 0 1 auto; justify-content: center; align-items: center; }
+.relation-entry-title { font-size: 13px; line-height: 1.4; font-weight: 600; overflow-wrap: anywhere; }
+.relation-entry-hint { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); line-height: 1.4; color: var(--text-secondary); }
+.relation-entry-arrow { flex-shrink: 0; color: var(--text-secondary); }
+.relation-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: rgba(var(--accent-rgb), .08); }
+.relation-entry:active { background: rgba(var(--accent-rgb), .13); }
+@media (hover: hover) {
+  .relation-entry:hover { background: rgba(var(--accent-rgb), .06); }
+  .relation-entry:hover .relation-entry-icon { color: var(--accent-hover); }
+  .relation-entry:hover .relation-entry-icon::before { opacity: 1; }
 }
 
 /* ── 今日报纸入口卡片 ── */
@@ -3052,14 +2846,25 @@ onMounted(async () => {
     grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
   }
-  /* 窄屏放不下两列入口：回退单行堆叠 */
-  .relation-entry-row {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-  .relation-entry-row .relation-entry {
-    margin-bottom: 12px;
-  }
+  .relation-entry-row { grid-template-columns: 1fr; gap: 12px; }
+  .tavern-life-group .relation-entry { padding: 14px 4px; }
+  .tavern-life-group .relation-entry-title { font-size: 13px; }
+  .tavern-life-group .relation-entry-text { min-height: 30px; }
+  .tavern-lobby { gap: 12px; }
+  .lobby-identity { grid-template-columns: 52px minmax(0, 1fr); gap: 12px; min-height: 0; padding: 16px; }
+  .user-avatar { width: 52px; height: 52px; }
+  .lobby-person { max-width: none; }
+  .lobby-profile { grid-template-columns: 1fr; gap: 10px; }
+  .lobby-appearance { border-left: 0; border-top: 1px solid var(--tavern-button-line); padding: 10px 0 0; }
+  .tavern-config-group .relation-entry-text { flex-direction: column; gap: 3px; }
+
+  .tavern-life-group { grid-template-columns: repeat(6, minmax(0, 1fr)); padding: 8px; }
+  .tavern-life-group .relation-entry { grid-column: span 2; }
+  .tavern-life-group .relation-entry:nth-child(-n+2) { grid-column: span 3; }
+  .tavern-life-group .relation-entry::after { display: none; }
+  .tavern-config-group { grid-template-columns: 1fr; }
+  .tavern-config-group .relation-entry:not(:last-child)::after { width: auto; height: 1px; top: auto; left: 12px; right: 12px; bottom: 0; }
+  .tavern-config-group .relation-entry { padding: 10px 12px; }
   .char-card { padding: 14px 8px 12px; }
   .char-card-avatar { width: 52px; height: 52px; font-size: 20px; }
   .char-card-name { font-size: 13px; }

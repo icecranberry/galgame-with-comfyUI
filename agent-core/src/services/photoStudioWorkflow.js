@@ -1,4 +1,4 @@
-export const DEFAULT_PHOTO_STUDIO_DIMENSIONS = Object.freeze({ width: 1200, height: 1600 });
+export const DEFAULT_PHOTO_STUDIO_DIMENSIONS = Object.freeze({ width: 1152, height: 2048 });
 
 export const PHOTO_STUDIO_DIMENSION_LIMITS = Object.freeze({ min: 512, max: 2048, step: 8 });
 
@@ -6,7 +6,7 @@ export function isPairPose(pose) {
   return /双人|pair/i.test(`${pose?.system || ''} ${pose?.id || ''}`);
 }
 
-export function buildPhotoStudioPrompt({ pose, characters, instruction = '' }) {
+export function buildPhotoStudioPrompt({ pose, characters, instruction = '', backgroundPrompt = '' }) {
   const rawPosePrompt = String(pose?.posePrompt || '').trim();
   if (!rawPosePrompt) throw new Error('该姿势的专属提示词尚未校准，请先选择已有完整描述的姿势');
   if (!Array.isArray(characters) || characters.length < 1 || characters.length > 2) {
@@ -21,18 +21,53 @@ export function buildPhotoStudioPrompt({ pose, characters, instruction = '' }) {
     return result;
   };
   const posePrompt = resolveCharacterNames(rawPosePrompt);
-  const group = text => `(${text})`;
   const rolePrompts = characters.map((character, index) => {
     const appearance = String(character.appearance || '').trim();
     if (!appearance) throw new Error('入镜角色缺少外观正文');
     const name = characterNames[index];
-    const description = resolveCharacterNames(appearance);
-    return group(description.startsWith(name) ? description : `${name}, ${description}`);
+    let description = resolveCharacterNames(appearance);
+    // Only normalize a known identity tag, never arbitrary weighted/tag parentheses.
+    const identity = character.identityTag;
+    if (identity) {
+      const plain = identity.replace(/\\([()])/g, '$1');
+      const escaped = plain.replace(/[()]/g, bracket => `\\${bracket}`);
+      description = description.replaceAll(escaped, plain);
+      if (description.includes(plain)) description = description.replaceAll(plain, escaped);
+      else description = `${escaped}, ${description}`;
+    }
+    return `Character ${index + 1} — Appearance: ${description.startsWith(name) ? description : `${name}, ${description}`}`;
   });
-  const parts = [group(posePrompt), ...rolePrompts];
+  const parts = [`Pose: ${posePrompt}`, ...rolePrompts];
+  if (backgroundPrompt.trim()) parts.push(`Background: ${backgroundPrompt.trim()}`);
   const extra = String(instruction || '').trim();
-  if (extra) parts.push(group(extra));
+  if (extra) parts.push(`Direction: ${extra}`);
   return parts.join('\n\n');
+}
+
+function sectionMatches(prompt) {
+  return [...prompt.matchAll(/^(Pose|Character [12] — Appearance|Background|Direction):/gm)];
+}
+
+export function photoStudioSectionHeadings(prompt) {
+  return sectionMatches(prompt).map(match => match[1]);
+}
+
+// Attach untouched clothing tags after the corresponding appearance, including
+// after AI polishing. This keeps actors bound to their own clothes and the
+// background at the end, without sending tags through the language model.
+export function appendPhotoStudioOutfits(prompt, outfitBlocks = []) {
+  const sections = sectionMatches(prompt);
+  const insertions = outfitBlocks.flatMap((block, index) => {
+    if (!block) return [];
+    const section = sections.findIndex(match => match[1] === `Character ${index + 1} — Appearance`);
+    if (section < 0) throw new Error('拍摄提示词缺少人物外观分段，无法追加服装');
+    return [{ offset: sections[section + 1]?.index ?? prompt.length, block }];
+  }).sort((a, b) => b.offset - a.offset);
+  let result = prompt;
+  for (const { offset, block } of insertions) {
+    result = `${result.slice(0, offset).trimEnd()}\n\n${block}\n\n${result.slice(offset).trimStart()}`.trimEnd();
+  }
+  return result;
 }
 
 export function photoStudioDimensions(width = DEFAULT_PHOTO_STUDIO_DIMENSIONS.width, height = DEFAULT_PHOTO_STUDIO_DIMENSIONS.height) {

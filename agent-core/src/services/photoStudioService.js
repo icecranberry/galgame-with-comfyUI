@@ -4,11 +4,15 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { buildCharacterImageAppearance, extractCharacterEnglishName, replaceAppearanceSection } from './characterPersona.js';
+import { buildCharacterImageAppearance, buildCharacterPersona, extractCharacterEnglishName, extractCharacterIdentityTag, replaceAppearanceSection } from './characterPersona.js';
+import { resolveClothingTags } from './clothingLibrary.js';
+import { resolveStudioBackground } from './photoStudioBackgrounds.js';
+import { collectCharacterLoras } from './groupImageLoraMatcher.js';
+import { polishStudioPrompt, generateStudioClothing } from './photoStudioPolish.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { getImageDir, buildImageUrl } from './imagePaths.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, resolveCustomWorkflowPath } from './workflowTemplates.js';
-import { buildPhotoStudioPrompt, DEFAULT_PHOTO_STUDIO_DIMENSIONS, isPairPose, photoStudioDimensions } from './photoStudioWorkflow.js';
+import { buildPhotoStudioPrompt, appendPhotoStudioOutfits, DEFAULT_PHOTO_STUDIO_DIMENSIONS, isPairPose, photoStudioDimensions } from './photoStudioWorkflow.js';
 
 export const POSE_GALLERY_DIR = fileURLToPath(new URL('../../assets/pose-gallery/', import.meta.url));
 const WORKFLOW_DIR = fileURLToPath(new URL('../../../workflow/', import.meta.url));
@@ -69,6 +73,8 @@ export function createPhotoStudioService({
   persona = buildCharacterImageAppearance,
   render = generateImage,
   save = savePhoto,
+  polish = polishStudioPrompt,
+  clothing = generateStudioClothing,
   random = values => values[Math.floor(Math.random() * values.length)],
 } = {}) {
   const db = () => database();
@@ -83,7 +89,12 @@ export function createPhotoStudioService({
     }));
   }
 
-  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', poseId, instruction = '', width, height }) {
+  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false }) {
+    const backgroundPrompt = resolveStudioBackground({ backgroundId, customBackgroundPrompt });
+    if (typeof polishPrompt !== 'boolean') throw Object.assign(new Error('AI 润色开关无效'), { status: 400 });
+    for (const appearance of [appearanceOverride, secondAppearanceOverride]) {
+      if (typeof appearance !== 'string' || appearance.length > 30000) throw Object.assign(new Error('服装提示词最多 30000 字'), { status: 400 });
+    }
     if (typeof instruction !== 'string' || instruction.length > 1000) throw Object.assign(new Error('补充要求最多 1000 字'), { status: 400 });
     let dimensions;
     try { dimensions = photoStudioDimensions(width ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.width, height ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.height); }
@@ -108,12 +119,23 @@ export function createPhotoStudioService({
       }
     }
 
+    const outfitInputs = [[clothingTags, customClothingPrompt], ...(second ? [[secondCharacterId ? secondClothingTags : [], secondCharacterId ? secondCustomClothingPrompt : '']] : [])];
+    const outfits = outfitInputs.map(([tags, custom]) => {
+      if (!Array.isArray(tags) || typeof custom !== 'string' || custom.length > 4000 || /```|\p{Script=Han}/u.test(custom)) throw Object.assign(new Error('本次服装参数无效，请重新选择或翻译'), { status: 400 });
+      let entries;
+      try { entries = tags.length ? resolveClothingTags(tags) : []; }
+      catch (error) { throw Object.assign(error, { status: 400 }); }
+      return { tags: entries.map(entry => entry.tag), custom: custom.trim() };
+    });
     const scenes = [outfitScene, secondCharacterId ? secondOutfitScene : 'work'];
+    const overrides = [appearanceOverride, secondCharacterId ? secondAppearanceOverride : ''];
     const characters = [first, ...(second ? [second] : [])].map((character, index) => {
       const scene = scenes[index];
       if (!outfitScenes.includes(scene)) throw Object.assign(new Error('请选择有效的服装：默认、私服、居家或睡衣'), { status: 400 });
       let selected = character;
-      if (scene !== 'work') {
+      if (overrides[index].trim()) {
+        selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, overrides[index].trim()) };
+      } else if (scene !== 'work') {
         const outfit = db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
         if (!outfit?.description?.trim()) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
         // Scene descriptions contain the complete appearance. Replace, rather than layer over, the default clothes.
@@ -122,10 +144,21 @@ export function createPhotoStudioService({
       const name = extractCharacterEnglishName(selected) || extractCharacterEnglishName(character) || `the ${index === 0 ? 'first' : 'second'} character`;
       const appearance = persona(selected);
       if (!appearance) throw Object.assign(new Error(`${character.display_name || character.name}缺少可用的外观正文，请先完善人物详情卡`), { status: 400 });
-      return { name, appearance, aliases: [character.display_name, character.name] };
+      return { name, appearance, identityTag: extractCharacterIdentityTag(selected) || extractCharacterIdentityTag(character), aliases: [character.display_name, character.name] };
     });
-    const prompt = buildPhotoStudioPrompt({ pose, characters, instruction: instruction.trim() });
-    return { first, second, pose, prompt, dimensions };
+    const basePrompt = buildPhotoStudioPrompt({ pose, characters, instruction: instruction.trim(), backgroundPrompt });
+    const outfitBlocks = characters.map((character, index) => {
+      const { tags, custom } = outfits[index];
+      if (!tags.length && !custom) return '';
+      return [`Character ${index + 1} — Outfit: Replace ${character.name}'s original clothing with the following outfit; preserve their physical appearance.`,
+        ...(tags.length ? [`Clothing tags: (${tags.join(', ')})`] : []),
+        ...(custom ? [`Custom clothing: (${custom})`] : []),
+      ].join('\n');
+    });
+    const prompt = appendPhotoStudioOutfits(basePrompt, outfitBlocks);
+    const personas = polishPrompt ? [first, ...(second ? [second] : [])].map(character => buildCharacterPersona(character, { variant: 'full', outfits: null })) : [];
+    const loras = collectCharacterLoras([first, ...(second ? [second] : [])]);
+    return { first, second, pose, prompt, dimensions, personas, loras, basePrompt, outfitBlocks };
   }
 
   async function preview(input) {
@@ -138,7 +171,7 @@ export function createPhotoStudioService({
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
     const previous = job(id);
     if (previous) return previous;
-    const { first, second, pose, prompt, dimensions } = await prepare(input);
+    const { first, second, pose, prompt, dimensions, personas, loras, basePrompt, outfitBlocks } = await prepare(input);
     const supported = await capability();
     if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
     const firstName = first.display_name || first.name;
@@ -154,17 +187,26 @@ export function createPhotoStudioService({
         .run(id, first.id, second?.id ?? null, firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height);
       return true;
     })();
-    if (created) void execute(job(id), pose);
+    if (created) void execute(job(id), { polishPrompt: input.polishPrompt === true, personas, loras, basePrompt, outfitBlocks });
     return job(id);
   }
 
-  async function execute(snapshot, pose) {
+  async function execute(snapshot, { polishPrompt, personas, loras, basePrompt, outfitBlocks }) {
     const database = db();
     try {
+      if (polishPrompt) {
+        database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing' WHERE id = ?").run(snapshot.id);
+        snapshot.prompt = appendPhotoStudioOutfits(await polish({ prompt: basePrompt, personas }), outfitBlocks);
+        database.prepare('UPDATE photo_studio_jobs SET prompt = ? WHERE id = ?').run(snapshot.prompt, snapshot.id);
+        database.prepare('UPDATE image_tasks SET prompt_refined = ? WHERE id = ?').run(snapshot.prompt, snapshot.image_task_id);
+      }
       database.prepare("UPDATE photo_studio_jobs SET stage = 'queued' WHERE id = ?").run(snapshot.id);
       const result = await render(snapshot.prompt, {
         promptScene: 'standalone',
         alreadyPrepared: true,
+        // Keep LoRA triggers out of AI rewriting; the shared workflow adds them
+        // to its dedicated trigger node and loads the models with their saved weights.
+        loras,
         width: snapshot.width,
         height: snapshot.height,
         onProgress: event => {
@@ -191,7 +233,13 @@ export function createPhotoStudioService({
     }
   }
 
-  return { submit, preview, job, list, listCharacters };
+  async function clothingDraft({ brief = '' }) {
+    if (typeof brief !== 'string' || brief.length > 2000) throw Object.assign(new Error('自定义服装最多 2000 字'), { status: 400 });
+    if (!brief.trim()) return { prompt: '' };
+    return { prompt: await clothing({ brief: brief.trim() }) };
+  }
+
+  return { submit, preview, clothingDraft, job, list, listCharacters };
 }
 
 async function savePhoto(dataUri, id) {

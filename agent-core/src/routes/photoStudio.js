@@ -1,5 +1,6 @@
 import express from 'express';
 import { createPhotoStudioService, getRecognizedPoseCatalog, photoStudioCapability, POSE_GALLERY_DIR } from '../services/photoStudioService.js';
+import { getStudioBackgrounds, generateStudioBackground } from '../services/photoStudioBackgrounds.js';
 
 const router = express.Router();
 const studio = createPhotoStudioService();
@@ -7,10 +8,19 @@ router.use('/assets', express.static(POSE_GALLERY_DIR, { maxAge: '7d', index: fa
 router.get('/catalog', async (_req, res) => res.json({ poses: await getRecognizedPoseCatalog() }));
 router.get('/capability', async (_req, res) => res.json(await photoStudioCapability()));
 router.get('/characters', (_req, res) => res.json({ characters: studio.listCharacters() }));
+router.get('/backgrounds', (_req, res) => res.json(getStudioBackgrounds()));
+router.post('/background-draft', async (req, res) => {
+  try { res.json(await generateStudioBackground(req.body?.description)); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
+});
 router.get('/jobs', (_req, res) => res.json({ jobs: studio.list() }));
 router.post('/prompt-preview', async (req, res) => {
   try { res.json(await studio.preview(req.body || {})); }
   catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
+router.post('/clothing-draft', async (req, res) => {
+  try { res.json(await studio.clothingDraft(req.body || {})); }
+  catch (error) { res.status(error.status || 502).json({ error: error.message }); }
 });
 router.get('/jobs/:id', (req, res) => {
   const job = studio.job(req.params.id);

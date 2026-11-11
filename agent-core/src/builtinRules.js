@@ -130,11 +130,13 @@ Hard Rules:
  * 立绘的构图、背景与服装要求由 buildStandingMessages 负责；这里不复用
  * IMAGE_PROMPT_RULE，避免其场景、环境、道具与换装要求把人物缩小成场景配角。
  */
+export const CHARACTER_IMAGE_IDENTITY_RULE = `**MUST:** When an existing IP character appears, begin with the character identity tag 'Name \\(Series\\)', preserving the escaped series parentheses. Follow it with natural-language sentences describing the character's defining appearance, then their pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) has long brown twin tails and bright red eyes. She wears a dark brown coat and a black hat with a plum blossom ornament. She stands at the center with a mischievous grin and one hand resting on her hip.' Prioritize accurate hair, eyes, clothing, accessories, and distinctive features from the character information. Do not wrap appearance descriptions in parentheses or invent details to meet a fixed feature count.`;
+
 export const STANDING_IMAGE_PROMPT_RULE = {
   rule_key: 'standing_image_prompt',
   rule_content: `Describe the requested character illustration in natural English as one continuous paragraph.
 
-**MUST:** When an existing IP character appears, begin with the character identity tag 'Name \\(Series\\)', preserving the escaped series parentheses. Follow it with natural-language sentences describing the character's defining appearance, then their pose, expression, action, and spatial position in the frame. Example: 'hu tao \\(Genshin Impact\\) has long brown twin tails and bright red eyes. She wears a dark brown coat and a black hat with a plum blossom ornament. She stands at the center with a mischievous grin and one hand resting on her hip.' Prioritize accurate hair, eyes, clothing, accessories, and distinctive features from the character information. Do not wrap appearance descriptions in parentheses or invent details to meet a fixed feature count.
+${CHARACTER_IMAGE_IDENTITY_RULE}
 
 Hard Rules:
 - ALL text in English. No Chinese characters anywhere.

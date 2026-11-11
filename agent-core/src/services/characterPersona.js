@@ -170,14 +170,14 @@ export function buildCharacterImageAppearance(character) {
   // Original characters sometimes use "中文名 (English Name) has ..." instead of a series tag.
   text = text.replace(/[\p{Script=Han}·]+\s*\(([A-Za-z][A-Za-z .'\-]{0,60})\)\s+(?=has\b|wearing\b)/u, '$1 ');
   // Discard a legacy tag prefix when a complete English identity sentence is also present.
-  const identity = /[A-Za-z][A-Za-z0-9 .'\-:]{0,60}?\s*\([^()\r\n]{1,80}\)\s+(?:has|wearing)\b/.exec(text);
+  const identity = /[A-Za-z][A-Za-z0-9 .'\-:]{0,60}?\s*\\?\([^()\r\n]{1,80}\\?\)\s+(?:has|wearing)\b/.exec(text);
   if (identity) text = text.slice(identity.index);
   return text.replace(/\s+/g, ' ').trim();
 }
 
 export function extractCharacterEnglishName(character) {
   const appearance = buildCharacterImageAppearance(character);
-  const tagged = /^([A-Za-z][A-Za-z0-9 .'\-:]{0,60}?)\s*\([^()]+\)\s+(?:has|wearing)\b/.exec(appearance);
+  const tagged = /^([A-Za-z][A-Za-z0-9 .'\-:]{0,60}?)\s*\\?\([^()]+\\?\)\s+(?:has|wearing)\b/.exec(appearance);
   const plain = /^([A-Za-z][A-Za-z0-9 .'\-:]{0,60}?)\s+(?:has|wearing)\b/.exec(appearance);
   const name = tagged?.[1] || plain?.[1];
   if (name) return name.trim();
@@ -307,7 +307,7 @@ export function buildCharacterPersona(character, opts = {}) {
 
 // 角色身份标签：外观段通常以 "Name (Series) has ..." 开头；限时服饰会把它包在
 // 「1. 日常装：...」之后，因此在外观段整段里搜，而不是只认第一行。
-const CHARACTER_IDENTITY_TAG_RE = /([A-Za-z][A-Za-z0-9 .'\-:]{1,50}?)\s*\\?\(([^()]{2,60})\\?\)\s+has\b/;
+const CHARACTER_IDENTITY_TAG_RE = /([A-Za-z][A-Za-z0-9 .'\-:]{1,50}?)\s*\\?\(([^()\\]{2,60})\\?\)\s+(?:has|wearing)\b/;
 
 /**
  * 提取角色在生图 prompt 中应使用的 'Name (Series)' 身份标签。

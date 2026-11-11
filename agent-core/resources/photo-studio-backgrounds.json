@@ -1,0 +1,2311 @@
+{
+  "version": 3,
+  "categories": [
+    {
+      "value": "几何抽象",
+      "label": "几何抽象"
+    },
+    {
+      "value": "平面拼贴",
+      "label": "平面拼贴"
+    },
+    {
+      "value": "自然奇景",
+      "label": "自然奇景"
+    },
+    {
+      "value": "都市街区",
+      "label": "都市街区"
+    },
+    {
+      "value": "人文纪实",
+      "label": "人文纪实"
+    },
+    {
+      "value": "室内空间",
+      "label": "室内空间"
+    },
+    {
+      "value": "二次元舞台",
+      "label": "二次元舞台"
+    },
+    {
+      "value": "异世界秘境",
+      "label": "异世界秘境"
+    },
+    {
+      "value": "科幻空间",
+      "label": "科幻空间"
+    },
+    {
+      "value": "戏剧梦境",
+      "label": "戏剧梦境"
+    },
+    {
+      "value": "卧室",
+      "label": "卧室"
+    },
+    {
+      "value": "家庭",
+      "label": "家庭"
+    },
+    {
+      "value": "学校",
+      "label": "学校"
+    },
+    {
+      "value": "办公室",
+      "label": "办公室"
+    },
+    {
+      "value": "简单纹理",
+      "label": "简单纹理"
+    },
+    {
+      "value": "纯色",
+      "label": "纯色"
+    }
+  ],
+  "entries": [
+    {
+      "id": "bg-001",
+      "category": "几何抽象",
+      "label": "包豪斯三原色",
+      "description": "米白底上的红圆、蓝矩形与黄三角，平面硬边构成。",
+      "prompt": "A flat Bauhaus-inspired backdrop on warm ivory, one large red circle, offset cobalt rectangles and a yellow triangle, precise hard edges, asymmetric balance and generous central negative space."
+    },
+    {
+      "id": "bg-002",
+      "category": "几何抽象",
+      "label": "黑白棋盘隧道",
+      "description": "黑白方格向消失点延伸，形成强烈透视与视觉错觉。",
+      "prompt": "A black-and-white checkerboard tunnel with floor and walls converging toward a distant vanishing point, exaggerated perspective, crisp alternating squares and a clear open foreground."
+    },
+    {
+      "id": "bg-003",
+      "category": "几何抽象",
+      "label": "孟菲斯糖果图形",
+      "description": "粉蓝底上散布波浪、斑点与斜线，轻快而跳跃。",
+      "prompt": "A playful Memphis graphic backdrop with pastel pink and cyan fields, scattered black squiggles, dotted disks and diagonal stripes, deliberately offbeat spacing and flat screen-printed shapes."
+    },
+    {
+      "id": "bg-004",
+      "category": "几何抽象",
+      "label": "镀铬液态圆环",
+      "description": "银色流体环悬浮于深灰空间，冷光在镜面上流动。",
+      "prompt": "Large liquid-chrome torus sculptures suspended in a charcoal void, fluid reflective surfaces, sharp white studio highlights and subtle blue reflections, with broad empty space between the rings."
+    },
+    {
+      "id": "bg-005",
+      "category": "几何抽象",
+      "label": "纸雕同心拱门",
+      "description": "层层奶油色纸拱向内递进，切边投下柔和阴影。",
+      "prompt": "Nested arches cut from thick cream and terracotta paper, layered into a shallow sculptural backdrop, visible paper edges, soft directional shadows and a broad uncluttered central opening."
+    },
+    {
+      "id": "bg-006",
+      "category": "几何抽象",
+      "label": "霓虹线框矩阵",
+      "description": "紫黑空间里只有青色线框，呈现复古电脑网格。",
+      "prompt": "A retro computer wireframe environment, luminous cyan grid lines across a violet-black floor and distant cubic outlines, stark vector geometry and a low glowing horizon."
+    },
+    {
+      "id": "bg-007",
+      "category": "几何抽象",
+      "label": "马卡龙积木",
+      "description": "薄荷绿圆柱、桃粉方块与淡紫球体组成柔软积木场。",
+      "prompt": "Oversized matte building blocks in mint, peach and lavender, simple cylinders, cubes and spheres arranged at different depths, rounded corners and diffuse shadowless lighting over a pale floor."
+    },
+    {
+      "id": "bg-008",
+      "category": "几何抽象",
+      "label": "至上主义斜构图",
+      "description": "灰白底上的黑方块与朱红斜条，极简而有张力。",
+      "prompt": "A restrained suprematist backdrop of floating black squares and one vermilion diagonal bar on off-white, sharp edges, large unprinted areas and a deliberately unbalanced abstract composition."
+    },
+    {
+      "id": "bg-009",
+      "category": "几何抽象",
+      "label": "欧普波纹墙",
+      "description": "密集黑白曲线起伏收束，形成眩目的波纹错视。",
+      "prompt": "An optical-art backdrop made of tightly spaced black and white curved bands, flowing around broad circular centers, a flat graphic surface with rhythmic waves and high contrast."
+    },
+    {
+      "id": "bg-010",
+      "category": "几何抽象",
+      "label": "彩色玻璃折面",
+      "description": "透明彩色棱面切割光线，地面映出斑斓几何光块。",
+      "prompt": "A prismatic installation of translucent colored glass planes, angular overlapping facets, refracted rainbow patches across a neutral floor and a spacious central gap framed by luminous edges."
+    },
+    {
+      "id": "bg-101",
+      "category": "几何抽象",
+      "label": "折线山形色块",
+      "description": "赭石与藏蓝折线像山形叠起，完全平面的硬边切分。",
+      "prompt": "A flat geometric backdrop of ochre and navy zigzag polygons arranged like layered mountains, crisp hard edges, broad uninterrupted shapes and an open central color field."
+    },
+    {
+      "id": "bg-102",
+      "category": "几何抽象",
+      "label": "悬浮石膏球阵",
+      "description": "大小石膏球悬在米灰空间，体积光影清晰。",
+      "prompt": "A sculptural arrangement of floating white plaster spheres at different heights against warm gray, directional light revealing subtle porous surfaces and clean dimensional shadows."
+    },
+    {
+      "id": "bg-103",
+      "category": "几何抽象",
+      "label": "透明亚克力叠方",
+      "description": "荧光色透明方板重叠，交叠处形成新色。",
+      "prompt": "Overlapping translucent acrylic squares in fluorescent orange, lime and cyan, visible sheet thickness, colored overlap zones and sharp edge reflections across a pale neutral background."
+    },
+    {
+      "id": "bg-104",
+      "category": "几何抽象",
+      "label": "弧形阶梯迷宫",
+      "description": "层层圆弧阶梯交错，像无法走通的建筑模型。",
+      "prompt": "An abstract architectural maze of cream semicircular stairways and curved platforms, impossible junctions, broad empty landings and strong side lighting emphasizing repeated rounded geometry."
+    },
+    {
+      "id": "bg-105",
+      "category": "几何抽象",
+      "label": "单点透视红廊",
+      "description": "纯红矩形门框向深处收束，黑色间隙切开画面。",
+      "prompt": "A sequence of vivid red rectangular frames narrowing toward a single vanishing point, deep black gaps between frames and an empty matching floor with precise axial symmetry."
+    },
+    {
+      "id": "bg-106",
+      "category": "几何抽象",
+      "label": "极简半圆日轮",
+      "description": "一个巨大半圆压在地平线上，米白与炭黑强烈对照。",
+      "prompt": "A minimalist flat backdrop with one immense charcoal semicircle resting on a straight ivory horizon, subtle paper texture, carefully balanced empty space and uncompromising two-tone geometry."
+    },
+    {
+      "id": "bg-107",
+      "category": "几何抽象",
+      "label": "蜂窝六角格",
+      "description": "蜂窝单元深浅交替，暖金色面板带出结构起伏。",
+      "prompt": "A honeycomb wall of hexagonal panels at alternating depths, muted gold and cream faces, narrow dark seams and raking side light creating a rhythmic geometric relief."
+    },
+    {
+      "id": "bg-108",
+      "category": "几何抽象",
+      "label": "拉伸椭圆轨道",
+      "description": "细长椭圆交错旋转，银灰底上呈现精密轨道感。",
+      "prompt": "Thin elongated elliptical outlines crossing at different angles over brushed silver gray, sparse orbital geometry, a few solid black disks and broad central negative space."
+    },
+    {
+      "id": "bg-109",
+      "category": "几何抽象",
+      "label": "螺旋彩带雕塑",
+      "description": "红黄蓝厚带旋成巨大螺旋，清晰区分正反表面。",
+      "prompt": "A monumental spiral sculpture made from thick red, yellow and blue ribbons, alternating front and reverse surfaces, a pale studio floor and crisp sculptural lighting."
+    },
+    {
+      "id": "bg-110",
+      "category": "几何抽象",
+      "label": "棱锥投影阵列",
+      "description": "白色棱锥整齐排列，斜光把影子拉成长三角。",
+      "prompt": "A regular field of small white pyramids against a white wall and floor, hard diagonal lighting producing long triangular shadows and an orderly repeating geometric rhythm."
+    },
+    {
+      "id": "bg-011",
+      "category": "平面拼贴",
+      "label": "撕纸朋克海报",
+      "description": "黑纸、荧光橙纸与订书钉痕拼成粗粝海报底。",
+      "prompt": "A punk poster collage backdrop of torn black paper, fluorescent orange scraps, photocopied grain and staple marks, jagged overlapping edges, with no lettering or readable text."
+    },
+    {
+      "id": "bg-012",
+      "category": "平面拼贴",
+      "label": "漫画爆裂格",
+      "description": "放射速度线与空白爆炸框，像漫画高潮页的背景。",
+      "prompt": "A manga-panel backdrop with bold radial speed lines, black ink bursts, white gutters and empty jagged impact shapes, a clear focal opening and no speech text."
+    },
+    {
+      "id": "bg-013",
+      "category": "平面拼贴",
+      "label": "复古印刷套色",
+      "description": "青红套印略微错位，粗颗粒纸上保留滚筒印刷痕。",
+      "prompt": "A vintage risograph-style background of overlapping cyan and brick-red shapes on rough cream paper, visibly misregistered edges, uneven ink density and bold printed grain without text."
+    },
+    {
+      "id": "bg-014",
+      "category": "平面拼贴",
+      "label": "水墨留白",
+      "description": "墨迹沿边缘晕开，中央留下大片宣纸空白。",
+      "prompt": "A sparse ink-wash background on textured rice paper, dry-brush black strokes and diluted gray blooms concentrated near the margins, broad untouched central space and subtle paper fibers."
+    },
+    {
+      "id": "bg-015",
+      "category": "平面拼贴",
+      "label": "像素游戏界面",
+      "description": "像素星星、生命格与方块边框构成街机式平面底图。",
+      "prompt": "A pixel-art arcade backdrop with stepped borders, tiny star sprites, blocky decorative meters and a dark navy field, limited bright colors, crisp pixel edges and no text."
+    },
+    {
+      "id": "bg-016",
+      "category": "平面拼贴",
+      "label": "蓝晒植物标本",
+      "description": "深普鲁士蓝底上浮现白色蕨叶与花枝轮廓。",
+      "prompt": "A cyanotype botanical collage with pale fern silhouettes and delicate flower stems on deep Prussian blue paper, uneven photographic exposure, flat specimen arrangement and a clear middle area."
+    },
+    {
+      "id": "bg-017",
+      "category": "平面拼贴",
+      "label": "便利贴手账",
+      "description": "方格纸、彩色胶带与空白便签叠放成日记拼贴。",
+      "prompt": "A scrapbook background built from graph paper, blank pastel sticky notes, translucent washi tape and torn notebook edges, tactile overhead collage arrangement with no handwriting or readable labels."
+    },
+    {
+      "id": "bg-018",
+      "category": "平面拼贴",
+      "label": "故障色块屏幕",
+      "description": "扫描线、色带与错位像素组成电子故障画面。",
+      "prompt": "An abstract digital-glitch backdrop with displaced RGB bars, fragmented pixel blocks, horizontal scan lines and patches of deep black, deliberately broken screen geometry without readable interface text."
+    },
+    {
+      "id": "bg-019",
+      "category": "平面拼贴",
+      "label": "丝绒花纹壁纸",
+      "description": "酒红底上的金色繁花纹样，像旧剧院的厚重壁纸。",
+      "prompt": "A flat ornamental backdrop resembling burgundy velvet wallpaper, repeating gold botanical damask motifs, dense symmetrical flourishes and a faint aged fabric texture under soft even illumination."
+    },
+    {
+      "id": "bg-020",
+      "category": "平面拼贴",
+      "label": "剪影城市拼贴",
+      "description": "不同深浅的蓝色纸片剪成楼群，层层叠出城市轮廓。",
+      "prompt": "A paper-cut city backdrop built from overlapping navy, cobalt and powder-blue building silhouettes, simple rectangular windows, visibly torn paper texture and shallow layered depth with no lettering."
+    },
+    {
+      "id": "bg-111",
+      "category": "平面拼贴",
+      "label": "邮票旅行拼贴",
+      "description": "无字邮票边框与行李贴纸叠放，旧纸色温暖。",
+      "prompt": "A flat travel scrapbook backdrop of blank perforated stamp frames, torn luggage-label shapes and faded map fragments without lettering, layered warm paper tones and irregular overlapping edges."
+    },
+    {
+      "id": "bg-112",
+      "category": "平面拼贴",
+      "label": "剪纸红窗花",
+      "description": "朱红镂空花纹贴在米白纸上，透出传统剪纸质感。",
+      "prompt": "A red paper-cut decorative backdrop with symmetrical floral perforations against warm ivory, fine scissor-cut edges, slight paper shadows and a broad simple central opening."
+    },
+    {
+      "id": "bg-113",
+      "category": "平面拼贴",
+      "label": "喷漆涂鸦底板",
+      "description": "荧光喷雾、滴漆与粗线覆盖混凝土，保留中央空区。",
+      "prompt": "An abstract graffiti backdrop on concrete with fluorescent spray clouds, broad paint drips and bold looping strokes, layered urban texture, no letters and an uncluttered central area."
+    },
+    {
+      "id": "bg-114",
+      "category": "平面拼贴",
+      "label": "透明胶片叠影",
+      "description": "透明彩膜、胶片齿孔和曝光边缘，像摄影暗房样片。",
+      "prompt": "A photographic collage background of translucent colored acetate, blank film strips with sprocket holes and softly exposed edges, overlapping analog textures with no pictures of people or text."
+    },
+    {
+      "id": "bg-115",
+      "category": "平面拼贴",
+      "label": "儿童蜡笔涂绘",
+      "description": "粗糙彩线和不规则色团，像蜡笔画在厚纸上。",
+      "prompt": "A playful crayon-drawn background with uneven colored loops, rough wax marks and simple irregular blobs on thick white paper, visible grain and a loosely framed open center."
+    },
+    {
+      "id": "bg-116",
+      "category": "平面拼贴",
+      "label": "金箔破碎拼贴",
+      "description": "深靛纸上散布碎金箔，反光与哑光纸面强烈对比。",
+      "prompt": "A flat collage of torn gold leaf scattered over deep indigo handmade paper, irregular reflective fragments, subtle wrinkles and contrasting matte fibers with generous uncovered space."
+    },
+    {
+      "id": "bg-117",
+      "category": "平面拼贴",
+      "label": "时装剪贴板",
+      "description": "空白布样、纽扣与裁片纸围成设计工作台式构图。",
+      "prompt": "An overhead fashion mood-board backdrop with neutral fabric swatches, loose buttons, blank pattern paper and tape corners, carefully arranged tactile layers without sketches of people or written notes."
+    },
+    {
+      "id": "bg-118",
+      "category": "平面拼贴",
+      "label": "拼色布艺补丁",
+      "description": "不同织纹的布块粗线缝合，带着手作温度。",
+      "prompt": "A patchwork textile background assembled from contrasting linen, denim and felt rectangles, visible oversized stitches, muted coral and blue colors and a flat handcrafted arrangement."
+    },
+    {
+      "id": "bg-119",
+      "category": "平面拼贴",
+      "label": "木版画浪纹",
+      "description": "粗黑刀痕刻出翻卷波纹，像手工木版拓印。",
+      "prompt": "A woodblock-print background of curling wave patterns, rough black carved lines and off-white paper gaps, uneven hand-printed ink coverage and a restrained graphic composition."
+    },
+    {
+      "id": "bg-120",
+      "category": "平面拼贴",
+      "label": "折页说明书拼贴",
+      "description": "空白折纸与细线图框交叠，理性而轻薄。",
+      "prompt": "A technical-paper collage background of folded blank sheets, fine geometric diagram frames and faint registration marks, pale gray ink, soft paper creases and no legible lettering."
+    },
+    {
+      "id": "bg-021",
+      "category": "自然奇景",
+      "label": "镜面盐湖",
+      "description": "极浅水面倒映整片天空，地平线几乎消失。",
+      "prompt": "A vast salt flat covered by a thin mirror of water, cloud formations reflected with near-perfect symmetry, a barely visible horizon and immense quiet open space."
+    },
+    {
+      "id": "bg-022",
+      "category": "自然奇景",
+      "label": "玄武岩黑沙滩",
+      "description": "六角石柱与黑色沙地相接，白浪切出鲜明边界。",
+      "prompt": "A volcanic coast of hexagonal basalt columns and black sand, pale surf tracing sharp curved edges, heavy overcast light and a rugged rock wall receding into sea mist."
+    },
+    {
+      "id": "bg-023",
+      "category": "自然奇景",
+      "label": "萤火雨林",
+      "description": "巨大叶片围成潮湿绿廊，林间散落细小萤火光点。",
+      "prompt": "A humid tropical rainforest corridor with enormous layered leaves, moss-covered roots, tiny firefly lights in the undergrowth and deep emerald shadows surrounding a narrow open path."
+    },
+    {
+      "id": "bg-024",
+      "category": "自然奇景",
+      "label": "荒漠孤峰",
+      "description": "赭红孤峰立在空旷沙漠，烈日形成清晰硬阴影。",
+      "prompt": "An isolated red sandstone butte rising above a broad desert plain, dry cracked earth, almost cloudless sky, intense midday sunlight and sharply defined geological shadows."
+    },
+    {
+      "id": "bg-025",
+      "category": "自然奇景",
+      "label": "蓝冰裂隙",
+      "description": "半透明冰壁围出深蓝通道，冰层中封着细密气泡。",
+      "prompt": "A deep blue glacial crevasse with translucent ice walls, trapped air bubbles and sweeping frozen striations, cold light filtering from a narrow opening high above."
+    },
+    {
+      "id": "bg-026",
+      "category": "自然奇景",
+      "label": "金色麦浪",
+      "description": "低机位看向成熟麦田，夕阳把远处染成纯金色。",
+      "prompt": "A wide ripe wheat field seen from a low viewpoint, softly bending stalks, a distant dark tree line and warm sunset light turning the open horizon golden."
+    },
+    {
+      "id": "bg-027",
+      "category": "自然奇景",
+      "label": "极光雪原",
+      "description": "雪原上的小山脊极为简洁，绿色极光横贯夜空。",
+      "prompt": "A silent snow plain with low rounded ridges and almost no vegetation, broad green aurora curtains across a dark starry sky and faint cold moonlight on the snow."
+    },
+    {
+      "id": "bg-028",
+      "category": "自然奇景",
+      "label": "晨雾松林",
+      "description": "针叶林向雾中逐层退去，几束晨光穿过树干。",
+      "prompt": "A quiet pine forest at dawn, slender trunks receding into pale mist, damp needles covering the ground and narrow shafts of soft morning light between the trees."
+    },
+    {
+      "id": "bg-029",
+      "category": "自然奇景",
+      "label": "石灰岩天坑",
+      "description": "陡峭岩壁围住碧水池，顶部圆形开口洒下光束。",
+      "prompt": "A limestone sinkhole surrounding a clear turquoise pool, vertical weathered rock walls, trailing roots and a concentrated shaft of daylight entering through a circular opening above."
+    },
+    {
+      "id": "bg-030",
+      "category": "自然奇景",
+      "label": "粉色花海",
+      "description": "成片粉色野花覆盖起伏草坡，远山退成淡蓝色。",
+      "prompt": "Rolling meadows covered in small pink wildflowers, scattered pale grasses, distant blue mountain layers and gentle spring daylight, with an open grassy strip in the foreground."
+    },
+    {
+      "id": "bg-121",
+      "category": "自然奇景",
+      "label": "熔岩海岸",
+      "description": "暗色岩台下流动橙红熔岩，海雾在远处翻腾。",
+      "prompt": "A volcanic coastal ledge above glowing orange lava channels, black fractured rock, distant sea mist and subdued twilight, with a broad stable rocky foreground."
+    },
+    {
+      "id": "bg-122",
+      "category": "自然奇景",
+      "label": "峡谷细光",
+      "description": "狭窄砂岩峡谷像波浪弯曲，顶部透入一束白光。",
+      "prompt": "A narrow slot canyon with flowing orange sandstone walls, finely eroded curves, a single bright shaft of overhead sunlight and soft reflected warmth along the sandy floor."
+    },
+    {
+      "id": "bg-123",
+      "category": "自然奇景",
+      "label": "碧绿梯田",
+      "description": "层层水田沿山坡铺开，田埂勾出曲线节奏。",
+      "prompt": "Green rice terraces following the contours of a steep hillside, curved earthen ridges, small reflective water surfaces and humid daylight fading toward distant mountain layers."
+    },
+    {
+      "id": "bg-124",
+      "category": "自然奇景",
+      "label": "白桦雪林",
+      "description": "白色树干与积雪交错，浅蓝阴影划过地面。",
+      "prompt": "A winter birch grove with slender white trunks, small dark bark markings and untouched snow, low sunlight casting long pale-blue shadows across the quiet forest floor."
+    },
+    {
+      "id": "bg-125",
+      "category": "自然奇景",
+      "label": "紫色薰衣草田",
+      "description": "整齐紫色花行延伸远方，轻风下呈现柔和条带。",
+      "prompt": "Long rows of purple lavender crossing a gently rolling field, dusty paths between plants, a pale summer sky and soft sunlight emphasizing repeated floral bands."
+    },
+    {
+      "id": "bg-126",
+      "category": "自然奇景",
+      "label": "暴风海崖",
+      "description": "巨浪拍击灰色断崖，天空低沉且充满动势。",
+      "prompt": "A rugged gray sea cliff above crashing white surf, dark storm clouds, windblown spray and cold diffuse daylight, a wide rocky ledge providing a clear foreground."
+    },
+    {
+      "id": "bg-127",
+      "category": "自然奇景",
+      "label": "金黄芦苇荡",
+      "description": "高芦苇围出一条木栈道，秋光染亮穗尖。",
+      "prompt": "A narrow wooden boardwalk through tall golden reeds, feathery seed heads catching late-autumn sunlight, still wetland water below and an open pale horizon beyond."
+    },
+    {
+      "id": "bg-128",
+      "category": "自然奇景",
+      "label": "星空巨石阵",
+      "description": "天然巨石散落在旷野，银河横贯深色天幕。",
+      "prompt": "A remote plain scattered with enormous naturally weathered boulders, sparse dry grasses, a brilliant Milky Way overhead and faint cool starlight outlining the stone forms."
+    },
+    {
+      "id": "bg-129",
+      "category": "自然奇景",
+      "label": "热带白沙岛",
+      "description": "棕榈叶投下斑驳影子，浅海与白沙分出三层色带。",
+      "prompt": "A small tropical island beach with white sand, clear shallow turquoise water and overhanging palm fronds, crisp leaf shadows and distinct horizontal bands of coastal color."
+    },
+    {
+      "id": "bg-130",
+      "category": "自然奇景",
+      "label": "秋日苔石溪",
+      "description": "红叶落在湿润苔石上，浅溪带着细小水光。",
+      "prompt": "A shallow woodland stream winding around moss-covered stones, scattered crimson maple leaves, wet reflective surfaces and gentle autumn daylight beneath a low leafy canopy."
+    },
+    {
+      "id": "bg-031",
+      "category": "都市街区",
+      "label": "涩谷式巨型路口",
+      "description": "宽阔斑马线被巨幅广告屏包围，城市尺度扑面而来。",
+      "prompt": "An empty metropolitan scramble crossing surrounded by tall commercial facades and enormous abstract advertising screens, bold zebra stripes, glass reflections and dense vertical city geometry without readable signs."
+    },
+    {
+      "id": "bg-032",
+      "category": "都市街区",
+      "label": "雨夜霓虹窄巷",
+      "description": "狭窄街巷布满霓虹色光，湿地面映出紫红倒影。",
+      "prompt": "A narrow urban alley at night, magenta and cyan neon panels without lettering, wet asphalt reflections, exposed pipes and tightly packed storefronts beneath dark upper floors."
+    },
+    {
+      "id": "bg-033",
+      "category": "都市街区",
+      "label": "高架桥底",
+      "description": "粗壮混凝土桥柱与深阴影形成工业感透视。",
+      "prompt": "The underside of an urban highway interchange, massive concrete pillars, repeating beams, dusty pavement and bands of daylight cutting through the heavy industrial shadows."
+    },
+    {
+      "id": "bg-034",
+      "category": "都市街区",
+      "label": "纽约消防梯",
+      "description": "红砖立面上的铁楼梯层层折返，午后光线硬朗。",
+      "prompt": "A red-brick city facade lined with black steel fire escapes, repeating windows, a narrow sidewalk and strong afternoon sunlight creating intricate stair-shaped shadows across the masonry."
+    },
+    {
+      "id": "bg-035",
+      "category": "都市街区",
+      "label": "港口集装箱",
+      "description": "红蓝货箱堆出巨大色块，吊机横跨远处天际。",
+      "prompt": "A working harbor storage yard without people, stacked red and blue shipping containers, weathered steel textures, distant gantry cranes and broad concrete lanes under cool daylight."
+    },
+    {
+      "id": "bg-036",
+      "category": "都市街区",
+      "label": "地铁末班站台",
+      "description": "白色灯管照亮空站台，轨道延伸进深黑隧道。",
+      "prompt": "An empty underground train platform with pale fluorescent strips, tiled walls, a yellow safety line and parallel tracks disappearing into a black tunnel, no readable station signs."
+    },
+    {
+      "id": "bg-037",
+      "category": "都市街区",
+      "label": "都市屋顶水箱",
+      "description": "楼顶水箱、天线与远方天际线形成粗粝城市剪影。",
+      "prompt": "A weathered city rooftop with cylindrical water tanks, television antennas and low parapets, densely layered apartment blocks beyond and muted orange evening light along the skyline."
+    },
+    {
+      "id": "bg-038",
+      "category": "都市街区",
+      "label": "地中海阶梯街",
+      "description": "白墙、钴蓝门窗与陡峭石阶，明快而开阔。",
+      "prompt": "A steep Mediterranean stairway between whitewashed buildings, cobalt-blue doors, small ceramic planters and glimpses of bright sky, chalky surfaces and strong clean summer shadows."
+    },
+    {
+      "id": "bg-039",
+      "category": "都市街区",
+      "label": "未来极简商务区",
+      "description": "无招牌玻璃塔楼与浅灰广场，冷静、疏朗且秩序分明。",
+      "prompt": "A minimalist business district with tall unmarked glass towers, pale stone paving and a shallow reflecting pool, broad rectilinear spaces, cool reflections and restrained architectural symmetry."
+    },
+    {
+      "id": "bg-040",
+      "category": "都市街区",
+      "label": "废弃游乐街",
+      "description": "褪色游乐招牌与封闭橱窗，彩色外壳下透出荒凉。",
+      "prompt": "A deserted amusement shopping street with faded sculptural shop signs, shuttered windows, chipped candy-colored paint and weeds between paving stones, melancholy daylight and no readable lettering."
+    },
+    {
+      "id": "bg-131",
+      "category": "都市街区",
+      "label": "旧城电车转角",
+      "description": "绿皮电车轨道拐过老楼，街角有复古站牌轮廓。",
+      "prompt": "A curved tram track passing old plaster apartment buildings, a simple unlettered stop marker, overhead wires and worn paving stones under soft overcast urban light."
+    },
+    {
+      "id": "bg-132",
+      "category": "都市街区",
+      "label": "深夜自动售货机",
+      "description": "一排发光售货机照亮空巷，周围压成深蓝暗部。",
+      "prompt": "A row of glowing vending machines with unmarked product windows beside an empty side street, intense cool illumination, deep navy surroundings and a clean strip of pavement."
+    },
+    {
+      "id": "bg-133",
+      "category": "都市街区",
+      "label": "天桥钢索",
+      "description": "步行桥钢索斜穿画面，车流光线在桥下延伸。",
+      "prompt": "A pedestrian suspension bridge with taut diagonal steel cables, dark city buildings beyond and blurred traffic-light ribbons below, cool evening air and a broad empty walkway."
+    },
+    {
+      "id": "bg-134",
+      "category": "都市街区",
+      "label": "屋顶篮球场",
+      "description": "鲜亮球场线与高楼天际线相接，围网划出城市边界。",
+      "prompt": "An empty rooftop basketball court with saturated painted lines, tall perimeter fencing and a dense skyline beyond, hard afternoon sunlight and an expansive unobstructed playing surface."
+    },
+    {
+      "id": "bg-135",
+      "category": "都市街区",
+      "label": "拱廊商店街",
+      "description": "连续拱门包住石板街，橱窗暖光沿两侧延伸。",
+      "prompt": "A covered shopping arcade with repeated stone arches, warm unlettered shop windows and polished paving, long architectural perspective and soft amber reflections along the empty central passage."
+    },
+    {
+      "id": "bg-136",
+      "category": "都市街区",
+      "label": "雨中电话亭",
+      "description": "透明电话亭立在路边，雨滴与车灯交叠。",
+      "prompt": "A transparent street telephone booth in heavy rain, beads of water on the glass, distant defocused headlights and dark wet paving illuminated by a single cool streetlamp."
+    },
+    {
+      "id": "bg-137",
+      "category": "都市街区",
+      "label": "停车楼螺旋坡道",
+      "description": "混凝土坡道层层旋转，红色栏杆形成连续曲线。",
+      "prompt": "A spiral ramp inside an empty concrete parking structure, continuous red safety rails, repeating ceiling beams and shafts of daylight revealing sweeping curved architectural layers."
+    },
+    {
+      "id": "bg-138",
+      "category": "都市街区",
+      "label": "城市下沉广场",
+      "description": "阶梯围住低处广场，玻璃立面反射出整片天空。",
+      "prompt": "A sunken metropolitan plaza enclosed by broad stone steps, tall reflective glass facades and a small geometric planting bed, bright sky reflections and generous open paving."
+    },
+    {
+      "id": "bg-139",
+      "category": "都市街区",
+      "label": "黄昏铁路道口",
+      "description": "栏杆与交叉轨道切开街道，暖色夕光落在铁面。",
+      "prompt": "An urban railway crossing at dusk, raised striped barriers, intersecting steel rails and closely spaced buildings, warm sunset reflections on metal and an empty foreground street."
+    },
+    {
+      "id": "bg-140",
+      "category": "都市街区",
+      "label": "旧楼外廊",
+      "description": "层层外廊挂着植物与遮阳布，生活气息密集。",
+      "prompt": "An older apartment block with stacked exterior corridors, potted plants and faded fabric sunshades, weathered railings, layered domestic details and soft daylight through the open courtyard."
+    },
+    {
+      "id": "bg-041",
+      "category": "人文纪实",
+      "label": "老式戏台后台",
+      "description": "刺绣戏服、木箱与暖灯围出戏曲后台的生活痕迹。",
+      "prompt": "A traditional opera backstage without performers, embroidered costumes on wooden racks, scuffed travel trunks, round warm dressing lights and richly worn textiles, leaving the foreground passage clear."
+    },
+    {
+      "id": "bg-042",
+      "category": "人文纪实",
+      "label": "陶艺工坊",
+      "description": "拉坯台、半干陶器与沾泥工具，充满手作触感。",
+      "prompt": "A small pottery workshop with clay-stained worktables, a potter's wheel, rows of drying ceramic bowls and rough plaster walls, soft side-window light and earthy material textures."
+    },
+    {
+      "id": "bg-043",
+      "category": "人文纪实",
+      "label": "海港鱼市",
+      "description": "空置冰台、塑料鱼筐与防水棚，潮湿而鲜活。",
+      "prompt": "A coastal fish market before opening, crushed ice on empty display counters, stacked blue plastic crates, striped waterproof awnings and a wet concrete floor under cool morning light."
+    },
+    {
+      "id": "bg-044",
+      "category": "人文纪实",
+      "label": "西部旧酒馆",
+      "description": "摆门、磨旧木吧台与黄铜灯，像边境小镇的旧时空。",
+      "prompt": "An old frontier saloon interior with swinging wooden doors, a scarred timber bar, brass lamps and dusty floorboards, amber light and deep warm shadows without patrons."
+    },
+    {
+      "id": "bg-045",
+      "category": "人文纪实",
+      "label": "摩洛哥染坊",
+      "description": "圆形染池盛着不同颜色，土墙与窄桥交错其间。",
+      "prompt": "A traditional dye courtyard filled with round stone vats of ochre, indigo and terracotta pigments, narrow raised walkways, sunbaked walls and intensely textured surfaces without workers."
+    },
+    {
+      "id": "bg-046",
+      "category": "人文纪实",
+      "label": "藏书修复室",
+      "description": "古书、纸张压板与放大镜静置桌面，安静而细致。",
+      "prompt": "A book conservation room with open antique volumes, paper presses, linen cloth and magnifying lamps on long wooden tables, diffuse daylight and quiet archival order without readable text."
+    },
+    {
+      "id": "bg-047",
+      "category": "人文纪实",
+      "label": "旧火车候车厅",
+      "description": "高拱窗、木长椅与机械钟，留着时代磨损的质感。",
+      "prompt": "A historic railway waiting hall with tall arched windows, long wooden benches, a large unnumbered station clock and worn stone floors, dusty sunbeams and grand restrained proportions."
+    },
+    {
+      "id": "bg-048",
+      "category": "人文纪实",
+      "label": "手工织布间",
+      "description": "巨大木织机与彩色线轴，织线形成密集节奏。",
+      "prompt": "A traditional weaving room with a large wooden loom, tightly stretched warp threads, colorful yarn spools and folded woven textiles, tactile natural fibers and gentle light from a small window."
+    },
+    {
+      "id": "bg-049",
+      "category": "人文纪实",
+      "label": "市井夜食摊",
+      "description": "金属灶台、塑料凳与蒸汽，在暖色小灯下聚成一角。",
+      "prompt": "An unoccupied neighborhood street-food stall at night, stainless steel cooking surfaces, small plastic stools, rising steam and warm bare bulbs beneath a simple canopy, no written menus."
+    },
+    {
+      "id": "bg-050",
+      "category": "人文纪实",
+      "label": "旧影院放映室",
+      "description": "胶片盘与笨重放映机，细窄光束穿过漂浮尘埃。",
+      "prompt": "An old cinema projection booth with large film reels, a heavy mechanical projector and metal shelving, a narrow beam cutting through dusty darkness toward a small viewing window."
+    },
+    {
+      "id": "bg-141",
+      "category": "人文纪实",
+      "label": "皮革手作铺",
+      "description": "旧木桌摆着皮片、铜扣与缝线，工具墙排列整齐。",
+      "prompt": "A leather workshop with cut hide pieces, brass buckles, thread spools and neatly hung hand tools, a worn wooden bench and warm side light revealing tactile material surfaces."
+    },
+    {
+      "id": "bg-142",
+      "category": "人文纪实",
+      "label": "旧报刊亭",
+      "description": "折叠铁窗与报纸堆围成小亭，印刷内容模糊不可读。",
+      "prompt": "A small vintage newsstand with folding metal shutters, stacked newspapers and blank magazine covers, sun-faded paint and a narrow counter under gentle street-side daylight."
+    },
+    {
+      "id": "bg-143",
+      "category": "人文纪实",
+      "label": "手工面包坊",
+      "description": "木案台沾着面粉，烤炉与篮筐透出暖意。",
+      "prompt": "An artisan bakery workroom with flour-dusted wooden counters, woven bread baskets and a warm brick oven, rough plaster walls and softly glowing early-morning interior light."
+    },
+    {
+      "id": "bg-144",
+      "category": "人文纪实",
+      "label": "渔船修补棚",
+      "description": "渔网、绳结和船板堆在棚下，蓝色海光透进来。",
+      "prompt": "A coastal boat-repair shed with hanging fishing nets, thick rope coils and weathered hull boards, rough timber supports and cool reflected sea light entering through open sides."
+    },
+    {
+      "id": "bg-145",
+      "category": "人文纪实",
+      "label": "旧照相馆暗房",
+      "description": "显影盘、夹着的空白相纸和红灯构成旧式暗房。",
+      "prompt": "A traditional photographic darkroom with developing trays, blank prints clipped to drying lines and an enlarger on a workbench, deep red safelight and carefully arranged analog equipment."
+    },
+    {
+      "id": "bg-146",
+      "category": "人文纪实",
+      "label": "民俗灯笼作坊",
+      "description": "竹骨灯笼半成品悬在梁下，彩纸映出柔和暖色。",
+      "prompt": "A lantern-making workshop with unfinished bamboo frames, translucent colored paper and completed lanterns hanging from rafters, warm diffuse light and a clear central working passage."
+    },
+    {
+      "id": "bg-147",
+      "category": "人文纪实",
+      "label": "古董钟表店",
+      "description": "大小钟壳与细密零件堆叠，放大台灯照亮工作角。",
+      "prompt": "An antique clock repair shop with varied wooden clock cases, trays of tiny gears and a magnifying desk lamp, dusty shelves and concentrated warm light without readable numerals."
+    },
+    {
+      "id": "bg-148",
+      "category": "人文纪实",
+      "label": "乡村露天集市",
+      "description": "空篮筐、粗布棚和木摊位铺开，晨光清新。",
+      "prompt": "A village market before opening, empty wicker baskets, rough cloth canopies and simple wooden stalls along a dirt lane, fresh morning light and practical handmade textures."
+    },
+    {
+      "id": "bg-149",
+      "category": "人文纪实",
+      "label": "传统染布晾场",
+      "description": "长布从高架垂落，靛蓝与赭红形成高大色幕。",
+      "prompt": "An open textile-drying yard with long indigo and rust-red cloth panels suspended from tall wooden frames, moving fabric folds, bright sunlight and narrow empty paths between them."
+    },
+    {
+      "id": "bg-150",
+      "category": "人文纪实",
+      "label": "音乐唱片档案室",
+      "description": "唱片套与音响设备层层排列，旧时代感克制而浓厚。",
+      "prompt": "A music archive room with densely arranged record sleeves, vintage audio equipment and low wooden shelving, subdued amber lighting, slightly worn surfaces and no readable album titles."
+    },
+    {
+      "id": "bg-051",
+      "category": "室内空间",
+      "label": "凌乱宅房",
+      "description": "漫画书、游戏手柄和随手搭着的衣物，像真实有人住的房间。",
+      "prompt": "A lived-in hobby bedroom with uneven stacks of comic books, game controllers, cables and clothes draped over a chair, soft desk-lamp light and unmarked posters on the walls."
+    },
+    {
+      "id": "bg-052",
+      "category": "室内空间",
+      "label": "法式旧公寓",
+      "description": "雕花线脚、鱼骨木地板与高窗，温柔而略带旧感。",
+      "prompt": "An aged Parisian apartment with ornamental wall moldings, herringbone parquet flooring, tall windows and an antique mirror, faded cream paint and soft natural afternoon light."
+    },
+    {
+      "id": "bg-053",
+      "category": "室内空间",
+      "label": "榻榻米茶室",
+      "description": "低矮木桌、障子门与壁龛，极简空间强调水平线。",
+      "prompt": "A quiet tatami tea room with a low wooden table, translucent shoji screens and a recessed alcove holding a single ceramic vase, restrained horizontal lines and diffused daylight."
+    },
+    {
+      "id": "bg-054",
+      "category": "室内空间",
+      "label": "粉色梦幻衣帽间",
+      "description": "圆弧柜体、粉色绒凳与镜面墙，精致而甜美。",
+      "prompt": "A pastel-pink dressing room with curved cabinetry, a velvet stool, open accessory shelves and a tall mirror, glossy pale surfaces and soft warm perimeter lighting."
+    },
+    {
+      "id": "bg-055",
+      "category": "室内空间",
+      "label": "工业阁楼",
+      "description": "裸砖、黑钢梁与皮沙发，挑高空间透着粗粝质感。",
+      "prompt": "A high-ceiling industrial loft with exposed brick, black steel beams, a worn leather sofa and huge factory windows, unfinished concrete flooring and broad cool daylight."
+    },
+    {
+      "id": "bg-056",
+      "category": "室内空间",
+      "label": "深夜便利店",
+      "description": "整齐货架与冷白灯，玻璃门外是深蓝夜色。",
+      "prompt": "A small convenience store interior at night, neatly stocked shelves with unlettered packaging, cold white ceiling lights, a tiled floor and dark blue street reflections in the glass entrance."
+    },
+    {
+      "id": "bg-057",
+      "category": "室内空间",
+      "label": "绿色瓷砖浴室",
+      "description": "复古绿瓷砖、白浴缸与起雾镜面，潮湿而私密。",
+      "prompt": "A vintage bathroom with green ceramic tiles, a freestanding white tub, aged brass plumbing and a lightly misted mirror, soft overhead light and visible moisture on the tiled surfaces."
+    },
+    {
+      "id": "bg-058",
+      "category": "室内空间",
+      "label": "太空舱胶囊卧室",
+      "description": "极窄卧舱内嵌灯带、折叠桌与柔软床铺，紧凑而安稳。",
+      "prompt": "A compact capsule bedroom with rounded white wall panels, recessed amber light strips, a fold-down desk and a neatly padded sleeping niche, intimate enclosed proportions and clean modular details."
+    },
+    {
+      "id": "bg-059",
+      "category": "室内空间",
+      "label": "旧地下排练室",
+      "description": "吸音海绵、旧音箱与散落线缆，灯光低而有舞台感。",
+      "prompt": "A basement rehearsal room with acoustic foam, battered amplifiers, coiled instrument cables and a drum kit in the rear, low tungsten lighting and a clear foreground floor area."
+    },
+    {
+      "id": "bg-060",
+      "category": "室内空间",
+      "label": "雨窗洗衣房",
+      "description": "成排圆窗洗衣机与塑料篮，雨水划过大玻璃窗。",
+      "prompt": "A neighborhood laundromat with repeating circular washing-machine doors, plastic laundry baskets and a broad rain-streaked front window, pale mint walls and cool reflective fluorescent lighting."
+    },
+    {
+      "id": "bg-151",
+      "category": "室内空间",
+      "label": "玻璃花房餐厅",
+      "description": "细钢架玻璃顶包住餐桌，绿植与日光轻盈交织。",
+      "prompt": "A glasshouse dining interior with slender metal roof frames, simple wooden tables and climbing greenery, abundant diffused daylight, transparent architectural layers and a clear central aisle."
+    },
+    {
+      "id": "bg-152",
+      "category": "室内空间",
+      "label": "红色电玩厅",
+      "description": "街机屏幕与红灯照出低矮空间，地毯带复古花纹。",
+      "prompt": "A retro arcade interior with blank glowing game screens, red accent lamps and patterned carpet, closely spaced cabinets and a dark ceiling above an open central passage."
+    },
+    {
+      "id": "bg-153",
+      "category": "室内空间",
+      "label": "木质桑拿房",
+      "description": "浅色木板连续包住墙面，阶梯长凳与热石炉简洁排列。",
+      "prompt": "An empty sauna room lined with pale timber boards, stepped wooden benches and a compact stone heater, concealed amber lighting and clean horizontal lines in a compact interior."
+    },
+    {
+      "id": "bg-154",
+      "category": "室内空间",
+      "label": "老式电梯厢",
+      "description": "黄铜栅门与深色木饰面围出狭小空间，顶灯昏黄。",
+      "prompt": "A vintage elevator cabin with a brass lattice gate, dark wood wall panels and a softly glowing ceiling lamp, compact symmetrical framing and gently aged metal reflections."
+    },
+    {
+      "id": "bg-155",
+      "category": "室内空间",
+      "label": "极简美术展厅",
+      "description": "白墙、单件雕塑与长凳，空白空间占据主体。",
+      "prompt": "A minimalist gallery interior with white walls, one abstract stone sculpture and a narrow wooden bench, diffuse skylight and expansive empty floor space without labels or visitors."
+    },
+    {
+      "id": "bg-156",
+      "category": "室内空间",
+      "label": "地下爵士吧",
+      "description": "圆桌、铜质乐器架与深蓝灯光，室内层次低而深。",
+      "prompt": "An empty basement jazz bar with small round tables, a brass instrument stand and a low stage, dark timber surfaces and subdued blue lighting with warm lamp accents."
+    },
+    {
+      "id": "bg-157",
+      "category": "室内空间",
+      "label": "高顶攀岩馆",
+      "description": "彩色攀点在斜墙上散开，厚软垫覆盖地面。",
+      "prompt": "An indoor climbing hall with angular climbing walls, scattered colorful holds and thick padded flooring, exposed roof trusses and even overhead illumination without climbers or signage."
+    },
+    {
+      "id": "bg-158",
+      "category": "室内空间",
+      "label": "旧式理发店",
+      "description": "并排镜面、皮质理发椅与瓷砖，整齐又有年代感。",
+      "prompt": "A vintage barbershop with paired mirrors, worn leather barber chairs and black-and-white floor tiles, polished metal tools and warm window light without people or readable advertisements."
+    },
+    {
+      "id": "bg-159",
+      "category": "室内空间",
+      "label": "夜间泳池馆",
+      "description": "蓝色池水把波光投到天花板，玻璃外是一片黑夜。",
+      "prompt": "An empty indoor swimming pool at night, turquoise water casting wavering reflections onto the ceiling, tall dark windows and pale tiled walkways under restrained architectural lighting."
+    },
+    {
+      "id": "bg-160",
+      "category": "室内空间",
+      "label": "档案储藏走廊",
+      "description": "金属文件柜沿窄廊排列，顶灯逐段延伸到远处。",
+      "prompt": "A narrow archive storage corridor lined with tall gray filing cabinets and plain cardboard boxes, repeated overhead lights and tightly controlled perspective, with no visible labels or people."
+    },
+    {
+      "id": "bg-061",
+      "category": "二次元舞台",
+      "label": "樱花校园天台",
+      "description": "动画式蓝天与樱花花瓣，围栏后是干净的校园轮廓。",
+      "prompt": "An anime-school rooftop background with chain-link fencing, scattered cherry petals and a vivid blue sky painted with large white clouds, simplified campus silhouettes and clean cel-shaded environmental colors."
+    },
+    {
+      "id": "bg-062",
+      "category": "二次元舞台",
+      "label": "魔法少女变身空间",
+      "description": "粉紫渐变里漂浮星星与缎带，完全脱离现实地点。",
+      "prompt": "A magical-girl transformation backdrop of luminous pink and lavender gradients, floating star outlines, curling translucent ribbons and concentric light rings, a nonphysical stage with no figures or lettering."
+    },
+    {
+      "id": "bg-063",
+      "category": "二次元舞台",
+      "label": "热血竞技擂台",
+      "description": "厚重擂台边绳和放射聚光灯，像动画决战场面。",
+      "prompt": "An anime tournament arena backdrop with thick ring ropes, angular overhead spotlights and simplified dark spectator tiers without visible people, bold cel-shaded shadows and energetic radial beams."
+    },
+    {
+      "id": "bg-064",
+      "category": "二次元舞台",
+      "label": "视觉小说黄昏教室",
+      "description": "空教室被橙红晚霞照亮，课桌投下细长影子。",
+      "prompt": "A visual-novel classroom background at dusk, rows of empty desks, open curtains and warm orange sky outside, carefully painted interior details and long quiet shadows across the floor."
+    },
+    {
+      "id": "bg-065",
+      "category": "二次元舞台",
+      "label": "像素勇者旅店",
+      "description": "像素木床、宝箱与壁炉，像俯视角色扮演游戏的小屋。",
+      "prompt": "A pixel-art fantasy inn background with wooden beds, small treasure chests, a glowing hearth and chunky timber walls, tiled game-environment geometry and a warm limited-color palette."
+    },
+    {
+      "id": "bg-066",
+      "category": "二次元舞台",
+      "label": "偶像演出主舞台",
+      "description": "心形灯牌与发光阶梯围住中心，荧光色强调演出氛围。",
+      "prompt": "An anime idol-concert stage background with luminous heart-shaped panels, tiered glowing steps and pastel spotlights, an empty central platform, bright graphic lighting and no lettering or audience figures."
+    },
+    {
+      "id": "bg-067",
+      "category": "二次元舞台",
+      "label": "机甲整备甲板",
+      "description": "巨型机械支架与警示色块，呈现硬派动画工业场景。",
+      "prompt": "A mecha-anime maintenance deck with enormous mechanical support arms, hazard-striped panels, exposed hydraulic systems and distant armored machine silhouettes, sharp cel-shaded environment details and cool overhead light."
+    },
+    {
+      "id": "bg-068",
+      "category": "二次元舞台",
+      "label": "水彩乡间车站",
+      "description": "手绘水彩的小站台与电线杆，夏日空气轻盈透明。",
+      "prompt": "A watercolor anime countryside station background with a tiny platform, thin utility poles and sunlit summer grasses, loose translucent pigment edges and a bright airy sky without readable signs."
+    },
+    {
+      "id": "bg-069",
+      "category": "二次元舞台",
+      "label": "少女漫画花框",
+      "description": "玫瑰、蕾丝与闪光点从四边围合，中央保留柔白留空。",
+      "prompt": "A shoujo-manga decorative background with illustrated roses, delicate lace borders, soft sparkle shapes and pale blush gradients framing an open white center, ornamental linework without text or characters."
+    },
+    {
+      "id": "bg-070",
+      "category": "二次元舞台",
+      "label": "都市动画夜景",
+      "description": "高饱和青紫楼群与平涂云层，城市像动画片尾画面。",
+      "prompt": "A stylized anime city-night backdrop with saturated cyan and violet towers, simplified glowing windows and flat painted cloud bands, crisp graphic silhouettes and a quiet elevated foreground terrace."
+    },
+    {
+      "id": "bg-161",
+      "category": "二次元舞台",
+      "label": "校园祭彩旗街",
+      "description": "动画式校庆摊位与彩旗相连，明亮色块富有节日感。",
+      "prompt": "An anime school-festival backdrop with empty booth frames, bright triangular bunting and simplified campus buildings, cheerful cel-shaded colors and a clear central path without readable banners."
+    },
+    {
+      "id": "bg-162",
+      "category": "二次元舞台",
+      "label": "宇宙歌姬舞台",
+      "description": "星形台阶漂在银河色幕前，发光圆环环绕舞台。",
+      "prompt": "An anime space-concert backdrop with star-shaped platforms, glowing circular hoops and a painted galaxy curtain, saturated violet and blue light and an empty central performance area."
+    },
+    {
+      "id": "bg-163",
+      "category": "二次元舞台",
+      "label": "运动番体育馆",
+      "description": "木地板高光与夸张顶灯，像比赛前静止的一帧。",
+      "prompt": "A sports-anime gymnasium background with glossy wooden flooring, bold court lines and exaggerated overhead light beams, clean cel-shaded architecture and empty seating tiers without spectators."
+    },
+    {
+      "id": "bg-164",
+      "category": "二次元舞台",
+      "label": "魔法学院回廊",
+      "description": "动画平涂的石拱、悬灯与彩窗，明亮而轻盈。",
+      "prompt": "An anime magic-academy corridor with simplified stone arches, floating lanterns and jewel-colored windows, clean painted shapes, luminous highlights and a broad unobstructed walkway through the center."
+    },
+    {
+      "id": "bg-165",
+      "category": "二次元舞台",
+      "label": "机战驾驶舱",
+      "description": "环形控制台包住中央座位区，红蓝光像动画警报。",
+      "prompt": "A mecha-anime cockpit background with a circular control console, blank holographic panels and angular metal framing, vivid red and blue lighting with sharp cel-shaded environmental shadows."
+    },
+    {
+      "id": "bg-166",
+      "category": "二次元舞台",
+      "label": "漫画网点街角",
+      "description": "黑白网点铺满街道，粗墨线强调透视与轮廓。",
+      "prompt": "A monochrome manga street-corner backdrop built from crisp ink outlines and varied screentone dots, exaggerated architectural perspective, white sky space and no speech bubbles or readable signs."
+    },
+    {
+      "id": "bg-167",
+      "category": "二次元舞台",
+      "label": "像素地下城入口",
+      "description": "方块石砖和火把围出入口，像横版游戏关卡。",
+      "prompt": "A pixel-art dungeon entrance with chunky stone tiles, animated-looking torch shapes and a dark arched opening, limited warm colors and a clear side-scrolling game foreground platform."
+    },
+    {
+      "id": "bg-168",
+      "category": "二次元舞台",
+      "label": "梦幻甜品小镇",
+      "description": "糖果形屋顶与奶油色街道，像童话动画中的小镇。",
+      "prompt": "A whimsical anime dessert town with candy-shaped rooftops, cream-colored streets and rounded pastel shop fronts, clean illustrated environmental shapes and a broad empty avenue without readable lettering."
+    },
+    {
+      "id": "bg-169",
+      "category": "二次元舞台",
+      "label": "赛璐璐海滨站",
+      "description": "复古动画的海边小站，天空和海面都是大块平涂色。",
+      "prompt": "A retro cel-animation seaside station backdrop with simple platform rails, broad flat blue sea shapes and large painted clouds, restrained linework and warm nostalgic environmental colors."
+    },
+    {
+      "id": "bg-170",
+      "category": "二次元舞台",
+      "label": "恋爱游戏花园",
+      "description": "柔光玫瑰拱门与白色长椅，像视觉小说的告白场景。",
+      "prompt": "A romantic visual-novel garden background with a rose-covered arch, an empty white bench and softly painted foliage, luminous pastel daylight and a clear open foreground path."
+    },
+    {
+      "id": "bg-071",
+      "category": "异世界秘境",
+      "label": "倒悬城堡",
+      "description": "整座城堡悬在天空并向下生长，碎石环绕下方。",
+      "prompt": "An inverted fantasy castle suspended high overhead, its spires pointing downward, floating stone fragments circling the masonry and a vast cloud-filled void beyond an open stone terrace."
+    },
+    {
+      "id": "bg-072",
+      "category": "异世界秘境",
+      "label": "巨树王座厅",
+      "description": "古树内壁长成柱廊，树根盘成王座，金光从树冠落下。",
+      "prompt": "A throne hall inside an immense ancient tree, living wooden ribs forming colonnades, braided roots shaping a distant throne and golden light descending through openings in the canopy."
+    },
+    {
+      "id": "bg-073",
+      "category": "异世界秘境",
+      "label": "水下失落神殿",
+      "description": "沉没石柱被珊瑚包裹，青蓝光束在水中摇晃。",
+      "prompt": "A submerged ruined temple with coral-encrusted stone columns, drifting particles and pale turquoise shafts of underwater light, broken arches surrounding a broad ceremonial floor with no creatures."
+    },
+    {
+      "id": "bg-074",
+      "category": "异世界秘境",
+      "label": "龙骨荒原",
+      "description": "巨大肋骨跨越荒地，远山在暗红天空下仅剩剪影。",
+      "prompt": "A barren fantasy plain beneath colossal weathered dragon ribs, scattered white bones embedded in dark soil and distant jagged mountains silhouetted against a dim crimson sky."
+    },
+    {
+      "id": "bg-075",
+      "category": "异世界秘境",
+      "label": "蘑菇精灵村",
+      "description": "巨型蘑菇长成小屋，窗灯点缀青苔小径。",
+      "prompt": "A tiny fantasy village built into giant mushroom stems, warm round windows, moss-covered stepping stones and fern canopies, whimsical organic architecture with no inhabitants visible."
+    },
+    {
+      "id": "bg-076",
+      "category": "异世界秘境",
+      "label": "黑曜石祭坛",
+      "description": "黑色玻璃岩阶梯围住暗红光池，庄严而危险。",
+      "prompt": "An obsidian ritual chamber with glossy black stepped platforms surrounding a recessed crimson light pool, angular stone monoliths and faint red reflections across a broad empty ceremonial floor."
+    },
+    {
+      "id": "bg-077",
+      "category": "异世界秘境",
+      "label": "云海浮岛桥",
+      "description": "细窄石桥连接漂浮岛屿，瀑布直接坠入云海。",
+      "prompt": "Floating green islands connected by a narrow arched stone bridge above an immense sea of clouds, waterfalls spilling into open air and bright high-altitude sunlight on ancient masonry."
+    },
+    {
+      "id": "bg-078",
+      "category": "异世界秘境",
+      "label": "沙漠星象宫",
+      "description": "黄铜星盘悬于穹顶，拱门外是一整片金色沙海。",
+      "prompt": "A desert fantasy observatory palace with suspended brass astrolabes, carved sandstone arches and deep blue tiled floors, golden dunes visible through open colonnades under intense dry light."
+    },
+    {
+      "id": "bg-079",
+      "category": "异世界秘境",
+      "label": "水晶魔法图书馆",
+      "description": "透明水晶书架沿高塔旋转，书页与光粒漂在空中。",
+      "prompt": "A magical library tower with translucent crystal shelves spiraling upward, a few floating closed books and luminous dust, cool violet reflections and a clear circular floor at the center."
+    },
+    {
+      "id": "bg-080",
+      "category": "异世界秘境",
+      "label": "永夜哥特长廊",
+      "description": "尖拱与彩窗无限延伸，月光把长廊切成冷暖色块。",
+      "prompt": "An immense Gothic corridor in perpetual night, repeated pointed arches, tall stained-glass windows and alternating pools of moonlit blue and muted crimson light across polished black stone."
+    },
+    {
+      "id": "bg-171",
+      "category": "异世界秘境",
+      "label": "琥珀封存王宫",
+      "description": "半透明琥珀包住宫柱，金光像凝固的时间。",
+      "prompt": "A fantasy palace hall encased in translucent amber, frozen architectural fragments visible within golden columns, warm internal glow and a clear polished floor beneath immense resin arches."
+    },
+    {
+      "id": "bg-172",
+      "category": "异世界秘境",
+      "label": "无尽魔法阶梯",
+      "description": "石阶悬空交错，通向不同方向的发光门。",
+      "prompt": "An impossible fantasy stairwell with floating stone flights crossing at contradictory angles, softly glowing doorways at distant landings and a spacious central platform surrounded by deep blue emptiness."
+    },
+    {
+      "id": "bg-173",
+      "category": "异世界秘境",
+      "label": "霜晶精灵圣坛",
+      "description": "冰晶像花朵长成柱子，淡紫极光照亮圣坛。",
+      "prompt": "An elven sanctuary built from branching frost crystals, flower-like translucent columns and a pale stone altar, lavender auroral light and a clean icy floor with no inhabitants."
+    },
+    {
+      "id": "bg-174",
+      "category": "异世界秘境",
+      "label": "赤月荒城",
+      "description": "破碎城墙映着巨大红月，街道埋在灰尘中。",
+      "prompt": "A ruined fantasy city beneath an enormous crimson moon, broken defensive walls, dust-filled avenues and dark collapsed towers, stark red rim light around a clear foreground terrace."
+    },
+    {
+      "id": "bg-175",
+      "category": "异世界秘境",
+      "label": "蘑菇孢子洞",
+      "description": "发光孢子漂在巨大菌伞之间，地面长满软苔。",
+      "prompt": "A vast cavern filled with oversized mushroom caps, gently glowing spores and thick moss, bioluminescent turquoise accents and a broad natural pathway through the strange organic architecture."
+    },
+    {
+      "id": "bg-176",
+      "category": "异世界秘境",
+      "label": "沙海骸骨巨门",
+      "description": "两根巨兽骨柱撑起入口，流沙从门楣不断落下。",
+      "prompt": "A monumental gateway formed from ancient creature bones in a desert, sand pouring from the upper arch, eroded carvings and hard golden light across an open stone approach."
+    },
+    {
+      "id": "bg-177",
+      "category": "异世界秘境",
+      "label": "镜湖天空城",
+      "description": "白色城堡倒映在静湖中，城与倒影难分上下。",
+      "prompt": "A white fantasy citadel floating just above a perfectly still lake, slender spires mirrored below, pale mist at the waterline and soft silver daylight around an open lakeside platform."
+    },
+    {
+      "id": "bg-178",
+      "category": "异世界秘境",
+      "label": "蒸汽矮人工坊",
+      "description": "铜管和巨型齿轮塞满石厅，火炉在深处发亮。",
+      "prompt": "A subterranean fantasy forge with enormous brass gears, heavy copper pipes and stone vaults, distant furnace glow, scattered metalworking equipment and a broad clear work floor without workers."
+    },
+    {
+      "id": "bg-179",
+      "category": "异世界秘境",
+      "label": "星尘占卜帐",
+      "description": "宝石色布幕与悬浮星盘，灯光像漂浮的星尘。",
+      "prompt": "A fantasy divination tent with jewel-toned fabric drapes, floating brass star charts and softly luminous dust, layered cushions at the edges and an empty central rug without written symbols."
+    },
+    {
+      "id": "bg-180",
+      "category": "异世界秘境",
+      "label": "巨鲸腹内遗城",
+      "description": "拱形骨架包住遗迹街道，蓝光从巨大裂隙渗入。",
+      "prompt": "An ancient fantasy settlement within a colossal whale-like skeleton, rib arches spanning ruined stone lanes, soft blue light filtering through distant openings and a clear empty foreground street."
+    },
+    {
+      "id": "bg-081",
+      "category": "科幻空间",
+      "label": "轨道空间站",
+      "description": "舷窗占满整面墙，蓝色行星在窗外缓缓铺开。",
+      "prompt": "An orbital station observation lounge with an enormous curved window, the blue arc of a planet outside, restrained white structural ribs and faint instrument lights along an empty floor."
+    },
+    {
+      "id": "bg-082",
+      "category": "科幻空间",
+      "label": "赛博义体诊所",
+      "description": "机械诊疗椅、透明屏幕与冷绿灯，洁净中带着地下感。",
+      "prompt": "A cybernetic repair clinic without patients, articulated treatment equipment, translucent blank display panels, coiled cables and cool green task lighting against worn stainless steel surfaces."
+    },
+    {
+      "id": "bg-083",
+      "category": "科幻空间",
+      "label": "火星殖民温室",
+      "description": "红色荒漠外壳包围透明温室，整齐作物被人工灯照亮。",
+      "prompt": "A transparent greenhouse on a red desert planet, orderly hydroponic growing racks, white structural frames and violet cultivation lamps, rust-colored dunes visible beyond the pressurized glass enclosure."
+    },
+    {
+      "id": "bg-084",
+      "category": "科幻空间",
+      "label": "量子服务器深井",
+      "description": "发光机柜绕深井层层排列，蓝色线路像垂直瀑布。",
+      "prompt": "A vast cylindrical data-center shaft lined with luminous server racks, stacked maintenance balconies and descending blue fiber-optic bundles, deep vertical perspective and a clear metal observation ledge."
+    },
+    {
+      "id": "bg-085",
+      "category": "科幻空间",
+      "label": "废土加油站",
+      "description": "锈蚀油泵与破裂遮棚孤立在公路旁，沙尘掩去远方。",
+      "prompt": "An abandoned post-apocalyptic fuel station beside an empty highway, rusted pumps, a broken canopy, windblown sand and faded metal panels, dusty amber light with no readable branding."
+    },
+    {
+      "id": "bg-086",
+      "category": "科幻空间",
+      "label": "反重力都市车站",
+      "description": "悬浮轨道在室内穿行，透明地板下是深不见底的城市。",
+      "prompt": "A futuristic transit terminal with suspended magnetic rails, transparent floor sections revealing a deep city below, smooth silver platforms and cool luminous guide strips without signs or passengers."
+    },
+    {
+      "id": "bg-087",
+      "category": "科幻空间",
+      "label": "生物机械巢室",
+      "description": "肋骨般金属结构与半透明膜交织，空间像活着的机器。",
+      "prompt": "A biomechanical chamber formed from ribbed metallic arches, translucent organic membranes and pulsing amber conduits, sculptural alien architecture with a clear floor and no living creatures."
+    },
+    {
+      "id": "bg-088",
+      "category": "科幻空间",
+      "label": "复古太空控制室",
+      "description": "奶油色按钮台、圆形显示器与橘色软包，带七十年代未来感。",
+      "prompt": "A retrofuturist space control room with cream instrument consoles, round blank monitors, orange padded wall sections and chunky toggle switches, warm analog lighting and seventies-inspired industrial design."
+    },
+    {
+      "id": "bg-089",
+      "category": "科幻空间",
+      "label": "机库星门",
+      "description": "巨大的圆形传送环立在机库尽头，内部涌动蓝白能量。",
+      "prompt": "An enormous circular transit gate at the end of a spacecraft hangar, blue-white energy rippling inside the ring, layered metal gantries and broad empty landing markings without lettering."
+    },
+    {
+      "id": "bg-090",
+      "category": "科幻空间",
+      "label": "全息白色实验室",
+      "description": "白色无缝实验室中漂着透明图形，干净到近乎失重。",
+      "prompt": "A seamless white research laboratory with floating translucent geometric holograms, thin glass work surfaces and concealed soft illumination, pristine open floor space and no readable data or human silhouettes."
+    },
+    {
+      "id": "bg-181",
+      "category": "科幻空间",
+      "label": "深海科研舱",
+      "description": "圆形观察窗外是漆黑深海，仪器绿光映在金属上。",
+      "prompt": "A deep-sea research module with large circular observation windows facing black water, compact metal consoles, muted green instrument glow and a clear grated floor without people or readable data."
+    },
+    {
+      "id": "bg-182",
+      "category": "科幻空间",
+      "label": "太阳能荒漠阵列",
+      "description": "成排反光板延伸到塔楼，刺眼白光切开沙色地面。",
+      "prompt": "A futuristic desert energy facility with rows of reflective solar panels converging on a tall central tower, hard white sunlight, pale sand and a broad empty maintenance walkway."
+    },
+    {
+      "id": "bg-183",
+      "category": "科幻空间",
+      "label": "磁悬浮货运仓",
+      "description": "货箱漂在发光轨道上，蓝色线条贯穿巨大仓库。",
+      "prompt": "A futuristic cargo warehouse with rectangular containers hovering above luminous guide rails, immense steel trusses, cool blue floor lines and a clear central loading platform without workers."
+    },
+    {
+      "id": "bg-184",
+      "category": "科幻空间",
+      "label": "仿生植物培养室",
+      "description": "透明培养罐中长着金属叶片，绿光带着实验感。",
+      "prompt": "A synthetic-botany laboratory with transparent growth cylinders containing metallic leaf structures, pale work surfaces, subtle green illumination and orderly rows of equipment around an open central aisle."
+    },
+    {
+      "id": "bg-185",
+      "category": "科幻空间",
+      "label": "环形重力训练室",
+      "description": "圆筒墙面延伸成地板，红色标线沿弧面绕行。",
+      "prompt": "A cylindrical gravity-training chamber with continuous curved wall panels, red geometric guide markings and recessed white light strips, a clean metallic interior with no equipment blocking the center."
+    },
+    {
+      "id": "bg-186",
+      "category": "科幻空间",
+      "label": "月球采矿平台",
+      "description": "灰色月壤与橙色矿机并置，黑天空下阴影锐利。",
+      "prompt": "A lunar mining platform with orange industrial machinery, gray regolith and modular metal walkways, a pitch-black sky and sharply defined solar shadows across an empty working area."
+    },
+    {
+      "id": "bg-187",
+      "category": "科幻空间",
+      "label": "太空电梯接驳港",
+      "description": "垂直轨道伸向云外，巨大玻璃厅俯瞰城市。",
+      "prompt": "A space-elevator terminal with towering vertical rails disappearing above the clouds, a vast glazed arrival hall and distant city layers below, cool structural lighting and clear open platforms."
+    },
+    {
+      "id": "bg-188",
+      "category": "科幻空间",
+      "label": "全息记忆档案馆",
+      "description": "悬浮光片像书架层层排开，黑色空间里只有信息光。",
+      "prompt": "A futuristic memory archive with translucent luminous rectangular panels arranged like floating shelves, a deep black interior, pale blue volumetric light and a simple unobstructed central walkway."
+    },
+    {
+      "id": "bg-189",
+      "category": "科幻空间",
+      "label": "外星红沙登陆点",
+      "description": "几何登陆舱停在红沙上，远处长着棱柱状岩石。",
+      "prompt": "An angular exploration lander on an alien red-sand plain, distant prismatic rock formations, twin pale suns and sharp metallic reflections, with a broad undisturbed foreground area."
+    },
+    {
+      "id": "bg-190",
+      "category": "科幻空间",
+      "label": "废弃仿生商场",
+      "description": "光洁外壳下长出藤蔓，故障灯带断续闪亮。",
+      "prompt": "An abandoned futuristic shopping atrium with smooth synthetic wall panels, creeping vines and partially lit ceiling strips, broken glass reflections and a wide empty floor without readable signs."
+    },
+    {
+      "id": "bg-091",
+      "category": "戏剧梦境",
+      "label": "红幕独角戏",
+      "description": "厚重红幕打开一道口，单束追光落在空舞台中心。",
+      "prompt": "An empty theater stage framed by heavy crimson velvet curtains, one sharply focused overhead spotlight on dark wooden boards and deep surrounding shadows, spare dramatic theatrical composition."
+    },
+    {
+      "id": "bg-092",
+      "category": "戏剧梦境",
+      "label": "巨型玩具屋",
+      "description": "日常家具被放大成玩具尺度，糖果色塑料表面明亮圆润。",
+      "prompt": "An oversized dollhouse room with giant rounded toy furniture, candy-colored plastic surfaces, exaggerated proportions and a tiny decorative window, bright artificial lighting and a clear central play area."
+    },
+    {
+      "id": "bg-093",
+      "category": "戏剧梦境",
+      "label": "漂浮房门",
+      "description": "不同颜色的房门悬在白色虚空，开门后仍是另一片天空。",
+      "prompt": "Several differently colored freestanding doors floating at varied heights in a white void, open doorways revealing unrelated skies, soft impossible shadows and a spacious surreal foreground plane."
+    },
+    {
+      "id": "bg-094",
+      "category": "戏剧梦境",
+      "label": "融化钟表厅",
+      "description": "长钟像软布般垂落在家具上，空房间时间停滞。",
+      "prompt": "A surreal empty room with elongated clock forms drooping over simple furniture, blank clock faces, sandy plaster walls and unnaturally long shadows, quiet dreamlike architectural distortion."
+    },
+    {
+      "id": "bg-095",
+      "category": "戏剧梦境",
+      "label": "纸月布景",
+      "description": "手工纸月挂在深蓝幕布前，棉絮云朵与细绳清晰可见。",
+      "prompt": "A handmade theatrical moon set, a large cut-paper crescent suspended before navy fabric, visible thin rigging strings, fluffy cotton clouds and warm practical lighting over a bare stage floor."
+    },
+    {
+      "id": "bg-096",
+      "category": "戏剧梦境",
+      "label": "镜面无限回廊",
+      "description": "镜墙彼此反射成无尽走廊，细条灯带反复折返。",
+      "prompt": "An infinite-mirror corridor with repeated narrow light strips, glossy black flooring and reflections of empty architectural frames, precise symmetrical depth with no reflected people or silhouettes."
+    },
+    {
+      "id": "bg-097",
+      "category": "戏剧梦境",
+      "label": "沉入海水的客厅",
+      "description": "完整客厅半浸在透明海水中，沙发上方漂着斑驳水光。",
+      "prompt": "A surreal living room partially flooded with perfectly clear seawater, an intact sofa and standing lamp, wavering caustic patterns across the walls and a sharp horizontal waterline without sea creatures."
+    },
+    {
+      "id": "bg-098",
+      "category": "戏剧梦境",
+      "label": "巨型花朵舞台",
+      "description": "花瓣像建筑墙面，人物尺度的空地藏在巨大花蕊之间。",
+      "prompt": "A theatrical garden set built from enormous sculpted flower petals, oversized stamens rising like columns and a clear platform between them, saturated coral and yellow surfaces under directional stage lighting."
+    },
+    {
+      "id": "bg-099",
+      "category": "戏剧梦境",
+      "label": "失重茶会",
+      "description": "茶壶、瓷杯和桌布悬在半空，淡蓝房间没有明显重力方向。",
+      "prompt": "A dreamlike pale-blue dining room with a floating teapot, porcelain cups and a gently suspended tablecloth, ordinary objects defying gravity above an empty floor in soft diffuse light."
+    },
+    {
+      "id": "bg-100",
+      "category": "戏剧梦境",
+      "label": "月面复古电话亭",
+      "description": "鲜红电话亭独立在灰色月壤上，地球挂在漆黑天空。",
+      "prompt": "A bright red vintage telephone booth standing alone on gray lunar regolith, a small blue Earth in a pitch-black sky, hard sunlight and an absurdly isolated cinematic composition."
+    },
+    {
+      "id": "bg-191",
+      "category": "戏剧梦境",
+      "label": "巨人棋盘",
+      "description": "巨型棋子像建筑般围住棋盘，光影严肃而荒诞。",
+      "prompt": "A surreal stage-sized chessboard surrounded by enormous sculptural chess pieces, black and ivory surfaces, hard theatrical side lighting and a clear central square with no human figures."
+    },
+    {
+      "id": "bg-192",
+      "category": "戏剧梦境",
+      "label": "云朵地毯房",
+      "description": "房间地面被蓬松云团覆盖，墙上开着天空形窗口。",
+      "prompt": "A dreamlike room with a soft cloud-covered floor, pale blue walls and irregular windows opening onto bright sky, diffuse luminous atmosphere and no conventional furniture in the center."
+    },
+    {
+      "id": "bg-193",
+      "category": "戏剧梦境",
+      "label": "倒置餐厅",
+      "description": "桌椅吊在天花板，地面空荡，吊灯反而向上生长。",
+      "prompt": "A surreal upside-down dining room with tables and chairs attached to the ceiling, inverted chandeliers and an empty floor, warm domestic colors and deliberately impossible architectural orientation."
+    },
+    {
+      "id": "bg-194",
+      "category": "戏剧梦境",
+      "label": "影子森林布景",
+      "description": "真实舞台上只有纸板树影，聚光灯把影子拉得极长。",
+      "prompt": "A theatrical forest made from flat cardboard tree silhouettes, exposed stage flooring and a single low spotlight, extremely elongated shadows and deliberately visible handmade scenery construction."
+    },
+    {
+      "id": "bg-195",
+      "category": "戏剧梦境",
+      "label": "玻璃糖果雨",
+      "description": "透明糖果形雕塑悬在空中，彩色反光洒满地面。",
+      "prompt": "A surreal installation of suspended translucent candy-shaped glass sculptures, tiny colored reflections across a white floor, gentle overhead lighting and broad clear space beneath the floating objects."
+    },
+    {
+      "id": "bg-196",
+      "category": "戏剧梦境",
+      "label": "纸船海洋",
+      "description": "放大的折纸船漂在蓝布波浪上，手作痕迹清晰。",
+      "prompt": "A handmade dream-ocean stage with oversized folded-paper boats resting among sculpted blue fabric waves, visible creases, simple warm lighting and an open foreground platform."
+    },
+    {
+      "id": "bg-197",
+      "category": "戏剧梦境",
+      "label": "时间标本柜",
+      "description": "透明柜里封着落叶与雨滴，房间像静止的收藏盒。",
+      "prompt": "A surreal specimen room with clear cabinets containing suspended autumn leaves and oversized glass raindrops, pale walls, quiet cool illumination and a broad empty floor between the displays."
+    },
+    {
+      "id": "bg-198",
+      "category": "戏剧梦境",
+      "label": "无门长廊",
+      "description": "每个门框后都是实体墙，淡粉走廊无限重复。",
+      "prompt": "An uncanny pastel-pink corridor with repeated doorframes opening onto solid walls, uniformly spaced ceiling lights and a smooth empty floor, restrained symmetry and subtly impossible architectural repetition."
+    },
+    {
+      "id": "bg-199",
+      "category": "戏剧梦境",
+      "label": "月光布幕海",
+      "description": "银色绸布堆成海浪，纸月投下冰冷舞台光。",
+      "prompt": "A theatrical sea formed from folds of silver satin, a large flat paper moon suspended above, cool directional stage lighting and a dark open foreground between fabric waves."
+    },
+    {
+      "id": "bg-200",
+      "category": "戏剧梦境",
+      "label": "漂浮相框花园",
+      "description": "空相框立在草地上或悬在空中，框内季节各不相同。",
+      "prompt": "A surreal garden of empty freestanding and floating picture frames, each enclosing a different seasonal sky, short green grass, gentle daylight and no images of people or written captions."
+    },
+    {
+      "id": "bg-201",
+      "category": "卧室",
+      "label": "晨光亚麻卧室",
+      "description": "米白亚麻床品、低矮木床与侧窗晨光，安静自然。",
+      "prompt": "A quiet bedroom with a low oak bed, rumpled ivory linen, a narrow bedside shelf and morning sunlight crossing the floor through a tall side window."
+    },
+    {
+      "id": "bg-202",
+      "category": "卧室",
+      "label": "阁楼斜顶卧室",
+      "description": "斜木梁下的小床，天窗与收纳箱围合紧凑空间。",
+      "prompt": "An attic bedroom beneath sloping timber rafters, a compact bed tucked under the eaves, stacked storage trunks and a skylight illuminating the open central floor."
+    },
+    {
+      "id": "bg-203",
+      "category": "卧室",
+      "label": "雨夜落地窗卧室",
+      "description": "高层落地窗挂着雨珠，深色床铺映出城市灯光。",
+      "prompt": "A high-rise bedroom at night, rain streaking floor-to-ceiling windows, distant city lights reflected on dark glass, a charcoal bed and a dim bedside lamp."
+    },
+    {
+      "id": "bg-204",
+      "category": "卧室",
+      "label": "日式榻榻米寝室",
+      "description": "草席、收起的障子门与铺开的被褥，庭院光线透入。",
+      "prompt": "A Japanese sleeping room with woven tatami flooring, neatly spread futon bedding, sliding shoji panels partly open toward a small courtyard and gentle reflected daylight."
+    },
+    {
+      "id": "bg-205",
+      "category": "卧室",
+      "label": "法式雕花卧室",
+      "description": "奶油雕花墙、弧形床头与古铜壁灯，细腻古典。",
+      "prompt": "A French bedroom with cream wall moldings, a curved upholstered headboard, antique brass sconces and a narrow parquet floor framed by long softly gathered curtains."
+    },
+    {
+      "id": "bg-206",
+      "category": "卧室",
+      "label": "工业砖墙卧室",
+      "description": "裸砖、黑铁床架与管线吊灯，粗粝的城市居所。",
+      "prompt": "An industrial bedroom with exposed red brick, a black iron bed frame, visible ceiling pipes and pendant work lights casting warm pools across a worn concrete floor."
+    },
+    {
+      "id": "bg-207",
+      "category": "卧室",
+      "label": "海边百叶窗卧室",
+      "description": "白色百叶窗漏下条纹光，蓝白床铺与藤编床头柜。",
+      "prompt": "A coastal bedroom with white wooden shutters, blue and white bedding, a woven rattan nightstand and narrow stripes of sunlight stretching across pale timber floorboards."
+    },
+    {
+      "id": "bg-208",
+      "category": "卧室",
+      "label": "玻璃穹顶观星卧室",
+      "description": "圆形卧床位于透明穹顶下，深夜星空包围室内。",
+      "prompt": "A circular stargazing bedroom under a transparent glass dome, a low round bed, minimal recessed floor lighting and an unobstructed night sky above the curved walls."
+    },
+    {
+      "id": "bg-209",
+      "category": "卧室",
+      "label": "复古花墙纸卧室",
+      "description": "细碎花墙纸、胡桃木床与蕾丝帘，旧宅午后氛围。",
+      "prompt": "A vintage bedroom with small floral wallpaper, a walnut bed, lace curtains filtering afternoon light and a dressing mirror reflecting the quiet corner of the room."
+    },
+    {
+      "id": "bg-210",
+      "category": "卧室",
+      "label": "壁龛床卧室",
+      "description": "厚墙中的拱形床龛，暖灰石膏与小型阅读灯。",
+      "prompt": "A compact bedroom with a bed recessed into an arched wall niche, warm gray plaster, a small reading light and a clear stone floor before the alcove."
+    },
+    {
+      "id": "bg-211",
+      "category": "卧室",
+      "label": "暖炉木屋卧室",
+      "description": "原木墙、格纹被褥与铸铁暖炉，窗外飘雪。",
+      "prompt": "A timber cabin bedroom with log walls, plaid blankets, a cast-iron stove glowing in one corner and falling snow visible through a small square window."
+    },
+    {
+      "id": "bg-212",
+      "category": "卧室",
+      "label": "沙漠旅舍卧室",
+      "description": "赭色土墙、低床和编织毯，窄窗投下锐利光束。",
+      "prompt": "A desert guesthouse bedroom with ochre earthen walls, a low platform bed, woven rugs and a narrow window casting a sharp shaft of light across the plaster."
+    },
+    {
+      "id": "bg-213",
+      "category": "卧室",
+      "label": "书墙阅读卧室",
+      "description": "床后整面书架、活动梯与床边阅读角，温暖灯光。",
+      "prompt": "A reading bedroom with full-height bookshelves behind the bed, a sliding library ladder, a compact bedside reading nook and warm lamps illuminating the empty wooden floor."
+    },
+    {
+      "id": "bg-214",
+      "category": "卧室",
+      "label": "黑白极简卧室",
+      "description": "悬浮黑色床架、白色墙面与隐藏灯槽，线条克制。",
+      "prompt": "A minimalist monochrome bedroom with a floating black bed frame, blank white walls, concealed linear lighting and a continuous pale floor with a spacious uncluttered foreground."
+    },
+    {
+      "id": "bg-215",
+      "category": "卧室",
+      "label": "帷幔四柱床卧室",
+      "description": "深色四柱床挂着薄纱，柔光穿过帷幔形成层次。",
+      "prompt": "A bedroom centered on a dark four-poster bed with translucent gauze curtains, layered daylight passing through the canopy and a polished floor reflecting the soft fabric edges."
+    },
+    {
+      "id": "bg-216",
+      "category": "卧室",
+      "label": "青绿植物卧室",
+      "description": "青绿墙面、藤床头与靠窗绿植，潮润清新。",
+      "prompt": "A botanical bedroom with muted teal walls, a woven cane headboard, leafy plants arranged beside a broad window and fresh daylight reaching the open tiled floor."
+    },
+    {
+      "id": "bg-217",
+      "category": "卧室",
+      "label": "老宅架子床卧室",
+      "description": "深木架子床、格栅窗与旧式衣柜，带中式居住气息。",
+      "prompt": "A traditional Chinese bedroom with a dark carved canopy bed, lattice windows, an aged wooden wardrobe and quiet daylight tracing rectangular patterns across the stone floor."
+    },
+    {
+      "id": "bg-218",
+      "category": "卧室",
+      "label": "胶囊睡眠舱",
+      "description": "紧凑弧形睡眠舱、嵌入床铺与琥珀阅读灯，未来旅宿。",
+      "prompt": "A compact capsule bedroom with curved molded walls, an inset sleeping platform, amber reading lights and a sliding translucent entry panel opening onto a clean narrow floor."
+    },
+    {
+      "id": "bg-219",
+      "category": "卧室",
+      "label": "唱片收藏卧室",
+      "description": "床边摆放唱片架和转盘，软木墙与暖黄台灯。",
+      "prompt": "A music collector's bedroom with record shelves beside a simple bed, a turntable on a low cabinet, cork wall panels and a warm yellow desk lamp."
+    },
+    {
+      "id": "bg-220",
+      "category": "卧室",
+      "label": "圆窗月光卧室",
+      "description": "圆窗中露出月亮，银色月光落在蓝灰床铺和地板上。",
+      "prompt": "A nocturnal bedroom with a large circular window framing the moon, blue-gray bedding, a bare bedside stool and silver moonlight spreading across the quiet wooden floor."
+    },
+    {
+      "id": "bg-221",
+      "category": "家庭",
+      "label": "磨砂窗卫生间",
+      "description": "白瓷马桶、窄洗手台与磨砂窗，洁净日常。",
+      "prompt": "A compact home toilet room with a white ceramic toilet, a narrow wall-mounted basin, frosted window glass and clean neutral tiles illuminated by diffused daylight."
+    },
+    {
+      "id": "bg-222",
+      "category": "家庭",
+      "label": "复古绿砖洗漱间",
+      "description": "墨绿小砖、圆镜与黄铜水龙头，精致旧宅洗漱角。",
+      "prompt": "A domestic washroom with dark green square tiles, a round mirror, brass taps and a small ceramic sink beneath a warm wall lamp, with an uncluttered tiled foreground."
+    },
+    {
+      "id": "bg-223",
+      "category": "家庭",
+      "label": "玻璃隔断淋浴间",
+      "description": "透明淋浴隔断、深灰石材与水珠，顶部天光明亮。",
+      "prompt": "A home shower room with a transparent glass partition, charcoal stone walls, droplets on the glass and a rectangular skylight illuminating the empty wet floor."
+    },
+    {
+      "id": "bg-224",
+      "category": "家庭",
+      "label": "窗边独立浴缸",
+      "description": "白色独立浴缸靠着高窗，亚麻帘与浅石材地面。",
+      "prompt": "A spacious bathroom with a freestanding white bathtub beside a tall window, loosely hanging linen curtains, a wooden bath stool and pale stone flooring in gentle daylight."
+    },
+    {
+      "id": "bg-225",
+      "category": "家庭",
+      "label": "露天庭院温泉",
+      "description": "竹篱围起石砌温泉，薄雾与小型庭院植被相伴。",
+      "prompt": "A private courtyard hot spring with a stone-lined pool, bamboo privacy fencing, drifting steam and small garden plants at the edges, leaving the poolside stone path open."
+    },
+    {
+      "id": "bg-226",
+      "category": "家庭",
+      "label": "日式木桶浴室",
+      "description": "深木浴桶、低矮水龙头与木条地板，温暖水汽弥漫。",
+      "prompt": "A Japanese home bath with a deep cedar soaking tub, low wall-mounted taps, slatted wooden flooring and warm steam rising beneath a softly lit timber ceiling."
+    },
+    {
+      "id": "bg-227",
+      "category": "家庭",
+      "label": "晨间白色厨房",
+      "description": "白柜、木台面与侧窗，早餐器皿整齐放在边角。",
+      "prompt": "A bright home kitchen with white cabinets, oak countertops and a side window, a few breakfast dishes placed near the wall and an open sunlit aisle."
+    },
+    {
+      "id": "bg-228",
+      "category": "家庭",
+      "label": "复古搪瓷厨房",
+      "description": "奶油色搪瓷炉具、格纹地砖与红色小柜，怀旧家常。",
+      "prompt": "A retro domestic kitchen with a cream enamel stove, checkerboard floor tiles, small red cabinets and a window above the sink casting crisp light through the narrow room."
+    },
+    {
+      "id": "bg-229",
+      "category": "家庭",
+      "label": "深色中岛厨房",
+      "description": "深木柜、宽石台中岛与吊灯，现代开放空间。",
+      "prompt": "A modern open kitchen with dark walnut cabinetry, a broad stone island and suspended pendant lights, with clear walking space between the island and the rear counter."
+    },
+    {
+      "id": "bg-230",
+      "category": "家庭",
+      "label": "烟火中式厨房",
+      "description": "不锈钢灶台、挂起的炒锅与调料架，温暖生活气息。",
+      "prompt": "A practical Chinese home kitchen with a stainless steel stovetop, hanging woks and a tidy spice shelf, warm overhead lighting and a clear aisle along the tiled floor."
+    },
+    {
+      "id": "bg-231",
+      "category": "家庭",
+      "label": "阳台晾衣角",
+      "description": "衣架靠墙、浅色床单晾起，阳光穿过栏杆投下条纹。",
+      "prompt": "A domestic laundry balcony with drying racks placed against the wall, pale sheets hanging overhead and sunlight casting railing stripes across a clear stretch of tiled floor."
+    },
+    {
+      "id": "bg-232",
+      "category": "家庭",
+      "label": "绿植封闭阳台",
+      "description": "玻璃围合阳台、植物架和小藤椅，清晨光线通透。",
+      "prompt": "An enclosed apartment balcony with glass panels, tiered plant shelves and a small wicker chair, fresh morning light illuminating the narrow open floor beside the windows."
+    },
+    {
+      "id": "bg-233",
+      "category": "家庭",
+      "label": "城市夜景露台",
+      "description": "高层家庭露台、简洁户外椅与点点城市灯光。",
+      "prompt": "A private apartment terrace at night with simple outdoor chairs, a low parapet and a broad view of scattered city lights beyond an uncluttered stone floor."
+    },
+    {
+      "id": "bg-234",
+      "category": "家庭",
+      "label": "午后布艺客厅",
+      "description": "浅色布沙发、地毯与低茶几，斜阳铺满地面。",
+      "prompt": "A lived-in family lounge with a light fabric sofa, a woven rug and a low coffee table set to one side, afternoon sunlight filling the open floor."
+    },
+    {
+      "id": "bg-235",
+      "category": "家庭",
+      "label": "老式电视客厅",
+      "description": "木质电视柜、碎花沙发套与吊扇，带年代感的家庭空间。",
+      "prompt": "An older family living room with a wooden television cabinet, floral sofa covers, a ceiling fan and worn terrazzo flooring lit by a broad curtained window."
+    },
+    {
+      "id": "bg-236",
+      "category": "家庭",
+      "label": "壁炉会客厅",
+      "description": "石砌壁炉、弧形沙发与厚地毯，暖光围合。",
+      "prompt": "A home sitting room with a stone fireplace, a curved sofa and a thick wool rug, amber firelight mixing with subdued window light across the empty foreground."
+    },
+    {
+      "id": "bg-237",
+      "category": "家庭",
+      "label": "家庭餐厅",
+      "description": "圆木餐桌、吊灯与餐边柜，背景是干净的家居墙面。",
+      "prompt": "A domestic dining room with a round wooden table, a simple pendant lamp and a sideboard against a clean wall, leaving a wide passage beside the table."
+    },
+    {
+      "id": "bg-238",
+      "category": "家庭",
+      "label": "玄关换鞋区",
+      "description": "嵌入鞋柜、长凳与半开的入户门，日光从门口进入。",
+      "prompt": "A home entrance hall with a built-in shoe cabinet, a narrow bench and a partly open front door, daylight extending across the uncluttered entry floor."
+    },
+    {
+      "id": "bg-239",
+      "category": "家庭",
+      "label": "家用洗衣房",
+      "description": "叠放洗烘机、洗衣篮与折衣台，整洁实用。",
+      "prompt": "A home laundry room with stacked washer and dryer units, woven laundry baskets and a folding counter, neutral overhead light revealing a clean open tiled aisle."
+    },
+    {
+      "id": "bg-240",
+      "category": "家庭",
+      "label": "楼梯转角平台",
+      "description": "木扶手、家庭相框与转角窗，阶梯形成纵深。",
+      "prompt": "A domestic stair landing with a wooden handrail, framed family photographs along the wall and a corner window, soft daylight defining the steps and the empty landing."
+    },
+    {
+      "id": "bg-241",
+      "category": "学校",
+      "label": "午后普通教室",
+      "description": "整齐课桌、绿色黑板与高窗，树影落在空教室里。",
+      "prompt": "An empty school classroom with orderly wooden desks, a green chalkboard and tall side windows, afternoon tree shadows stretching across the floor between the rows."
+    },
+    {
+      "id": "bg-242",
+      "category": "学校",
+      "label": "雨天教学楼走廊",
+      "description": "湿润窗景映入长廊，教室门、公告栏与水磨石地面。",
+      "prompt": "A school corridor on a rainy day with classroom doors, noticeboards and a terrazzo floor, cool window light reflected along the empty passage toward the far stairwell."
+    },
+    {
+      "id": "bg-243",
+      "category": "学校",
+      "label": "梧桐校园大道",
+      "description": "两排梧桐树夹着宽步道，远处是低矮教学楼。",
+      "prompt": "A broad campus avenue lined with mature plane trees, a distant low classroom building and scattered fallen leaves, dappled light crossing the clear central walkway."
+    },
+    {
+      "id": "bg-244",
+      "category": "学校",
+      "label": "樱花校园大道",
+      "description": "盛开的樱花树沿校道延伸，花瓣点缀干净路面。",
+      "prompt": "A school avenue beneath rows of blooming cherry trees, pale petals scattered across the pavement and classroom buildings glimpsed between branches, with an open path receding ahead."
+    },
+    {
+      "id": "bg-245",
+      "category": "学校",
+      "label": "学校围网天台",
+      "description": "铁丝围网、水箱与平坦屋顶，蓝天下风感开阔。",
+      "prompt": "An empty school rooftop enclosed by chain-link fencing, a utility water tank at one edge and a flat concrete surface beneath a wide clear blue sky."
+    },
+    {
+      "id": "bg-246",
+      "category": "学校",
+      "label": "晨雾操场",
+      "description": "草坪操场、旗杆与教学楼，清晨薄雾尚未散去。",
+      "prompt": "A school sports field in light morning mist, trimmed grass, a flagpole and distant classroom blocks, with soft early light leaving the central field completely open."
+    },
+    {
+      "id": "bg-247",
+      "category": "学校",
+      "label": "红色塑胶跑道",
+      "description": "弯曲跑道与白色编号线，侧面看台洒下阳光。",
+      "prompt": "A red rubber school running track with crisp white lane markings curving into the distance, low spectator stands along one side and bright sunlight across the empty lanes."
+    },
+    {
+      "id": "bg-248",
+      "category": "学校",
+      "label": "体育器材室",
+      "description": "篮球网袋、跳箱与垫子沿墙归置，中央通道空出。",
+      "prompt": "A school sports equipment room with basketball nets, vaulting boxes and stacked exercise mats stored along the walls, fluorescent lighting illuminating a clear central aisle."
+    },
+    {
+      "id": "bg-249",
+      "category": "学校",
+      "label": "化学实验室",
+      "description": "实验台、水槽与玻璃器皿柜，整齐洁净的教学环境。",
+      "prompt": "A school chemistry laboratory with long experiment benches, inset sinks and glassware cabinets, cool daylight from high windows and an empty aisle between the workstations."
+    },
+    {
+      "id": "bg-250",
+      "category": "学校",
+      "label": "音乐排练教室",
+      "description": "黑色立式钢琴、谱架与吸音墙面，暖色顶灯。",
+      "prompt": "A school music practice room with a black upright piano, folded music stands and acoustic wall panels, warm ceiling lights illuminating the open rehearsal floor."
+    },
+    {
+      "id": "bg-251",
+      "category": "学校",
+      "label": "美术画室",
+      "description": "靠墙画架、石膏像与颜料台，北向窗光均匀。",
+      "prompt": "A school art classroom with easels arranged along the walls, plaster study sculptures and paint tables, even north-facing window light spreading across the clear central floor."
+    },
+    {
+      "id": "bg-252",
+      "category": "学校",
+      "label": "学校图书阅览室",
+      "description": "长阅读桌、低书架与大窗，安静有序。",
+      "prompt": "A school library reading room with long study tables, low bookshelves and broad windows, soft daylight falling between the tables and an uncluttered aisle toward the rear."
+    },
+    {
+      "id": "bg-253",
+      "category": "学校",
+      "label": "午休校园食堂",
+      "description": "浅色餐桌、取餐窗口与托盘架，干净明亮无人。",
+      "prompt": "An empty school cafeteria with pale dining tables, serving windows and stacked tray racks, bright overhead lights and a wide central aisle across the tiled floor."
+    },
+    {
+      "id": "bg-254",
+      "category": "学校",
+      "label": "放学鞋柜大厅",
+      "description": "整排学生鞋柜、入口玻璃门与低矮换鞋凳。",
+      "prompt": "A school entry hall lined with individual shoe lockers, glass entrance doors and low changing benches, late-afternoon light crossing the open tiled space between the locker rows."
+    },
+    {
+      "id": "bg-255",
+      "category": "学校",
+      "label": "学生社团活动室",
+      "description": "折叠桌、海报墙与储物柜，活动后收拾整齐的小房间。",
+      "prompt": "A student club room with folding tables pushed toward the walls, a poster-covered noticeboard and storage cabinets, warm window light illuminating the tidy open center."
+    },
+    {
+      "id": "bg-256",
+      "category": "学校",
+      "label": "校园自行车棚",
+      "description": "金属棚顶、整齐车架与停放的自行车，树影斑驳。",
+      "prompt": "A covered campus bicycle shelter with a metal roof, orderly bicycle racks and parked bikes along the sides, dappled tree shadows crossing the clear central passage."
+    },
+    {
+      "id": "bg-257",
+      "category": "学校",
+      "label": "旧教学楼楼梯间",
+      "description": "绿色墙裙、旧石阶与大窗，阶梯转折形成层次。",
+      "prompt": "An older school stairwell with green lower walls, worn stone steps and a tall landing window, angled daylight emphasizing the turns of the empty staircase."
+    },
+    {
+      "id": "bg-258",
+      "category": "学校",
+      "label": "学校广播室",
+      "description": "小型调音台、话筒和隔音玻璃，紧凑的播音空间。",
+      "prompt": "A school broadcasting room with a compact mixing console, tabletop microphones and a soundproof glass partition, muted studio lights and clear floor space beside the desk."
+    },
+    {
+      "id": "bg-259",
+      "category": "学校",
+      "label": "室外篮球球场",
+      "description": "绿色围网与蓝色球场，篮架投出清晰长影。",
+      "prompt": "An outdoor school basketball court with green perimeter fencing, blue playing surfaces and a single hoop casting a long clear shadow across the empty painted court."
+    },
+    {
+      "id": "bg-260",
+      "category": "学校",
+      "label": "校园礼堂舞台",
+      "description": "木质讲台、深红帷幕与折叠座椅，庄重而朴素。",
+      "prompt": "A school assembly hall with a wooden stage, deep red curtains and rows of folding seats, broad overhead lights illuminating the empty stage and the central aisle."
+    },
+    {
+      "id": "bg-261",
+      "category": "办公室",
+      "label": "玻璃幕墙开放办公区",
+      "description": "低隔断工位与整面玻璃窗，现代办公空间明亮开阔。",
+      "prompt": "A modern open-plan office with low workstation partitions and a full glass curtain wall, daylight illuminating neat desks and the wide empty circulation path between them."
+    },
+    {
+      "id": "bg-262",
+      "category": "办公室",
+      "label": "旧式文书办公室",
+      "description": "木桌、文件柜与台式风扇，纸质档案沿墙排列。",
+      "prompt": "An older clerical office with wooden desks, metal filing cabinets and a tabletop fan, paper archives arranged along the walls and muted daylight across the worn floor."
+    },
+    {
+      "id": "bg-263",
+      "category": "办公室",
+      "label": "创意团队工作室",
+      "description": "大工作台、色样板与模型架，工作材料集中在边缘。",
+      "prompt": "A creative office studio with a large shared worktable, color sample boards and model shelves, task materials grouped at the edges and a clear central floor."
+    },
+    {
+      "id": "bg-264",
+      "category": "办公室",
+      "label": "高层经理办公室",
+      "description": "深木办公桌、皮椅与城市天际线，宽敞简洁。",
+      "prompt": "A high-rise executive office with a dark wooden desk, a leather chair and broad skyline windows, restrained furnishings and a wide open carpeted foreground in cool daylight."
+    },
+    {
+      "id": "bg-265",
+      "category": "办公室",
+      "label": "玻璃会议室",
+      "description": "长桌、空椅与玻璃隔断，背景透出模糊工位。",
+      "prompt": "A glass-walled conference room with a long table and empty chairs, frosted bands on the partitions and blurred workstations beyond, with clean neutral ceiling lighting."
+    },
+    {
+      "id": "bg-266",
+      "category": "办公室",
+      "label": "小型视频会议间",
+      "description": "圆桌、壁挂屏与吸音软包，紧凑无窗空间。",
+      "prompt": "A compact video meeting room with a small round table, a wall-mounted screen and fabric acoustic panels, even recessed lighting and uncluttered floor space near the doorway."
+    },
+    {
+      "id": "bg-267",
+      "category": "办公室",
+      "label": "办公室茶水间",
+      "description": "咖啡机、吧台与储物柜，暖灯照亮日常休息角。",
+      "prompt": "An office pantry with a coffee machine, a short breakfast bar and storage cabinets, warm under-cabinet lighting and a clear tiled aisle beside the counter."
+    },
+    {
+      "id": "bg-268",
+      "category": "办公室",
+      "label": "深夜加班工位",
+      "description": "空桌上的屏幕微光、黑暗窗景与单盏台灯。",
+      "prompt": "A quiet office workstation at night with a faintly glowing monitor, dark windows and a single desk lamp, cool shadows extending across the empty aisle beside the desk."
+    },
+    {
+      "id": "bg-269",
+      "category": "办公室",
+      "label": "办公室打印角",
+      "description": "复印机、纸张收纳架与浅灰墙面，明亮实用。",
+      "prompt": "An office printing area with a large copier, paper storage shelves and pale gray walls, bright functional overhead lights and a clear floor in front of the machines."
+    },
+    {
+      "id": "bg-270",
+      "category": "办公室",
+      "label": "创业车库办公室",
+      "description": "卷帘门、拼装桌与白板，随意但整洁的办公空间。",
+      "prompt": "A startup office inside a converted garage with a roller door, modular desks and a freestanding whiteboard, practical ceiling lights illuminating a tidy open central aisle."
+    },
+    {
+      "id": "bg-271",
+      "category": "办公室",
+      "label": "共享办公休闲区",
+      "description": "柔软沙发、圆桌与阶梯坐席，半开放的交流空间。",
+      "prompt": "A coworking lounge with soft sofas, small round tables and tiered seating, a partially open view of nearby desks and warm ambient light across the circulation space."
+    },
+    {
+      "id": "bg-272",
+      "category": "办公室",
+      "label": "律所档案办公室",
+      "description": "深色书柜、整齐卷宗与传统办公桌，严谨沉稳。",
+      "prompt": "A law office with dark bookcases, neatly organized case files and a traditional writing desk, brass reading lamps and a clear parquet floor beneath tall shelves."
+    },
+    {
+      "id": "bg-273",
+      "category": "办公室",
+      "label": "建筑事务所绘图室",
+      "description": "大幅绘图桌、建筑模型与卷纸架，光线均匀。",
+      "prompt": "An architectural office with broad drafting tables, building models and rolled drawing racks, diffused skylight across the work surfaces and empty space between the tables."
+    },
+    {
+      "id": "bg-274",
+      "category": "办公室",
+      "label": "新闻编辑办公室",
+      "description": "成排显示器、新闻板与时钟墙，略显密集的工作场。",
+      "prompt": "A newsroom office with rows of monitors, editorial boards and a wall of clocks, cool overhead lighting and a clear central route through the dense empty workstations."
+    },
+    {
+      "id": "bg-275",
+      "category": "办公室",
+      "label": "办公室接待前厅",
+      "description": "弧形接待台、等候椅与无字标识墙，干净正式。",
+      "prompt": "An office reception lobby with a curved front desk, simple waiting chairs and a blank feature wall, soft recessed lights reflecting across a broad polished stone floor."
+    },
+    {
+      "id": "bg-276",
+      "category": "办公室",
+      "label": "百叶窗财务室",
+      "description": "整排文件夹、计算器与百叶窗投影，安静实用。",
+      "prompt": "An accounting office with rows of binders, compact calculators on tidy desks and venetian blinds casting striped light, with an empty aisle along the filing cabinets."
+    },
+    {
+      "id": "bg-277",
+      "category": "办公室",
+      "label": "办公室电话隔间",
+      "description": "独立隔音电话舱、窄桌与毛毡内壁，克制现代。",
+      "prompt": "A small office phone booth with a narrow standing desk, felt-lined interior walls and a glass door, a soft overhead light illuminating the clear compact floor."
+    },
+    {
+      "id": "bg-278",
+      "category": "办公室",
+      "label": "植物中庭办公区",
+      "description": "室内绿植中庭旁布置工位，玻璃顶透入自然光。",
+      "prompt": "An office beside an indoor planted atrium, workstations arranged around the perimeter and daylight filtering through a glass roof, with a wide open path along the greenery."
+    },
+    {
+      "id": "bg-279",
+      "category": "办公室",
+      "label": "研究团队项目室",
+      "description": "磁性白板、便签墙与拼接桌，任务资料分区陈列。",
+      "prompt": "A research project office with magnetic whiteboards, clustered notes and joined worktables, organized reference materials along the walls and neutral light across the open meeting area."
+    },
+    {
+      "id": "bg-280",
+      "category": "办公室",
+      "label": "港口调度办公室",
+      "description": "宽窗望向码头，控制桌、挂图与工业吊灯。",
+      "prompt": "A port dispatch office with broad windows overlooking cranes, a control desk, wall charts and industrial pendant lamps, with clear worn flooring between the desk and windows."
+    },
+    {
+      "id": "bg-281",
+      "category": "简单纹理",
+      "label": "细麻布纹",
+      "description": "米白细麻布的交织纤维，低对比且均匀。",
+      "prompt": "A simple full-frame texture backdrop of ivory fine linen with evenly interwoven fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-282",
+      "category": "简单纹理",
+      "label": "粗织帆布纹",
+      "description": "沙色粗帆布，经纬颗粒自然起伏。",
+      "prompt": "A simple full-frame texture backdrop of sand-colored coarse canvas with raised woven threads, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-283",
+      "category": "简单纹理",
+      "label": "棉纸纤维纹",
+      "description": "暖白棉纸，细小纤维散布在平整纸面。",
+      "prompt": "A simple full-frame texture backdrop of warm white cotton paper with delicate embedded fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-284",
+      "category": "简单纹理",
+      "label": "牛皮纸纹",
+      "description": "浅褐牛皮纸，柔和细褶与自然纸粒。",
+      "prompt": "A simple full-frame texture backdrop of light brown kraft paper with subtle creases and natural paper grain, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-285",
+      "category": "简单纹理",
+      "label": "宣纸晕染纹",
+      "description": "淡灰宣纸，浅墨边缘柔和晕开。",
+      "prompt": "A simple full-frame texture backdrop of pale gray rice paper with gently diffused ink wash edges, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-286",
+      "category": "简单纹理",
+      "label": "灰泥刮痕纹",
+      "description": "浅灰抹灰墙，平缓刮刀痕迹交错。",
+      "prompt": "A simple full-frame texture backdrop of light gray plaster with broad overlapping trowel marks, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-287",
+      "category": "简单纹理",
+      "label": "细砂石纹",
+      "description": "暖砂岩平面，细小矿物颗粒均匀分布。",
+      "prompt": "A simple full-frame texture backdrop of warm sandstone with evenly scattered fine mineral grains, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-288",
+      "category": "简单纹理",
+      "label": "微水泥纹",
+      "description": "灰米色微水泥，低对比哑光云纹。",
+      "prompt": "A simple full-frame texture backdrop of greige microcement with low-contrast matte clouding, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-289",
+      "category": "简单纹理",
+      "label": "哑光皮革纹",
+      "description": "深棕皮革，细密毛孔与轻微折痕。",
+      "prompt": "A simple full-frame texture backdrop of dark brown matte leather with fine pores and shallow creases, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-290",
+      "category": "简单纹理",
+      "label": "拉丝铝纹",
+      "description": "银灰金属表面，单向细密拉丝。",
+      "prompt": "A simple full-frame texture backdrop of silver-gray aluminum with fine parallel brushed lines, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-291",
+      "category": "简单纹理",
+      "label": "浅木直纹",
+      "description": "浅橡木平面，细长木纹纵向延伸。",
+      "prompt": "A simple full-frame texture backdrop of pale oak with slender straight grain running vertically, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-292",
+      "category": "简单纹理",
+      "label": "深木环纹",
+      "description": "深胡桃木，年轮曲线自然盘绕。",
+      "prompt": "A simple full-frame texture backdrop of dark walnut with gently curving growth-ring patterns, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-293",
+      "category": "简单纹理",
+      "label": "细腻软木纹",
+      "description": "浅棕软木，碎颗粒密集但颜色柔和。",
+      "prompt": "A simple full-frame texture backdrop of light brown cork with densely packed soft-toned granules, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-294",
+      "category": "简单纹理",
+      "label": "黑白大理石纹",
+      "description": "白底石材，稀疏灰黑细脉穿过画面。",
+      "prompt": "A simple full-frame texture backdrop of white marble with sparse thin charcoal and gray veins, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-295",
+      "category": "简单纹理",
+      "label": "水磨石碎粒纹",
+      "description": "奶白底中散布低饱和彩色石屑。",
+      "prompt": "A simple full-frame texture backdrop of milky terrazzo with small scattered muted colored stone chips, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-296",
+      "category": "简单纹理",
+      "label": "波纹磨砂玻璃",
+      "description": "半透明玻璃表面，竖向波纹柔化光线。",
+      "prompt": "A simple full-frame texture backdrop of translucent frosted glass with vertical ripples diffusing the light, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-297",
+      "category": "简单纹理",
+      "label": "深灰毛毡纹",
+      "description": "深灰毛毡，短绒细密而平整。",
+      "prompt": "A simple full-frame texture backdrop of charcoal felt with a dense even layer of short fibers, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-298",
+      "category": "简单纹理",
+      "label": "釉面细裂纹",
+      "description": "淡青釉面，细微开片自然交织。",
+      "prompt": "A simple full-frame texture backdrop of pale celadon glaze with a delicate irregular crackle network, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-299",
+      "category": "简单纹理",
+      "label": "柔软绒面纹",
+      "description": "雾粉绒面，绒毛方向产生细微明暗。",
+      "prompt": "A simple full-frame texture backdrop of dusty pink suede with subtle tonal shifts from the nap direction, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-300",
+      "category": "简单纹理",
+      "label": "细点胶片颗粒",
+      "description": "中性灰底，细密均匀胶片颗粒。",
+      "prompt": "A simple full-frame texture backdrop of neutral gray film grain with tiny evenly distributed speckles, a continuous flat surface with restrained detail, even lighting, no objects, lettering or visible room boundaries."
+    },
+    {
+      "id": "bg-301",
+      "category": "纯色",
+      "label": "纯白强烈阴影",
+      "description": "纯白无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid pure white studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-302",
+      "category": "纯色",
+      "label": "炭黑强烈阴影",
+      "description": "炭黑无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid charcoal black studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-303",
+      "category": "纯色",
+      "label": "象牙白强烈阴影",
+      "description": "象牙白无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid ivory white studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-304",
+      "category": "纯色",
+      "label": "浅灰强烈阴影",
+      "description": "浅灰无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid light gray studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-305",
+      "category": "纯色",
+      "label": "石墨灰强烈阴影",
+      "description": "石墨灰无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid graphite gray studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-306",
+      "category": "纯色",
+      "label": "米杏强烈阴影",
+      "description": "米杏无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid warm beige studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-307",
+      "category": "纯色",
+      "label": "奶油黄强烈阴影",
+      "description": "奶油黄无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid cream yellow studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-308",
+      "category": "纯色",
+      "label": "柠檬黄强烈阴影",
+      "description": "柠檬黄无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid lemon yellow studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-309",
+      "category": "纯色",
+      "label": "焦橙强烈阴影",
+      "description": "焦橙无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid burnt orange studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-310",
+      "category": "纯色",
+      "label": "朱红强烈阴影",
+      "description": "朱红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid vermilion red studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-311",
+      "category": "纯色",
+      "label": "酒红强烈阴影",
+      "description": "酒红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid burgundy red studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-312",
+      "category": "纯色",
+      "label": "樱粉强烈阴影",
+      "description": "樱粉无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid cherry blossom pink studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-313",
+      "category": "纯色",
+      "label": "玫红强烈阴影",
+      "description": "玫红无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid magenta studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-314",
+      "category": "纯色",
+      "label": "薰衣草紫强烈阴影",
+      "description": "薰衣草紫无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid lavender purple studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-315",
+      "category": "纯色",
+      "label": "深紫强烈阴影",
+      "description": "深紫无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid deep violet studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-316",
+      "category": "纯色",
+      "label": "钴蓝强烈阴影",
+      "description": "钴蓝无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid cobalt blue studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-317",
+      "category": "纯色",
+      "label": "天蓝强烈阴影",
+      "description": "天蓝无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid sky blue studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-318",
+      "category": "纯色",
+      "label": "薄荷绿强烈阴影",
+      "description": "薄荷绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid mint green studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-319",
+      "category": "纯色",
+      "label": "森林绿强烈阴影",
+      "description": "森林绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid forest green studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    },
+    {
+      "id": "bg-320",
+      "category": "纯色",
+      "label": "青绿强烈阴影",
+      "description": "青绿无缝纯色背景，硬质定向光带来强烈阴影与清晰投影边缘。",
+      "prompt": "A seamless solid teal studio backdrop extending across the wall and floor, hard directional lighting producing strong, sharply defined cast shadows, no texture, props or lettering."
+    }
+  ]
+}

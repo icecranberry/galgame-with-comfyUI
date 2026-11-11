@@ -163,7 +163,7 @@
                         <Transition name="persona-fold" mode="out-in">
                           <div v-if="activeSceneOutfit" :key="activeSceneOutfit.scene" class="scene-edit">
                             <p class="split-hint">{{ activeSceneOutfit.scene === 'sleep' ? '睡眠时段优先使用睡衣；未配置时沿用其他有效服装。' : activeSceneOutfit.scene === 'work' ? '保留角色的常态形象，作为其他服装的生成基准。' : '只调整这套服装，保留角色的身体特征。' }}</p>
-                            <linshe-button variant="secondary" size="sm" class="clothing-library-trigger" :disabled="outfitBatchRunning || outfitGenerating" @click="openClothingLibrary">衣服库 · 选 tag 搭配</linshe-button>
+                            <linshe-button v-if="profileAdapter" variant="secondary" size="sm" class="clothing-library-trigger" :disabled="outfitBatchRunning || outfitGenerating" @click="openClothingLibrary">衣服库 · 选 tag 搭配</linshe-button>
                             <linshe-input
                               v-model="activeSceneOutfit.description" type="textarea" rows="10" :disabled="outfitBatchRunning"
                               :aria-label="`${activeSceneOutfit.scene === 'work' ? '默认' : activeSceneOutfit.sceneLabel}外观描述`"

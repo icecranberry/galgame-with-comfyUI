@@ -395,3 +395,10 @@ test('direct image identity understands an original Chinese character with an En
   assert.equal(extractCharacterEnglishName(character), 'Bai Zhiqing');
   assert.equal(extractCharacterEnglishName({ name: 'original_character', base_prompt: '## 你的外观\nshort hair, blue eyes' }), 'original character');
 });
+
+test('escaped IP identities retain their English name and do not leak the closing escape into the series', () => {
+  const character = { name: '中文名字', base_prompt: '## 你的外观\nFurina \\(Genshin Impact\\) has blue hair and blue eyes.' };
+  assert.equal(extractCharacterIdentityTag(character), 'Furina (Genshin Impact)');
+  assert.equal(extractCharacterEnglishName(character), 'Furina');
+  assert.equal(buildCharacterImageAppearance(character), 'Furina \\(Genshin Impact\\) has blue hair and blue eyes.');
+});
