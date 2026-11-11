@@ -48,11 +48,9 @@ export function parseStudioPolish(raw, requiredTags = []) {
     throw new Error('AI 润色仍包含拼装标记，请重试或关闭 AI 润色');
   }
   const normalized = prompt.replace(/\s+/g, ' ');
-  const missingTags = requiredTags.filter(tag => !new RegExp(`(?<![\\w])${tag.replace(/\s+/g, ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`, 'i').test(normalized));
-  if (missingTags.length) {
-    throw Object.assign(new Error('AI 润色遗漏了服装或姿势 tag，请重试或关闭 AI 润色'), { code: 'STUDIO_MISSING_TAGS', missingTags });
-  }
-  return prompt.replace(/\s*\n\s*/g, ' ');
+  const missingTags = [...new Set(requiredTags)].filter(tag => !new RegExp(`(?<![\\w])${tag.replace(/\s+/g, ' ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`, 'i').test(normalized));
+  // Repair omitted tags locally so a usable rewrite can proceed without another LLM call.
+  return [prompt.replace(/\s*\n\s*/g, ' '), ...missingTags].join(', ');
 }
 
 // Capture only the rules and model settings used by studio rewriting.
@@ -64,31 +62,22 @@ export function getStudioPolishContext() {
     model: config.llm.model || 'deepseek-chat',
     baseURL: config.llm.baseURL,
     connectionType: config.llm.connectionType,
-    thinkingMode: config.llm.thinkingMode,
+    thinkingMode: 'disabled',
     maxTokens: config.llm.maxTokens,
     extraBody: config.llm.extraBody,
     freeEgg: config.llm.freeEgg,
   };
 }
 
-export async function polishStudioPrompt({ prompt, personas, requiredTags = [], polishInstruction = '', context = getStudioPolishContext(), onRetry }, { chat = chatSync } = {}) {
+export async function polishStudioPrompt({ prompt, personas, requiredTags = [], polishInstruction = '', context = getStudioPolishContext() }, { chat = chatSync } = {}) {
   const request = buildStudioPolishRequest({ prompt, personas, requiredTags, polishInstruction, ...context });
   const options = {
     model: context.model, temperature: 0.35,
+    thinking: { type: 'disabled' }, forceDisableThinking: true,
     label: '照相馆提示词润色', lorebook: request.lorebook,
   };
   const raw = await chat(request.messages, options);
-  try { return parseStudioPolish(raw, requiredTags); }
-  catch (error) {
-    if (error.code !== 'STUDIO_MISSING_TAGS') throw error;
-    onRetry?.();
-    // A genuine dropped tag gets one targeted retry, retaining the same stable
-    // prefix and a single final user. Never cache an invalid draft or loop.
-    const messages = request.messages.map((message, index) => index === request.messages.length - 1
-      ? { ...message, content: `${message.content}\n\n上次结果遗漏了以下 tag，请按原始材料重新整理，并将它们保留在所属人物或姿势描述中：\n${error.missingTags.join('\n')}` }
-      : message);
-    return parseStudioPolish(await chat(messages, options), requiredTags);
-  }
+  return parseStudioPolish(raw, requiredTags);
 }
 
 const CLOTHING_TRANSLATION_RULES = `你是服装词语翻译员。把用户的自定义服装描述准确翻译为简短英文服装词组，可用逗号分隔。

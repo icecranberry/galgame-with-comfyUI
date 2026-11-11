@@ -48,11 +48,76 @@ async function mountStudio(t, submit) {
   state.characterId.value = 1
   state.poseId.value = 'pose'
   return {
-    state, get sounds() { return sounds },
+    state, unmount: () => app.unmount(), get sounds() { return sounds },
     send: async (event, job) => { handlers.get(event)({ job }); await Vue.nextTick() },
     snapshot: jobs => { snapshot = jobs },
   }
 }
+
+test('studio mixes simulated and real progress with the same timing and cap as schedule peek', async t => {
+  storage(t)
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  t.mock.method(Math, 'random', () => 0)
+  const studio = await mountStudio(t)
+  const running = { id: 'progress-shot', status: 'running', stage: 'queued', progress: 0 }
+  await studio.send('photo_studio_progress', running)
+  assert.equal(studio.state.studioProgress.value, 0)
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 1)
+  await studio.send('photo_studio_progress', { ...running, stage: 'sampling', progress: 0.8 })
+  assert.equal(studio.state.studioProgress.value, 80, 'real sampling takes over immediately')
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.simulatedPct.value, 1, 'simulation pauses while real progress leads')
+  for (const stage of ['polishing', 'queued', 'generating', 'saving']) {
+    await studio.send('photo_studio_progress', { ...running, stage })
+    assert.equal(studio.state.studioProgress.value, 80, `${stage} must not reset the displayed progress`)
+  }
+  await studio.send('photo_studio_ready', { ...running, status: 'done', stage: 'done', progress: 1, output_url: '/images/photo_studio/progress.png' })
+  assert.equal(studio.state.studioProgress.value, 100)
+  assert.equal(studio.state.currentPhoto.value.id, running.id)
+
+  await studio.send('photo_studio_progress', { ...running, id: 'next-shot' })
+  assert.equal(studio.state.studioProgress.value, 0, 'a new shot resets both values')
+  for (let tick = 0; tick < 110; tick++) t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 95, 'simulation never completes a pending photo')
+  await studio.send('photo_studio_progress', { ...running, id: 'next-shot', stage: 'sampling', progress: 0.1 })
+  assert.equal(studio.state.studioProgress.value, 95, 'slow real progress does not pull the display below simulation')
+  await studio.send('photo_studio_ready', { ...running, id: 'next-shot', status: 'failed', stage: 'failed', error: 'offline' })
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 95, 'failure stops rather than completes progress')
+  await studio.send('photo_studio_progress', { ...running, id: 'failed-early' })
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 1)
+  await studio.send('photo_studio_ready', { ...running, id: 'failed-early', status: 'failed', stage: 'failed', error: 'offline' })
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 1, 'failure also cancels the timer before the cap is reached')
+})
+
+test('submitting a shot starts simulation once, adopts its SSE job and cleans up on unmount', async t => {
+  storage(t)
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  t.mock.method(Math, 'random', () => 0)
+  let finishSubmit, payload
+  const studio = await mountStudio(t, input => {
+    payload = input
+    return new Promise(resolve => { finishSubmit = resolve })
+  })
+  const submitted = studio.state.shoot()
+  await Vue.nextTick()
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 1)
+  const running = { id: payload.id, status: 'running', stage: 'polishing', progress: 0 }
+  await studio.send('photo_studio_progress', running)
+  finishSubmit({ job: running })
+  await submitted
+  await Vue.nextTick()
+  assert.equal(studio.state.studioProgress.value, 1, 'the POST response and SSE adoption must not restart simulation')
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 2)
+  studio.unmount()
+  t.mock.timers.tick(400)
+  assert.equal(studio.state.studioProgress.value, 2)
+})
 
 test('only the page that pressed the shutter sounds; another studio receiving delayed SSE or recovery stays silent', async t => {
   storage(t)

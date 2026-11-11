@@ -1,6 +1,7 @@
 <template>
   <linshe-modal v-model="visible" title="服装 tag 库" variant="film" full full-height :transition-ms="300" body-class="modal-workspace-body">
-    <template #header-extra><span class="modal-header-stat">{{ character?.display_name || character?.name }}<strong class="modal-header-stat-value">{{ tags.length }} / 32</strong></span></template>
+    <template #title-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M9.5 6a2.5 2.5 0 1 1 4 2c-1 .7-1.5 1.1-1.5 2.5V12M12 12 3.2 17.3A1.5 1.5 0 0 0 4 20h16a1.5 1.5 0 0 0 .8-2.7L12 12Z" /></svg></template>
+    <template #header-extra><span class="modal-header-stat">{{ slotKey === 'first' ? '主角' : '搭档' }}<strong class="modal-header-stat-value">{{ tags.length }} / 32</strong></span></template>
     <template #close="{ close }"><studio-button variant="icon" aria-label="关闭服装库" @click="close()">×</studio-button></template>
     <div v-if="loading" class="wardrobe-status" role="status">正在翻开服装目录…</div>
     <div v-else-if="loadError" class="wardrobe-status" role="alert">{{ loadError }}<studio-button size="sm" @click="loadCatalog">重新加载</studio-button></div>
@@ -37,7 +38,7 @@
         <p class="wardrobe-hint">所选 tag 直接加入提示词；自定义描述仅翻译，不生成角色外观。</p><div v-if="promptText" class="wardrobe-prompt" aria-label="本次服装提示词">{{ promptText }}</div>
       </section>
     </div>
-    <template #footer><studio-button v-if="outfit" variant="link" size="sm" :disabled="busy" @click="clearOutfit">清除本次搭配</studio-button><span class="wardrobe-footer-note">只用于本次拍摄，不改写角色衣柜。</span><studio-button variant="primary" :loading="busy" :disabled="busy || (!tags.length && !brief.trim())" @click="apply">{{ busy ? '正在翻译服装' : '用于本次拍摄' }}</studio-button></template>
+    <template #footer><studio-button v-if="outfit || draft" variant="link" size="sm" :disabled="busy" @click="clearOutfit">清除本次搭配</studio-button><span class="wardrobe-footer-note">只用于本次拍摄，不改写角色衣柜。</span><studio-button variant="primary" :loading="busy" :disabled="busy || (!tags.length && !brief.trim())" @click="apply">{{ busy ? '正在翻译服装' : '用于本次拍摄' }}</studio-button></template>
   </linshe-modal>
 </template>
 
@@ -49,8 +50,8 @@ import StudioInput from './StudioInput.vue'
 import StudioFilterOptions from './StudioFilterOptions.vue'
 import StudioButton from './StudioButton.vue'
 
-const props = defineProps({ modelValue: Boolean, character: { type: Object, default: null }, outfit: { type: Object, default: null } })
-const emit = defineEmits(['update:modelValue', 'applied'])
+const props = defineProps({ modelValue: Boolean, slotKey: { type: String, default: 'first' }, outfit: { type: Object, default: null }, draft: { type: Object, default: null } })
+const emit = defineEmits(['update:modelValue', 'applied', 'draft-change'])
 const visible = computed({ get: () => props.modelValue, set: value => { if (!value) cancel(); emit('update:modelValue', value) } })
 const catalog = ref({ categories: [], entries: [] }), loading = ref(false), loadError = ref('')
 const query = ref(''), category = ref('all'), subcategory = ref('all'), limit = ref(60)
@@ -58,9 +59,17 @@ const scrollRoot = ref(null), loadSentinel = ref(null)
 let paging = false, disposed = false
 const tags = ref([]), brief = ref(''), translatedBrief = ref(''), customPrompt = ref(''), error = ref(''), busy = ref(false)
 let revision = 0, controller
+let restoring = false, editingSlot = null
 const promptText = computed(() => [tags.value.join(', '), brief.value.trim() === translatedBrief.value ? customPrompt.value : ''].filter(Boolean).join(', '))
 function cancel() { revision++; controller?.abort(); controller = undefined; busy.value = false }
 watch(brief, () => { cancel(); error.value = '' }, { flush: 'sync' })
+watch([tags, brief], () => {
+  if (restoring || !props.modelValue || editingSlot !== props.slotKey) return
+  emit('draft-change', { slot: editingSlot, outfit: {
+    tags: [...tags.value], brief: brief.value,
+    customPrompt: brief.value.trim() === translatedBrief.value ? customPrompt.value : '',
+  } })
+}, { deep: true, flush: 'sync' })
 onBeforeUnmount(cancel)
 const entries = computed(() => catalog.value.entries.filter(entry => entry.kind === 'outfit'))
 const entryMap = computed(() => new Map(entries.value.map(entry => [entry.tag, entry])))
@@ -96,43 +105,46 @@ async function loadCatalog() {
   loading.value = true; loadError.value = ''
   try { catalog.value = await getClothingLibrary() } catch (err) { loadError.value = err.message } finally { loading.value = false }
 }
-// The studio refreshes character objects in the background. Only an actual ID/open
-// change may reset this draft; a new object for the same character must preserve it.
-watch([() => props.modelValue, () => props.character?.id], ([open]) => {
+// Clothing belongs to a shooting slot; changing its occupant must preserve this draft.
+watch([() => props.modelValue, () => props.slotKey], ([open]) => {
   if (!open) { cancel(); return }
-  cancel(); tags.value = [...(props.outfit?.tags || [])]; brief.value = props.outfit?.brief || ''
-  translatedBrief.value = brief.value.trim(); customPrompt.value = props.outfit?.customPrompt || ''; error.value = ''
+  const saved = props.draft ?? props.outfit
+  restoring = true
+  cancel(); editingSlot = props.slotKey
+  tags.value = [...(saved?.tags || [])]; brief.value = saved?.brief || ''
+  translatedBrief.value = brief.value.trim(); customPrompt.value = saved?.customPrompt || ''; error.value = ''
+  restoring = false
   query.value = ''; category.value = 'all'; subcategory.value = 'all'; limit.value = 60
   if (scrollRoot.value) scrollRoot.value.scrollTop = 0
   if (!catalog.value.entries.length) void loadCatalog()
-})
+}, { immediate: true })
 function toggle(tag) {
   if (busy.value) return
   if (tags.value.includes(tag)) tags.value = tags.value.filter(value => value !== tag)
   else if (tags.value.length < 32) tags.value = [...tags.value, tag]
 }
 function clearOutfit() {
-  if (!props.modelValue || busy.value || !props.character) return
-  emit('applied', { characterId: props.character.id, outfit: null })
+  if (!props.modelValue || busy.value) return
+  emit('applied', { slot: props.slotKey, outfit: null })
   visible.value = false
 }
 async function apply() {
-  if (!props.modelValue || busy.value || !props.character || (!tags.value.length && !brief.value.trim())) return
-  const current = ++revision, characterId = props.character.id, selectedTags = [...tags.value], text = brief.value.trim()
+  if (!props.modelValue || busy.value || (!tags.value.length && !brief.value.trim())) return
+  const current = ++revision, slot = props.slotKey, selectedTags = [...tags.value], text = brief.value.trim()
   error.value = ''
   let prompt = text ? customPrompt.value : ''
   if (text && (text !== translatedBrief.value || !prompt)) {
     controller = new AbortController(); busy.value = true
     try {
       const response = await generateStudioClothingDraft({ brief: text, signal: controller.signal })
-      if (current !== revision || disposed || !props.modelValue) return
+      if (current !== revision || disposed || !props.modelValue || slot !== props.slotKey) return
       if (!response?.prompt?.trim()) throw new Error('翻译结果为空，请重试')
       prompt = response.prompt.trim(); translatedBrief.value = text; customPrompt.value = prompt
     } catch (err) { if (current === revision) error.value = err.message; return }
     finally { if (current === revision) { busy.value = false; controller = undefined } }
   }
-  if (current !== revision || disposed || !props.modelValue) return
-  emit('applied', { characterId, outfit: { tags: selectedTags, brief: text, customPrompt: prompt } })
+  if (current !== revision || disposed || !props.modelValue || slot !== props.slotKey) return
+  emit('applied', { slot, outfit: { tags: selectedTags, brief: text, customPrompt: prompt } })
   visible.value = false
 }
 

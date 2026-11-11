@@ -81,3 +81,15 @@ test('a wardrobe read failure is explicit and closing invalidates a late respons
   assert.equal(f.panel(), undefined)
   assert.equal(f.selected.value, 'work')
 })
+
+
+test('opening a wardrobe with a missing scene does not erase the slot preference', async t => {
+  const f = fixture(t, async () => ({ outfits: [] }))
+  f.selected.value = 'sleep'
+  await settle()
+  f.trigger().props.onClick(); await settle()
+  assert.match(f.text(), /默认服装/)
+  assert.equal(f.selected.value, 'sleep')
+  f.option('默认服装').props.onClick(); await settle()
+  assert.equal(f.selected.value, 'work', 'explicit choices still update the slot')
+})

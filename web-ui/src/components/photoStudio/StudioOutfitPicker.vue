@@ -40,7 +40,7 @@ async function load() {
     const result = await listSceneOutfits(props.characterId)
     if (version !== requestVersion) return
     options.value = studioOutfitOptions(result.outfits)
-    if (!options.value.some(option => option.value === props.modelValue)) emit('update:modelValue', 'work')
+    // A missing outfit may fall back for this actor, but must not erase the slot preference.
     activeIndex.value = Math.max(0, options.value.findIndex(option => option.value === props.modelValue))
   } catch {
     if (version === requestVersion) error.value = '服装读取失败'

@@ -20,7 +20,7 @@
         </div>
         <div class="studio-settings"><h3>画幅设定<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" /></svg></h3><linshe-tabs class="size-ratios" variant="film" v-model="aspectRatio" size="sm" :options="aspectRatioOptions" aria-label="照片比例"><template #option="{ option }"><span class="ratio-option"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect :x="(28 - option.iconWidth) / 2" :y="(24 - option.iconHeight) / 2" :width="option.iconWidth" :height="option.iconHeight" rx="2" :stroke-dasharray="option.value === 'custom' ? '3 2' : undefined" /></svg><span>{{ option.label }}</span></span></template></linshe-tabs><div class="size-controls" aria-label="成片尺寸"><div class="size-control"><div><span>宽度</span><strong>{{ width }} px</strong></div><linshe-slider variant="film" :model-value="width" :min="dimensionControls.width.min" :max="dimensionControls.width.max" :step="dimensionControls.width.step" aria-label="成片宽度" @update:model-value="setWidth" /></div><div class="size-control"><div><span>高度</span><strong>{{ height }} px</strong></div><linshe-slider variant="film" :model-value="height" :min="dimensionControls.height.min" :max="dimensionControls.height.max" :step="dimensionControls.height.step" aria-label="成片高度" @update:model-value="setHeight" /></div></div></div>
       </aside>
-      <section class="studio-darkroom"><div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat"><span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in"><div v-if="activeJob || shooting" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track"><span :style="{ transform: `scaleX(${Math.max(.06, activeJob?.progress || 0)})` }"></span></div></div><figure v-else-if="currentPhoto" :key="currentPhoto.id" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else key="empty" class="empty-negative"><svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+      <section class="studio-darkroom"><div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat"><span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in"><div v-if="activeJob || shooting" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><figure v-else-if="currentPhoto" :key="currentPhoto.id" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else key="empty" class="empty-negative"><svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
   <g transform="rotate(9 48 48)" opacity=".35"><path d="M25 14h51v67H25z" /><path d="M30 20h41v44H30z" /></g>
   <g transform="rotate(-9 44 48)">
     <path d="M17 13h54v70H17z" fill="var(--studio-film)" />
@@ -47,16 +47,16 @@
             </template>
           </studio-outfit-picker>
         </div>
-        <div class="studio-wardrobe-tools"><studio-button size="compact" block :disabled="!editingCharacter" @click="clothingOpen = true">服装 tag 库 · {{ characterSlot === 'first' ? '主角' : '搭档' }}<span v-if="editingCharacter && customOutfits[editingCharacter.id]" class="studio-wardrobe-selected">· 已选择</span></studio-button></div>
+        <div class="studio-wardrobe-tools"><studio-button size="compact" block @click="clothingOpen = true">服装 tag 库 · {{ characterSlot === 'first' ? '主角' : '搭档' }}<span v-if="customOutfits[characterSlot]" class="studio-wardrobe-selected">· 已选择</span></studio-button></div>
         <StudioPromptTools v-model="polishPrompt" v-model:instruction="polishInstruction" v-model:expanded="polishSettingsOpen" :disabled="shooting || !!activeJob" :can-preview="!!selectedCharacter && !!selectedPose" :has-photo="!!currentPhoto" @preview="previewPrompt" @photo-prompt="showPhotoPrompt" />
         <div v-if="duoPose" class="reference-hint">双人姿势使用主角 + 搭档；未指定搭档时会随机选择一位。</div><div v-if="!characters.length" class="rail-empty">没有可选择的角色</div>
       </aside>
     </section>
     </Transition>
 
-    <linshe-modal v-model="poseOpen" title="已识别姿势" variant="film" full full-height :transition-ms="300" body-class="modal-workspace-body"><template #header-extra><span class="modal-header-stat">底稿<strong class="modal-header-stat-value">{{ filteredPoses.length }}</strong></span></template><template #close="{ close, disabled }"><studio-button variant="icon" :disabled="disabled" aria-label="关闭姿势图库" @click="close()"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></studio-button></template><div class="pose-library"><div class="library-tools"><studio-input v-model="query" placeholder="搜索动作、分类或编号…" aria-label="搜索姿势" /><div class="library-system-row"><studio-filter-options v-model="systemFilter" :options="systemOptions" label="姿势体系" /><Transition name="studio-content"><div v-if="systemFilter" class="library-system-categories"><studio-filter-options v-model="categoryFilter" :options="categoryOptions" label="姿势分类" size="xs" /></div></Transition></div><studio-filter-options v-model="angleFilter" :options="angleOptions" label="相机角度" /></div><Transition name="studio-content" mode="out-in" @after-enter="checkPoseScroll"><div ref="poseScrollRoot" :key="`${query}:${systemFilter}:${categoryFilter}:${angleFilter}`" class="pose-gallery-grid" @scroll.passive="checkPoseScroll"><article v-for="pose in visiblePoses" :key="pose.id" :aria-label="`${pose.name}，${pose.category}，${pose.angle}，已识别`" class="pose-option" :class="{ selected: pose.id === poseId }" role="button" tabindex="0" :aria-pressed="pose.id === poseId" @click="selectPose(pose)" @keydown.enter.prevent="selectPose(pose)" @keydown.space.prevent="selectPose(pose)"><div class="pose-option-image"><img :src="poseAsset(pose.thumbnail)" alt="" loading="lazy" decoding="async" /><span>{{ pose.angle }}</span><i v-if="pose.id === poseId">✓</i></div><div class="pose-option-heading"><small>{{ pose.id.split('_').slice(-2, -1)[0] || 'POSE' }}</small><strong>{{ pose.name }}</strong></div><span>{{ pose.category }} · {{ pose.group }}</span></article><div v-if="!filteredPoses.length" class="studio-empty">没有匹配的姿势，试试调整筛选。</div></div></Transition></div></linshe-modal>
+    <linshe-modal v-model="poseOpen" title="已识别姿势" variant="film" full full-height :transition-ms="300" body-class="modal-workspace-body"><template #title-icon><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="14" cy="4" r="2" /><path d="m4 7 5 3 4-2 4 4 4-2M13 8l-3 7-6 5M10 15l6 1 2 5" /></svg></template><template #header-extra><span class="modal-header-stat">底稿<strong class="modal-header-stat-value">{{ filteredPoses.length }}</strong></span></template><template #close="{ close, disabled }"><studio-button variant="icon" :disabled="disabled" aria-label="关闭姿势图库" @click="close()"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></studio-button></template><div class="pose-library"><div class="library-tools"><studio-input v-model="query" placeholder="搜索动作、分类或编号…" aria-label="搜索姿势" /><div class="library-system-row"><studio-filter-options v-model="systemFilter" :options="systemOptions" label="姿势体系" /><Transition name="studio-content"><div v-if="systemFilter" class="library-system-categories"><studio-filter-options v-model="categoryFilter" :options="categoryOptions" label="姿势分类" size="xs" /></div></Transition></div><studio-filter-options v-model="angleFilter" :options="angleOptions" label="相机角度" /></div><Transition name="studio-content" mode="out-in" @after-enter="checkPoseScroll"><div ref="poseScrollRoot" :key="`${query}:${systemFilter}:${categoryFilter}:${angleFilter}`" class="pose-gallery-grid" @scroll.passive="checkPoseScroll"><article v-for="pose in visiblePoses" :key="pose.id" :aria-label="`${pose.name}，${pose.category}，${pose.angle}，已识别`" class="pose-option" :class="{ selected: pose.id === poseId }" role="button" tabindex="0" :aria-pressed="pose.id === poseId" @click="selectPose(pose)" @keydown.enter.prevent="selectPose(pose)" @keydown.space.prevent="selectPose(pose)"><div class="pose-option-image"><img :src="poseAsset(pose.thumbnail)" alt="" loading="lazy" decoding="async" /><span>{{ pose.angle }}</span><i v-if="pose.id === poseId">✓</i></div><div class="pose-option-heading"><small>{{ pose.id.split('_').slice(-2, -1)[0] || 'POSE' }}</small><strong>{{ pose.name }}</strong></div><span>{{ pose.category }} · {{ pose.group }}</span></article><div v-if="!filteredPoses.length" class="studio-empty">没有匹配的姿势，试试调整筛选。</div></div></Transition></div></linshe-modal>
     <StudioBackgroundLibrary v-model="backgroundOpen" :value="background" @applied="background = $event" />
-    <StudioClothingLibrary v-model="clothingOpen" :character="editingCharacter" :outfit="editingCharacter ? customOutfits[editingCharacter.id] || null : null" @applied="applyClothing" />
+    <StudioClothingLibrary v-model="clothingOpen" :slot-key="characterSlot" :outfit="customOutfits[characterSlot] || null" :draft="clothingDrafts[characterSlot] ?? null" @draft-change="saveClothingDraft" @applied="applyClothing" />
     <linshe-modal v-model="promptOpen" title="拍摄提示词" variant="film" wide :transition-ms="300"><template #close="{ close }"><studio-button variant="icon" aria-label="关闭提示词" @click="close()">×</studio-button></template><p v-if="promptLoading" class="studio-prompt-note" role="status">正在拼装…</p><p v-else-if="promptError" class="studio-prompt-note" role="alert">{{ promptError }}</p><div v-else class="studio-prompt-text" tabindex="0">{{ promptText }}</div></linshe-modal>
     <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="photoOpen" :imgs="[lightboxUrl]" :index="0" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="photoOpen = false" /></div></Teleport>
   </main>
@@ -102,16 +102,25 @@ watch(jobs, list => {
 })
 const saved = (() => { try { return JSON.parse(sessionStorage.getItem('photo-studio-selection') || '{}') } catch { return {} } })()
 const poseId = ref(saved.poseId || ''), characterId = ref(saved.characterId || ''), secondCharacterId = ref(saved.secondCharacterId || '')
-const characterOutfits = ref(Object.fromEntries(Object.entries(saved.characterOutfits || {}).filter(([id, scene]) => /^\d+$/.test(id) && Object.hasOwn(STUDIO_OUTFIT_LABELS, scene))))
-const customOutfits = ref(restoreCustomOutfits(saved.customOutfits))
-function restoreCustomOutfits(value) {
+// Migrate only the saved occupants once; future character changes never move clothing.
+function restoreSlotEntries(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value).flatMap(([id, outfit]) => {
-    if (!/^\d+$/.test(id) || !outfit || typeof outfit !== 'object') return []
+  return Object.fromEntries(['first', 'second'].flatMap(slot => {
+    const key = saved.clothingBinding === 'slot' ? slot : slot === 'first' ? saved.characterId : saved.secondCharacterId
+    return key != null && Object.hasOwn(value, key) ? [[slot, value[key]]] : []
+  }))
+}
+const slotOutfits = ref(Object.fromEntries(Object.entries(restoreSlotEntries(saved.clothingBinding === 'slot' ? saved.slotOutfits : saved.characterOutfits)).filter(([, scene]) => Object.hasOwn(STUDIO_OUTFIT_LABELS, scene))))
+const customOutfits = ref(restoreCustomOutfits(saved.customOutfits))
+const clothingDrafts = ref(restoreCustomOutfits(saved.clothingDrafts, true))
+function restoreCustomOutfits(value, keepDrafts = false) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(restoreSlotEntries(value)).flatMap(([id, outfit]) => {
+    if (!outfit || typeof outfit !== 'object') return []
     const tags = Array.isArray(outfit.tags) ? outfit.tags.filter(tag => typeof tag === 'string' && tag.trim()).slice(0, 32) : []
     const brief = typeof outfit.brief === 'string' ? outfit.brief : ''
     const customPrompt = typeof outfit.customPrompt === 'string' ? outfit.customPrompt : ''
-    return tags.length || customPrompt ? [[id, { tags, brief, customPrompt }]] : []
+    return keepDrafts || tags.length || customPrompt ? [[id, { tags, brief, customPrompt }]] : []
   }))
 }
 const clothingOpen = ref(false), promptOpen = ref(false), promptLoading = ref(false), promptText = ref(''), promptError = ref('')
@@ -127,7 +136,6 @@ watch(polishPrompt, enabled => {
 const backgroundOpen = ref(false)
 const background = ref(saved.background && ['library', 'custom'].includes(saved.background.source) ? saved.background : null)
 const shutterPulse = ref(false)
-const editingCharacter = computed(() => characterSlot.value === 'first' ? selectedCharacter.value : selectedSecondCharacter.value)
 let promptRevision = 0, shutterTimer
 const outfitLabels = STUDIO_OUTFIT_LABELS
 const initialFrame = initialPhotoStudioFrame(saved)
@@ -154,6 +162,48 @@ const recognizedPoses = computed(() => catalog.value.filter(item => !!item.poseP
 const selectedCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(characterId.value)))
 const selectedSecondCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(secondCharacterId.value)))
 const activeJob = computed(() => jobs.value.find(item => item.status === 'running'))
+// Match schedule peek: simulated progress fills quiet periods; real sampling wins.
+const realPct = ref(0), simulatedPct = ref(0)
+const studioProgress = computed(() => Math.max(Math.floor(simulatedPct.value), realPct.value))
+let progressTimer, progressRunning = false, progressJobId = ''
+function stopFakeProgress() {
+  clearTimeout(progressTimer)
+  progressTimer = undefined
+  progressRunning = false
+}
+function scheduleProgressTick() {
+  progressTimer = setTimeout(() => {
+    if (!progressRunning) return
+    if (realPct.value <= simulatedPct.value && simulatedPct.value < 95) {
+      simulatedPct.value = Math.min(95, simulatedPct.value + 1 + Math.random() * 3)
+    }
+    scheduleProgressTick()
+  }, 400 + Math.random() * 1200)
+}
+function startFakeProgress() {
+  stopFakeProgress()
+  realPct.value = 0
+  simulatedPct.value = 0
+  progressJobId = ''
+  progressRunning = true
+  scheduleProgressTick()
+}
+watch([activeJob, shooting], ([job, submitting]) => {
+  if (job || submitting) {
+    if (!progressRunning || (job && progressJobId && job.id !== progressJobId)) startFakeProgress()
+    if (job) {
+      progressJobId = job.id
+      if (job.stage === 'sampling' && job.progress != null && Number.isFinite(Number(job.progress))) {
+        realPct.value = Math.round(Math.min(1, Math.max(0, Number(job.progress))) * 100)
+      }
+    }
+  } else {
+    stopFakeProgress()
+    if (jobs.value.some(job => job.id === progressJobId && job.status === 'done')) {
+      simulatedPct.value = 100
+    }
+  }
+}, { immediate: true })
 const currentPhoto = computed(() => jobs.value.find(item => item.id === selectedJobId.value && item.status === 'done') || jobs.value.find(item => item.status === 'done'))
 const characterCollator = new Intl.Collator('zh-u-co-pinyin', { sensitivity: 'base', numeric: true })
 const sortedCharacters = computed(() => [...characters.value].sort((a, b) => characterCollator.compare(a.display_name || a.name || '', b.display_name || b.name || '') || Number(a.id) - Number(b.id)))
@@ -193,9 +243,9 @@ function syncAspect(anchor) {
 function setWidth(value) { width.value = clampPhotoDimension(value); syncAspect('width') }
 function setHeight(value) { height.value = clampPhotoDimension(value); syncAspect('height') }
 watch(aspectRatio, value => { if (value !== 'custom') syncAspect('width') })
-function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: 2, background: background.value, polishInstruction: polishInstruction.value, characterOutfits: characterOutfits.value, customOutfits: customOutfits.value })) }
+function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: 2, background: background.value, polishInstruction: polishInstruction.value, clothingBinding: 'slot', slotOutfits: slotOutfits.value, customOutfits: customOutfits.value, clothingDrafts: clothingDrafts.value })) }
 watch([poseId, characterId, secondCharacterId, width, height, aspectRatio, background, polishInstruction], persistSelection)
-watch([characterOutfits, customOutfits], persistSelection, { deep: true, flush: 'sync' })
+watch([slotOutfits, customOutfits, clothingDrafts], persistSelection, { deep: true, flush: 'sync' })
 watch(systemFilter, () => {
   categoryFilter.value = ''
   if (!angleOptions.value.some(option => option.value === angleFilter.value)) angleFilter.value = ''
@@ -237,35 +287,46 @@ function selectCharacter(character) {
     secondCharacterId.value = Number(character.id) === Number(characterId.value) ? '' : character.id
   }
 }
-function characterOutfit(character) {
-  const scene = characterOutfits.value[character.id] || 'work'
+function outfitSlot(character) {
+  return characterSlotNumber(character) === 1 ? 'first' : characterSlotNumber(character) === 2 ? 'second' : characterSlot.value
+}
+function characterOutfit(character, slot = outfitSlot(character)) {
+  const scene = slotOutfits.value[slot] || 'work'
   return Array.isArray(character.outfitScenes) && !character.outfitScenes.includes(scene) ? 'work' : scene
 }
-function outfitLabel(character) { return customOutfits.value[character.id] ? '本次搭配' : outfitLabels[characterOutfit(character)] }
+function outfitLabel(character) { return customOutfits.value[outfitSlot(character)] ? '本次搭配' : outfitLabels[characterOutfit(character)] }
 function selectOutfitCharacter(character) {
   selectCharacter(character)
 }
 function selectOutfit(character, scene) {
   selectCharacter(character)
-  characterOutfits.value[character.id] = scene
-  delete customOutfits.value[character.id]
+  slotOutfits.value[characterSlot.value] = scene
 }
 function jobCharacters(job) { return [job.character_name, job.character2_name].filter(Boolean).join(' + ') }
-function stageLabel(stage) { return ({ polishing: 'AI 正在润色提示词', polishing_retry: 'AI 正在补全遗漏的 tag', preparing: '正在架好相机', queued: '已进入暗房队列', generating: '正在拍摄', saving: '正在冲印照片' })[stage] || '正在拍摄' }
+function stageLabel(stage) { return ({ polishing: 'AI 正在润色提示词', polishing_retry: 'AI 正在补全遗漏的 tag', preparing: '正在架好相机', queued: '已进入暗房队列', generating: '正在处理画面', sampling: '正在采样', saving: '正在冲印照片' })[stage] || '正在拍摄' }
 function openPhoto(url) { lightboxUrl.value = url; photoOpen.value = true }
 function shotInput() {
   return { characterId: characterId.value, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null,
-    poseId: poseId.value, outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value) : 'work',
-    secondOutfitScene: duoPose.value && selectedSecondCharacter.value ? characterOutfit(selectedSecondCharacter.value) : 'work',
-    clothingTags: customOutfits.value[characterId.value]?.tags || [],
-    customClothingPrompt: customOutfits.value[characterId.value]?.customPrompt || '',
-    secondClothingTags: duoPose.value && secondCharacterId.value ? customOutfits.value[secondCharacterId.value]?.tags || [] : [],
-    secondCustomClothingPrompt: duoPose.value && secondCharacterId.value ? customOutfits.value[secondCharacterId.value]?.customPrompt || '' : '',
+    poseId: poseId.value, outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value, 'first') : 'work',
+    secondOutfitScene: duoPose.value ? (selectedSecondCharacter.value ? characterOutfit(selectedSecondCharacter.value, 'second') : slotOutfits.value.second || 'work') : 'work',
+    clothingTags: customOutfits.value.first?.tags || [],
+    customClothingPrompt: customOutfits.value.first?.customPrompt || '',
+    secondClothingTags: duoPose.value ? customOutfits.value.second?.tags || [] : [],
+    secondCustomClothingPrompt: duoPose.value ? customOutfits.value.second?.customPrompt || '' : '',
     backgroundId: background.value?.source === 'library' ? background.value.id : '',
     customBackgroundPrompt: background.value?.source === 'custom' ? background.value.prompt : '',
     width: width.value, height: height.value, polishPrompt: polishPrompt.value, polishInstruction: polishInstruction.value }
 }
-function applyClothing({ characterId: id, outfit }) { if (outfit) customOutfits.value[id] = outfit; else delete customOutfits.value[id] }
+function saveClothingDraft({ slot: id, outfit }) { clothingDrafts.value[id] = outfit }
+function applyClothing({ slot: id, outfit }) {
+  if (outfit) {
+    customOutfits.value[id] = outfit
+    clothingDrafts.value[id] = { ...outfit, tags: [...outfit.tags] }
+  } else {
+    delete customOutfits.value[id]
+    delete clothingDrafts.value[id]
+  }
+}
 function showPhotoPrompt() {
   if (!currentPhoto.value) return
   promptText.value = currentPhoto.value.prompt; promptError.value = ''; promptLoading.value = false
@@ -307,7 +368,7 @@ async function refreshSavedBackground() {
 }
 onMounted(refreshSavedBackground)
 onMounted(async () => { await load(); if (disposed) return; if (!recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (!sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection(); pollTimer = setInterval(poll, 15000) })
-onBeforeUnmount(() => { disposed = true; clearInterval(pollTimer); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
+onBeforeUnmount(() => { disposed = true; stopFakeProgress(); clearInterval(pollTimer); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
 </script>
 
 <style scoped>
@@ -376,13 +437,13 @@ onBeforeUnmount(() => { disposed = true; clearInterval(pollTimer); clearTimeout(
 .character-choice { min-width:0; position:relative; display:flex; flex-direction:column; align-items:center; gap:0; padding:4px 4px 0; cursor:pointer; border:1px solid transparent; background:transparent; text-align:center; transition:background .3s,border-color .3s,box-shadow .3s; }
 .character-choice.selected { border-color:var(--studio-shutter); box-shadow:none; background:var(--studio-film-edge); }.character-choice.is-other-slot { border-color:var(--studio-film-muted); }
 .character-choice.selected::after { content:''; position:absolute; inset:-2px; border:2px solid var(--studio-shutter); border-radius:35% 6% 30% 5%; transform:rotate(-4deg); pointer-events:none; }
-.character-face { width:100%; aspect-ratio:1; flex:none; position:relative; background:var(--studio-film-edge); }.character-face img,.character-face>span { display:block; width:100%; height:100%; object-fit:cover; }.character-face>span { display:grid; place-items:center; font-size:25px; color:var(--studio-film-text); }.character-face i { position:absolute; left:0; bottom:0; padding:2px 5px; background:var(--studio-shutter); color:var(--studio-film); font-size:10px; font-style:normal; font-weight:600; }
+.character-face { width:100%; aspect-ratio:1; flex:none; position:relative; background:var(--studio-film-edge); }.character-face img,.character-face>span { display:block; width:100%; height:100%; border-radius:50%; object-fit:cover; }.character-face>span { display:grid; place-items:center; font-size:25px; color:var(--studio-film-text); }.character-face i { position:absolute; left:0; bottom:0; padding:2px 5px; background:var(--studio-shutter); color:var(--studio-film); font-size:10px; font-style:normal; font-weight:600; }
 .character-contact { width:100%; display:flex; align-items:center; justify-content:space-between; gap:4px; min-height:24px; }
 .character-outfit { font-size:var(--fs-xs); color:var(--studio-film-muted); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .contact-number { align-self:flex-start; font:italic 700 12px/1.6 monospace; color:var(--studio-shutter); letter-spacing:.1em; padding-top:3px; }
 .character-name { width:100%; flex:none; font-size:12px; line-height:1.5; min-height:25px; padding:0 0 5px; color:var(--studio-film-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:400; }
 .reference-hint,.rail-empty { font-size:12px; line-height:1.6; color:var(--studio-muted); }
-.empty-negative,.developing-state { text-align:center; color:var(--studio-film-text); position:relative; padding:24px; }.empty-negative { display:grid; justify-items:center; gap:16px; }.negative-mark { display:block; width:88px; height:88px; color:var(--studio-shutter); }.empty-negative>span:nth-child(2) { font-size:clamp(20px,2.5vw,30px); font-family:Georgia,'Songti SC',serif; }.empty-negative p,.developing-state p { margin:0; font-size:14px; line-height:1.7; color:var(--studio-film-muted); }.developing-state { width:min(100%,410px); }.developing-state h3 { font-size:23px; }.spinner { margin:auto; width:40px; height:40px; border:2px solid var(--studio-film-muted); border-top-color:var(--studio-shutter); border-radius:50%; animation:studio-spin .8s linear infinite; }.develop-track { height:3px; background:var(--studio-film-edge); margin-top:24px; }.develop-track span { display:block; width:100%; height:100%; transform-origin:left; background:var(--studio-shutter); transition:transform .3s; }.studio-error { font-size:13px; line-height:1.6; padding:10px 14px; background:var(--studio-paper); color:var(--fun-orange); display:flex; align-items:center; justify-content:space-between; gap:8px; overflow-wrap:anywhere; }
+.empty-negative,.developing-state { text-align:center; color:var(--studio-film-text); position:relative; padding:24px; }.empty-negative { display:grid; justify-items:center; gap:16px; }.negative-mark { display:block; width:88px; height:88px; color:var(--studio-shutter); }.empty-negative>span:nth-child(2) { font-size:clamp(20px,2.5vw,30px); font-family:Georgia,'Songti SC',serif; }.empty-negative p,.developing-state p { margin:0; font-size:14px; line-height:1.7; color:var(--studio-film-muted); }.developing-state { width:min(100%,410px); }.developing-state h3 { font-size:23px; }.spinner { margin:auto; width:40px; height:40px; border:2px solid var(--studio-film-muted); border-top-color:var(--studio-shutter); border-radius:50%; animation:studio-spin .8s linear infinite; }.develop-track { overflow:hidden; height:3px; background:var(--studio-film-edge); margin-top:24px; }.develop-track span { display:block; width:100%; height:100%; transform-origin:left; background:var(--studio-shutter); transition:transform .3s; }.studio-error { font-size:13px; line-height:1.6; padding:10px 14px; background:var(--studio-paper); color:var(--fun-orange); display:flex; align-items:center; justify-content:space-between; gap:8px; overflow-wrap:anywhere; }
 .character-choice:focus-visible { outline:2px solid var(--studio-shutter); outline-offset:2px; }.pose-card:focus-visible { outline:2px solid var(--studio-accent); outline-offset:3px; }
 @media(hover:hover) { .character-choice:hover { background:var(--studio-film-edge); border-color:var(--studio-shutter); } }
 .studio-content-enter-active,.studio-content-leave-active { transition:opacity .3s,transform .3s; }.studio-content-enter-from,.studio-content-leave-to { opacity:0; transform:translateY(6px); }

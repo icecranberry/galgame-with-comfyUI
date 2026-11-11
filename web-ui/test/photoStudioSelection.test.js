@@ -142,7 +142,7 @@ test('background selection persists and sends only the preset ID or the frozen c
   await state.refreshSavedBackground()
   assert.equal(state.background.value.label, '包豪斯三原色')
   state.characterId.value = 1
-  state.applyClothing({ characterId: 1, outfit: { tags: ['striped_shirt'], brief: '白色', customPrompt: 'white' } })
+  state.applyClothing({ slot: 'first', outfit: { tags: ['striped_shirt'], brief: '白色', customPrompt: 'white' } })
   assert.deepEqual(state.shotInput().clothingTags, ['striped_shirt'])
   assert.equal(state.shotInput().customClothingPrompt, 'white')
   assert.equal(Object.hasOwn(state.shotInput(), 'appearanceOverride'), false)
@@ -267,7 +267,7 @@ test('the first shutter after enabling polish submits a new job and asynchronous
   assert.equal(submissions.length, 3)
 })
 
-test('each actor keeps applied outfit tags, translated custom clothing and wardrobe selection across remounts', async t => {
+test('shooting slots migrate saved outfits and keep clothes and drafts across actor changes and remounts', async t => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   const stored = new Map()
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: key => stored.get(key) || null, setItem: (key, value) => stored.set(key, value) } })
@@ -287,25 +287,66 @@ test('each actor keeps applied outfit tags, translated custom clothing and wardr
     const unmount = () => { if (mounted) { app.unmount(); mounted = false } }
     t.after(unmount); return { state, unmount }
   }
+  stored.set('photo-studio-selection', JSON.stringify({
+    characterId: 1, secondCharacterId: 2, poseId: 'pair',
+    characterOutfits: { 1: 'casual', 2: 'home', 3: 'sleep' },
+    customOutfits: { 1: { tags: ['shirt'], brief: '', customPrompt: '' }, 2: { tags: ['skirt'], brief: '', customPrompt: '' } },
+    clothingDrafts: { 1: { tags: [], brief: '旧草稿', customPrompt: '' } },
+  }))
   const first = mount()
   await Vue.nextTick()
+  assert.deepEqual(first.state.slotOutfits.value, { first: 'casual', second: 'home' })
+  assert.deepEqual(first.state.customOutfits.value.first.tags, ['shirt'])
+  assert.deepEqual(first.state.customOutfits.value.second.tags, ['skirt'])
+  assert.equal(first.state.clothingDrafts.value.first.brief, '旧草稿')
+  first.state.persistSelection()
+  assert.equal(JSON.parse(stored.get('photo-studio-selection')).clothingBinding, 'slot')
   first.state.characterId.value = 1; first.state.secondCharacterId.value = 2; first.state.poseId.value = 'pair'
-  first.state.characterOutfits.value = { 1: 'casual', 2: 'home' }
+  first.state.slotOutfits.value = { first: 'casual', second: 'home' }
   const main = { tags: ['striped_shirt'], brief: '蓝色外套', customPrompt: 'blue coat' }
   const partner = { tags: ['skirt'], brief: '', customPrompt: '' }
-  first.state.applyClothing({ characterId: 1, outfit: main })
-  first.state.applyClothing({ characterId: 2, outfit: partner })
-  assert.deepEqual(JSON.parse(stored.get('photo-studio-selection')).customOutfits, { 1: main, 2: partner })
+  first.state.applyClothing({ slot: 'first', outfit: main })
+  first.state.applyClothing({ slot: 'second', outfit: partner })
+  assert.deepEqual(JSON.parse(stored.get('photo-studio-selection')).customOutfits, { first: main, second: partner })
+  first.state.saveClothingDraft({ slot: 'first', outfit: { tags: [], brief: '还没翻译', customPrompt: '' } })
+  first.state.saveClothingDraft({ slot: 'second', outfit: { tags: [], brief: '', customPrompt: '' } })
+  first.state.selectOutfit(actors[0], 'casual')
+  first.state.characterSlot.value = 'second'
+  first.state.selectOutfit(actors[1], 'work')
+  first.state.selectOutfit(actors[1], 'home')
+  assert.deepEqual(first.state.customOutfits.value, { first: main, second: partner })
   first.unmount()
   const second = mount()
   await Vue.nextTick()
-  assert.deepEqual(second.state.customOutfits.value, { 1: main, 2: partner })
+  assert.deepEqual(second.state.customOutfits.value, { first: main, second: partner })
+  assert.deepEqual(second.state.clothingDrafts.value, {
+    first: { tags: [], brief: '还没翻译', customPrompt: '' },
+    second: { tags: [], brief: '', customPrompt: '' },
+  })
+  second.state.characterId.value = 1; second.state.secondCharacterId.value = 2
   assert.equal(second.state.shotInput().outfitScene, 'casual')
   assert.equal(second.state.shotInput().secondOutfitScene, 'home')
   assert.equal(second.state.shotInput().customClothingPrompt, 'blue coat')
   assert.deepEqual(second.state.shotInput().secondClothingTags, ['skirt'])
-  second.state.applyClothing({ characterId: 1, outfit: null })
-  assert.deepEqual(JSON.parse(stored.get('photo-studio-selection')).customOutfits, { 2: partner })
+  // Promote the partner, then choose the former protagonist as partner: clothes stay put.
+  second.state.characterSlot.value = 'first'
+  second.state.selectOutfitCharacter(actors[1])
+  assert.equal(second.state.secondCharacterId.value, '')
+  assert.equal(second.state.shotInput().customClothingPrompt, 'blue coat')
+  assert.deepEqual(second.state.shotInput().secondClothingTags, ['skirt'], 'random partner keeps the partner outfit')
+  assert.equal(second.state.shotInput().outfitScene, 'work', 'missing wardrobe scene temporarily falls back')
+  assert.equal(second.state.slotOutfits.value.first, 'casual', 'fallback preserves the slot preference')
+  second.state.characterSlot.value = 'second'
+  second.state.selectOutfitCharacter(actors[0])
+  assert.deepEqual(second.state.shotInput().clothingTags, ['striped_shirt'])
+  assert.deepEqual(second.state.shotInput().secondClothingTags, ['skirt'])
+  assert.equal(second.state.clothingDrafts.value.first.brief, '还没翻译')
+  second.state.characterSlot.value = 'first'
+  second.state.selectOutfitCharacter(actors[0])
+  assert.equal(second.state.shotInput().outfitScene, 'casual')
+  second.state.applyClothing({ slot: 'first', outfit: null })
+  assert.deepEqual(JSON.parse(stored.get('photo-studio-selection')).customOutfits, { second: partner })
+  assert.equal(Object.hasOwn(JSON.parse(stored.get('photo-studio-selection')).clothingDrafts, 'first'), false)
   assert.equal(second.state.characterOutfit({ id: 1, outfitScenes: ['work'] }), 'work')
 })
 

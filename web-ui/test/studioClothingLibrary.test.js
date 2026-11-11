@@ -13,7 +13,7 @@ const code = script.content.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g
 function fixture(t, generate = async () => ({ prompt: 'white silk shirt' })) {
   const deps = { generateStudioClothingDraft: generate, getClothingLibrary: async () => ({ entries: [], categories: [] }) }
   const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
-  const props = Vue.reactive({ modelValue: false, character: { id: 1, name: 'Alice' }, outfit: null })
+  const props = Vue.reactive({ modelValue: false, slotKey: 'first', character: { id: 1, name: 'Alice' }, outfit: null, draft: null })
   let state
   const emitted = []
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
@@ -23,16 +23,16 @@ function fixture(t, generate = async () => ({ prompt: 'white silk shirt' })) {
   return { state, props, emitted }
 }
 
-test('preset tags apply immediately without AI and a same-character refresh preserves the draft', async t => {
+test('preset tags apply immediately without AI and changing the actor preserves the slot draft', async t => {
   const { state, props, emitted } = fixture(t, async () => { throw new Error('AI must not run') })
   props.modelValue = true; await Vue.nextTick()
   state.tags.value = ['striped_shirt', 'wet_shirt']; state.query.value = 'shirt'
-  props.character = { id: 1, name: 'Alice', outfitScenes: ['work'] }; await Vue.nextTick()
+  props.character = { id: 2, name: 'Bella', outfitScenes: ['work'] }; await Vue.nextTick()
   assert.equal(state.query.value, 'shirt')
   assert.equal(state.promptText.value, 'striped_shirt, wet_shirt')
   await state.apply()
-  assert.deepEqual(emitted[0], ['applied', { characterId: 1, outfit: { tags: ['striped_shirt', 'wet_shirt'], brief: '', customPrompt: '' } }])
-  props.character = { id: 2, name: 'Bella' }; await Vue.nextTick()
+  assert.deepEqual(emitted.find(([event]) => event === 'applied'), ['applied', { slot: 'first', outfit: { tags: ['striped_shirt', 'wet_shirt'], brief: '', customPrompt: '' } }])
+  props.slotKey = 'second'; await Vue.nextTick()
   assert.deepEqual(state.tags.value, [])
 })
 
@@ -44,7 +44,7 @@ test('custom-only outfits translate just the text and reuse the translation when
   await state.apply()
   assert.equal(calls.length, 1)
   assert.deepEqual(Object.keys(calls[0]).sort(), ['brief', 'signal'])
-  const outfit = emitted[0][1].outfit
+  const outfit = emitted.find(([event]) => event === 'applied')[1].outfit
   assert.deepEqual(outfit, { tags: [], brief: '白色丝绸衬衫', customPrompt: 'white silk shirt' })
   props.modelValue = false; props.outfit = outfit; await Vue.nextTick()
   props.modelValue = true; await Vue.nextTick()
@@ -62,7 +62,7 @@ test('closing cancels translation and discards late results', async t => {
   props.modelValue = false; await Vue.nextTick()
   assert.equal(signal.aborted, true)
   resolve({ prompt: 'silk shirt' }); await pending
-  assert.deepEqual(emitted, [])
+  assert.deepEqual(emitted.filter(([event]) => event === 'applied'), [])
 })
 
 test('translation failure preserves selected tags and custom text for retry', async t => {
@@ -74,7 +74,7 @@ test('translation failure preserves selected tags and custom text for retry', as
   assert.deepEqual(state.tags.value, ['shirt'])
   assert.equal(state.brief.value, '白色')
   assert.equal(state.busy.value, false)
-  assert.deepEqual(emitted, [])
+  assert.deepEqual(emitted.filter(([event]) => event === 'applied'), [])
 })
 
 test('clothing auto-pagination appends near the bottom, preserves selections, and resets on filtering or reopening', async t => {
@@ -103,4 +103,62 @@ test('clothing auto-pagination appends near the bottom, preserves selections, an
   assert.equal(state.limit.value, 60)
   props.modelValue = true; await Vue.nextTick()
   assert.equal(state.limit.value, 60)
+})
+
+
+test('edits emit synchronously and reopening restores unapplied text without stale translation', async t => {
+  const calls = []
+  const { state, props, emitted } = fixture(t, async input => { calls.push(input); return { prompt: 'red coat' } })
+  props.outfit = { tags: ['shirt'], brief: '蓝色外套', customPrompt: 'blue coat' }
+  props.modelValue = true; await Vue.nextTick()
+  assert.equal(emitted.length, 0, 'restoring must not overwrite stored drafts')
+  state.toggle('skirt')
+  assert.deepEqual(emitted.at(-1)[1].outfit.tags, ['shirt', 'skirt'])
+  state.brief.value = '红色外套'
+  const draft = emitted.at(-1)[1].outfit
+  assert.deepEqual(draft, { tags: ['shirt', 'skirt'], brief: '红色外套', customPrompt: '' })
+  props.modelValue = false; await Vue.nextTick()
+  props.draft = draft; props.modelValue = true; await Vue.nextTick()
+  assert.equal(state.brief.value, '红色外套')
+  assert.equal(state.promptText.value, 'shirt, skirt')
+  await state.apply()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].brief, '红色外套')
+  assert.equal(emitted.find(([event]) => event === 'applied')[1].outfit.customPrompt, 'red coat')
+})
+
+test('empty drafts override applied outfits and slot hydration never saves to another slot', async t => {
+  const { state, props, emitted } = fixture(t)
+  props.outfit = { tags: ['shirt'], brief: '', customPrompt: '' }
+  props.draft = { tags: [], brief: '', customPrompt: '' }
+  props.modelValue = true; await Vue.nextTick()
+  assert.deepEqual(state.tags.value, [])
+  state.brief.value = '未翻译的衣服'
+  assert.equal(emitted.at(-1)[1].slot, 'first')
+  const count = emitted.length
+  props.slotKey = 'second'; props.draft = { tags: ['skirt'], brief: '', customPrompt: '' }
+  await Vue.nextTick()
+  assert.equal(emitted.length, count)
+  assert.deepEqual(state.tags.value, ['skirt'])
+  state.toggle('hat')
+  assert.equal(emitted.at(-1)[1].slot, 'second')
+})
+
+
+test('switching slots during translation preserves the original draft and ignores the late result', async t => {
+  let resolve, signal
+  const { state, props, emitted } = fixture(t, input => {
+    signal = input.signal
+    return new Promise(done => { resolve = done })
+  })
+  props.modelValue = true; await Vue.nextTick()
+  state.brief.value = '白衬衫'
+  const pending = state.apply()
+  props.slotKey = 'second'; props.draft = { tags: ['skirt'], brief: '', customPrompt: '' }
+  await Vue.nextTick()
+  assert.equal(signal.aborted, true)
+  resolve({ prompt: 'white shirt' }); await pending
+  assert.deepEqual(emitted.filter(([event]) => event === 'applied'), [])
+  assert.deepEqual(state.tags.value, ['skirt'])
+  assert.equal(emitted.find(([event]) => event === 'draft-change')[1].slot, 'first')
 })

@@ -10,6 +10,7 @@ import { migratePhotoStudioSchema } from '../src/db/photoStudioSchema.js';
 import { createPhotoStudioService, getPoseCatalog, getRecognizedPoseCatalog, savePhoto } from '../src/services/photoStudioService.js';
 import { getImageDir } from '../src/services/imagePaths.js';
 import { config } from '../src/config.js';
+import { polishStudioPrompt } from '../src/services/photoStudioPolish.js';
 
 const soloPose = { id: 'pose', system: '全身单人・标准系', name: 'Pose', angle: 'Front', posePrompt: 'seated on the floor, leaning back' };
 const pairPose = {
@@ -110,7 +111,7 @@ test('studio pushes progress and only publishes ready after the image and task a
   try {
     await f.service.submit(request);
     await saving;
-    assert.ok(events.some(({ job }) => job.stage === 'generating' && job.progress === 0.5));
+    assert.ok(events.some(({ job }) => job.stage === 'sampling' && job.progress === 0.5));
     assert.equal(events.at(-1).job.stage, 'saving');
     assert.ok(events.every(({ event }) => event === 'photo_studio_progress'));
     finishSave('/images/photo_studio/original.png');
@@ -121,6 +122,55 @@ test('studio pushes progress and only publishes ready after the image and task a
     const count = events.length;
     await f.service.submit(request);
     assert.equal(events.length, count, 'idempotent submission must not generate again');
+  } finally { f.db.close(); }
+});
+
+test('studio tracks each sampling pass and clears percentages during retries, queueing and saving', async () => {
+  const events = [];
+  const sequence = [
+    [{ stage: 'submitting' }, 'queued', 0],
+    [{ phase: 'submitted', promptId: 'first' }, 'queued', 0],
+    [{ phase: 'started' }, 'generating', 0],
+    [{ phase: 'sampling', progress: 0.02 }, 'sampling', 0.02],
+    [{ phase: 'sampling', progress: 1 }, 'sampling', 1],
+    [{ phase: 'executing', node: 'second-sampler' }, 'generating', 0],
+    [{ phase: 'sampling', progress: 0.1 }, 'sampling', 0.1],
+    [{ stage: 'retrying' }, 'queued', 0],
+    [{ phase: 'submitted', promptId: 'retry' }, 'queued', 0],
+    [{ phase: 'sampling', progress: 0 }, 'sampling', 0],
+    [{ phase: 'sampling', progress: 0.25 }, 'sampling', 0.25],
+    [{ phase: 'waiting' }, 'queued', 0],
+    [{ phase: 'sampling', progress: 0.7, estimated: true }, 'generating', 0],
+    [{ phase: 'sampling', progress: null }, 'generating', 0],
+    [{ phase: 'sampling', progress: NaN }, 'generating', 0],
+    [{ phase: 'sampling', progress: Infinity }, 'generating', 0],
+    [{ phase: 'sampling', progress: -0.1 }, 'sampling', 0],
+    [{ phase: 'sampling', progress: 1.1 }, 'sampling', 1],
+    [{ phase: 'executed' }, 'saving', 0],
+    [{ phase: 'done', progress: 1 }, 'saving', 0],
+  ];
+  const f = await fixture({
+    publish: (event, { job }) => events.push({ event, job }),
+    render: async (_, { onProgress }) => {
+      for (const [event, stage, progress] of sequence) {
+        onProgress(event);
+        assert.equal(events.at(-1).job.stage, stage);
+        assert.equal(events.at(-1).job.progress, progress);
+      }
+      return { success: true, images: [{ base64: 'original' }] };
+    },
+    save: async () => {
+      assert.equal(events.at(-1).job.stage, 'saving');
+      assert.equal(events.at(-1).job.progress, 0);
+      assert.ok(events.every(({ event }) => event === 'photo_studio_progress'));
+      return '/images/photo_studio/original.png';
+    },
+  });
+  try {
+    await f.service.submit(request);
+    assert.equal((await waitForJob(f.service, request.id)).status, 'done');
+    assert.equal(events.at(-1).job.progress, 1);
+    assert.equal(events.at(-1).event, 'photo_studio_ready');
   } finally { f.db.close(); }
 });
 
@@ -136,14 +186,15 @@ test('studio pushes terminal errors so the client does not wait for polling', as
   } finally { f.db.close(); }
 });
 
-test('polish correction is visible and a returned prompt immediately enters one render', async () => {
+test('omitted tags are appended locally before rendering and the repaired prompt is saved and reused', async () => {
   const events = [];
   let finishPolish, enteredRender;
   const rendering = new Promise(resolve => { enteredRender = resolve; });
   let renders = 0;
+  let rewrites = 0;
   const f = await fixture({
     publish: (event, data) => events.push({ event, ...data }),
-    polish: ({ onRetry }) => { onRetry(); return new Promise(resolve => { finishPolish = resolve; }); },
+    polish: input => polishStudioPrompt(input, { chat: () => { rewrites++; return new Promise(resolve => { finishPolish = resolve; }); } }),
     render: async (prompt, { onProgress }) => {
       renders++; enteredRender(prompt);
       onProgress({ stage: 'generating', phase: 'submitted' });
@@ -152,17 +203,28 @@ test('polish correction is visible and a returned prompt immediately enters one 
     },
   });
   try {
-    await f.service.submit({ ...request, polishPrompt: true });
-    assert.equal(events.at(-1).job.stage, 'polishing_retry');
+    const input = { ...request, polishPrompt: true, clothingTags: ['striped_shirt'] };
+    await f.service.submit(input);
+    assert.equal(events.at(-1).job.stage, 'polishing');
     assert.equal(renders, 0);
     const prompt = 'Alice stands beside the window in soft morning light.';
+    const repaired = `${prompt}, striped_shirt, leaning back`;
     finishPolish(prompt);
-    assert.equal(await rendering, prompt);
+    assert.equal(await rendering, repaired);
     const done = await waitForJob(f.service, request.id);
     assert.equal(done.status, 'done');
     assert.equal(renders, 1);
-    assert.deepEqual(events.map(({ job }) => job.stage), ['preparing', 'polishing', 'polishing_retry', 'queued', 'queued', 'generating', 'saving', 'done']);
+    assert.equal(rewrites, 1);
+    assert.equal(done.prompt, repaired);
+    assert.equal(f.db.prepare('SELECT prompt_refined FROM image_tasks').get().prompt_refined, repaired);
+    assert.deepEqual(events.map(({ job }) => job.stage), ['preparing', 'polishing', 'queued', 'queued', 'generating', 'saving', 'done']);
     assert.equal(events.filter(({ event }) => event === 'photo_studio_ready').length, 1);
+    await f.service.submit({ ...input, id: 'repaired-cache-hit' });
+    const cached = await waitForJob(f.service, 'repaired-cache-hit');
+    assert.equal(cached.status, 'done');
+    assert.equal(cached.prompt, repaired);
+    assert.equal(rewrites, 1);
+    assert.equal(renders, 2);
   } finally { f.db.close(); }
 });
 
@@ -564,7 +626,7 @@ test('studio exposes only configured outfits and rejects missing or invalid outf
   } finally { f.db.close(); }
 });
 
-test('a random partner always uses default clothes and Chinese internal names use English role labels', async () => {
+test('a random partner with a missing wardrobe scene falls back and Chinese names use English role labels', async () => {
   const f = await fixture({ persona: undefined, random: choices => choices[0] });
   try {
     f.db.prepare('UPDATE characters SET name = ?, base_prompt = ? WHERE id = 1').run('中文姓名', '## 你的外观\nwhite hair, blue eyes, white coat');
@@ -655,5 +717,29 @@ test('extra requirements are validated, trimmed and forwarded only to polishing'
     const plain = await waitForJob(f.service, 'without-polish-123');
     assert.equal(inputs.length, 1);
     assert.doesNotMatch(plain.prompt, /偏暖光线/);
+  } finally { f.db.close(); }
+});
+
+
+test('random partners inherit slot clothing tags, custom text and an available wardrobe scene', async () => {
+  const f = await fixture({ persona: undefined, random: choices => choices[0] });
+  try {
+    f.db.prepare('UPDATE characters SET base_prompt = ?').run('## 你的外观\nblack hair, blue eyes, white uniform');
+    f.db.prepare('INSERT INTO character_outfits (character_id, scene, description) VALUES (?, ?, ?)').run(2, 'sleep', 'black hair, blue eyes, pink pajamas');
+    const input = { ...request, poseId: 'pair-pose', secondOutfitScene: 'sleep', secondClothingTags: ['skirt'], secondCustomClothingPrompt: 'red silk scarf' };
+    const preview = await f.service.preview(input);
+    assert.match(preview.prompt, /pink pajamas/);
+    assert.match(preview.prompt, /Character 2 — Outfit:/);
+    assert.match(preview.prompt, /Clothing tags: \(skirt\)/);
+    assert.match(preview.prompt, /Custom clothing: \(red silk scarf\)/);
+    await f.service.submit(input);
+    const job = await waitForJob(f.service, request.id);
+    assert.equal(job.status, 'done');
+    assert.equal(job.prompt, preview.prompt);
+    f.db.prepare('DELETE FROM character_outfits WHERE character_id = 2').run();
+    const fallback = await f.service.preview(input);
+    assert.doesNotMatch(fallback.prompt, /pink pajamas/);
+    assert.match(fallback.prompt, /Character 2 — Outfit:/);
+    assert.match(fallback.prompt, /red silk scarf/);
   } finally { f.db.close(); }
 });

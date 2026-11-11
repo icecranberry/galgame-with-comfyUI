@@ -128,7 +128,7 @@ export function createPhotoStudioService({
       }
     }
 
-    const outfitInputs = [[clothingTags, customClothingPrompt], ...(second ? [[secondCharacterId ? secondClothingTags : [], secondCharacterId ? secondCustomClothingPrompt : '']] : [])];
+    const outfitInputs = [[clothingTags, customClothingPrompt], ...(second ? [[secondClothingTags, secondCustomClothingPrompt]] : [])];
     const outfits = outfitInputs.map(([tags, custom]) => {
       if (!Array.isArray(tags) || typeof custom !== 'string' || custom.length > 4000 || /```|\p{Script=Han}/u.test(custom)) throw Object.assign(new Error('本次服装参数无效，请重新选择或翻译'), { status: 400 });
       let entries;
@@ -136,7 +136,7 @@ export function createPhotoStudioService({
       catch (error) { throw Object.assign(error, { status: 400 }); }
       return { tags: entries.map(entry => entry.tag), custom: custom.trim() };
     });
-    const scenes = [outfitScene, secondCharacterId ? secondOutfitScene : 'work'];
+    const scenes = [outfitScene, secondOutfitScene];
     const overrides = [appearanceOverride, secondCharacterId ? secondAppearanceOverride : ''];
     const characters = [first, ...(second ? [second] : [])].map((character, index) => {
       const scene = scenes[index];
@@ -146,9 +146,9 @@ export function createPhotoStudioService({
         selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, overrides[index].trim()) };
       } else if (scene !== 'work') {
         const outfit = db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
-        if (!outfit?.description?.trim()) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
+        if (!outfit?.description?.trim() && (index === 0 || secondCharacterId)) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
         // Scene descriptions contain the complete appearance. Replace, rather than layer over, the default clothes.
-        selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, outfit.description) };
+        if (outfit?.description?.trim()) selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, outfit.description) };
       }
       const name = extractCharacterEnglishName(selected) || extractCharacterEnglishName(character) || `the ${index === 0 ? 'first' : 'second'} character`;
       const appearance = persona(selected);
@@ -226,10 +226,7 @@ export function createPhotoStudioService({
         } else {
           database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing' WHERE id = ?").run(snapshot.id);
           notify(snapshot.id);
-          snapshot.prompt = await polish({ prompt: snapshot.prompt, personas, requiredTags, polishInstruction, context, onRetry: () => {
-            database.prepare("UPDATE photo_studio_jobs SET stage = 'polishing_retry' WHERE id = ?").run(snapshot.id);
-            notify(snapshot.id);
-          } });
+          snapshot.prompt = await polish({ prompt: snapshot.prompt, personas, requiredTags, polishInstruction, context });
           polishedPrompts.set(key, snapshot.prompt);
           if (polishedPrompts.size > 32) polishedPrompts.delete(polishedPrompts.keys().next().value);
         }
@@ -249,15 +246,19 @@ export function createPhotoStudioService({
         height: snapshot.height,
         onProgress: event => {
           const progress = Number(event.progress);
+          const hasProgress = !event.estimated && event.progress != null && Number.isFinite(progress);
           const stage = event.phase === 'executed' || event.phase === 'done' ? 'saving'
-            : event.stage === 'submitting' || event.stage === 'retrying' || event.phase === 'submitted' || event.phase === 'waiting' ? 'queued' : 'generating';
-          database.prepare('UPDATE photo_studio_jobs SET stage = ?, progress = MAX(progress, ?) WHERE id = ?')
-            .run(stage, Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0, snapshot.id);
+            : event.stage === 'submitting' || event.stage === 'retrying' || event.phase === 'submitted' || event.phase === 'waiting' ? 'queued'
+              : hasProgress ? 'sampling' : 'generating';
+          // ComfyUI reports the current sampling pass, not total job completion.
+          // A new pass/retry may restart at zero; non-sampling phases have no percentage.
+          database.prepare('UPDATE photo_studio_jobs SET stage = ?, progress = ? WHERE id = ?')
+            .run(stage, stage === 'sampling' ? Math.min(1, Math.max(0, progress)) : 0, snapshot.id);
           notify(snapshot.id);
         },
       });
       if (!result.success || !result.images?.[0]?.base64) throw new Error(result.error || 'Anima 工作流未返回图片');
-      database.prepare("UPDATE photo_studio_jobs SET stage = 'saving' WHERE id = ?").run(snapshot.id);
+      database.prepare("UPDATE photo_studio_jobs SET stage = 'saving', progress = 0 WHERE id = ?").run(snapshot.id);
       notify(snapshot.id);
       const url = await save(result.images[0].base64, snapshot.id);
       database.transaction(() => {

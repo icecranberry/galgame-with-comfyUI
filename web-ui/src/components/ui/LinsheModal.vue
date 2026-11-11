@@ -5,7 +5,7 @@
       <div v-if="isOpen" ref="overlay" class="modal-overlay linshe-modal-overlay" :class="{ 'is-host-anchored': isAnchored, 'is-floating': floating, 'is-full-height': fullHeight }" :style="overlayStyle" @pointerdown="onBackdropPointerDown" @click.self="onBackdropClick">
         <div ref="panel" class="modal-panel linshe-modal" :class="[{ 'modal-wide': wide, 'modal-full': full, 'modal-comic': variant === 'comic', 'modal-film': variant === 'film' }, panelClass]" role="dialog" :aria-modal="floating ? undefined : true" :aria-label="title || undefined" tabindex="-1" @click.stop>
           <div class="modal-header">
-            <slot name="title"><h3 class="modal-title">{{ title }}</h3></slot>
+            <slot name="title"><h3 class="modal-title" :class="{ 'has-title-icon': !!$slots['title-icon'] }"><span v-if="$slots['title-icon']" class="modal-title-icon" aria-hidden="true"><slot name="title-icon" /></span>{{ title }}</h3></slot>
             <span v-if="$slots['header-extra']" class="modal-header-extra"><slot name="header-extra" /></span>
             <slot v-if="showClose" name="close" :close="close" :disabled="closeDisabled || checkingClose">
               <linshe-close-button :disabled="closeDisabled || checkingClose" @click="close()" />
@@ -140,6 +140,8 @@ onBeforeUnmount(() => {
 .modal-header { gap: 12px; }
 :slotted(.modal-heading-content) { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .modal-title { min-width: 0; overflow-wrap: anywhere; }
+.modal-title-icon { display:inline-flex; flex:none; width:1em; height:1em; }
+.modal-title-icon :deep(svg) { display:block; width:100%; height:100%; }
 .linshe-modal:focus { outline: none; }
 .linshe-modal .modal-body.modal-workspace-body { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .linshe-modal .modal-body.modal-form-body { display: flex; flex-direction: column; gap: 12px; }
@@ -288,6 +290,8 @@ onBeforeUnmount(() => {
 .modal-film .modal-header { padding:16px 24px; border-bottom:2px solid var(--studio-ink); background:url('../../assets/studio-photocopy.svg'),var(--studio-paper); }
 .modal-film .modal-title { color:var(--studio-ink); font-size:24px; font-weight:900; letter-spacing:-.04em; }
 .modal-film .modal-title::before { content:'✳'; color:var(--studio-tag); margin-right:10px; }
+.modal-film .modal-title.has-title-icon::before { content:none; }
+.modal-film .modal-title-icon { color:var(--studio-tag); }
 .modal-film .modal-footer { border-top:1px dashed var(--studio-ink); padding:12px 24px; }
 .modal-film .modal-body { scrollbar-color:var(--studio-muted) transparent; }
 @media(max-width:600px) { .modal-film .modal-header,.modal-film .modal-footer { padding:12px; }.modal-film .modal-title { font-size:20px; } }

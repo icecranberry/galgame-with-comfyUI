@@ -714,7 +714,7 @@ async function pollAndDownload(promptId, onProgress, maxRetries = EXECUTION_TIME
       if (status.completed === false) {
         if (onProgress && i % 10 === 0) {
           // 轮询模式：用时间估算进度（粗糙）
-          onProgress({ phase: 'sampling', progress: Math.min(0.95, i / maxRetries), step: i, max: maxRetries, promptId });
+          onProgress({ phase: 'sampling', progress: Math.min(0.95, i / maxRetries), estimated: true, step: i, max: maxRetries, promptId });
         }
         await sleep(interval);
         continue;

@@ -8,6 +8,7 @@ import { IMAGE_PROMPT_RULE } from '../src/builtinRules.js';
 test('studio rewriting excludes worlds and lorebooks and places image rules after the stable task requirements', async () => {
   const context = getStudioPolishContext();
   assert.equal(context.systemRules, getSystemRules({ roleplay: false }));
+  assert.equal(context.thinkingMode, 'disabled');
   assert.ok(!Object.hasOwn(context, 'worldId'));
   assert.ok(!Object.hasOwn(context, 'worldRule'));
   const first = buildStudioPolishRequest({ personas: ['persona A'], prompt: 'pose A, outfit A', polishInstruction: '暖色光线', worldRule: 'must not appear' });
@@ -39,7 +40,7 @@ test('polished output must be usable English prompt text', () => {
   }
 });
 
-test('photo polishing accepts prose, rejects assembly labels and validates exact tags', () => {
+test('photo polishing accepts prose, rejects assembly labels and appends only missing exact tags', () => {
   const refined = 'Alice wears striped_shirt, leaning_back with (arms_up:1.2) before a red wall.';
   const tags = ['striped_shirt', 'leaning_back', '(arms_up:1.2)'];
   assert.equal(parseStudioPolish(refined, tags), refined);
@@ -47,10 +48,15 @@ test('photo polishing accepts prose, rejects assembly labels and validates exact
   for (const label of ['Pose:', 'Character 1 — Appearance:', 'Character 2 — Outfit:', 'Clothing tags:', 'Custom clothing:', 'Background:', 'Direction:']) {
     assert.throws(() => parseStudioPolish(`${label} ${refined}`, tags), /拼装标记/);
   }
-  for (const tag of tags) assert.throws(() => parseStudioPolish(refined.replace(tag, 'changed'), tags), /遗漏.*tag/);
-  assert.throws(() => parseStudioPolish('Alice wears a miniskirt before a red wall.', ['skirt']), /遗漏.*tag/);
+  for (const tag of tags) assert.equal(parseStudioPolish(refined.replace(tag, 'changed'), tags), `${refined.replace(tag, 'changed')}, ${tag}`);
+  assert.equal(parseStudioPolish('Alice wears a miniskirt before a red wall.', ['skirt']), 'Alice wears a miniskirt before a red wall., skirt');
   assert.equal(parseStudioPolish('Alice is sitting in a red silk dress before a wall.', ['sitting', 'red silk']), 'Alice is sitting in a red silk dress before a wall.');
-  assert.throws(() => parseStudioPolish('Alice stands in a blue silk dress before a wall.', ['sitting', 'red silk']), /遗漏.*tag/);
+  assert.equal(parseStudioPolish('Alice stands in a blue silk dress before a wall.', ['sitting', 'red silk']), 'Alice stands in a blue silk dress before a wall., sitting, red silk');
+  assert.equal(parseStudioPolish(refined.toUpperCase(), tags), refined.toUpperCase());
+  const escapedTag = 'hair_bow\\(blue\\)';
+  const repaired = parseStudioPolish(refined, [...tags, escapedTag, escapedTag]);
+  assert.equal(repaired, `${refined}, ${escapedTag}`);
+  assert.equal(parseStudioPolish(repaired, [...tags, escapedTag]), repaired);
 });
 
 test('polish material contains clothing overrides and protected tags outside the stable prefix', () => {
@@ -72,21 +78,23 @@ test('tag bundles allow reordering and prose clauses are not mistaken for verbat
   assert.equal(parseStudioPolish('Alice is sitting in a red\nsilk dress beside the window.', ['red silk']), 'Alice is sitting in a red silk dress beside the window.');
 });
 
-test('a genuinely missing tag gets one corrective request with the same prefix and sole final user', async () => {
+test('missing tags are appended after one non-thinking request without a corrective request', async () => {
   const calls = [];
   const input = { prompt: 'A studio portrait, upper-body view.', requiredTags: ['upper-body view'], context: { systemRules: 'rules', model: 'test' } };
-  const corrected = 'Alice wears a blue dress, upper-body view in soft light.';
+  const raw = 'Alice wears a blue dress in soft light.';
   assert.equal(await polishStudioPrompt(input, { chat: async (messages, options) => {
     calls.push({ messages, options });
-    return calls.length === 1 ? 'Alice wears a blue dress in soft light.' : corrected;
-  } }), corrected);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[0].messages.slice(0, -1), calls[1].messages.slice(0, -1));
-  assert.equal(calls[1].messages.filter(message => message.role === 'user').length, 1);
-  assert.match(calls[1].messages.at(-1).content, /上次结果遗漏.*\nupper-body view/s);
+    return raw;
+  } }), `${raw}, upper-body view`);
+  assert.equal(calls.length, 1);
+  for (const { options } of calls) {
+    assert.deepEqual(options.thinking, { type: 'disabled' });
+    assert.equal(options.forceDisableThinking, true);
+  }
+  assert.equal(calls[0].messages.filter(message => message.role === 'user').length, 1);
   let attempts = 0;
-  await assert.rejects(polishStudioPrompt(input, { chat: async () => { attempts++; return 'Alice wears a blue dress in soft light.'; } }), { code: 'STUDIO_MISSING_TAGS' });
-  assert.equal(attempts, 2, 'failed repair must not loop or return an invalid prompt');
+  await assert.rejects(polishStudioPrompt(input, { chat: async () => { attempts++; return ''; } }), /有效的英文提示词/);
+  assert.equal(attempts, 1, 'invalid output must still fail instead of becoming a tag-only prompt');
   attempts = 0;
   await assert.rejects(polishStudioPrompt(input, { chat: async () => { attempts++; throw new Error('offline'); } }), /offline/);
   assert.equal(attempts, 1, 'network failures are not tag corrections');
