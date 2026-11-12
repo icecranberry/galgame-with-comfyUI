@@ -259,6 +259,11 @@ export async function generateCharacterPreview(description, { searchContext = ''
   return request(`/characters/generate`, { method: 'POST', body: { description, save: false, searchContext } })
 }
 
+/** 只重试已选百科页面的立绘，不调用角色生成、不修改角色卡。 */
+export function retryCharacterReferenceImage(pageUrl, { signal } = {}) {
+  return request('/characters/reference-image', { method: 'POST', body: { pageUrl }, signal })
+}
+
 /** 导入酒馆角色卡（PNG 内嵌 chara / JSON 卡），返回预览数据，直接进入招募预览步骤 */
 export async function importCharacterCard({ data, mimetype, filename }) {
   return request(`/characters/import-card`, { method: 'POST', body: { data, mimetype, filename } })

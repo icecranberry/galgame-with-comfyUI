@@ -288,8 +288,9 @@
 </div>
       </template>
 
+      <Transition name="recruit-step" mode="out-in">
             <!-- 步骤 0：输入描述 -->
-      <div v-if="recruit.step === 'input'" class="modal-content-section" style="position:relative">
+      <div v-if="recruit.step === 'input'" key="input" class="modal-content-section" style="position:relative">
               <p class="modal-hint">描述你想招募的角色——可以是知名 IP 角色（尽可能输入全名+IP），也可以是原创设定。</p>
               <linshe-input
                 type="textarea"
@@ -325,7 +326,7 @@
             </div>
 
             <!-- 步骤 1：预览确认 -->
-      <div v-if="recruit.step === 'preview'" class="modal-content-section" style="position:relative">
+      <div v-else-if="recruit.step === 'preview'" key="preview" class="modal-content-section" style="position:relative">
               <div class="preview-card">
                 <div class="preview-name-row">
                   <linshe-input
@@ -343,6 +344,18 @@
                   <span class="recruit-search-dot" :class="{ 'is-found': recruit.searchContext.trim() }" aria-hidden="true"></span>
                   {{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : '未抓取到角色资料' }}
                 </div>
+                <Transition name="recruit-step">
+                  <div v-if="recruit.referenceInfo?.page_url && !recruit.referenceImage" class="recruit-image-status" role="status" aria-live="polite">
+                    <span>{{ recruit.imageLoading ? '正在重新获取百科立绘…' : recruit.referenceInfo.message }}</span>
+                    <linshe-button
+                      variant="link" size="sm" :loading="recruit.imageLoading"
+                      :disabled="recruit.loading || recruit.saving || showRecruitRefine || recruit.imageRetrySeconds > 0"
+                      @click="retryRecruitImage"
+                    >
+                      {{ recruit.imageRetrySeconds > 0 ? `${recruit.imageRetrySeconds} 秒后重试` : '重试立绘' }}
+                    </linshe-button>
+                  </div>
+                </Transition>
                 <linshe-input type="textarea" v-model="recruit.result.base_prompt" class="prompt-textarea" rows="12" />
 
                 <!-- 朋友圈开关 -->
@@ -351,7 +364,7 @@
                 <div class="modal-actions-left">
                   <linshe-button
                     variant="secondary"
-                    :disabled="recruit.loading"
+                    :disabled="recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine"
                     @click="doGenerate"
                   >
 {{ recruit.loading && recruit.task === 'search' ? '正在重新搜索...' : '重新搜索' }}
@@ -359,7 +372,7 @@
                   <linshe-button
                     variant="secondary"
                     title="不重新联网，使用上次搜索资料重新归纳角色卡"
-                    :disabled="!recruit.searchContext || recruit.loading"
+                    :disabled="!recruit.searchContext || recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine"
                     @click="regenerateFromSearchResult"
                   >
 {{ recruit.loading && recruit.task === 'regenerate' ? '正在重新归纳...' : '再次生成' }}
@@ -367,15 +380,15 @@
                   <linshe-button
                     variant="secondary"
                     title="提供参考图，邻舍分析后重写角色卡里的「## 你的外观」"
-                    :disabled="recruit.loading"
-                    @click="showRecruitRefine = true"
+                    :disabled="recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine"
+                    @click="openRecruitRefine()"
                   >
-修正外观
+{{ showRecruitRefine && recruitRefineAuto ? '正在修正外观' : '修正外观' }}
 </linshe-button>
                 </div>
                 <div class="modal-actions-right">
-                  <linshe-button variant="secondary" @click="recruit.step = 'input'; recruit.error = ''">返回修改</linshe-button>
-                  <linshe-button variant="primary" :disabled="recruit.saving" @click="confirmRecruit">
+                  <linshe-button variant="secondary" :disabled="recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine" @click="recruit.step = 'input'; recruit.error = ''">返回修改</linshe-button>
+                  <linshe-button variant="primary" :disabled="recruit.saving || recruit.loading || recruit.imageLoading || showRecruitRefine" @click="confirmRecruit">
                     {{ recruit.saving ? '招募中...' : '确认招募' }}
                   </linshe-button>
                 </div>
@@ -391,6 +404,7 @@
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.name).replaceAll('_', '+')}`" target="_blank">animadex</a>直接补充tag
               </div>
             </div>
+      </Transition>
 </linshe-modal>
 
     <!-- 招募预览的修正外观：结果回填到待确认的角色卡草稿（尚未创建角色，无最近图片入口） -->
@@ -398,8 +412,10 @@
       v-model="showRecruitRefine"
       :display-name="recruit.result?.display_name || ''"
       :base-prompt="recruit.result?.base_prompt || ''"
+      :initial-image="recruitRefineImage"
+      :auto-apply="recruitRefineAuto"
       apply-text="应用到角色卡"
-      apply-hint="应用后会回填到上方的待确认角色卡"
+      :apply-hint="recruitRefineAuto ? '完成后自动返回角色卡' : '应用后会回填到上方的待确认角色卡'"
       @applied="onRecruitAppearanceRefined"
     />
 
@@ -938,7 +954,57 @@ const recruit = reactive({
   result: null,    // 生成结果
   task: null,      // 'search' | 'regenerate'
   searchContext: '', // 首次联网搜索得到的原始资料，用于重新归纳
+  referenceImage: '', // 与本次搜索绑定，重新归纳时复用，不送进文本提示词
+  referenceInfo: null,
+  imageLoading: false,
+  imageRetrySeconds: 0,
 })
+let recruitVersion = 0
+let imageRetryController = null
+let imageRetryTimer = null
+
+function stopImageRetry() {
+  imageRetryController?.abort()
+  imageRetryController = null
+  if (imageRetryTimer) clearInterval(imageRetryTimer)
+  imageRetryTimer = null
+  recruit.imageRetrySeconds = 0
+  recruit.imageLoading = false
+}
+
+function setRecruitReference(result) {
+  recruit.referenceImage = result.reference_image || ''
+  recruit.referenceInfo = result.reference_image_info || null
+  if (imageRetryTimer) clearInterval(imageRetryTimer)
+  imageRetryTimer = null
+  recruit.imageRetrySeconds = Math.max(0, Math.ceil(Number(recruit.referenceInfo?.retry_after) || 0))
+  if (recruit.imageRetrySeconds) {
+    const retryAt = Date.now() + recruit.imageRetrySeconds * 1000
+    imageRetryTimer = setInterval(() => {
+      recruit.imageRetrySeconds = Math.max(0, Math.ceil((retryAt - Date.now()) / 1000))
+      if (!recruit.imageRetrySeconds) { clearInterval(imageRetryTimer); imageRetryTimer = null }
+    }, 1000)
+  }
+}
+
+async function retryRecruitImage() {
+  if (!recruit.show || !recruit.result || !recruit.referenceInfo?.page_url || recruit.imageRetrySeconds
+    || recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine.value) return
+  const version = ++recruitVersion
+  imageRetryController = new AbortController()
+  recruit.imageLoading = true
+  try {
+    const result = await api.retryCharacterReferenceImage(recruit.referenceInfo.page_url, { signal: imageRetryController.signal })
+    if (version !== recruitVersion || !recruit.show) return
+    setRecruitReference(result)
+    if (recruit.referenceImage) openRecruitRefine(recruit.referenceImage)
+  } catch (error) {
+    if (version !== recruitVersion || error.name === 'AbortError') return
+    recruit.referenceInfo = { ...recruit.referenceInfo, status: 'service_error', message: error.message || '立绘获取失败，请重试' }
+  } finally {
+    if (version === recruitVersion) { recruit.imageLoading = false; imageRetryController = null }
+  }
+}
 
 // 招募加载提示语轮播
 const LOADING_TIPS = [
@@ -979,6 +1045,9 @@ function showToast(message, type = 'info') {
 }
 
 function openRecruit() {
+  ++recruitVersion
+  stopImageRetry()
+  showRecruitRefine.value = false
   recruit.show = true
   recruit.step = 'input'
   recruit.desc = ''
@@ -988,9 +1057,13 @@ function openRecruit() {
   recruit.saving = false
   recruit.task = null
   recruit.searchContext = ''
+  recruit.referenceImage = ''
+  recruit.referenceInfo = null
 }
 
 function closeRecruit() {
+  ++recruitVersion
+  stopImageRetry()
   recruit.show = false
   showRecruitRefine.value = false
   stopLoadingTips()
@@ -998,16 +1071,26 @@ function closeRecruit() {
 
 // ── 招募预览的修正外观（草稿卡模式：结果回填 recruit.result.base_prompt，确认招募时才落库）──
 const showRecruitRefine = ref(false)
+const recruitRefineImage = ref('')
+const recruitRefineAuto = ref(false)
+
+function openRecruitRefine(image = '') {
+  if (!recruit.show || !recruit.result) return
+  recruitRefineImage.value = image
+  recruitRefineAuto.value = !!image
+  showRecruitRefine.value = true
+}
 
 function onRecruitAppearanceRefined({ basePrompt }) {
-  if (!recruit.result) return
+  if (!recruit.show || !recruit.result) return
   recruit.result.base_prompt = basePrompt
   showToast('外观已应用到待确认的角色卡', 'success')
 }
 
 async function doGenerate() {
   const desc = recruit.desc.trim()
-  if (!desc || recruit.loading) return
+  if (!desc || recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine.value) return
+  const version = ++recruitVersion
 
   recruit.loading = true
   recruit.error = ''
@@ -1016,25 +1099,32 @@ async function doGenerate() {
 
   try {
     const result = await api.generateCharacterPreview(desc)
+    if (version !== recruitVersion || !recruit.show) return
     if (result.error) {
       recruit.error = result.error
       return
     }
     recruit.searchContext = result.search_context || ''
+    setRecruitReference(result)
     recruit.result = { ...result }
     recruit.step = 'preview'
+    if (recruit.referenceImage) openRecruitRefine(recruit.referenceImage)
   } catch (err) {
+    if (version !== recruitVersion) return
     recruit.error = '生成失败: ' + (err.message || '网络错误')
   } finally {
-    recruit.loading = false
-    recruit.task = null
-    stopLoadingTips()
+    if (version === recruitVersion) {
+      recruit.loading = false
+      recruit.task = null
+      stopLoadingTips()
+    }
   }
 }
 
 async function regenerateFromSearchResult() {
   const desc = recruit.desc.trim()
-  if (!desc || !recruit.searchContext || recruit.loading) return
+  if (!desc || !recruit.searchContext || recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine.value) return
+  const version = ++recruitVersion
 
   recruit.loading = true
   recruit.error = ''
@@ -1043,24 +1133,29 @@ async function regenerateFromSearchResult() {
 
   try {
     const result = await api.generateCharacterPreview(desc, { searchContext: recruit.searchContext })
+    if (version !== recruitVersion || !recruit.show) return
     if (result.error) {
       recruit.error = result.error
       return
     }
     if (result.search_context) recruit.searchContext = result.search_context
     recruit.result = { ...result }
+    if (recruit.referenceImage) openRecruitRefine(recruit.referenceImage)
     showToast('已根据原搜索资料重新整理角色卡', 'success')
   } catch (err) {
+    if (version !== recruitVersion) return
     recruit.error = '重新生成失败: ' + (err.message || '网络错误')
   } finally {
-    recruit.loading = false
-    recruit.task = null
-    stopLoadingTips()
+    if (version === recruitVersion) {
+      recruit.loading = false
+      recruit.task = null
+      stopLoadingTips()
+    }
   }
 }
 
 async function confirmRecruit() {
-  if (!recruit.result || recruit.saving) return
+  if (!recruit.result || recruit.saving || recruit.loading || recruit.imageLoading || showRecruitRefine.value) return
   recruit.saving = true
   recruit.error = ''
 
@@ -1076,7 +1171,7 @@ async function confirmRecruit() {
       return
     }
     // 成功：关闭弹窗，刷新角色列表
-    recruit.show = false
+    closeRecruit()
     await chat.loadCharacters()
   } catch (err) {
     recruit.error = '入库失败: ' + (err.message || '网络错误')
@@ -1090,6 +1185,8 @@ const cardInputRef = ref(null)
 async function onCardSelected(e) {
   const file = e.target.files && e.target.files[0]
   if (!file) return
+  if (recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine.value) return
+  const version = ++recruitVersion
   if (file.size > 7 * 1024 * 1024) {
     recruit.error = '角色卡文件过大（>7MB），请使用更小的文件'
     e.target.value = ''
@@ -1110,6 +1207,7 @@ async function onCardSelected(e) {
       mimetype: file.type,
       filename: file.name,
     })
+    if (version !== recruitVersion || !recruit.show) return
     if (result.error) {
       recruit.error = result.error
       return
@@ -1120,13 +1218,18 @@ async function onCardSelected(e) {
     recruit.step = 'preview'
     recruit.task = null
     recruit.searchContext = ''
+    recruit.referenceImage = ''
+    setRecruitReference({})
     showToast('角色卡已整理完成，请检查后确认招募', 'success')
   } catch (err) {
+    if (version !== recruitVersion) return
     recruit.error = '导入失败: ' + (err.message || '网络错误')
   } finally {
-    recruit.loading = false
-    stopLoadingTips()
-    if (cardInputRef.value) cardInputRef.value.value = ''
+    if (version === recruitVersion) {
+      recruit.loading = false
+      stopLoadingTips()
+      if (cardInputRef.value) cardInputRef.value.value = ''
+    }
   }
 }
 
@@ -1468,7 +1571,10 @@ onMounted(() => {
   // 最长一档错峰是 440ms 延迟 + 450ms 动画
   staggerTimer = setTimeout(() => { gridStagger.value = false }, 1000)
 })
-onUnmounted(() => clearTimeout(staggerTimer))
+onUnmounted(() => {
+  clearTimeout(staggerTimer)
+  closeRecruit()
+})
 
 // 置顶按钮：先播一次爆心特效，再切状态（重排由 TransitionGroup 的 FLIP 兜住）
 function onPinClick(c) {
@@ -1605,6 +1711,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.recruit-step-enter-active, .recruit-step-leave-active { transition: opacity 0.3s var(--ease-out); }
+.recruit-step-enter-from, .recruit-step-leave-to { opacity: 0; }
+.recruit-image-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 0 0 10px; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.6; }
+.recruit-image-status > span { flex: 1 1 200px; }
 .tavern-view {
   padding: 32px;
   overflow-y: auto;
@@ -2557,7 +2667,8 @@ onMounted(async () => {
 
 /* ── 扫描动画覆盖层 ── */
 .scan-overlay {
-  position: absolute; inset: 0;
+  /* 盖住底部按钮超出内容区的立体底边。 */
+  position: absolute; inset: 0 0 -12px;
   background: transparent;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);

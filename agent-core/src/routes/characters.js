@@ -7,6 +7,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { chatSync } from '../services/lorebook/runtime.js';
 import { config } from '../config.js';
 import { runPersonaGeneration } from '../services/characterGenerator.js';
+import { fetchCharacterReferenceImage } from '../services/webSearch.js';
 import { clearImageJudgeCounter } from './chat.js';
 import { invalidateGalleryCache, dataUriExt } from './images.js';
 import { startEditTask, startBackgroundTask } from '../services/imageEditTasks.js';
@@ -35,6 +36,14 @@ import { generateDialogueBackground } from '../services/dialogueBackground.js';
 import { getClothingLibrary, resolveClothingTags, buildClothingAppearanceMessages, parseClothingAppearance } from '../services/clothingLibrary.js';
 
 const router = Router();
+
+router.post('/reference-image', async (req, res) => {
+  try {
+    res.json(await fetchCharacterReferenceImage(req.body?.pageUrl));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
 
 router.get('/clothing-library', (_req, res) => res.json(getClothingLibrary()));
 
@@ -666,7 +675,7 @@ router.post('/generate', async (req, res) => {
   }
 
   try {
-    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext } = await runPersonaGeneration({
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext, referenceImage, referenceImageInfo } = await runPersonaGeneration({
       description,
       cachedSearchContext,
     });
@@ -696,6 +705,8 @@ router.post('/generate', async (req, res) => {
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
         search_context: searchContext,
+        reference_image: referenceImage,
+        reference_image_info: referenceImageInfo,
       });
       refreshCharSearch();
 
@@ -739,6 +750,8 @@ router.post('/generate', async (req, res) => {
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
         search_context: searchContext,
+        reference_image: referenceImage,
+        reference_image_info: referenceImageInfo,
       });
     }
   } catch (err) {

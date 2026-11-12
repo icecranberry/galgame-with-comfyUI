@@ -1,7 +1,7 @@
 import { getDb, getSystemRulesWithWorld } from '../db/index.js';
 import { config } from '../config.js';
 import { chatSync } from './lorebook/runtime.js';
-import { searchCharacterInfo } from './webSearch.js';
+import { searchCharacterReference } from './webSearch.js';
 
 // 共享：构建人格生成指令（标准模板 + 参考资料）
 export function buildPersonaSystemPrompt({ searchContext, extraContext, extraContextLabel }) {
@@ -88,6 +88,8 @@ export async function runPersonaGeneration({
   // ── 联网搜索角色资料（可跳过：导入角色卡时以卡片为第一手资料，无需联网）──────
   let searchContext = '';
   let searchFound = false;
+  let referenceImage = '';
+  let referenceImageInfo = null;
   if (cachedSearchContext) {
     searchContext = cachedSearchContext;
     searchFound = searchContext.length >= 600;
@@ -97,7 +99,10 @@ export async function runPersonaGeneration({
   } else {
     console.log(`[characters] searching web for: "${description.trim()}"`);
     try {
-      searchContext = await searchCharacterInfo(description.trim());
+      const reference = await searchCharacterReference(description.trim());
+      searchContext = reference.text;
+      referenceImage = reference.referenceImage || '';
+      referenceImageInfo = reference.referenceImageInfo || null;
       if (searchContext) {
         console.log(`[characters] web search returned ${searchContext.length} chars`);
       } else {
@@ -169,6 +174,6 @@ export async function runPersonaGeneration({
   const exists = db.prepare('SELECT id FROM characters WHERE name = ?').get(charName);
   if (exists) charName = charName + '_' + Date.now();
 
-  return { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext };
+  return { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext, referenceImage, referenceImageInfo };
 }
 

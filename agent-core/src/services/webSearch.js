@@ -46,7 +46,9 @@ function toSafeMoegirlScrapeUrl(rawUrl) {
   } catch {
     return null;
   }
-  if (!ALLOWED_FETCH_HOSTS.test(parsed.hostname)) return null;
+  if (!/^([a-z0-9-]+\.)*moegirl\.org\.cn$/.test(parsed.hostname)
+    || !['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password
+    || (parsed.port && !['80', '443'].includes(parsed.port))) return null;
   return `https://zh.moegirl.org.cn${parsed.pathname}${parsed.search}`;
 }
 
@@ -93,13 +95,18 @@ async function extractNameForSearch(rawQuery) {
  * @returns {Promise<string>} 格式化后的搜索结果文本
  */
 export async function searchCharacterInfo(query) {
+  return (await searchCharacterReference(query)).text;
+}
+
+/** 图片独立于文本传递，避免 base64 进入人格生成提示词及搜索缓存。 */
+export async function searchCharacterReference(query) {
   // 先用 LLM 提取核心角色名 + 作品上下文，提升萌娘百科搜索命中率
   const { name: searchName, context } = await extractNameForSearch(query);
 
   // 没有作品上下文 → 原创角色描述 → 跳过搜索，让 LLM 自行发挥
   if (!context) {
     console.log(`[webSearch] no work context, skipping search (original character): "${searchName}"`);
-    return '';
+    return { text: '', referenceImage: '' };
   }
 
   const allResults = [];
@@ -128,6 +135,8 @@ export async function searchCharacterInfo(query) {
         const scrapeUrl = toSafeMoegirlScrapeUrl(rawScrapeUrl);
         try {
           const pageData = await scrapeMoegirlPage(scrapeUrl);
+          if (pageData?.reference_image) best.reference_image = pageData.reference_image;
+          if (pageData?.reference_image_info) best.reference_image_info = pageData.reference_image_info;
           if (pageData && pageData.content) {
             const infoboxLen = pageData.infobox?.length || 0;
             const contentLen = pageData.content?.length || 0;
@@ -172,11 +181,12 @@ export async function searchCharacterInfo(query) {
     }
   }
 
-  if (allResults.length === 0) return '';
-
-  return allResults
+  const text = allResults.filter(r => r.content)
     .map((r, i) => `[${i + 1}] ${r.title}\n${r.content}\n来源: ${r.source}`)
     .join('\n\n');
+  const reference = allResults.find(r => r.reference_image) || allResults.find(r => r.reference_image_info);
+  return { text, referenceImage: reference?.reference_image || '',
+    ...(reference?.reference_image_info ? { referenceImageInfo: reference.reference_image_info } : {}) };
 }
 
 /**
@@ -514,16 +524,7 @@ async function scrapeMoegirlPage(pageUrl) {
   }
   console.log(`[webSearch] scrapeMoegirlPage calling python: ${pageUrl}`);
   try {
-    const res = await fetch(`http://localhost:8765/scrape`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: pageUrl }),
-    });
-    if (!res.ok) {
-      console.warn(`[webSearch] python scrape returned ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
+    const data = await callMoegirlScraper(pageUrl, false);
     const pyInfoboxLen = data.infobox?.length || 0;
     const bodyLen = data.content?.length || 0;
     console.log(`[webSearch] python scrape done: infobox=${pyInfoboxLen} chars, body=${bodyLen} chars`);
@@ -550,6 +551,58 @@ async function scrapeMoegirlPage(pageUrl) {
     return data;
   } catch (err) {
     console.warn(`[webSearch] python scrape call failed: ${err.message}`);
-    return null;
+    return referenceFailure(pageUrl, 'service_error', '立绘获取失败，请检查抓取服务后重试');
   }
+}
+
+function referenceFailure(pageUrl, status, message, retryAfter = 0) {
+  return { source: pageUrl, content: '', reference_image: '', reference_image_info: {
+    page_url: pageUrl, status, message, retry_after: retryAfter,
+  } };
+}
+
+async function callMoegirlScraper(pageUrl, imageOnly, signal) {
+  try {
+    const timeout = AbortSignal.timeout(65000);
+    const res = await fetch(`http://localhost:8765/${imageOnly ? 'scrape-image' : 'scrape'}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: pageUrl }),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (!res.ok) {
+      let detail = '';
+      try { detail = JSON.stringify((await res.json()).detail || ''); } catch { /* legacy service */ }
+      if (res.status === 429 || /\b429\b/.test(detail)) {
+        return referenceFailure(pageUrl, 'rate_limited', '萌娘百科请求过于频繁，请稍后重试立绘', 5);
+      }
+      if (/\b403\b/.test(detail)) return referenceFailure(pageUrl, 'blocked', '萌娘百科要求访问验证，暂时无法获取立绘');
+      return referenceFailure(pageUrl, 'service_error', res.status === 404 && imageOnly
+        ? '抓取服务尚未更新，请重启向量服务后重试立绘' : '立绘获取失败，请检查抓取服务后重试');
+    }
+    const data = await res.json();
+    const image = typeof data.reference_image === 'string' ? data.reference_image : '';
+    const info = data.reference_image_info || {};
+    return { ...data, reference_image: image, reference_image_info: {
+      page_url: pageUrl,
+      status: image ? 'ready' : (info.status || 'service_error'),
+      message: image ? '' : (info.message || '抓取服务未返回图片状态，请重启向量服务后重试'),
+      retry_after: Math.max(0, Number(info.retry_after) || 0),
+    } };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return referenceFailure(pageUrl, error.name === 'TimeoutError' ? 'timeout' : 'service_error',
+      error.name === 'TimeoutError' ? '获取立绘超时，请重试' : '无法连接抓取服务，请检查服务后重试立绘');
+  }
+}
+
+/** Retry only the already-selected article's image. No name extraction, persona generation or DB writes. */
+export async function fetchCharacterReferenceImage(rawPageUrl, { signal } = {}) {
+  const pageUrl = toSafeMoegirlScrapeUrl(rawPageUrl);
+  if (!pageUrl) {
+    const error = new Error('请提供有效的萌娘百科页面地址');
+    error.status = 400;
+    throw error;
+  }
+  const result = await callMoegirlScraper(pageUrl, true, signal);
+  return { reference_image: result.reference_image, reference_image_info: result.reference_image_info };
 }

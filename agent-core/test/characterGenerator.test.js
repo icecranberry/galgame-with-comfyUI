@@ -9,7 +9,7 @@ const fixture = stub(`
   export const getDb = () => ({ prepare: () => ({ get: () => state.exists ? { id: 1 } : undefined }) });
   export const getSystemRulesWithWorld = () => state.rules;
   export const chatSync = async (messages, options) => { state.calls.push({ messages, options }); return state.result; };
-  export const searchCharacterInfo = async description => { state.searches.push(description); return '网络资料'.repeat(160); };
+  export const searchCharacterReference = async description => { state.searches.push(description); return { text: '网络资料'.repeat(160), referenceImage: 'data:image/png;base64,cG9ydHJhaXQ=' }; };
 `);
 const { state } = await import(fixture);
 const source = readFileSync(new URL('../src/services/characterGenerator.js', import.meta.url), 'utf8')
@@ -53,12 +53,24 @@ test('ordinary character generation retains web references, name deduplication a
   const result = await runPersonaGeneration({ description: '某作品角色' });
   assert.deepEqual(state.searches, ['某作品角色']);
   assert.equal(result.searchFound, true);
+  assert.equal(result.referenceImage, 'data:image/png;base64,cG9ydHJhaXQ=');
   assert.match(result.charName, /^angel_\d+$/);
   const { messages, options } = state.calls.at(-1);
   assert.deepEqual(messages.map(m => m.role), ['system', 'user']);
   assert.equal(options.label, '创造角色');
   assert.equal(options.lorebook.cacheBoundary.index, 0);
   assert.ok(!options.lorebook.staticTexts[0].includes('网络资料'));
+  assert.ok(!JSON.stringify(messages).includes('data:image'));
   state.result = '天使\nAngel\n{}\n内容太短';
   await assert.rejects(runPersonaGeneration({ description: '天使', skipWebSearch: true }), /人格不完整/);
+});
+
+test('cached search and imported cards do not repeat the image scrape', async () => {
+  state.result = `天使\nAngel\n{}\n${persona}`;
+  state.searches.length = 0;
+  const result = await runPersonaGeneration({ description: '天使', cachedSearchContext: '缓存资料'.repeat(160) });
+  assert.equal(result.referenceImage, '');
+  assert.equal(state.searches.length, 0);
+  const imported = await runPersonaGeneration({ description: '天使', skipWebSearch: true });
+  assert.equal(imported.referenceImage, '');
 });

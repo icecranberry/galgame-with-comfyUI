@@ -13,6 +13,9 @@ import time
 import requests
 import cloudscraper
 from bs4 import BeautifulSoup
+from moegirl_image import fetch_infobox_image_result, image_failure
+from moegirl_page import fetch_moegirl_page
+from moegirl_fetch import FetchError, allowed_moegirl_url
 
 from embedding import embed, embed_single
 from chroma_store import (
@@ -224,6 +227,8 @@ class ScrapeResponse(BaseModel):
     content: str = ''     # 正文（不含信息框）
     infobox: str = ''     # 基本信息框，高度浓缩的结构化数据，独立于正文
     source: str = ''
+    reference_image: str = ''  # 信息框立绘 data URL，独立传递，不写进人格生成提示词
+    reference_image_info: dict = Field(default_factory=dict)
 
 _scraper = cloudscraper.create_scraper()
 _scraper.trust_env = False  # 不走系统代理，避免加速器/代理把萌娘百科连接掐掉
@@ -238,45 +243,45 @@ _direct_session = requests.Session()
 _direct_session.trust_env = False
 
 def _fetch_moegirl_page(url):
-    candidates = [url]
-    if 'zh.moegirl.org.cn' in url:
-        candidates.append(url.replace('zh.moegirl.org.cn', 'mzh.moegirl.org.cn'))
+    return fetch_moegirl_page(url, _direct_session, _scraper, _SCRAPE_HEADERS)
 
-    last_error = None
-    for candidate in candidates:
-        for attempt in range(2):
-            try:
-                resp = _scraper.get(candidate, headers=_SCRAPE_HEADERS, timeout=10)
-                resp.raise_for_status()
-                return resp
-            except Exception as e:
-                last_error = e
-                print(f"[scrape] cloudscraper fetch failed ({candidate}, attempt {attempt + 1}/2): {e}")
-                try:
-                    resp = _direct_session.get(candidate, headers=_SCRAPE_HEADERS, timeout=10)
-                    resp.raise_for_status()
-                    return resp
-                except Exception as e2:
-                    last_error = e2
-                    print(f"[scrape] requests fallback failed ({candidate}): {e2}")
-                time.sleep(0.8)
-    raise last_error
+
+def _image_fields(page_url, result):
+    return {'reference_image': result['image'], 'reference_image_info': {
+        'page_url': page_url, 'status': result['status'],
+        'message': result['message'], 'retry_after': result['retry_after'],
+    }}
+
+
+@app.post('/scrape-image', response_model=ScrapeResponse)
+def scrape_moegirl_image(req: ScrapeRequest):
+    """Only fetch the selected article's portrait; never generate or rewrite a character."""
+    if not allowed_moegirl_url(req.url):
+        raise HTTPException(400, 'invalid moegirl url')
+    try:
+        page_bytes, page_url = _fetch_moegirl_page(req.url)
+        soup = BeautifulSoup(page_bytes, 'lxml', from_encoding='utf-8')
+        result = fetch_infobox_image_result([soup], page_url, _direct_session)
+    except FetchError as error:
+        result = image_failure(error)
+    return ScrapeResponse(source=req.url, **_image_fields(req.url, result))
 
 @app.post("/scrape", response_model=ScrapeResponse)
-async def scrape_moegirl(req: ScrapeRequest):
+def scrape_moegirl(req: ScrapeRequest):
     """爬取萌娘百科页面，返回正文 + 结构化基本资料"""
+    if not allowed_moegirl_url(req.url):
+        raise HTTPException(400, 'invalid moegirl url')
     fetch_url = req.url.replace('mzh.moegirl.org.cn', 'zh.moegirl.org.cn')
     print(f"[scrape] fetching {fetch_url}")
 
     try:
-        resp = _fetch_moegirl_page(fetch_url)
-        resp.raise_for_status()
-        print(f"[scrape] status: {resp.status_code}, bytes: {len(resp.content)}")
-    except Exception as e:
+        page_bytes, page_url = _fetch_moegirl_page(fetch_url)
+        print(f"[scrape] bytes: {len(page_bytes)}")
+    except FetchError as e:
         print(f"[scrape] fetch failed: {e}")
-        raise HTTPException(502, f"fetch failed: {e}")
+        return ScrapeResponse(source=req.url, **_image_fields(req.url, image_failure(e)))
 
-    soup = BeautifulSoup(resp.content, 'lxml', from_encoding='utf-8')
+    soup = BeautifulSoup(page_bytes, 'lxml', from_encoding='utf-8')
 
     # 正文被包裹在 <template id="MOE_SKIN_TEMPLATE_BODYCONTENT"> 内（Vue 渲染用）
     # 需要提取模板内容单独解析
@@ -285,7 +290,7 @@ async def scrape_moegirl(req: ScrapeRequest):
     template = soup.select_one('template#MOE_SKIN_TEMPLATE_BODYCONTENT')
     if template:
         import re
-        html_text = resp.content.decode('utf-8', errors='replace')
+        html_text = page_bytes.decode('utf-8', errors='replace')
         tmpl_match = re.search(
             r'<template[^>]*id="MOE_SKIN_TEMPLATE_BODYCONTENT"[^>]*>([\s\S]*?)</template>',
             html_text, re.I
@@ -312,6 +317,9 @@ async def scrape_moegirl(req: ScrapeRequest):
     if not article:
         print("[scrape] content not found in template or page")
         raise HTTPException(404, 'content not found')
+
+    # 必须在 img 被替换为 alt 文本之前提取立绘；下载失败不影响角色资料。
+    image_result = fetch_infobox_image_result([article, inner_soup, soup], page_url, _direct_session)
 
     # 去掉 navbox / script / style
     for tag in article.select('table.navbox, script, style'):
@@ -467,6 +475,7 @@ async def scrape_moegirl(req: ScrapeRequest):
         content=text,          # 正文（游戏数值已过滤）
         infobox=infobox_text,  # 信息框（CSS 提取的结构化字段，独立返回）
         source=req.url,
+        **_image_fields(req.url, image_result),
     )
 
 
