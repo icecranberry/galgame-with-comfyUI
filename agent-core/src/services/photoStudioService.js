@@ -91,15 +91,16 @@ export function createPhotoStudioService({
   // a server restart. Store only successful rewrites, never failures.
   const polishedPrompts = new Map();
   function listCharacters() {
+    // 与酒馆 /api/characters 一致：列出全部角色资料，不按小镇身份、立绘或服装筛选。
     const outfits = db().prepare("SELECT character_id, scene FROM character_outfits WHERE scene IN ('casual', 'home', 'sleep') AND TRIM(COALESCE(description, '')) != ''").all();
-    return db().prepare('SELECT id, name, display_name, avatar_path, standing_url FROM characters WHERE COALESCE(archived, 0) = 0 ORDER BY pinned DESC, id DESC').all().map(character => ({
+    return db().prepare('SELECT id, name, display_name, avatar_path, standing_url FROM characters ORDER BY pinned DESC, id DESC').all().map(character => ({
       ...character,
       outfitScenes: outfitScenes.filter(scene => scene === 'work' || outfits.some(outfit => outfit.character_id === character.id && outfit.scene === scene)),
     }));
   }
 
   function loadCharacter(id) {
-    if (id !== 'angel') return db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(id));
+    if (id !== 'angel') return db().prepare('SELECT * FROM characters WHERE id = ?').get(Number(id));
     const exists = db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='god_angel'").get();
     const angel = exists && db().prepare('SELECT * FROM god_angel WHERE id = 1').get();
     if (!angel) throw Object.assign(new Error('尚未创建天使，请先在神说中召唤天使'), { status: 400 });
@@ -149,7 +150,7 @@ export function createPhotoStudioService({
     }
     let first;
     if (randomFirst) {
-      const candidates = db().prepare('SELECT * FROM characters WHERE COALESCE(archived, 0) = 0 AND id != ? ORDER BY pinned DESC, id DESC').all(second?.id ?? -1);
+      const candidates = db().prepare('SELECT * FROM characters WHERE id != ? ORDER BY pinned DESC, id DESC').all(second?.id ?? -1);
       if (!candidates.length) throw Object.assign(new Error(duo ? '双人姿势至少需要两位可用角色' : '没有可选择的角色'), { status: 400 });
       first = random(candidates);
     } else {
@@ -160,7 +161,7 @@ export function createPhotoStudioService({
       if (!randomSecond) {
         if (second.id === first.id) throw Object.assign(new Error('双人姿势需要选择两位不同角色'), { status: 400 });
       } else {
-        const candidates = db().prepare('SELECT * FROM characters WHERE COALESCE(archived, 0) = 0 AND id != ? ORDER BY pinned DESC, id DESC').all(first.id);
+        const candidates = db().prepare('SELECT * FROM characters WHERE id != ? ORDER BY pinned DESC, id DESC').all(first.id);
         if (!candidates.length) throw Object.assign(new Error('双人姿势至少需要两位可用角色'), { status: 400 });
         second = random(candidates);
       }

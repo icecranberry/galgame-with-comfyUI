@@ -24,7 +24,7 @@ const appearances = {
 function fixture(t, options = {}) {
   const db = new Database(':memory:');
   t.after(() => db.close());
-  db.exec(`CREATE TABLE characters(id INTEGER PRIMARY KEY,name TEXT,display_name TEXT,base_prompt TEXT,short_prompt TEXT,loras TEXT,archived INTEGER DEFAULT 0,pinned INTEGER DEFAULT 0);
+  db.exec(`CREATE TABLE characters(id INTEGER PRIMARY KEY,name TEXT,display_name TEXT,base_prompt TEXT,short_prompt TEXT,loras TEXT,pinned INTEGER DEFAULT 0);
     CREATE TABLE character_outfits(id INTEGER PRIMARY KEY,character_id INTEGER,scene TEXT,description TEXT);
     CREATE TABLE image_tasks(id INTEGER PRIMARY KEY,prompt_original TEXT,prompt_refined TEXT,status TEXT,output_paths TEXT,workflow_template TEXT,finished_at TEXT,error_message TEXT);
     CREATE TABLE moment_posts(id INTEGER PRIMARY KEY);
