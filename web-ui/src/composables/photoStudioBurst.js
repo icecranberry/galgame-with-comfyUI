@@ -76,7 +76,9 @@ export function createPhotoStudioBurst(studio, { prepareSound = () => {}, playSo
         if (!disposed) fail(error.message)
       } finally {
         shooting.value = false
-        if (!remaining) stop()
+        // Single shots keep their existing lifecycle; a burst stays stoppable
+        // through its final print, until the terminal job update arrives.
+        if (!remaining && burstTotal.value === 1) stop()
         syncRecovery()
       }
     }
@@ -116,7 +118,7 @@ export function createPhotoStudioBurst(studio, { prepareSound = () => {}, playSo
       timer = setTimeout(() => { timer = undefined; void submit() }, 800)
     })
     onScopeDispose(() => { disposed = true; stop(); clearInterval(recoveryTimer); pendingSounds.clear() })
-    return { groupIds, groupIndex, groupPhotos, burstRunning, burstTotal, shooting, exposure, lastFailure, selectedJobId, start, detachInput }
+    return { groupIds, groupIndex, groupPhotos, burstRunning, burstTotal, shooting, exposure, lastFailure, selectedJobId, start, stop, detachInput }
   })
   controller.dispose = () => { scope.stop(); controllers.delete(studio) }
   controllers.set(studio, controller)

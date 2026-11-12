@@ -651,9 +651,8 @@ test('burst repeats the ordinary shutter sequentially, builds only the current g
   state.polishPrompt.value = false
   const first = state.shoot()
   posts[0].resolve({ status: 'running' }); await first; await settle()
-  await state.shoot()
   t.mock.timers.tick(5000); await settle()
-  assert.equal(posts.length, 1, 'neither another click nor time passing may submit ahead of completion')
+  assert.equal(posts.length, 1, 'time passing may not submit ahead of completion')
   assert.equal(posts[0].input.characterId, null, 'random protagonist is resolved anew by the normal backend request')
   emitJob(0); await settle()
   state.polishPrompt.value = true
@@ -724,6 +723,72 @@ test('submission failure stops a burst without retries', async t => {
   assert.equal(state.burstRunning.value, false)
 })
 
+test('the stop shutter works during submission and late completion cannot resume the batch', async t => {
+  const { state, posts, emitJob, settle, sounds } = await mountBurstStudio(t)
+  state.burstCount.value = 3
+  const pending = state.shoot()
+  assert.equal(state.shooting.value, true)
+  assert.equal(state.canStopBurst.value, true)
+  assert.equal(state.shootDisabled.value, false)
+  // Even changed or unavailable shot inputs must not disable stopping.
+  state.poseId.value = ''
+  await state.shoot()
+  assert.equal(state.burstRunning.value, false)
+  assert.equal(state.shootDisabled.value, true, 'the in-flight POST still prevents a new batch')
+  emitJob(0); await settle()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  t.mock.timers.tick(30000); await settle()
+  assert.equal(posts.length, 1)
+  assert.equal(state.groupPhotos.value.length, 1)
+  assert.equal(sounds(), 1)
+  assert.equal(state.lastFailure.value, '')
+})
+
+test('stopping a running print survives navigation, retains photos and allows a fresh batch after completion', async t => {
+  const { state, posts, emitJob, settle, unmount, mount } = await mountBurstStudio(t)
+  state.burstCount.value = 3
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  emitJob(0); await settle()
+  t.mock.timers.tick(800); await settle()
+  posts[1].resolve({ status: 'running' }); await settle()
+  unmount()
+  const returning = mount()
+  await returning.state.load(); await settle()
+  assert.equal(returning.state.canStopBurst.value, true)
+  await returning.state.shoot()
+  assert.equal(returning.state.shootDisabled.value, true, 'the current print still owns the shutter')
+  assert.equal(returning.state.groupPhotos.value.length, 1)
+  returning.unmount()
+  emitJob(1); await settle()
+  t.mock.timers.tick(30000); await settle()
+  assert.equal(posts.length, 2, 'stopping remains effective off-page')
+  const finished = mount()
+  await finished.state.load(); await settle()
+  assert.equal(finished.state.groupPhotos.value.length, 2)
+  assert.equal(finished.state.shootDisabled.value, false)
+  finished.state.burstCount.value = 1
+  const next = finished.state.shoot()
+  posts[2].resolve({ status: 'running' }); await next; await settle()
+  assert.equal(finished.state.canStopBurst.value, false, 'single shots keep their existing loading behavior')
+  emitJob(2); await settle()
+  assert.deepEqual(finished.state.groupPhotos.value.map(photo => photo.id), [posts[2].input.id])
+})
+
+test('stopping between shutters clears the scheduled continuation immediately', async t => {
+  const { state, posts, emitJob, settle } = await mountBurstStudio(t)
+  state.burstCount.value = 2
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  emitJob(0); await settle()
+  assert.equal(state.canStopBurst.value, true)
+  await state.shoot()
+  t.mock.timers.tick(30000); await settle()
+  assert.equal(posts.length, 1)
+  assert.equal(state.groupPhotos.value.length, 1)
+  assert.equal(state.shootDisabled.value, false)
+})
+
 test('leaving during a pending print continues the batch and returning reuses the same stack without resubmitting', async t => {
   const { state, posts, emitJob, settle, stored, unmount, mount } = await mountBurstStudio(t)
   state.burstCount.value = 3
@@ -749,10 +814,12 @@ test('leaving during a pending print continues the batch and returning reuses th
   }
   const returning = mount()
   await returning.state.load(); await settle()
-  assert.equal(returning.state.shootDisabled.value, true)
+  assert.equal(returning.state.shootDisabled.value, false, 'the final pending shot still exposes the stop action')
+  assert.equal(returning.state.canStopBurst.value, true)
   assert.equal(returning.state.groupPhotos.value.length, 2)
   await returning.state.shoot()
-  assert.equal(posts.length, 3, 're-entering or pressing the disabled shutter cannot duplicate a group')
+  assert.equal(returning.state.burstRunning.value, false, 'the final pending shot can also stop the batch')
+  assert.equal(posts.length, 3, 're-entering or stopping cannot duplicate a group')
   posts[2].resolve({ status: 'running' }); await settle()
   emitJob(2); await settle()
   assert.equal(returning.state.groupPhotos.value.length, 3)

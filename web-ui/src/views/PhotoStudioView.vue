@@ -53,7 +53,21 @@
 </Transition>
 <div v-if="groupPhotos.length && (activeJob || shooting)" class="deck-developing" role="status"><StudioDevelopingIcon /><span>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}<template v-if="burstTotal > 1"> · {{ Math.min(groupPhotos.length + 1, burstTotal) }} / {{ burstTotal }}</template></span><div class="develop-track" role="progressbar" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100" aria-label="当前照片冲印进度"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div>
 <div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div>
-</div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><div class="studio-shutter"><studio-button variant="primary" size="lg" joined :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting" @click="shoot"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button><StudioBurstControl v-model="burstCount" :disabled="burstRunning || shooting || !!activeJob" /></div></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div>
+</div><div class="portrait-actions">
+<div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><div class="studio-shutter">
+  <studio-button variant="primary" size="lg" joined :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting && !canStopBurst" :title="canStopBurst ? '停止后续连拍，当前照片继续冲印' : undefined" @click="shoot">
+    <Transition name="shutter-action" mode="out-in">
+      <span :key="canStopBurst ? 'stop' : activeJob ? 'printing' : shooting ? 'preparing' : 'ready'" class="shutter-action-content">
+        <svg v-if="canStopBurst" class="nav-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+        <StudioDevelopingIcon v-else-if="activeJob" />
+        <svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>
+        {{ canStopBurst ? '停止任务' : activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}
+      </span>
+    </Transition>
+  </studio-button>
+  <StudioBurstControl v-model="burstCount" :disabled="burstRunning || shooting || !!activeJob" />
+</div>
+</div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div>
 </section>
       <aside ref="characterPanel" class="studio-characters" tabindex="-1">
         <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">02</span>入镜人物</h2></div><span class="rail-count">{{ sortedCharacters.length }}</span></div>
@@ -389,7 +403,8 @@ const filteredPoses = computed(() => { const term = query.value.trim().toLowerCa
 const visiblePoses = computed(() => filteredPoses.value.slice(0, visiblePoseCount.value))
 const canUseCharacters = computed(() => characters.value.length >= (duoPose.value ? 2 : 1) && (!characterId.value || !!selectedCharacter.value) && (!duoPose.value || !secondCharacterId.value || !!selectedSecondCharacter.value))
 const shotUnavailable = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt?.trim() || !canUseCharacters.value)
-const shootDisabled = computed(() => burstRunning.value || shotUnavailable.value)
+const canStopBurst = computed(() => burstRunning.value && burstTotal.value > 1)
+const shootDisabled = computed(() => !canStopBurst.value && (burstRunning.value || shotUnavailable.value))
 const dimensionControls = computed(() => photoDimensionControls(aspectRatio.value))
 function unique(field) { return [...new Set(catalog.value.filter(item => field === 'system' || !systemFilter.value || item.system === systemFilter.value).map(item => item[field]))].sort((a, b) => a.localeCompare(b, 'zh')) }
 async function loadMorePoses() {
@@ -520,6 +535,7 @@ async function previewPrompt() {
   finally { if (revision === promptRevision && !disposed) promptLoading.value = false }
 }
 function shoot() {
+  if (canStopBurst.value) { burst.stop(); return }
   if (shootDisabled.value) return
   return burst.start(burstCount.value, shotInput)
 }
@@ -654,6 +670,9 @@ onBeforeUnmount(() => { burst.detachInput(shotInput); disposed = true; poseReque
 @keyframes studio-enter{from{opacity:0}to{opacity:1}}@keyframes studio-spin{to{transform:rotate(360deg)}}
 .studio-shutter { display:flex; min-width:0; }
 .studio-shutter>.studio-button { flex:1; min-width:0; }
+.shutter-action-content { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.shutter-action-enter-active,.shutter-action-leave-active { transition:opacity .3s; }
+.shutter-action-enter-from,.shutter-action-leave-to { opacity:0; }
 .studio-mobile-back { display:none; }
 .deck-developing { position:absolute; z-index:13; left:32px; right:32px; bottom:6px; display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--studio-film); color:var(--studio-film-text); font-size:var(--fs-xs); }
 .deck-developing .develop-track { position:absolute; left:0; right:0; bottom:0; margin:0; }
