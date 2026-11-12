@@ -53,6 +53,7 @@
         @wheel="onUserScrollIntent"
         @touchstart="onUserScrollIntent"
         @pointerdown="onUserScrollIntent"
+        @keydown="onMessageKeydown"
       >
         <div v-if="store.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
@@ -430,6 +431,7 @@ import SpeechButton from '../components/SpeechButton.vue'
 import { loadSpeech, stopSpeech, speechEnabled } from '../stores/speech.js'
 import { useSpeechAutoPlay } from '../composables/useSpeechAutoPlay.js'
 import { useSpeechBubbleControls } from '../composables/useSpeechBubbleControls.js'
+import { useGroupEntryScroll } from '../composables/useGroupEntryScroll.js'
 import '../styles/speechBubble.css'
 
 const route = useRoute()
@@ -635,17 +637,46 @@ function timeLabel(iso) {
 
 // ── 进入/切换群 ──
 
+let enterRequestId = 0
+let enteringGroup = false
+const entryScroll = useGroupEntryScroll({
+  container: () => scrollEl.value,
+  busy: () => store.sending || store.playing || store.messages.some(msg => ['pending', 'generating', 'retrying'].includes(msg.genStatus)),
+  reveal: () => store.revealLastSeenDivider(),
+  onStart: () => {
+    teardownResizeObserver()
+    clearTimeout(autoScrollTimer)
+    isAutoScrolling = false
+    isFollowingLatest.value = false
+  },
+  onFinish: syncFollowingState,
+})
+
 async function enterGroup(id) {
   if (!id) return
+  const requestId = ++enterRequestId
+  enteringGroup = true
+  entryScroll.cancel()
+  teardownResizeObserver()
+  clearTimeout(autoScrollTimer)
+  isAutoScrolling = false
   stopSpeech()
   loadSpeech(null, { groupId: Number(id) }).catch(() => {})
   isFollowingLatest.value = true
   hasNewMessages.value = false
   await loadGroupActivity()
+  if (requestId !== enterRequestId) return
   await store.loadGroups()
-  await store.selectGroup(parseInt(id, 10))
-  scrollToBottom(true)   // 进群直接定位底部，不要缓动
-  setupResizeObserver()  // 与私聊一致：历史图片异步加载撑高列表时自动追底
+  if (requestId !== enterRequestId) return
+  const entry = await store.selectGroup(parseInt(id, 10))
+  if (requestId !== enterRequestId) return
+  const restored = await entryScroll.start(entry)
+  if (requestId !== enterRequestId) return
+  enteringGroup = false
+  if (!restored) {
+    scrollToBottom(true)
+    setupResizeObserver()
+  }
   armLullTimer()
 }
 
@@ -656,6 +687,7 @@ watch(() => store.scrollSignal, () => {
   const messageCount = store.messages.length
   const receivedNewMessage = messageCount > observedMessageCount
   observedMessageCount = messageCount
+  if (enteringGroup || entryScroll.active.value) return
   if (isFollowingLatest.value) scrollToBottom()
   else if (receivedNewMessage) hasNewMessages.value = true
   armLullTimer()
@@ -747,6 +779,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  enterRequestId++
+  entryScroll.cancel()
   clearLullTimer()
   clearSendPressTimer()
   clearTimeout(autoScrollTimer)
@@ -778,7 +812,7 @@ function syncFollowingState() {
 }
 
 function onMessageScroll() {
-  if (isAutoScrolling) return
+  if (enteringGroup || entryScroll.active.value || isAutoScrolling) return
   syncFollowingState()
 
   const el = scrollEl.value
@@ -792,13 +826,19 @@ function onMessageScroll() {
 }
 
 function onUserScrollIntent() {
+  entryScroll.cancel()
   isAutoScrolling = false
   clearTimeout(autoScrollTimer)
   autoScrollTimer = null
   requestAnimationFrame(syncFollowingState)
 }
 
+function onMessageKeydown(event) {
+  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) onUserScrollIntent()
+}
+
 function returnToLatest() {
+  entryScroll.cancel()
   isFollowingLatest.value = true
   hasNewMessages.value = false
   scrollToBottom()
@@ -849,6 +889,7 @@ function teardownResizeObserver() {
 // 与私聊一致：新消息平滑滚动到底，force 时（进群/切群）瞬间定位
 function scrollToBottom(force = false) {
   nextTick(() => {
+    if (enteringGroup || entryScroll.active.value) return
     const el = scrollEl.value
     if (!el) return
     isAutoScrolling = true

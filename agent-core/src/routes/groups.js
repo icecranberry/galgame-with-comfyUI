@@ -89,6 +89,7 @@ function serializeGroup(group) {
     last_seen_at: toISODate(group.last_seen_at),
     created_at: toISODate(group.created_at),
     unread,
+    generating: isGroupRoundRunning(group.id),
     ...getLastMessagePreview(group.id),
     members: group.members.map(m => ({
       id: m.id, display_name: m.display_name, avatar_path: m.avatar_path,
