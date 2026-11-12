@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as dimensions from '../src/utils/photoStudioDimensions.js'
+import * as imageUpload from '../src/utils/imageUpload.js'
 import { createPhotoStudioBurst } from '../src/composables/photoStudioBurst.js'
 import { STUDIO_OUTFIT_LABELS } from '../src/utils/studioWardrobe.js'
 import { usePhotoStudio as createStudio } from '../src/composables/usePhotoStudio.js'
@@ -19,7 +20,7 @@ test('image pasting shares pose upload, preserves text paste and only handles th
   const globals = {
     document: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name) } },
     sessionStorage: { getItem: () => null, setItem() {} }, localStorage: { getItem: () => null, setItem() {} },
-    FileReader: class { readAsDataURL(file) { reads.push(file); this.result = 'data:image/png;base64,dGVzdA=='; this.onload() } },
+    FileReader: class { readAsDataURL(file) { reads.push(file); this.result = `data:${file.type || 'application/octet-stream'};base64,dGVzdA==`; this.onload() } },
   }
   for (const [name, value] of Object.entries(globals)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name)
@@ -27,7 +28,7 @@ test('image pasting shares pose upload, preserves text paste and only handles th
     t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
   }
   let finish
-  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS,
+  const deps = { ...dimensions, ...imageUpload, STUDIO_OUTFIT_LABELS,
     describePhotoStudioPose: (image, signal) => { calls.push({ image, signal }); return new Promise(resolve => { finish = resolve }) },
     usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
   }
@@ -50,7 +51,7 @@ test('image pasting shares pose upload, preserves text paste and only handles th
   await paste(text)
   assert.equal(text.defaultPrevented, false)
   const incoming = picture(), pending = paste(incoming)
-  await Promise.resolve()
+  await new Promise(setImmediate)
   assert.equal(incoming.defaultPrevented, true)
   assert.equal(state.describingPose.value, true)
   await paste(picture())
@@ -61,11 +62,26 @@ test('image pasting shares pose upload, preserves text paste and only handles th
   assert.equal(state.duoPose.value, false, 'a recognized single-person image only uses the protagonist')
   const fallback = event({ items: [], files: [file] }), next = paste(fallback)
   const pairResult = { ...result, personCount: 2, posePrompt: 'character 1 holds the hand of character 2.' }
-  await Promise.resolve(); finish(pairResult); await next
+  await new Promise(setImmediate); finish(pairResult); await next
   assert.equal(state.duoPose.value, true, 'a recognized pair automatically enables the partner')
   assert.equal(state.shotInput().customPose.personCount, 2)
   assert.equal(fallback.defaultPrevented, true)
   assert.deepEqual(reads, [file, file])
+  for (const type of ['', 'application/octet-stream']) {
+    const phoneFile = { name: 'IMG_2026.JPG', type, size: 1024 }
+    const target = { files: [phoneFile], value: 'phone-photo' }
+    const pending = state.uploadPose({ target })
+    assert.equal(target.value, '', 'the same phone photo can be selected again')
+    await new Promise(setImmediate)
+    assert.equal(calls.at(-1).image, 'data:image/jpeg;base64,dGVzdA==')
+    finish(result); await pending
+  }
+  const phonePaste = event({ files: [{ name: 'photo.png', type: '', size: 1024 }] })
+  const phonePending = paste(phonePaste)
+  await new Promise(setImmediate)
+  assert.equal(phonePaste.defaultPrevented, true)
+  assert.equal(calls.at(-1).image, 'data:image/png;base64,dGVzdA==')
+  finish(result); await phonePending
   app.unmount()
   assert.equal(listeners.has('paste'), false)
 });
@@ -88,7 +104,7 @@ test('supplementary descriptions expand without a request, revise the saved imag
     t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
   }
   const result = { ...original, posePrompt: 'character 1 raises the right hand.', personCount: 2 }
-  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS,
+  const deps = { ...dimensions, ...imageUpload, STUDIO_OUTFIT_LABELS,
     describePhotoStudioPose: async (image, signal, direction) => { calls.push({ image, signal, direction }); if (failure) throw new Error('识别失败'); return result },
     usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
   }

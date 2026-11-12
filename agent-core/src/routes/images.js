@@ -23,6 +23,8 @@ import { getUserName, matchUser } from '../services/userSearch.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
 import { extractImagePromptResponse } from '../services/imagePromptResponse.js';
 import { studioDimensions, saveStudioChatImages } from '../services/studioChatImages.js';
+import { collectCharacterLoras } from '../services/groupImageLoraMatcher.js';
+import { ACTIVE_WORKFLOW, PRO_WORKFLOW } from '../services/workflowTemplates.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -577,7 +579,7 @@ function parseImageTarget(cleanUrl) {
  * 按文件名反查这张图片的完整生成参数（prompt / 画风 / 分辨率 / 工作流模式 / 角色配置）
  * 查找顺序: image_tasks → moment_posts → raw_messages → character_events → choice_history
  */
-function lookupImageGenerationParams(filename) {
+function lookupImageGenerationParams(filename, category) {
   const db = getDb();
   const params = {
     promptText: null, taskStyle: null, taskResolution: null, taskWorkflowTemplate: null,
@@ -611,6 +613,21 @@ function lookupImageGenerationParams(filename) {
     params.taskResolution = task.resolution || null;
     params.taskWorkflowTemplate = task.workflow_template || null;
     if (task.conversation_id) tryGetCharConfig(task.conversation_id);
+  }
+
+  // 照相馆不使用 char_* 会话：从拍摄记录恢复画幅与全部入镜角色。
+  // 工作流记录带渠道前缀，细化服务只接受实际模式或模板文件名。
+  if (category === 'photo_studio') {
+    const photo = db.prepare('SELECT * FROM photo_studio_jobs WHERE output_url = ? LIMIT 1')
+      .get(`/images/photo_studio/${filename}`);
+    if (photo) {
+      params.promptText ||= photo.prompt;
+      params.taskResolution ||= `${photo.width}x${photo.height}`;
+      const actors = [photo.character_id, photo.character2_id].filter(id => id != null)
+        .map(id => db.prepare('SELECT loras FROM characters WHERE id = ?').get(id)).filter(Boolean);
+      params.charLoras = collectCharacterLoras(actors);
+    }
+    params.taskWorkflowTemplate = params.taskWorkflowTemplate?.replace(/^photo-studio-anima-/, '') || null;
   }
 
   // 2. moment_posts
@@ -672,6 +689,7 @@ function categoryGenConfig(category) {
     gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
     avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
     standing:  { artist: config.comfyui.momentsArtist,  width: 768,                         height: 1536 },
+    photo_studio: { artist: config.comfyui.momentsArtist ?? config.comfyui.artist, width: 1152, height: 2048 },
   };
   return map[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
 }
@@ -719,13 +737,13 @@ async function startImageEditTask(action, url) {
 
   let filePath = path.join(getImageDir(category), filename);
   // 与静态图片服务保持一致：压缩后旧 PNG URL 仍指向同名 AVIF。
-  if (action === 'regenerate' && !fs.existsSync(filePath) && /\.png$/i.test(filePath)) {
+  if ((action === 'regenerate' || category === 'photo_studio') && !fs.existsSync(filePath) && /\.png$/i.test(filePath)) {
     const compressed = filePath.replace(/\.png$/i, '.avif');
     if (fs.existsSync(compressed)) filePath = compressed;
   }
   const sourceWorkflow = action === 'regenerate' && fs.existsSync(filePath)
     ? await readImageWorkflow(filePath) : null;
-  const params = sourceWorkflow ? {} : lookupImageGenerationParams(filename);
+  const params = sourceWorkflow ? {} : lookupImageGenerationParams(filename, category);
   const promptText = params.promptText;
   if (!sourceWorkflow && (!promptText || promptText.trim().length === 0)) {
     throw taskHttpError('prompt not found for this image', 404);
@@ -736,7 +754,7 @@ async function startImageEditTask(action, url) {
       let genOpts = { sourceWorkflow, onProgress };
       if (!sourceWorkflow) {
         const opts = { ...categoryGenConfig(category) };
-        if (params.taskStyle !== null && params.taskResolution) {
+        if ((params.taskStyle !== null || category === 'photo_studio') && params.taskResolution) {
           const resolutionMatch = params.taskResolution.match(/^(\d+)x(\d+)$/);
           if (resolutionMatch) {
             opts.width = Number(resolutionMatch[1]);
@@ -747,7 +765,9 @@ async function startImageEditTask(action, url) {
           artist: resolveArtist(category, params),
           width: opts.width,
           height: opts.height,
-          scene: CATEGORY_SCENE[category] || 'chat',
+          // 照相馆原拍摄不按场景过滤全局 LoRA；提示词加工单独使用 standalone。
+          scene: category === 'photo_studio' ? undefined : CATEGORY_SCENE[category] || 'chat',
+          ...(category === 'photo_studio' ? { promptScene: 'standalone' } : {}),
           alreadyPrepared: true,
           disableRAG: true,
           persistPreparation: false,
@@ -755,6 +775,10 @@ async function startImageEditTask(action, url) {
         };
         if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
         if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
+        else if (category === 'photo_studio' && params.taskWorkflowTemplate) {
+          genOpts.customWorkflow = params.taskWorkflowTemplate === 'base' ? PRO_WORKFLOW
+            : params.taskWorkflowTemplate === 'turbo' ? ACTIVE_WORKFLOW : params.taskWorkflowTemplate;
+        }
       }
       const result = await generateImageRaw(promptText || '', genOpts);
       if (!result.success || !result.images?.length) {
@@ -786,9 +810,15 @@ async function startImageEditTask(action, url) {
       loras: params.charLoras || [],
       customWorkflow: params.charCustomWorkflow,
       sourceMode: params.taskWorkflowTemplate,
-      scene: CATEGORY_SCENE[category] || 'chat',
+      scene: category === 'photo_studio' ? undefined : CATEGORY_SCENE[category] || 'chat',
+      ...(category === 'photo_studio' ? { workflowScene: 'standalone' } : {}),
       onProgress,
     });
+    if (category === 'photo_studio' && /\.avif$/i.test(outPath)) {
+      const buffer = fs.readFileSync(outPath);
+      const pipeline = await preserveImageWorkflow(sharp(buffer), buffer);
+      fs.writeFileSync(outPath, await pipeline.avif({ quality: 50, effort: 4 }).toBuffer());
+    }
     return { filename: path.basename(outPath) };
   };
 

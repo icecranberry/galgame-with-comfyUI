@@ -107,7 +107,7 @@
               <svg v-if="!describingPose" class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5" /></svg>
               {{ describingPose ? '识别中…' : '上传图片' }}
             </studio-button>
-            <input ref="poseFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden @change="uploadPose" />
+            <input ref="poseFileInput" type="file" accept="image/*" hidden @change="uploadPose" />
           </div>
           <p v-if="poseUploadError" class="pose-upload-error" role="alert">{{ poseUploadError }}</p>
           <CollapseTransition :show="!!customPose">
@@ -151,7 +151,7 @@
     <StudioBackgroundLibrary v-model="backgroundOpen" :value="background" @applied="background = $event" />
     <StudioClothingLibrary v-model="clothingOpen" :slot-key="characterSlot" :outfit="customOutfits[characterSlot] || null" :draft="clothingDrafts[characterSlot] ?? null" @draft-change="saveClothingDraft" @applied="applyClothing" />
     <linshe-modal v-model="promptOpen" title="拍摄提示词" variant="film" wide :transition-ms="300"><template #close="{ close }"><studio-button variant="icon" aria-label="关闭提示词" @click="close()">×</studio-button></template><p v-if="promptLoading" class="studio-prompt-note" role="status">正在拼装…</p><p v-else-if="promptError" class="studio-prompt-note" role="alert">{{ promptError }}</p><div v-else class="studio-prompt-text" tabindex="0">{{ promptText }}</div></linshe-modal>
-    <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="photoOpen" :imgs="lightboxImages" :index="lightboxIndex" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="photoOpen = false" /></div></Teleport>
+    <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="photoOpen" :imgs="lightboxImages" :index="lightboxIndex" :show-regenerate="true" :show-download="true" :show-upscale="true" :show-delete="false" @hide="photoOpen = false" /></div></Teleport>
   </main>
 </template>
 
@@ -177,6 +177,7 @@ import LinsheSlider from '../components/ui/LinsheSlider.vue'
 import LinsheTabs from '../components/ui/LinsheTabs.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
+import { isImageFile, normalizeImage } from '../utils/imageUpload.js'
 import { PHOTO_ASPECT_RATIOS, initialPhotoStudioFrame, clampPhotoDimension, photoDimensionControls, resizePhoto } from '../utils/photoStudioDimensions.js'
 
 const toggleMobileSidebar = inject('toggleMobileSidebar', () => {})
@@ -217,7 +218,7 @@ function pastePose(event) {
   if (!poseOpen.value || event.defaultPrevented) return
   const clipboard = event.clipboardData
   const item = Array.from(clipboard?.items || []).find(item => item.kind === 'file' && item.type.startsWith('image/'))
-  const file = item?.getAsFile() || Array.from(clipboard?.files || []).find(file => file.type.startsWith('image/'))
+  const file = item?.getAsFile() || Array.from(clipboard?.files || []).find(isImageFile)
   if (!file) return
   event.preventDefault()
   return recognizePose(file)
@@ -231,14 +232,8 @@ async function recognizePose(source, direction = '') {
   try {
     const file = typeof source === 'function' ? await source(controller.signal) : source
     if (controller.signal.aborted || disposed) return
-    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'].includes(file.type)) throw new Error('请选择 PNG、JPG、WEBP、GIF 或 AVIF 图片')
-    if (file.size > 6 * 1024 * 1024) throw new Error('图片不能超过 6MB')
-    const image = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result)
-      reader.onerror = () => reject(new Error('图片读取失败，请重试'))
-      reader.readAsDataURL(file)
-    })
+    const image = await normalizeImage(file)
+    if (image.length > 6 * 1024 * 1024 * 4 / 3 + 100) throw new Error('处理后的图片不能超过 6MB，请换张图片重试')
     if (controller.signal.aborted) return
     const result = await describePhotoStudioPose(image, controller.signal, direction)
     if (controller.signal.aborted || disposed) return

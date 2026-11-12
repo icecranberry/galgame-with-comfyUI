@@ -142,11 +142,9 @@ import LinsheInput from './ui/LinsheInput.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import { testStyle } from '../api/index.js'
 import { appendMomentImageRequest } from '../utils/momentImageRequest.js'
-import { canSelectMultipleImages, isImageFile } from '../utils/imageUpload.js'
+import { canSelectMultipleImages, isImageFile, normalizeImage } from '../utils/imageUpload.js'
 
 const MAX_IMAGES = 3
-// 超过该大小的原图统一压到最长边 1600 的 JPEG（base64 传输体积 + GIF 动图例外保留）
-const COMPRESS_THRESHOLD = 1.5 * 1024 * 1024
 
 const moments = useMomentsStore()
 const toastFn = inject('toast', null)
@@ -226,36 +224,6 @@ function onPaste(e) {
       addFiles(files)
     }
   }
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = () => reject(new Error('read failed'))
-    reader.readAsDataURL(file)
-  })
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('decode failed'))
-    img.src = src
-  })
-}
-
-async function normalizeImage(file) {
-  const dataUrl = await fileToDataUrl(file)
-  if (file.size <= COMPRESS_THRESHOLD) return dataUrl
-  const img = await loadImage(dataUrl)
-  const scale = Math.min(1, 1600 / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round((img.naturalWidth || 1) * scale))
-  canvas.height = Math.max(1, Math.round((img.naturalHeight || 1) * scale))
-  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.88)
 }
 
 async function generateAutoImage() {

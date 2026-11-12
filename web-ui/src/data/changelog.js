@@ -32,6 +32,17 @@ export const CHANGELOG_TITLE = '更新说明'
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
   {
+    version: 'v4.3.0',
+    date: '2026-11-12',
+    title: '照相馆开张！',
+    summary: '来给角色拍张照吧',
+    items: [
+      '新增照相馆，自选姿势、服装和背景，支持合照与连拍',
+      '神说里的天使也能帮你拍照了',
+      '修复生图lora流程、群聊、日程和语音等问题',
+    ],
+  },
+  {
     version: 'v4.2.0',
     date: '2026-11-5',
     title: '上线“宿舍”功能，邻舍终于名正言顺了',
