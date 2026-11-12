@@ -16,7 +16,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [2/3] PyInstaller 打包...
-pyinstaller ^
+python build_launcher.py ^
   --onefile ^
   --windowed ^
   --name "邻舍.EXE" ^
@@ -43,6 +43,11 @@ echo [3/3] 复制到项目根目录...
 copy /Y "dist\邻舍.EXE.exe" "..\邻舍.EXE.exe"
 if %errorlevel% neq 0 (
     echo [ERROR] 复制失败
+    exit /b 1
+)
+python build_launcher.py --normalize-integrity "..\邻舍.EXE.exe"
+if %errorlevel% neq 0 (
+    echo [ERROR] 启动器完整性标记修复失败
     exit /b 1
 )
 

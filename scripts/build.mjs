@@ -117,7 +117,8 @@ async function main() {
     log("已删除旧的 .spec 缓存");
   }
 
-  const pyinstallerResult = await exec("pyinstaller", [
+  const pyinstallerResult = await exec("python", [
+    "build_launcher.py",
     "--onefile", "--windowed",
     "--name", "邻舍.EXE",
     "--icon", "assets/icon.ico",
@@ -149,6 +150,13 @@ async function main() {
 
   if (existsSync(exeSrc)) {
     copyFileSync(exeSrc, exeDst);
+    const integrityResult = await exec("python", [
+      "build_launcher.py", "--normalize-integrity", exeDst,
+    ], { cwd: LAUNCHER_DIR, print: true });
+    if (!integrityResult.ok) {
+      fail("启动器完整性标记修复失败，不能保证 EXE 可启动");
+      process.exit(1);
+    }
     ok(`邻舍.EXE.exe → 项目根目录`);
   } else {
     warn("未找到 dist/邻舍.EXE.exe，跳过复制");

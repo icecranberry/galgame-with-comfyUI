@@ -564,7 +564,7 @@ async function main() {
     }
 
     // 优先使用构建 venv 运行 PyInstaller，失败则回退系统 pyinstaller
-    let r = await exec(BUILD_VENV_PY, ["-m", "PyInstaller",
+    let r = await exec(BUILD_VENV_PY, ["build_launcher.py",
       "--onefile", "--windowed",
       "--name", "邻舍.EXE",
       "--icon", "assets/icon.ico",
@@ -581,7 +581,8 @@ async function main() {
     ], { cwd: launcherDir, print: true, timeout: 300000 });
     if (!r.ok) {
       warn("捆绑 Python PyInstaller 失败，尝试系统 pyinstaller...");
-      r = await exec("pyinstaller", [
+      r = await exec("python", [
+        "build_launcher.py",
         "--onefile", "--windowed",
         "--name", "邻舍.EXE",
         "--icon", "assets/icon.ico",
@@ -721,7 +722,12 @@ async function main() {
   const launcherExe = resolve(launcherDir, "dist", "邻舍.EXE.exe");
   if (existsSync(launcherExe)) {
     const { copyFileSync } = await import("node:fs");
-    copyFileSync(launcherExe, resolve(RELEASE_DIR, "邻舍.EXE.exe"));
+    const releaseLauncherExe = resolve(RELEASE_DIR, "邻舍.EXE.exe");
+    copyFileSync(launcherExe, releaseLauncherExe);
+    const integrityResult = await exec("python", [
+      "build_launcher.py", "--normalize-integrity", releaseLauncherExe,
+    ], { cwd: launcherDir, print: true });
+    if (!integrityResult.ok) { fail("启动器完整性标记修复失败!"); process.exit(1); }
     ok("邻舍.EXE.exe");
   } else {
     warn("未找到 邻舍.EXE.exe，PyInstaller 可能未成功");
