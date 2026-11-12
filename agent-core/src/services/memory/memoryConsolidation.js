@@ -644,7 +644,10 @@ ${pendingLines}
     llmCalls++;
     let items = [];
     try {
-      const raw = await chatSync([{ role: 'user', content: prompt }], LLM_OPTS);
+      const raw = await chatSync([{ role: 'user', content: prompt }], {
+        ...LLM_OPTS,
+        thinking: { type: 'disabled' }, forceDisableThinking: true,
+      });
       items = parseJsonObject(raw).suggestions || [];
     } catch (error) {
       console.warn('[memory-consolidation] T4 LLM failed:', error.message);

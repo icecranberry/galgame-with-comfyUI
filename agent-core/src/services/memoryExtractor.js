@@ -78,6 +78,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
     let requestMessages = buildCurationMessages({ transcript, related, timeRange, maxActions });
     let result = await chatSync(requestMessages, {
       temperature: 0.2,
+      thinking: { type: 'disabled' }, forceDisableThinking: true,
       label: '聊天记忆整理',
       returnMeta: true,
     });
@@ -88,6 +89,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
       requestMessages = buildCurationMessages({ transcript, related, timeRange, compact: true, maxActions });
       result = await chatSync(requestMessages, {
         temperature: 0.2,
+        thinking: { type: 'disabled' }, forceDisableThinking: true,
         label: '聊天记忆整理(截断重发)',
         returnMeta: true,
       });
@@ -103,6 +105,7 @@ async function curateNow({ conversationId, throughRawMsgId, characterName = '', 
       console.warn(`[memoryExtractor] 输出非严格 JSON，改用 json 模式补发一次: ${parseError.message}`);
       const strict = await chatSync(requestMessages, {
         temperature: 0.2,
+        thinking: { type: 'disabled' }, forceDisableThinking: true,
         response_format: { type: 'json_object' },
         label: '聊天记忆整理(json回退)',
       });
@@ -210,6 +213,7 @@ export async function curateAccumulatedMemory({ accumulatedText, characterName =
   // 该路径只消费 judgment，强制 v2 精简格式，避免为不落库的扩展字段浪费输出 token。
   const raw = await chatSync(buildCurationMessages({ transcript: accumulatedText, related: [], v3: false, maxActions: CURATION_MAIBOT_ACTIONS }), {
     temperature: 0.2,
+    thinking: { type: 'disabled' }, forceDisableThinking: true,
     response_format: { type: 'json_object' },
     label: '聊天记忆整理',
   });
