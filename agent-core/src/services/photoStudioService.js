@@ -6,7 +6,8 @@ import { config } from '../config.js';
 import { getDb } from '../db/index.js';
 import { buildCharacterImageAppearance, extractCharacterEnglishName, extractCharacterIdentityTag, replaceAppearanceSection } from './characterPersona.js';
 import { resolveClothingTags } from './clothingLibrary.js';
-import { resolveStudioBackground } from './photoStudioBackgrounds.js';
+import { resolveStudioBackground, getStudioBackgrounds } from './photoStudioBackgrounds.js';
+import { angelOutfits } from './godSays/angelWardrobe.js';
 import { resolveCustomStudioPose } from './photoStudioPose.js';
 import { collectCharacterLoras } from './groupImageLoraMatcher.js';
 import { polishStudioPrompt, getStudioPolishContext, generateStudioClothing, splitStudioTags, studioPoseTags } from './photoStudioPolish.js';
@@ -97,9 +98,26 @@ export function createPhotoStudioService({
     }));
   }
 
-  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, customPose, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false, polishInstruction = '' }) {
+  function loadCharacter(id) {
+    if (id !== 'angel') return db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(id));
+    const exists = db().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='god_angel'").get();
+    const angel = exists && db().prepare('SELECT * FROM god_angel WHERE id = 1').get();
+    if (!angel) throw Object.assign(new Error('尚未创建天使，请先在神说中召唤天使'), { status: 400 });
+    return { id: 'god:angel', name: 'the angel', display_name: angel.display_name || '天使', base_prompt: angel.persona, angel };
+  }
+
+  async function prepare({ characterId, secondCharacterId = null, outfitScene = 'work', secondOutfitScene = 'work', appearanceOverride = '', secondAppearanceOverride = '', clothingTags = [], secondClothingTags = [], customClothingPrompt = '', secondCustomClothingPrompt = '', poseId, customPose, instruction = '', backgroundId = '', customBackgroundPrompt = '', width, height, polishPrompt = false, polishInstruction = '', strictParticipants = false }) {
     if (typeof polishInstruction !== 'string' || polishInstruction.length > 1000) throw Object.assign(new Error('润色任务额外需求最多 1000 字'), { status: 400 });
     polishInstruction = polishInstruction.trim();
+    if (typeof strictParticipants !== 'boolean') throw Object.assign(new Error('入镜名单参数无效'), { status: 400 });
+    const hasSecond = secondCharacterId !== null && secondCharacterId !== '';
+    if (strictParticipants && (characterId == null || characterId === '' || (hasSecond && secondCharacterId === characterId))) throw Object.assign(new Error('请明确指定一至两位不同的入镜角色'), { status: 400 });
+    if (backgroundId === 'random') {
+      if (customBackgroundPrompt) throw Object.assign(new Error('随机背景不能同时指定自定义背景'), { status: 400 });
+      const entries = getStudioBackgrounds().entries;
+      if (!entries.length) throw Object.assign(new Error('背景库没有可用条目'), { status: 400 });
+      backgroundId = random(entries).id;
+    }
     const backgroundPrompt = resolveStudioBackground({ backgroundId, customBackgroundPrompt });
     if (typeof polishPrompt !== 'boolean') throw Object.assign(new Error('AI 润色开关无效'), { status: 400 });
     for (const appearance of [appearanceOverride, secondAppearanceOverride]) {
@@ -109,18 +127,24 @@ export function createPhotoStudioService({
     let dimensions;
     try { dimensions = photoStudioDimensions(width ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.width, height ?? DEFAULT_PHOTO_STUDIO_DIMENSIONS.height); }
     catch (error) { throw Object.assign(error, { status: 400 }); }
-    const pose = poseId === 'custom-upload'
-      ? resolveCustomStudioPose(customPose)
-      : (await catalog()).find(item => item.id === poseId);
+    let pose;
+    if (poseId === 'random' || poseId === undefined) {
+      const candidates = (await catalog()).filter(item => item.posePrompt && isPairPose(item) === hasSecond);
+      if (!candidates.length) throw Object.assign(new Error(hasSecond ? '没有可用的已校准双人姿势' : '没有可用的已校准单人姿势'), { status: 400 });
+      pose = random(candidates);
+    } else {
+      pose = poseId === 'custom-upload' ? resolveCustomStudioPose(customPose) : (await catalog()).find(item => item.id === poseId);
+    }
     if (!pose) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
     if (!pose.posePrompt) throw Object.assign(new Error('该姿势的专属提示词尚未校准，请先选择已有完整描述的姿势'), { status: 400 });
 
     const duo = isPairPose(pose);
+    if (strictParticipants && duo !== hasSecond) throw Object.assign(new Error(duo ? '双人姿势必须指定搭档' : '单人姿势不能加入第二位角色'), { status: 400 });
     const randomFirst = characterId === null || characterId === '';
     const randomSecond = secondCharacterId === null || secondCharacterId === '';
     let second = null;
     if (duo && !randomSecond) {
-      second = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(secondCharacterId));
+      second = loadCharacter(secondCharacterId);
       if (!second) throw Object.assign(new Error('请选择有效的第二位角色'), { status: 400 });
     }
     let first;
@@ -129,7 +153,7 @@ export function createPhotoStudioService({
       if (!candidates.length) throw Object.assign(new Error(duo ? '双人姿势至少需要两位可用角色' : '没有可选择的角色'), { status: 400 });
       first = random(candidates);
     } else {
-      first = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(characterId));
+      first = loadCharacter(characterId);
       if (!first) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
     }
     if (duo) {
@@ -159,7 +183,8 @@ export function createPhotoStudioService({
       if (overrides[index].trim()) {
         selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, overrides[index].trim()) };
       } else if (scene !== 'work') {
-        const outfit = db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
+        const outfit = character.angel ? angelOutfits(character.angel).find(outfit => outfit.scene === scene)
+          : db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
         if (!outfit?.description?.trim() && !(index === 0 ? randomFirst : randomSecond)) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
         // Scene descriptions contain the complete appearance. Replace, rather than layer over, the default clothes.
         if (outfit?.description?.trim()) selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, outfit.description) };
@@ -187,8 +212,8 @@ export function createPhotoStudioService({
       ...outfits.flatMap(outfit => [...outfit.tags.flatMap(splitStudioTags), ...splitStudioTags(outfit.custom)]),
       ...studioPoseTags(poseText),
     ])];
-    const loras = collectCharacterLoras([first, ...(second ? [second] : [])]);
-    return { first, second, pose, prompt, dimensions, personas, loras, requiredTags, polishInstruction };
+    const loras = collectCharacterLoras([first, ...(second ? [second] : [])].filter(character => !character.angel));
+    return { first, second, pose, backgroundId, prompt, dimensions, personas, loras, requiredTags, polishInstruction };
   }
 
   async function preview(input) {
@@ -201,7 +226,7 @@ export function createPhotoStudioService({
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
     const previous = job(id);
     if (previous) return previous;
-    const { first, second, pose, prompt, dimensions, personas, loras, requiredTags, polishInstruction } = await prepare(input);
+    const { first, second, pose, backgroundId, prompt, dimensions, personas, loras, requiredTags, polishInstruction } = await prepare(input);
     const supported = await capability();
     if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
     const firstName = first.display_name || first.name;
@@ -212,9 +237,10 @@ export function createPhotoStudioService({
       if (active) throw Object.assign(new Error('已有照片正在拍摄，请等待完成'), { status: 409 });
       const task = db().prepare("INSERT INTO image_tasks (prompt_original, prompt_refined, status) VALUES (?, ?, 'running')").run(prompt, prompt);
       db().prepare(`INSERT INTO photo_studio_jobs
-        (id, character_id, character2_id, character_name, character2_name, pose_id, pose_name, image_task_id, prompt, width, height)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(id, first.id, second?.id ?? null, firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height);
+        (id, character_id, character2_id, character_kind, character2_kind, background_id, character_name, character2_name, pose_id, pose_name, image_task_id, prompt, width, height)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, first.angel ? null : first.id, second?.angel ? null : second?.id ?? null, first.angel ? 'angel' : 'resident', second?.angel ? 'angel' : 'resident', backgroundId,
+          firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height);
       return true;
     })();
     if (created) {
@@ -231,7 +257,7 @@ export function createPhotoStudioService({
         const context = polishContext();
         const key = createHash('sha256').update(JSON.stringify({
           prompt: snapshot.prompt, personas, requiredTags, polishInstruction, context,
-          actors: [snapshot.character_id, snapshot.character2_id], poseId: snapshot.pose_id,
+          actors: [snapshot.character_kind, snapshot.character_id, snapshot.character2_kind, snapshot.character2_id], poseId: snapshot.pose_id,
           // Resolution belongs to rendering; it does not change the LLM input.
           loras,
         })).digest('hex');

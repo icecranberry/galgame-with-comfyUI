@@ -99,7 +99,7 @@ test('real module routes create groups, letters, relations, library entries and 
     groups: '/api/groups', mailbox: '/api/mailbox', relationships: '/api/relationships', library: '/api/library', characters: '/api/characters',
     items: '/api/items', diary: '/api/diaries', config: '/api/config', media: '/api/media', presets: '/api/presets',
     schedule: '/api/schedule', moments: '/api/moments', events: '/api/events', portraits: '/api/portraits', memory: '/api/memory',
-    images: '/api/images', newspaper: '/api/newspaper', tts: '/api/tts', godSays: '/api/god-says' };
+    images: '/api/images', photoStudio: '/api/photo-studio', newspaper: '/api/newspaper', tts: '/api/tts', godSays: '/api/god-says' };
   for (const [route, mount] of Object.entries(mounts)) {
     const router = (await import(`../src/routes/${route}.js`)).default;
     for (const layer of router.stack) {

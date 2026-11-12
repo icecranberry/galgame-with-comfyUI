@@ -2,14 +2,29 @@ import express from 'express';
 import { createPhotoStudioService, getRecognizedPoseCatalog, photoStudioCapability, POSE_GALLERY_DIR } from '../services/photoStudioService.js';
 import { getStudioBackgrounds, generateStudioBackground } from '../services/photoStudioBackgrounds.js';
 import { describeStudioPose } from '../services/photoStudioPose.js';
+import { queryStudioCatalog } from '../services/photoStudioCatalog.js';
 
 const router = express.Router();
 const studio = createPhotoStudioService();
 router.use('/assets', express.static(POSE_GALLERY_DIR, { maxAge: '7d', index: false, dotfiles: 'deny' }));
-router.get('/catalog', async (_req, res) => res.json({ poses: await getRecognizedPoseCatalog() }));
+router.get('/catalog', async (req, res) => {
+  try {
+    const poses = await getRecognizedPoseCatalog();
+    if (!Object.keys(req.query).length) return res.json({ poses });
+    const { entries, ...pagination } = queryStudioCatalog(poses, req.query, { poses: true });
+    res.json({ poses: entries, ...pagination });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
 router.get('/capability', async (_req, res) => res.json(await photoStudioCapability()));
 router.get('/characters', (_req, res) => res.json({ characters: studio.listCharacters() }));
-router.get('/backgrounds', (_req, res) => res.json(getStudioBackgrounds()));
+router.get('/backgrounds', (req, res) => {
+  try {
+    const catalog = getStudioBackgrounds();
+    if (!Object.keys(req.query).length) return res.json(catalog);
+    const { entries, ...pagination } = queryStudioCatalog(catalog.entries, req.query);
+    res.json({ ...catalog, entries, ...pagination });
+  } catch (error) { res.status(error.status || 500).json({ error: error.message }); }
+});
 router.post('/describe-pose', async (req, res) => {
   try { res.json(await describeStudioPose(req.body || {})); }
   catch (error) { res.status(error.status || 502).json({ error: error.message }); }

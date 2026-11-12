@@ -118,6 +118,27 @@ test('unsaved empty session can send its first message and does not request unsc
   assert.equal(god.turns[0].input, '你好');
 });
 
+test('照相馆成图与后续查询复用消息图片，隔离其他工具、失败任务和外部链接', () => {
+  for (const name of ['generate_studio_photo', 'read_studio_photo']) {
+    const message = { tool_calls: [{ id: 'studio-1', function: { name } }] };
+    const turn = { calls: [{ id: 'run:0:studio-1', name, status: 'done', result: { ok: true, value: { data: {
+      success: true, width: 1152, height: 2048, images: [
+        { url: '/images/photo_studio/godstudio_123.avif' }, { url: '/images/photo_studio/godstudio_123.avif' },
+        { url: '/images/chat/other.png' }, { url: 'https://example.com/fake.png' }, { url: '/images/photo_studio/../fake.png' },
+      ],
+    } } } }] };
+    const expected = [{ url: '/images/photo_studio/godstudio_123.avif', width: 1152, height: 2048 }];
+    assert.deepEqual(godMessageImages(turn, message), expected);
+    assert.deepEqual(godMessageImages(structuredClone(turn), message), expected);
+    assert.deepEqual(godMessageImages(turn, { tool_calls: [{ id: 'other', function: { name } }] }), []);
+    turn.calls[0].result.value.data.success = false;
+    assert.deepEqual(godMessageImages(turn, message), []);
+    turn.calls[0].result.value.data.success = true;
+    turn.calls[0].status = 'failed';
+    assert.deepEqual(godMessageImages(turn, message), []);
+  }
+});
+
 test('attached images reach the request body instead of being dropped on the way to the store', async t => {
   setActivePinia(createPinia());
   const god = useGodSaysStore();

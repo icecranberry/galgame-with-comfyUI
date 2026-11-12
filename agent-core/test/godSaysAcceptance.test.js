@@ -199,6 +199,11 @@ test('AC-13 每个模块工具生成的接口地址都固定在 /api/ 内，编�
   for(const entry of GOD_MODULE_TOOLS) {
     const parameters=entry.definition.function.parameters;
     const args=Object.fromEntries(Object.entries(parameters.properties).map(([key,schema])=>[key,sample(schema)]));
+    if (entry.name==='generate_studio_photo') {
+      // 入镜身份是互斥参数；用天使主角和居民搭档覆盖混合拍摄。
+      delete args.character_id;
+      delete args.second_special_character;
+    }
     validateToolArgs(parameters,args);
     const request=buildModuleRequest(entry,args,{effectKey:'audit'});
     assert.ok(request.path.startsWith('/api/'),entry.name);

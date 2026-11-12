@@ -1,3 +1,6 @@
+import { executeStudioPhoto, buildStudioPhotoBody, studioPhotoResult } from './studioPhotos.js';
+import { isPairPose } from '../photoStudioWorkflow.js';
+
 // 每个工具固定绑定已有业务接口；模型不能提供任意 URL、HTTP 方法或请求体。
 const text = (description, maxLength = 2000) => ({ type: 'string', description, minLength: 1, maxLength });
 const ident = description => ({ type: 'integer', description, minimum: 1 });
@@ -59,8 +62,8 @@ export const GOD_MODULE_TOOLS = [
   tool('search_character_memory', '记忆', '搜索角色记忆', '仅在神要求了解某个角色往事时查询；不会把天使私有记忆写给角色。', { ...char, query: text('搜索内容', 200), limit: integer('返回条数', 1, 20) }, ['character_id', 'query'], 'GET', '/api/memory/search', { query: { query: 'q', limit: 'top_k' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('list_character_memories', '记忆', '读取角色记忆目录', '按角色读取已有记忆片段，支持分页。', { ...char, ...page }, ['character_id'], 'GET', '/api/memory/fragments', { query: { limit: 'limit', offset: 'offset' }, extraQuery: a => ({ conversation_id: `char_${a.character_id}` }) }),
   tool('search_gallery', '相册', '查找邻舍图片', '可按角色和文件夹筛选已保存图片，返回图片地址。', { ...char, folder: text('先查询得到的文件夹键', 80), ...page }, [], 'GET', '/api/images/gallery', { query: { character_id: 'character', folder: 'folder', limit: 'limit', offset: 'offset' }, href: '/gallery' }),
-  tool('generate_image', '相册', '生成并发送图片', '使用图片实验室的画面描述接口，生成后保存并发送到当前神说对话。prompt 填中文画面描述，已知角色必须保留真实姓名，用姓名描述各自的动作与位置，不得只写一位少女、她等匿名指代。已查询到的入镜角色必须同时传 character_ids，后端按编号加载身份、外观和 LoRA；不用凭记忆重写其外貌。未传编号时仅按描述中的角色显示名匹配资料，不会继承本对话的查询结果或凭外貌识别人。画自己或天使与角色同框时传 special_characters: ["angel"]，后端直接读取神说里的天使外观；prompt 保留天使称呼或名字及各自动作位置，不代写外貌，天使不占普通角色编号。未指定宽高时沿用当前对话分辨率，宽高仅覆盖本次出图，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
-    prompt: text('中文画面描述：保留每位已知入镜角色的真实姓名，描述动作、位置、场景及本次要求；例如“流萤坐在窗边看书”。不填文件路径', 5000),
+  tool('generate_image', '相册', '生成并发送图片', '图片实验室：要求图片对应某个活动、上下文或具体情境就使用，包括先查询后确定情境；例如“她在干什么，发图看看”“按刚才聊的场景画一张”。情境可来自用户、上文或工具结果，不要求用户把动作说全，不先查姿势库或用随机照片代替。明显超出照相馆能力的作图也使用。仅泛泛要一至两位人物的图片、自拍或合照才默认 generate_studio_photo；用户点名渠道优先。生成后保存并发送到当前神说对话。prompt 须完整写入已查到的活动、地点、相关上下文和用户要求，日程只作计划情境，不冒充已发生事实；已知角色保留真实姓名，用姓名描述各自动作与位置，不只写一位少女、她等。已查询到的入镜角色必须传 character_ids，后端按编号加载身份、外观和 LoRA，不用凭记忆重写外貌。未传编号时仅按描述中的角色显示名匹配，不继承聊天查询结果。画自己或天使与角色同框时传 special_characters: ["angel"]，后端读取当前天使外观；prompt 保留天使称呼或名字及动作位置，不代写外貌，天使不占居民编号。未指定宽高时沿用对话分辨率，宽高仅覆盖本次，不修改设置。成功返回 images 本地地址；失败不声称已发送。', {
+    prompt: text('完整中文画面描述：保留入镜角色真实姓名，写明动作、位置、场景和本次要求。上下文或查询配图须把相关情境完整写入，不能只写“按上文”；日程只作计划。例如“按日程安排，流萤坐在书房窗边看书”。不填文件路径', 5000),
     character_ids: { type: 'array', description: '已查询到的入镜角色真实编号；只列实际入镜者，不列仅被提及者、用户或天使。后端直接加载这些角色的资料，不能猜编号。', items: ident('已查询到的入镜角色编号'), minItems: 1, maxItems: 30, uniqueItems: true },
     special_characters: { type: 'array', description: '画你自己（天使）或天使与角色同框时必须传 ["angel"]，后端读取神说当前保存的天使外观，不需要手写外貌；仅提及天使但不入镜时传 []。天使不放进 character_ids。', items: { type: 'string', enum: ['angel'] }, minItems: 0, maxItems: 1, uniqueItems: true },
     width: integer('可选宽度像素；神指定尺寸或比例时设置，默认对话宽度', 256, 4096),
@@ -71,6 +74,26 @@ export const GOD_MODULE_TOOLS = [
     ...(a.width !== undefined ? { width: a.width } : {}), ...(a.height !== undefined ? { height: a.height } : {}), ...(a.artist !== undefined ? { artist: a.artist } : {}),
   }), href: '/gallery' }),
   tool('read_image_task', '相册', '查看图片生成结果', '按真实生图任务编号查询状态与输出文件。', { task_id: ident('task_id') }, ['task_id'], 'GET', '/api/images/tasks/:task_id/status', { href: '/gallery' }),
+  tool('read_photo_studio_capability', '照相馆', '查看照相馆可用状态', '查询当前 Anima 工作流和 ComfyUI 是否可用。拍摄前先检查；不可用时明确说明原因，不自动切换提供商或改用图片实验室。', {}, [], 'GET', '/api/photo-studio/capability', { href: '/photo-studio' }),
+  tool('search_photo_studio_poses', '照相馆', '查询照相馆姿势库', '仅返回已校准姿势的真实编号、名称、体系、分类、角度与人数。用户明确选择照相馆且有姿势或角度筛选需要时查询；未指定渠道的活动、上下文或具体情境配图直接用图片实验室，包括查询后确定的情境，不用此工具找近似动作。泛泛拍照默认随机，无需先查。手动选择须先查，不能猜编号；双人须选 person_count=2，顺序对应主角与搭档。', {
+    query: text('空格分隔的搜索词，全部匹配名称、编号或分类', 200), system: text('目录中的姿势体系', 100), category: text('目录中的分类', 100), angle: text('目录中的角度，如正面、侧面、俯视', 40),
+    person_count: integer('入镜人数，1 单人、2 双人', 1, 2), ...page,
+  }, [], 'GET', '/api/photo-studio/catalog', { query: { query: 'query', system: 'system', category: 'category', angle: 'angle', person_count: 'person_count', limit: 'limit', offset: 'offset' }, extraQuery: () => ({ compact: '1' }), href: '/photo-studio',
+    select: d => ({ ...d, poses: d.poses.map(({ id, name, system, category, angle, characterRoles }) => ({ id, name, system, category, angle, person_count: isPairPose({ id, system }) ? 2 : 1, ...(characterRoles ? { character_roles: characterRoles } : {}) })) }) }),
+  tool('search_photo_studio_backgrounds', '照相馆', '查询照相馆背景库', '返回背景真实编号、名称、分类和中文描述，可分页。用户明确选择照相馆且指定背景时先查再选，不编写替代背景。未指定渠道的活动、上下文或具体情境配图用图片实验室，不以库中背景代替情境；泛泛要人物图默认后端随机背景，无需查询。', {
+    query: text('空格分隔的搜索词，全部匹配名称、编号或描述', 200), category: text('目录中的背景分类', 100), ...page,
+  }, [], 'GET', '/api/photo-studio/backgrounds', { query: { query: 'query', category: 'category', limit: 'limit', offset: 'offset' }, extraQuery: () => ({ compact: '1' }), href: '/photo-studio',
+    select: d => ({ ...d, entries: d.entries.map(({ id, label, category, description }) => ({ id, label, category, description })) }) }),
+  tool('generate_studio_photo', '照相馆', '在照相馆拍摄并发送照片', '泛泛要一至两位人物图片、自拍或合照时默认使用，无需点名照相馆或说明人像写真。例如“给流萤拍张照”“发一张流萤的图片”“发你和流萤的图片”；只选已有服装、尺寸或笼统美观要求仍可用。要求图片对应活动、上下文或具体情境时改用 generate_image，包括“她在干什么，发图看看”、先查询再配图及“按刚才的场景画”；必须结合完整请求和上文，不因只出现“发张图”就用随机拍摄。超出能力的要求也用实验室，用户点名渠道优先遵循。支持天使自拍、与居民合照及居民单人或双人照。主角指定 character_id 或 special_character:"angel"，搭档指定 second_character_id 或 second_special_character:"angel"，同一位置二选一且两位不同，天使不占居民编号。天使外观及四套服装直接读 god_angel，不代写。默认省略 pose_id / background_id，后端按人数随机抽库；用户明确选照相馆且有筛选要求才查库传真实编号。instruction 只补充表情氛围，不覆盖库中动作背景。服装只影响本次，AI润色默认关闭。先检查可用状态；accepted 仍在拍摄，用 read_studio_photo 查询，不重复提交。', {
+    ...char, special_character: { type: 'string', enum: ['angel'], description: '主角是天使自己时传 angel，与 character_id 二选一' },
+    second_character_id: ident('搭档是普通居民时传真实编号'), second_special_character: { type: 'string', enum: ['angel'], description: '搭档是天使时传 angel，与 second_character_id 二选一' },
+    pose_id: text('可选：已查询到的校准姿势编号；省略或 random 按实际人数随机', 100), background_id: text('可选：已查询到的背景编号；省略或 random 从背景库随机', 100),
+    outfit_scene: { type: 'string', enum: ['work', 'casual', 'home', 'sleep'], description: '主角本次服装；work 默认，其他槽位读取该居民或天使已保存的服装' },
+    second_outfit_scene: { type: 'string', enum: ['work', 'casual', 'home', 'sleep'], description: '搭档本次服装，直接读取对应居民或天使的衣柜，默认 work' },
+    instruction: text('少量补充要求，不改写姿势和背景', 1000), polish_prompt: bool('是否使用照相馆 AI 润色，默认 false'),
+    width: integer('本次宽度：512–2048 且为8的倍数，默认1152', 512, 2048), height: integer('本次高度：512–2048 且为8的倍数，默认2048', 512, 2048),
+  }, [], 'POST', '/api/photo-studio/jobs', { body: buildStudioPhotoBody, href: '/photo-studio' }),
+  tool('read_studio_photo', '照相馆', '查看照相馆拍摄结果', '用 generate_studio_photo 返回的 job_id 查询真实状态。完成后 images 直接展示到本条回复，失败如实说明，不重复拍摄。', { job_id: text('工具返回的拍摄记录 job_id', 100) }, ['job_id'], 'GET', '/api/photo-studio/jobs/:job_id', { select: studioPhotoResult, href: '/photo-studio' }),
   tool('list_outfits', '角色', '查看角色外观', '读取专属外观列表及启用状态。', char, ['character_id'], 'GET', '/api/characters/:character_id/outfits', { href: '/tavern' }),
   tool('read_scene_outfits', '角色', '查看场景服装', '读取默认、私服、居家、睡衣槽位中的现有服装，不查询日程。', char, ['character_id'], 'GET', '/api/characters/:character_id/outfits/scene', { href: '/tavern' }),
   tool('generate_scene_outfits', '角色', '生成场景服装草稿', '生成或修改私服、居家服、睡衣必须用此工具。调用邻舍已有服装生成接口及其生图描述规则，先生成完整草稿，用户在卡片确认后仅写入指定场景槽位；不修改基础外观，不创建独立专属形态，不自动生图。可用 batch_characters 逐角色生成。', {
@@ -144,7 +167,7 @@ export function buildModuleRequest(entry, args, ctx = {}) {
   if (entry.definition.function.parameters.properties.limit && !query.has('limit') && entry.query?.limit === 'limit') query.set('limit', '20');
   let body;
   if (entry.method !== 'GET') {
-    body = entry.body ? entry.body(args) : Object.fromEntries(Object.entries(args).filter(([key]) => !used.has(key)));
+    body = entry.body ? entry.body(args, ctx) : Object.fromEntries(Object.entries(args).filter(([key]) => !used.has(key)));
     if (entry.clientKey) body.client_msg_id = `god-${ctx.effectKey}`;
   }
   return { method: entry.method, path: path + (query.size ? `?${query}` : ''), body, stream: entry.stream === true };
@@ -152,11 +175,12 @@ export function buildModuleRequest(entry, args, ctx = {}) {
 
 export async function executeModuleTool(entry, args, ctx, api) {
   if (!api) throw new Error('业务工具接口尚未连接');
-  const response = await api(buildModuleRequest(entry, args, ctx), ctx);
+  const request = buildModuleRequest(entry, args, ctx);
+  const response = entry.name === 'generate_studio_photo' ? await executeStudioPhoto(request, ctx, api) : await api(request, ctx);
   const data = entry.select ? entry.select(response.data, args) : response.data;
   const failed=data?.results?.filter(item=>item.ok===false)||[];
   if (failed.length && failed.length===data.results.length) throw new Error(failed.map(item=>item.error||'生成失败').join('；'));
-  const pending = response.status === 202 || data?.started === true || data?.queued === true || entry.pending;
+  const pending = response.status === 202 || data?.started === true || data?.queued === true || entry.pending || (entry.name === 'read_studio_photo' && data.status === 'running');
   const href = typeof entry.href === 'function' ? entry.href(args, data) : entry.href;
   return { status: failed.length ? 'partial' : data?.started===false ? 'not_started' : pending ? 'accepted' : 'returned', data, ...(href ? { href } : {}),
     note: failed.length || data?.partial ? '已有部分结果，但尚未完整结束；请到目标页面核对已保存内容。' : data?.started===false ? (data.generating?'本次未启动新任务，已有任务仍在处理，请查询实际进展。':data.message||'没有启动新的任务。') : pending ? '请求已交给原功能模块处理；请查询对应记录或任务，确认是否实际完成。' : '已取得原功能模块的实际返回结果。' };

@@ -55,7 +55,7 @@ test('全量真实路由清点与业务数据落库验收（合成内存库）',
   const imports=new Map([...source.matchAll(/import (\w+) from '(\.\/src\/[^']+)';/g)].map(m=>[m[1],m[2]]));
   const normalize=value=>value.replace(/:[a-zA-Z_][\w]*/g,':id');
   const routes=[];
-  for(const match of source.matchAll(/app\.use\('([^']+)', wrapRouterAsync\((\w+)\)\)/g)) {
+  for(const match of source.matchAll(/app\.use\('([^']+)', (?:godCommitGuard, )?wrapRouterAsync\((\w+)\)\)/g)) {
     const [,mount,name]=match;
     const file=imports.get(name);
     assert.ok(file,`实际 app 挂载必须可追溯：${name}`);

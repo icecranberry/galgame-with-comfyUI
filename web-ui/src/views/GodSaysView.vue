@@ -167,7 +167,7 @@
                   <TransitionGroup name="god-content" tag="div" class="god-inline-work">
                     <GodChangeCard v-for="work in godMessageWork(turn, message)" :key="work.id" :work="work" @updated="god.refreshWork" />
                   </TransitionGroup>
-                  <GodMessageImages v-if="message.tool_calls?.some(call => call.function?.name === 'generate_image')" :images="godMessageImages(turn, message)" editable />
+                  <GodMessageImages v-if="message.tool_calls?.some(call => isGodImageTool(call.function?.name))" :images="godMessageImages(turn, message)" editable />
                   <span v-if="['interrupted', 'cancelled'].includes(message.status)" class="partial-note">{{ message.status === 'cancelled' ? '已停止' : '此段回应未完整结束' }}</span>
                 </template>
                 <div v-if="turn.status === 'running' && !turn.messages.some(m => m.role === 'assistant')" class="preparing-reply"><span class="thinking-pulse">✦</span>天使正在整理今日见闻…</div>
@@ -269,7 +269,7 @@ import GodWorkCard from '../components/godSays/GodWorkCard.vue'
 import GodMessageImages from '../components/godSays/GodMessageImages.vue'
 import GodReplyFlow from '../components/godSays/GodReplyFlow.vue'
 import { godMessageWork } from '../utils/godSaysWork.js'
-import { godMessageImages } from '../utils/godSaysImages.js'
+import { godMessageImages, isGodImageTool } from '../utils/godSaysImages.js'
 import { userAvatar, loadUserAvatar } from '../userConfig.js'
 import { loadFont, getFontFamily } from '../composables/useHandwritingFont.js'
 
