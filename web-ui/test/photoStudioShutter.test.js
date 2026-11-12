@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as dimensions from '../src/utils/photoStudioDimensions.js'
+import { createPhotoStudioBurst } from '../src/composables/photoStudioBurst.js'
 import { STUDIO_OUTFIT_LABELS } from '../src/utils/studioWardrobe.js'
 import { usePhotoStudio } from '../src/composables/usePhotoStudio.js'
 
@@ -37,7 +38,7 @@ async function mountStudio(t, submit) {
       },
     }),
   }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -137,7 +138,7 @@ test('only the page that pressed the shutter sounds; another studio receiving de
   await observer.send('photo_studio_ready', done)
   assert.equal(observer.sounds, 0, 'a later delivery to another page must not produce a second shutter')
   observer.snapshot([done])
-  await observer.state.poll()
+  await observer.state.studio.poll()
   await Vue.nextTick()
   assert.equal(observer.sounds, 0)
   assert.equal(observer.state.currentPhoto.value.id, done.id, 'other pages still receive the photo')

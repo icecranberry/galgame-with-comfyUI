@@ -31,14 +31,14 @@
         </div>
       </section>
       <section class="wardrobe-draft" aria-label="本次拍摄搭配">
-        <div class="wardrobe-draft-heading"><h3>本次搭配</h3><studio-button variant="link" size="sm" :disabled="busy || !tags.length" @click="tags = []">清空</studio-button></div>
+        <div class="wardrobe-draft-heading"><h3>本次搭配</h3><studio-button variant="link" size="sm" :disabled="busy || (!tags.length && !brief.trim() && !outfit)" @click="clearOutfit">清空本次搭配</studio-button></div>
         <div class="wardrobe-selected"><studio-button v-for="tag in tags" :key="tag" size="sm" :disabled="busy" :aria-label="`移除 ${entryMap.get(tag)?.label || tag}`" @click="toggle(tag)">{{ entryMap.get(tag)?.label || tag }} ×</studio-button><p v-if="!tags.length" class="wardrobe-hint">从目录挑选服装、颜色与材质。</p></div>
         <studio-input v-model="brief" type="textarea" :rows="2" :maxlength="2000" :disabled="busy" placeholder="自定义服装（可选，只做英文翻译）" aria-label="自定义服装" />
         <p v-if="error" class="wardrobe-error" role="alert">{{ error }}</p>
         <p class="wardrobe-hint">所选 tag 直接加入提示词；自定义描述仅翻译，不生成角色外观。</p><div v-if="promptText" class="wardrobe-prompt" aria-label="本次服装提示词">{{ promptText }}</div>
       </section>
     </div>
-    <template #footer><studio-button v-if="outfit || draft" variant="link" size="sm" :disabled="busy" @click="clearOutfit">清除本次搭配</studio-button><span class="wardrobe-footer-note">只用于本次拍摄，不改写角色衣柜。</span><studio-button variant="primary" :loading="busy" :disabled="busy || (!tags.length && !brief.trim())" @click="apply">{{ busy ? '正在翻译服装' : '用于本次拍摄' }}</studio-button></template>
+    <template #footer><span class="wardrobe-footer-note">只用于本次拍摄，不改写角色衣柜。</span><studio-button variant="primary" :loading="busy" :disabled="busy || (!tags.length && !brief.trim())" @click="apply">{{ busy ? '正在翻译服装' : '用于本次拍摄' }}</studio-button></template>
   </linshe-modal>
 </template>
 
@@ -125,8 +125,11 @@ function toggle(tag) {
 }
 function clearOutfit() {
   if (!props.modelValue || busy.value) return
+  cancel()
+  restoring = true
+  tags.value = []; brief.value = ''; translatedBrief.value = ''; customPrompt.value = ''; error.value = ''
+  restoring = false
   emit('applied', { slot: props.slotKey, outfit: null })
-  visible.value = false
 }
 async function apply() {
   if (!props.modelValue || busy.value || (!tags.value.length && !brief.value.trim())) return

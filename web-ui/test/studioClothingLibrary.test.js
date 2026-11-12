@@ -77,6 +77,61 @@ test('translation failure preserves selected tags and custom text for retry', as
   assert.deepEqual(emitted.filter(([event]) => event === 'applied'), [])
 })
 
+test('clearing an outfit removes tags, custom text and translation without closing or resaving a draft', async t => {
+  const { state, props, emitted } = fixture(t)
+  props.outfit = { tags: ['shirt'], brief: '蓝色外套', customPrompt: 'blue coat' }
+  props.modelValue = true; await Vue.nextTick()
+  state.error.value = '旧错误'
+  state.query.value = 'shirt'
+  state.clearOutfit()
+  assert.deepEqual(state.tags.value, [])
+  assert.equal(state.brief.value, '')
+  assert.equal(state.translatedBrief.value, '')
+  assert.equal(state.customPrompt.value, '')
+  assert.equal(state.promptText.value, '')
+  assert.equal(state.error.value, '')
+  assert.equal(state.visible.value, true)
+  assert.equal(state.query.value, 'shirt')
+  assert.deepEqual(emitted, [['applied', { slot: 'first', outfit: null }]])
+
+  props.outfit = null; props.draft = null
+  props.modelValue = false; await Vue.nextTick()
+  props.modelValue = true; await Vue.nextTick()
+  assert.deepEqual(state.tags.value, [])
+  assert.equal(state.brief.value, '')
+  assert.equal(state.promptText.value, '')
+  state.toggle('skirt')
+  assert.deepEqual(emitted.at(-1), ['draft-change', { slot: 'first', outfit: { tags: ['skirt'], brief: '', customPrompt: '' } }])
+})
+
+test('clearing a custom-only partner draft affects that slot and does not reuse its old translation', async t => {
+  const calls = []
+  const { state, props, emitted } = fixture(t, async input => { calls.push(input); return { prompt: 'new translation' } })
+  props.slotKey = 'second'
+  props.draft = { tags: [], brief: '白色外套', customPrompt: 'white coat' }
+  props.modelValue = true; await Vue.nextTick()
+  state.clearOutfit()
+  assert.deepEqual(emitted, [['applied', { slot: 'second', outfit: null }]])
+  assert.equal(state.visible.value, true)
+  assert.equal(state.promptText.value, '')
+  state.brief.value = '白色外套'
+  await state.apply()
+  assert.equal(calls.length, 1)
+  assert.equal(emitted.filter(([event]) => event === 'applied').at(-1)[1].outfit.customPrompt, 'new translation')
+})
+
+test('clearing remains blocked while translating or when the library is closed', async t => {
+  const { state, props, emitted } = fixture(t)
+  state.clearOutfit()
+  assert.deepEqual(emitted, [])
+  props.outfit = { tags: ['shirt'], brief: '', customPrompt: '' }
+  props.modelValue = true; await Vue.nextTick()
+  state.busy.value = true
+  state.clearOutfit()
+  assert.deepEqual(state.tags.value, ['shirt'])
+  assert.deepEqual(emitted, [])
+})
+
 test('clothing auto-pagination appends near the bottom, preserves selections, and resets on filtering or reopening', async t => {
   const { state, props } = fixture(t)
   props.modelValue = true; await Vue.nextTick(); await Vue.nextTick()

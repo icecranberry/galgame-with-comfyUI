@@ -6,6 +6,7 @@
         <h1>照相馆<span class="studio-raw" aria-hidden="true"><span>FILM</span><span>CYPHER</span></span></h1>
         <svg class="studio-tagline" viewBox="0 0 300 30" fill="none" aria-hidden="true"><path d="M4 19C74 1 178 1 289 9M38 25C122 13 198 17 252 22" stroke="currentColor" stroke-width="5" stroke-linecap="round" /></svg>
       </div>
+      <studio-button class="studio-mobile-back" variant="icon-plain" aria-label="返回，打开侧边栏" title="返回" @click="toggleMobileSidebar"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14 6-6 6 6 6" /></svg></studio-button>
       <div class="studio-header-actions">
         <studio-button variant="nav" size="compact" block :aria-pressed="showHistory" @click="showHistory = !showHistory">{{ showHistory ? '返回取景' : '拍摄记录' }}</studio-button>
       </div>
@@ -22,8 +23,19 @@
       </aside>
       <section class="studio-darkroom">
 <div class="film-frame-edge" aria-hidden="true"><span>35 / STUDIO</span><i></i><span>▸ 01</span></div><div v-if="capability && !capability.available" class="studio-error" role="status">{{ capability.error }}</div><div class="portrait-mat">
+<div class="mat-patina" aria-hidden="true">
+  <svg class="mat-stamp" viewBox="0 0 144 144" fill="none" focusable="false">
+    <circle cx="72" cy="72" r="63" stroke="currentColor" stroke-width="2.5" />
+    <circle cx="72" cy="72" r="56" stroke="currentColor" stroke-width="1" />
+    <path d="M30 56h84M30 88h84" stroke="currentColor" stroke-width="1.5" />
+    <text x="72" y="45" class="mat-stamp-small">LINSHE</text>
+    <text x="72" y="78" class="mat-stamp-title">FILM CLUB</text>
+    <text x="72" y="107" class="mat-stamp-small">暗房出品</text>
+    <path d="m18 70 3 2-3 2-3-2Zm108 0 3 2-3 2-3-2Z" fill="currentColor" />
+  </svg>
+</div>
 <span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in">
-<div v-if="activeJob || shooting" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><figure v-else-if="currentPhoto" :key="currentPhoto.id" class="photo-print" :class="{ 'is-peeking': photoFlash }" :style="{ '--photo-aspect': photoAspect }"><img :src="currentPhoto.output_url" :alt="`${jobCharacters(currentPhoto)} · ${currentPhoto.pose_name}`" @load="revealPhoto(currentPhoto.id)" @error="pendingPhotoId = ''" @click="openPhoto(currentPhoto.output_url)" /><span v-if="photoFlash" class="photo-flash" aria-hidden="true"></span><figcaption><strong>{{ jobCharacters(currentPhoto) }}</strong><span>{{ currentPhoto.pose_name }}</span></figcaption></figure><div v-else key="empty" class="empty-negative">
+<div v-if="(activeJob || shooting) && !groupPhotos.length" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><StudioPhotoDeck v-else-if="currentPhoto" key="photos" :photos="displayPhotos" :index="groupPhotos.length ? groupIndex : 0" :flash="photoFlash" @update:index="groupIndex = $event" @preview="openPhoto" @load="revealPhoto" @error="pendingPhotoId = ''" /><div v-else key="empty" class="empty-negative">
 <svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
   <g transform="rotate(9 48 48)" opacity=".35"><path d="M25 14h51v67H25z" /><path d="M30 20h41v44H30z" /></g>
   <g transform="rotate(-9 44 48)">
@@ -38,13 +50,23 @@
   <path d="M13 72C4 76 10 87 38 89c17 1 36-4 39-10 2-5-6-8-14-8" stroke-width="1.5" />
 </svg><span>主角，就差你了。</span><p>选好姿势与角色，拍下这一幕。</p>
 </div>
-</Transition><div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div>
-</div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><studio-button variant="primary" size="lg" :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting" @click="shoot"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div>
+</Transition>
+<div v-if="groupPhotos.length && (activeJob || shooting)" class="deck-developing" role="status"><StudioDevelopingIcon /><span>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}<template v-if="burstTotal > 1"> · {{ Math.min(groupPhotos.length + 1, burstTotal) }} / {{ burstTotal }}</template></span><div class="develop-track" role="progressbar" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100" aria-label="当前照片冲印进度"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div>
+<div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div>
+</div><div class="portrait-actions"><div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><div class="studio-shutter"><studio-button variant="primary" size="lg" joined :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting" @click="shoot"><StudioDevelopingIcon v-if="activeJob" /><svg v-else class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5.5" /></svg>{{ activeJob ? '正在冲印' : shooting ? '准备中…' : '按下快门 / SHOOT' }}</studio-button><StudioBurstControl v-model="burstCount" :disabled="burstRunning || shooting || !!activeJob" /></div></div><div v-if="lastFailure && !activeJob" class="studio-error" role="status"><span>{{ lastFailure }}</span><studio-button variant="ghost" size="sm" @click="lastFailure = ''">知道了</studio-button></div>
 </section>
       <aside ref="characterPanel" class="studio-characters" tabindex="-1">
         <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">02</span>入镜人物</h2></div><span class="rail-count">{{ sortedCharacters.length }}</span></div>
-        <div class="character-slot-tools"><linshe-tabs v-model="characterSlot" variant="film" size="sm" :options="characterSlotOptions" aria-label="选择主角或搭档" /><studio-button v-if="characterSlot === 'second' && secondCharacterId" variant="ghost" size="sm" @click="secondCharacterId = ''">改为随机</studio-button></div>
+        <div class="character-slot-tools"><linshe-tabs v-model="characterSlot" variant="film" size="sm" :options="characterSlotOptions" aria-label="选择主角或搭档" /></div>
         <div class="character-grid">
+          <div class="character-choice character-random" :class="{ selected: randomSlotSelected, 'is-disabled': !characters.length }" role="button" :tabindex="characters.length ? 0 : -1" :aria-pressed="randomSlotSelected" :aria-disabled="!characters.length" :aria-label="`随机${characterSlot === 'first' ? '主角' : '搭档'}，拍摄时随机选择`" title="拍摄时随机选择角色" @click="selectRandomCharacter" @keydown.enter.prevent="selectRandomCharacter" @keydown.space.prevent="selectRandomCharacter">
+            <div class="character-face">
+              <span><svg class="random-character-mark" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="30" cy="21" r="8" /><path d="M15 48v-4a15 15 0 0 1 23-13M40 15h12m-5-5 5 5-5 5M38 39h14m-5-5 5 5-5 5M48 52H36m5-5-5 5 5 5" /></svg></span>
+              <i v-if="randomSlotSelected">{{ characterSlot === 'first' ? '主角' : '搭档' }}</i>
+            </div>
+            <div class="character-contact"><span class="contact-number" aria-hidden="true">00</span><span v-if="randomSlotSelected" class="character-outfit">{{ customOutfits[characterSlot] ? '本次搭配' : outfitLabels[slotOutfits[characterSlot] || 'work'] }}</span></div>
+            <span class="character-name">随机角色</span>
+          </div>
           <studio-outfit-picker v-for="(character, characterIndex) in sortedCharacters" :key="character.id" :character-id="character.id" :model-value="characterOutfit(character)" @open="selectOutfitCharacter(character)" @update:model-value="selectOutfit(character, $event)">
             <template #default="{ open, toggle, keydown, menuId, activeId }">
               <div class="character-choice" :title="character.display_name || character.name" :aria-label="`${character.display_name || character.name}，${outfitLabel(character)}，选择服装`" :class="{ selected: isSelectedSlot(character), 'is-other-slot': isOtherSlot(character) }" role="combobox" tabindex="0" aria-haspopup="listbox" :aria-expanded="open" :aria-controls="open ? menuId : undefined" :aria-activedescendant="activeId" @click="toggle" @keydown="keydown">
@@ -56,8 +78,8 @@
           </studio-outfit-picker>
         </div>
         <div class="studio-wardrobe-tools"><studio-button size="compact" block @click="clothingOpen = true">服装 tag 库 · {{ characterSlot === 'first' ? '主角' : '搭档' }}<span v-if="customOutfits[characterSlot]" class="studio-wardrobe-selected">· 已选择</span></studio-button></div>
-        <StudioPromptTools v-model="polishPrompt" v-model:instruction="polishInstruction" v-model:expanded="polishSettingsOpen" :disabled="shooting || !!activeJob" :can-preview="!!selectedCharacter && !!selectedPose" :has-photo="!!currentPhoto" @preview="previewPrompt" @photo-prompt="showPhotoPrompt" />
-        <div v-if="duoPose" class="reference-hint">双人姿势使用主角 + 搭档；未指定搭档时会随机选择一位。</div><div v-if="!characters.length" class="rail-empty">没有可选择的角色</div>
+        <StudioPromptTools v-model="polishPrompt" v-model:instruction="polishInstruction" v-model:expanded="polishSettingsOpen" :disabled="shooting || !!activeJob" :can-preview="canUseCharacters && !!selectedPose" :has-photo="!!currentPhoto" @preview="previewPrompt" @photo-prompt="showPhotoPrompt" />
+        <div v-if="duoPose" class="reference-hint">双人姿势使用主角 + 搭档；随机角色会在拍摄时选取。</div><div v-if="!characters.length" class="rail-empty">没有可选择的角色</div>
       </aside>
     </section>
     </Transition>
@@ -129,14 +151,17 @@
     <StudioBackgroundLibrary v-model="backgroundOpen" :value="background" @applied="background = $event" />
     <StudioClothingLibrary v-model="clothingOpen" :slot-key="characterSlot" :outfit="customOutfits[characterSlot] || null" :draft="clothingDrafts[characterSlot] ?? null" @draft-change="saveClothingDraft" @applied="applyClothing" />
     <linshe-modal v-model="promptOpen" title="拍摄提示词" variant="film" wide :transition-ms="300"><template #close="{ close }"><studio-button variant="icon" aria-label="关闭提示词" @click="close()">×</studio-button></template><p v-if="promptLoading" class="studio-prompt-note" role="status">正在拼装…</p><p v-else-if="promptError" class="studio-prompt-note" role="alert">{{ promptError }}</p><div v-else class="studio-prompt-text" tabindex="0">{{ promptText }}</div></linshe-modal>
-    <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="photoOpen" :imgs="[lightboxUrl]" :index="0" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="photoOpen = false" /></div></Teleport>
+    <Teleport to="body"><div style="--vel-z-index: 14000"><ImageLightbox :visible="photoOpen" :imgs="lightboxImages" :index="lightboxIndex" :show-regenerate="false" :show-upscale="false" :show-delete="false" @hide="photoOpen = false" /></div></Teleport>
   </main>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, inject } from 'vue'
 import { usePhotoStudio } from '../composables/usePhotoStudio.js'
+import { createPhotoStudioBurst } from '../composables/photoStudioBurst.js'
 import StudioButton from '../components/photoStudio/StudioButton.vue'
+import StudioBurstControl from '../components/photoStudio/StudioBurstControl.vue'
+import StudioPhotoDeck from '../components/photoStudio/StudioPhotoDeck.vue'
 import StudioDevelopingIcon from '../components/photoStudio/StudioDevelopingIcon.vue'
 import StudioOutfitPicker from '../components/photoStudio/StudioOutfitPicker.vue'
 import StudioBackgroundLibrary from '../components/photoStudio/StudioBackgroundLibrary.vue'
@@ -154,25 +179,19 @@ import LinsheModal from '../components/ui/LinsheModal.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { PHOTO_ASPECT_RATIOS, initialPhotoStudioFrame, clampPhotoDimension, photoDimensionControls, resizePhoto } from '../utils/photoStudioDimensions.js'
 
+const toggleMobileSidebar = inject('toggleMobileSidebar', () => {})
 const posePanel = ref(null), characterPanel = ref(null)
 function jumpToPanel(panel) {
   if (!panel) return
   panel.focus({ preventScroll: true })
   panel.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' })
 }
-const { catalog, characters, jobs, capability, load, poll, create } = usePhotoStudio()
-// SSE broadcasts every shot to every open studio. Only this page's shutter
-// gesture arms its sound; a delayed observer or recovery must stay silent.
-const pendingShutterJobs = new Set()
-watch(jobs, list => {
-  let completed = false
-  for (const job of list) {
-    if (job.status !== 'done' && job.status !== 'failed') continue
-    if (pendingShutterJobs.delete(job.id) && job.status === 'done') completed = true
-  }
-  if (completed) playCameraShutterSound()
-})
+const studio = usePhotoStudio({ persistent: true })
+const { catalog, characters, jobs, capability, load } = studio
+const burst = createPhotoStudioBurst(studio, { prepareSound: prepareCameraShutterSound, playSound: playCameraShutterSound })
+const { groupIndex, groupPhotos, burstRunning, burstTotal, shooting, exposure, lastFailure, selectedJobId } = burst
 const saved = (() => { try { return JSON.parse(sessionStorage.getItem('photo-studio-selection') || '{}') } catch { return {} } })()
+const burstCount = ref(Math.max(1, Math.min(10, Math.round(Number(saved.burstCount) || 1))))
 const customPoseKey = 'photo-studio-custom-pose'
 const customPose = ref((() => {
   try {
@@ -297,15 +316,12 @@ const outfitLabels = STUDIO_OUTFIT_LABELS
 const initialFrame = initialPhotoStudioFrame(saved)
 const width = ref(initialFrame.width), height = ref(initialFrame.height), characterSlot = ref('first')
 const aspectRatio = ref(initialFrame.aspectRatio)
-const poseOpen = ref(false), photoOpen = ref(false), showHistory = ref(false), shooting = ref(false), photoFlash = ref(false)
+const poseOpen = ref(false), photoOpen = ref(false), showHistory = ref(false), photoFlash = ref(false)
 const poseScrollRoot = ref(null)
 let pagingPoses = false
 const query = ref(''), systemFilter = ref(''), categoryFilter = ref(''), angleFilter = ref('')
-const lightboxUrl = ref(''), lastFailure = ref(''), selectedJobId = ref(sessionStorage.getItem('photo-studio-job') || ''), visiblePoseCount = ref(240)
-watch(() => jobs.value.find(job => job.id === selectedJobId.value), job => {
-  if (job?.status === 'failed') lastFailure.value = job.error || '拍摄失败，请重试'
-})
-let pollTimer, flashTimer, studioReady = false, pendingPhotoId = '', disposed = false
+const lightboxImages = ref([]), lightboxIndex = ref(0), visiblePoseCount = ref(240)
+let flashTimer, studioReady = false, pendingPhotoId = '', disposed = false
 const characterSlotOptions = [{ label: '主角', value: 'first' }, { label: '搭档', value: 'second' }]
 const aspectRatioOptions = PHOTO_ASPECT_RATIOS.map(value => {
   const [w, h] = value.split(':').map(Number)
@@ -317,6 +333,7 @@ const selectedPose = computed(() => poseId.value === 'custom-upload' && customPo
 const recognizedPoses = computed(() => catalog.value.filter(item => !!item.posePrompt))
 const selectedCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(characterId.value)))
 const selectedSecondCharacter = computed(() => characters.value.find(item => Number(item.id) === Number(secondCharacterId.value)))
+const randomSlotSelected = computed(() => !(characterSlot.value === 'first' ? characterId.value : secondCharacterId.value))
 const activeJob = computed(() => jobs.value.find(item => item.status === 'running'))
 // Match schedule peek: simulated progress fills quiet periods; real sampling wins.
 const realPct = ref(0), simulatedPct = ref(0)
@@ -360,12 +377,13 @@ watch([activeJob, shooting], ([job, submitting]) => {
     }
   }
 }, { immediate: true })
-const currentPhoto = computed(() => jobs.value.find(item => item.id === selectedJobId.value && item.status === 'done') || jobs.value.find(item => item.status === 'done'))
+const currentPhoto = computed(() => groupPhotos.value[groupIndex.value] || jobs.value.find(item => item.id === selectedJobId.value && item.status === 'done') || jobs.value.find(item => item.status === 'done'))
+const displayPhotos = computed(() => groupPhotos.value.length ? groupPhotos.value : currentPhoto.value ? [currentPhoto.value] : [])
 const characterCollator = new Intl.Collator('zh-u-co-pinyin', { sensitivity: 'base', numeric: true })
 const sortedCharacters = computed(() => [...characters.value].sort((a, b) => characterCollator.compare(a.display_name || a.name || '', b.display_name || b.name || '') || Number(a.id) - Number(b.id)))
 const duoPose = computed(() => !!selectedPose.value?.system?.includes('双人') || /^pair/i.test(selectedPose.value?.id || ''))
 const shootCharactersLabel = computed(() => {
-  const first = selectedCharacter.value?.display_name || selectedCharacter.value?.name || '尚未选人'
+  const first = selectedCharacter.value?.display_name || selectedCharacter.value?.name || (characters.value.length ? '随机主角' : '尚未选人')
   if (!duoPose.value) return first
   return `${first} + ${selectedSecondCharacter.value?.display_name || selectedSecondCharacter.value?.name || '随机搭档'}`
 })
@@ -374,9 +392,10 @@ const categoryOptions = computed(() => [{ label: '全部分类', value: '' }, ..
 const angleOptions = computed(() => [{ label: '全部角度', value: '' }, ...unique('angle').map(value => ({ label: value, value }))])
 const filteredPoses = computed(() => { const term = query.value.trim().toLowerCase(); return recognizedPoses.value.filter(item => (!systemFilter.value || item.system === systemFilter.value) && (!categoryFilter.value || item.category === categoryFilter.value) && (!angleFilter.value || item.angle === angleFilter.value) && (!term || `${item.name} ${item.category} ${item.group} ${item.system} ${item.id}`.toLowerCase().includes(term))) })
 const visiblePoses = computed(() => filteredPoses.value.slice(0, visiblePoseCount.value))
-const shootDisabled = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt?.trim() || !selectedCharacter.value)
+const canUseCharacters = computed(() => characters.value.length >= (duoPose.value ? 2 : 1) && (!characterId.value || !!selectedCharacter.value) && (!duoPose.value || !secondCharacterId.value || !!selectedSecondCharacter.value))
+const shotUnavailable = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt?.trim() || !canUseCharacters.value)
+const shootDisabled = computed(() => burstRunning.value || shotUnavailable.value)
 const dimensionControls = computed(() => photoDimensionControls(aspectRatio.value))
-const photoAspect = computed(() => Number(currentPhoto.value?.width) / Number(currentPhoto.value?.height) || 9 / 16)
 function unique(field) { return [...new Set(catalog.value.filter(item => field === 'system' || !systemFilter.value || item.system === systemFilter.value).map(item => item[field]))].sort((a, b) => a.localeCompare(b, 'zh')) }
 async function loadMorePoses() {
   if (disposed || !poseOpen.value || pagingPoses || visiblePoseCount.value >= filteredPoses.value.length) return
@@ -399,8 +418,8 @@ function syncAspect(anchor) {
 function setWidth(value) { width.value = clampPhotoDimension(value); syncAspect('width') }
 function setHeight(value) { height.value = clampPhotoDimension(value); syncAspect('height') }
 watch(aspectRatio, value => { if (value !== 'custom') syncAspect('width') })
-function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: 2, background: background.value, polishInstruction: polishInstruction.value, clothingBinding: 'slot', slotOutfits: slotOutfits.value, customOutfits: customOutfits.value, clothingDrafts: clothingDrafts.value })) }
-watch([poseId, characterId, secondCharacterId, width, height, aspectRatio, background, polishInstruction], persistSelection)
+function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ burstCount: burstCount.value, poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: 2, background: background.value, polishInstruction: polishInstruction.value, clothingBinding: 'slot', slotOutfits: slotOutfits.value, customOutfits: customOutfits.value, clothingDrafts: clothingDrafts.value })) }
+watch([burstCount, poseId, characterId, secondCharacterId, width, height, aspectRatio, background, polishInstruction], persistSelection)
 watch([slotOutfits, customOutfits, clothingDrafts], persistSelection, { deep: true, flush: 'sync' })
 watch(systemFilter, () => {
   categoryFilter.value = ''
@@ -432,6 +451,11 @@ function randomizePose() {
   selectPose(candidates[Math.floor(Math.random() * candidates.length)])
 }
 function selectPose(pose) { poseId.value = pose.id; poseOpen.value = false }
+function selectRandomCharacter() {
+  if (!characters.value.length) return
+  if (characterSlot.value === 'first') characterId.value = ''
+  else secondCharacterId.value = ''
+}
 function isSelectedSlot(character) { return Number(character.id) === Number(characterSlot.value === 'first' ? characterId.value : secondCharacterId.value) }
 function isOtherSlot(character) { return characterSlot.value === 'first' ? Number(character.id) === Number(secondCharacterId.value) : Number(character.id) === Number(characterId.value) }
 function characterSlotNumber(character) { if (Number(character.id) === Number(characterId.value)) return 1; if (secondCharacterId.value && Number(character.id) === Number(secondCharacterId.value)) return 2; return 0 }
@@ -460,10 +484,15 @@ function selectOutfit(character, scene) {
 }
 function jobCharacters(job) { return [job.character_name, job.character2_name].filter(Boolean).join(' + ') }
 function stageLabel(stage) { return ({ polishing: 'AI 正在润色提示词', polishing_retry: 'AI 正在补全遗漏的 tag', preparing: '正在架好相机', queued: '已进入暗房队列', generating: '正在处理画面', sampling: '正在采样', saving: '正在冲印照片' })[stage] || '正在拍摄' }
-function openPhoto(url) { lightboxUrl.value = url; photoOpen.value = true }
+function openPhoto(url) {
+  const photos = displayPhotos.value.map(photo => photo.output_url)
+  lightboxImages.value = photos.includes(url) ? photos : [url]
+  lightboxIndex.value = Math.max(0, lightboxImages.value.indexOf(url))
+  photoOpen.value = true
+}
 function shotInput() {
-  return { characterId: characterId.value, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null,
-    poseId: poseId.value, ...(poseId.value === 'custom-upload' ? { customPose: { posePrompt: customPose.value?.posePrompt, personCount: customPose.value?.personCount } } : {}), outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value, 'first') : 'work',
+  return { characterId: characterId.value || null, secondCharacterId: duoPose.value ? (secondCharacterId.value || null) : null,
+    poseId: poseId.value, ...(poseId.value === 'custom-upload' ? { customPose: { posePrompt: customPose.value?.posePrompt, personCount: customPose.value?.personCount } } : {}), outfitScene: selectedCharacter.value ? characterOutfit(selectedCharacter.value, 'first') : slotOutfits.value.first || 'work',
     secondOutfitScene: duoPose.value ? (selectedSecondCharacter.value ? characterOutfit(selectedSecondCharacter.value, 'second') : slotOutfits.value.second || 'work') : 'work',
     clothingTags: customOutfits.value.first?.tags || [],
     customClothingPrompt: customOutfits.value.first?.customPrompt || '',
@@ -495,22 +524,16 @@ async function previewPrompt() {
   catch (error) { if (revision === promptRevision && !disposed) promptError.value = error.message }
   finally { if (revision === promptRevision && !disposed) promptLoading.value = false }
 }
-async function shoot() {
+function shoot() {
   if (shootDisabled.value) return
+  return burst.start(burstCount.value, shotInput)
+}
+watch(exposure, () => {
   polishSettingsOpen.value = false
-  prepareCameraShutterSound()
-  shooting.value = true; lastFailure.value = ''; shutterPulse.value = true
+  shutterPulse.value = true
   clearTimeout(shutterTimer)
   shutterTimer = setTimeout(() => { shutterPulse.value = false }, 700)
-  let id
-  try {
-    id = crypto.randomUUID()
-    pendingShutterJobs.add(id)
-    const job = await create({ id, ...shotInput() })
-    selectedJobId.value = job.id; sessionStorage.setItem('photo-studio-job', job.id)
-  } catch (error) { pendingShutterJobs.delete(id); lastFailure.value = error.message }
-  finally { shooting.value = false }
-}
+}, { flush: 'sync' })
 // Preset names and descriptions are catalog data, not a frozen session snapshot.
 async function refreshSavedBackground() {
   const savedBackground = background.value
@@ -525,8 +548,8 @@ async function refreshSavedBackground() {
 onMounted(refreshSavedBackground)
 onMounted(() => { globalThis.document?.addEventListener('paste', pastePose) })
 onBeforeUnmount(() => { globalThis.document?.removeEventListener('paste', pastePose) })
-onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (!sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection(); pollTimer = setInterval(poll, 15000) })
-onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(); clearInterval(pollTimer); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
+onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (saved.characterId !== '' && saved.characterId !== null && !sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection() })
+onBeforeUnmount(() => { burst.detachInput(shotInput); disposed = true; poseRequest?.abort(); stopFakeProgress(); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
 </script>
 
 <style scoped>
@@ -543,7 +566,7 @@ onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(
 .pose-option-image{position:relative;aspect-ratio:3/4;overflow:hidden;background:var(--dialogue-photo-paper);padding:4px}.pose-option-image img{width:100%;height:100%;object-fit:contain}.pose-option-image>span{position:absolute;left:4px;top:4px;padding:3px 6px;background:var(--studio-film);color:var(--studio-film-text);font-size:11px}.pose-option-image>i{position:absolute;right:4px;bottom:4px;padding:4px 8px;display:grid;place-items:center;background:var(--studio-shutter);color:var(--studio-film);font-style:normal;font-weight:900}.pose-option-heading{display:flex;gap:8px;align-items:baseline;min-width:0}.pose-option-heading small{font:italic 700 12px/1.5 monospace;color:var(--studio-shutter);flex-shrink:0}.pose-option-heading strong{font-size:13px;line-height:1.5;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.pose-option>span{font-size:11px;color:var(--studio-film-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .studio-wardrobe-tools{display:grid;gap:4px}.studio-wardrobe-selected{color:var(--studio-tag);white-space:nowrap}.studio-prompt-note{margin:0;font-size:14px;line-height:1.7;color:var(--studio-muted)}.studio-prompt-text{white-space:pre-wrap;font-size:14px;line-height:1.8;color:var(--studio-ink);overflow-wrap:anywhere}
 .studio-exposure-enter-active{transition:opacity .3s,transform .3s}.studio-exposure-enter-from{opacity:0;transform:translateY(14px)}.studio-exposure-leave-active{transition:opacity .3s,transform .3s,filter .3s}.studio-exposure-leave-to{opacity:0;transform:translateY(-20px) rotate(-4deg) scale(.94);filter:blur(2px)}
-.photo-print.studio-exposure-leave-active{transform-origin:50% 0;animation:studio-print-away .45s cubic-bezier(.55,0,.8,.4) both;transition:none}
+.studio-photo-deck.studio-exposure-leave-active{transform-origin:50% 0;animation:studio-print-away .45s cubic-bezier(.55,0,.8,.4) both;transition:none}
 @keyframes studio-print-away{0%{opacity:1;transform:none}25%{opacity:1;transform:translateY(8px) rotate(-2deg)}100%{opacity:0;transform:translateY(-65%) rotate(9deg) scale(.82);filter:blur(3px)}}
 .shutter-sweep{position:absolute;inset:0;z-index:3;overflow:hidden;pointer-events:none}.shutter-sweep i{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 6px,var(--studio-film-edge) 7px 8px),var(--studio-film);border-bottom:3px solid var(--studio-shutter);animation:studio-curtain .7s cubic-bezier(.7,0,.2,1) both;clip-path:polygon(0 0,100% 0,100% 52%,0 48%)}.shutter-sweep i:nth-child(2){rotate:180deg}.shutter-sweep span{position:absolute;left:50%;top:50%;padding:8px 18px;border:3px solid var(--studio-shutter);color:var(--studio-shutter);font:italic 900 clamp(28px,4vw,56px)/1 Impact,sans-serif;letter-spacing:.06em;animation:studio-exposed .7s ease both}
 @keyframes studio-curtain{0%{transform:translateY(-100%)}35%,55%{transform:translateY(0)}100%{transform:translateY(-100%)}}@keyframes studio-exposed{0%,25%{opacity:0;transform:translate(-50%,-50%) rotate(-10deg) scale(1.4)}40%,55%{opacity:1;transform:translate(-50%,-50%) rotate(-10deg) scale(1)}85%,100%{opacity:0;transform:translate(-50%,-65%) rotate(-10deg) scale(.98)}}
@@ -581,20 +604,28 @@ onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(
 .studio-darkroom { display:flex; flex-direction:column; min-width:0; min-height:0; position:relative; isolation:isolate; background:var(--studio-film); border:0; border-radius:0; box-shadow:0 6px 16px var(--studio-shadow); overflow:hidden; }
 .film-frame-edge { display:flex; align-items:center; gap:14px; height:20px; flex-shrink:0; padding:0 40px; color:var(--studio-film-muted); font:700 9px/1 monospace; letter-spacing:.14em; pointer-events:none; }
 .film-frame-edge i { flex:1; height:4px; opacity:.4; background:repeating-linear-gradient(90deg,var(--studio-perforation) 0 1px,transparent 1px 12px); }
-.portrait-mat { flex:1; min-height:0; container-type:size; display:grid; place-items:center; position:relative; overflow:hidden; padding:18px 44px 20px; background:linear-gradient(90deg,var(--studio-film-edge) 30px,transparent 30px,transparent calc(100% - 30px),var(--studio-film-edge) calc(100% - 30px)); }
+.portrait-mat { flex:1; min-height:0; container-type:size; display:grid; place-items:center; position:relative; isolation:isolate; overflow:hidden; padding:18px 44px 20px; background:linear-gradient(90deg,var(--studio-film-edge) 30px,transparent 30px,transparent calc(100% - 30px),var(--studio-film-edge) calc(100% - 30px)); }
+/* Keep the worn darkroom surface behind the print and out of hit testing. */
+.mat-patina { position:absolute; inset:0; z-index:-1; pointer-events:none; user-select:none; }
+.mat-patina::before { content:''; position:absolute; inset:0; background:url('../assets/studio-photocopy.svg') repeat; opacity:.55; mix-blend-mode:screen; }
+.mat-stamp { position:absolute; right:48px; bottom:28px; width:clamp(96px,20cqw,136px); height:auto; color:var(--studio-shutter); opacity:.24; transform:rotate(-14deg); mask:url('../assets/studio-worn-ink.svg') center / 100% 100%; }
+.mat-stamp text { fill:currentColor; text-anchor:middle; font-family:'Arial Narrow',sans-serif; font-weight:800; }
+.mat-stamp-small { font-size:11px; letter-spacing:2px; }
+.mat-stamp-title { font-size:17px; letter-spacing:-.5px; }
+@media(max-width:520px) {
+  .mat-stamp { right:28px; bottom:22px; width:88px; opacity:.19; }
+}
 .portrait-mat::before,.portrait-mat::after { content:''; position:absolute; top:12px; bottom:12px; width:12px; background:linear-gradient(var(--studio-perforation) 0 13px,transparent 13px 28px) 0 0 / 12px 28px repeat-y; pointer-events:none; opacity:.8; }.portrait-mat::before { left:9px; }.portrait-mat::after { right:9px; }
-.photo-print { margin:0; display:flex; flex-direction:column; gap:8px; max-width:100%; max-height:100%; width:min(100cqw,calc((100cqh - 46px) * var(--photo-aspect) + 20px)); padding:10px; background:var(--dialogue-photo-paper); box-shadow:7px 6px 0 color-mix(in srgb,var(--studio-film-text) 16%,transparent),0 10px 30px var(--studio-shadow); position:relative; }
-.photo-print img { display:block; width:100%; min-height:0; max-height:calc(100cqh - 46px); object-fit:contain; cursor:zoom-in; }
-.photo-print figcaption { color:var(--dialogue-photo-caption); display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; font-size:12px; line-height:20px; }.photo-print figcaption strong,.photo-print figcaption span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }.photo-print figcaption span { font-size:11px; }
-.photo-print.is-peeking img { animation:photo-peek 420ms var(--ease-standard) both; }.photo-flash { position:absolute; inset:0; pointer-events:none; background:var(--dialogue-photo-paper); animation:photo-flash 420ms ease-out both; }
+
 .portrait-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:16px; flex-shrink:0; padding:14px 18px; background:var(--studio-paper); border-top:7px solid var(--studio-shutter); }
-.portrait-selection { display:grid; gap:3px; min-width:0; }.portrait-selection strong { font-size:17px; font-weight:650; line-height:1.4; overflow-wrap:anywhere; }.portrait-selection>span { font-size:12px; color:var(--studio-muted); overflow-wrap:anywhere; }.portrait-selection .next-shot { font:10px/1.5 monospace; letter-spacing:.16em; }.portrait-actions>.studio-button { flex-shrink:0; }
+.portrait-selection { display:grid; gap:3px; min-width:0; }.portrait-selection strong { font-size:17px; font-weight:650; line-height:1.4; overflow-wrap:anywhere; }.portrait-selection>span { font-size:12px; color:var(--studio-muted); overflow-wrap:anywhere; }.portrait-selection .next-shot { font:10px/1.5 monospace; letter-spacing:.16em; }.portrait-actions>.studio-shutter { flex-shrink:0; }
 .mobile-studio-links { display:none; }.mobile-studio-links>.studio-button { min-height:44px; }
 .character-slot-tools { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }.character-slot-tools>.ls-tabs { flex:1; min-width:170px; }
 .character-grid { flex:1; min-height:0; overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:max-content; gap:12px 8px; align-content:start; padding:8px; background:var(--studio-film); border:0; border-radius:0; scrollbar-color:var(--studio-shutter) var(--studio-film); }
 .character-choice { min-width:0; position:relative; display:flex; flex-direction:column; align-items:center; gap:0; padding:4px 4px 0; cursor:pointer; border:1px solid transparent; background:transparent; text-align:center; transition:background .3s,border-color .3s,box-shadow .3s; }
 .character-choice.selected { border-color:var(--studio-shutter); box-shadow:none; background:var(--studio-film-edge); }.character-choice.is-other-slot { border-color:var(--studio-film-muted); }
 .character-choice.selected::after { content:''; position:absolute; inset:-2px; border:2px solid var(--studio-shutter); border-radius:35% 6% 30% 5%; transform:rotate(-4deg); pointer-events:none; }
+.random-character-mark { width:64%; height:64%; }.character-choice.is-disabled { cursor:not-allowed; opacity:.5; }
 .character-face { width:100%; aspect-ratio:1; flex:none; position:relative; background:var(--studio-film-edge); }.character-face img,.character-face>span { display:block; width:100%; height:100%; border-radius:50%; object-fit:cover; }.character-face>span { display:grid; place-items:center; font-size:25px; color:var(--studio-film-text); }.character-face i { position:absolute; left:0; bottom:0; padding:2px 5px; background:var(--studio-shutter); color:var(--studio-film); font-size:10px; font-style:normal; font-weight:600; }
 .character-contact { width:100%; display:flex; align-items:center; justify-content:space-between; gap:4px; min-height:24px; }
 .character-outfit { font-size:var(--fs-xs); color:var(--studio-film-muted); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
@@ -603,7 +634,7 @@ onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(
 .reference-hint,.rail-empty { font-size:12px; line-height:1.6; color:var(--studio-muted); }
 .empty-negative,.developing-state { text-align:center; color:var(--studio-film-text); position:relative; padding:24px; }.empty-negative { display:grid; justify-items:center; gap:16px; }.negative-mark { display:block; width:88px; height:88px; color:var(--studio-shutter); }.empty-negative>span:nth-child(2) { font-size:clamp(20px,2.5vw,30px); font-family:Georgia,'Songti SC',serif; }.empty-negative p,.developing-state p { margin:0; font-size:14px; line-height:1.7; color:var(--studio-film-muted); }.developing-state { width:min(100%,410px); }.developing-state h3 { font-size:23px; }.spinner { margin:auto; width:40px; height:40px; border:2px solid var(--studio-film-muted); border-top-color:var(--studio-shutter); border-radius:50%; animation:studio-spin .8s linear infinite; }.develop-track { overflow:hidden; height:3px; background:var(--studio-film-edge); margin-top:24px; }.develop-track span { display:block; width:100%; height:100%; transform-origin:left; background:var(--studio-shutter); transition:transform .3s; }.studio-error { font-size:13px; line-height:1.6; padding:10px 14px; background:var(--studio-paper); color:var(--fun-orange); display:flex; align-items:center; justify-content:space-between; gap:8px; overflow-wrap:anywhere; }
 .character-choice:focus-visible { outline:2px solid var(--studio-shutter); outline-offset:2px; }.pose-card:focus-visible { outline:2px solid var(--studio-accent); outline-offset:3px; }
-@media(hover:hover) { .character-choice:hover { background:var(--studio-film-edge); border-color:var(--studio-shutter); } }
+@media(hover:hover) { .character-choice:hover:not(.is-disabled) { background:var(--studio-film-edge); border-color:var(--studio-shutter); } }
 .studio-content-enter-active,.studio-content-leave-active { transition:opacity .3s,transform .3s; }.studio-content-enter-from,.studio-content-leave-to { opacity:0; transform:translateY(6px); }
 @media(min-width:981px) {
   .studio-header { grid-template-columns:244px minmax(0,1fr) 286px; gap:22px; height:126px; box-sizing:border-box; padding-inline:0; }
@@ -619,13 +650,18 @@ onBeforeUnmount(() => { disposed = true; poseRequest?.abort(); stopFakeProgress(
 @media(min-width:1800px) { .studio-header { grid-template-columns:280px minmax(0,1fr) 330px; gap:32px; }.studio-heading h1 { font-size:62px; } }
 @media(min-width:981px) and (max-width:1200px) { .studio-header { grid-template-columns:210px minmax(0,1fr) 206px; gap:18px; }.studio-heading h1 { font-size:46px; gap:10px; }.studio-club { font-size:9px; } }
 @media(min-width:1800px) { .studio-body { grid-template-columns:280px minmax(0,1fr) 330px; gap:32px; }.character-name { font-size:14px; }.rail-title h2 { font-size:19px; } }
-@media(max-width:1200px) { .film-margin-note { display:none; } .studio-page { padding:16px 18px 24px; }.studio-header { width:100%; margin-inline:0; padding-inline:0; gap:20px; }.studio-body { grid-template-columns:210px minmax(0,1fr) 206px; gap:18px; }.character-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.rail-title h2 { font-size:16px; }.rail-title { flex-wrap:wrap; }.portrait-actions { flex-wrap:wrap; }.portrait-actions>.studio-button { margin-left:auto; } }
+@media(max-width:1200px) { .film-margin-note { display:none; } .studio-page { padding:16px 18px 24px; }.studio-header { width:100%; margin-inline:0; padding-inline:0; gap:20px; }.studio-body { grid-template-columns:210px minmax(0,1fr) 206px; gap:18px; }.character-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.rail-title h2 { font-size:16px; }.rail-title { flex-wrap:wrap; }.portrait-actions { flex-wrap:wrap; }.portrait-actions>.studio-shutter { margin-left:auto; } }
 @media(max-width:980px) { .mobile-studio-links { display:flex; flex-direction:row; gap:8px; align-items:center; margin-left:auto; flex-shrink:0; }.studio-pose,.studio-characters { scroll-margin-top:16px; }.studio-body { height:auto; grid-template-columns:1fr 1fr; gap:22px; }.studio-darkroom { grid-column:1/-1; grid-row:1; height:max(520px,75dvh); }.studio-pose { grid-column:1; }.studio-characters { grid-column:2; }.pose-card { flex:none; height:240px; }.character-grid { max-height:530px; }.library-tools { gap:8px; }.library-count { grid-column:1/-1; text-align:left; }.pose-gallery-grid { grid-template-columns:repeat(auto-fill,minmax(105px,1fr)); } }
-@media(max-width:520px) { .studio-page { padding:12px 12px 24px; }.studio-header { width:100%; margin-inline:0; padding:8px 0 0; grid-template-columns:1fr; gap:16px; margin-bottom:20px; }.studio-heading { grid-column:1; grid-row:1; justify-self:start; padding-left:6px; }.studio-heading h1 { font-size:58px; gap:22px; }.studio-header-actions { grid-row:2; justify-content:flex-end; }.studio-tagline { width:180px; height:18px; }.studio-club { font-size:10px; }.studio-body { grid-template-columns:1fr; gap:24px; }.studio-darkroom { height:max(510px,70dvh); }.film-frame-edge { padding-inline:26px; }.portrait-mat { padding:8px 26px 16px; background:linear-gradient(90deg,var(--studio-film-edge) 18px,transparent 18px,transparent calc(100% - 18px),var(--studio-film-edge) calc(100% - 18px)); }.portrait-mat::before,.portrait-mat::after { width:8px; background-size:8px 28px; }.portrait-mat::before { left:5px; }.portrait-mat::after { right:5px; }.portrait-actions { padding:12px; gap:10px; }.portrait-selection strong { font-size:16px; }.portrait-actions>.studio-button { margin-left:0; width:100%; }.photo-print figcaption span { display:none; }.studio-pose,.studio-characters { grid-column:1; }.studio-characters { grid-row:2; }.studio-pose,.studio-characters { transform:none; }.character-grid { grid-template-columns:repeat(3,minmax(0,1fr)); max-height:310px; }.character-name { font-size:13px; }.pose-card { height:260px; }.size-ratios { grid-template-columns:repeat(4,minmax(0,1fr)); }.size-controls { grid-template-columns:1fr 1fr; gap:16px; }.rail-title h2 { font-size:18px; }.portrait-selection>span { font-size:11px; } }
-.portrait-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.portrait-selection{grid-column:1;grid-row:1}.portrait-actions>.studio-button{grid-column:2;grid-row:1}.mobile-studio-links{grid-column:1/-1;grid-row:2;justify-self:end}
-@media(max-width:600px){.portrait-actions{grid-template-columns:1fr;gap:10px}.portrait-actions>.studio-button{grid-column:1;grid-row:2;width:100%}.mobile-studio-links{grid-row:3;justify-self:start;margin:0}}
+@media(max-width:520px) { .studio-page { padding:12px 12px 24px; }.studio-header { width:100%; margin-inline:0; padding:8px 0 0; grid-template-columns:1fr; gap:16px; margin-bottom:20px; }.studio-heading { grid-column:1; grid-row:1; justify-self:start; padding-left:6px; }.studio-heading h1 { font-size:58px; gap:22px; }.studio-header-actions { grid-row:2; justify-content:flex-end; }.studio-tagline { width:180px; height:18px; }.studio-club { font-size:10px; }.studio-body { grid-template-columns:1fr; gap:24px; }.studio-darkroom { height:max(510px,70dvh); }.film-frame-edge { padding-inline:26px; }.portrait-mat { padding:8px 26px 16px; background:linear-gradient(90deg,var(--studio-film-edge) 18px,transparent 18px,transparent calc(100% - 18px),var(--studio-film-edge) calc(100% - 18px)); }.portrait-mat::before,.portrait-mat::after { width:8px; background-size:8px 28px; }.portrait-mat::before { left:5px; }.portrait-mat::after { right:5px; }.portrait-actions { padding:12px; gap:10px; }.portrait-selection strong { font-size:16px; }.portrait-actions>.studio-shutter { margin-left:0; width:100%; }.studio-pose,.studio-characters { grid-column:1; }.studio-characters { grid-row:2; }.studio-pose,.studio-characters { transform:none; }.character-grid { grid-template-columns:repeat(3,minmax(0,1fr)); max-height:310px; }.character-name { font-size:13px; }.pose-card { height:260px; }.size-ratios { grid-template-columns:repeat(4,minmax(0,1fr)); }.size-controls { grid-template-columns:1fr 1fr; gap:16px; }.rail-title h2 { font-size:18px; }.portrait-selection>span { font-size:11px; } }
+.portrait-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.portrait-selection{grid-column:1;grid-row:1}.portrait-actions>.studio-shutter{grid-column:2;grid-row:1}.mobile-studio-links{grid-column:1/-1;grid-row:2;justify-self:end}
+@media(max-width:600px){.portrait-actions{grid-template-columns:1fr;gap:10px}.portrait-actions>.studio-shutter{grid-column:1;grid-row:2;width:100%}.mobile-studio-links{grid-row:3;justify-self:start;margin:0}}
 @media(prefers-reduced-motion:reduce) { .pose-description-enter-active,.pose-description-leave-active{transition:none}.shutter-sweep{display:none}.studio-page,.studio-page * { animation-duration:.01ms!important; transition-duration:.01ms!important; } }
 @keyframes studio-enter{from{opacity:0}to{opacity:1}}@keyframes studio-spin{to{transform:rotate(360deg)}}
-@keyframes photo-peek{0%{opacity:.18;filter:blur(6px) brightness(1.45);transform:scale(.975)}18%{opacity:1;filter:blur(0) brightness(1.12);transform:scale(1.015)}42%{filter:brightness(1)}100%{opacity:1;filter:none;transform:scale(1)}}
-@keyframes photo-flash{0%,100%{opacity:0}7%{opacity:.96}15%{opacity:.15}23%{opacity:.62}38%{opacity:0}}
+.studio-shutter { display:flex; min-width:0; }
+.studio-shutter>.studio-button { flex:1; min-width:0; }
+.studio-mobile-back { display:none; }
+.deck-developing { position:absolute; z-index:13; left:32px; right:32px; bottom:6px; display:flex; align-items:center; gap:8px; padding:8px 12px; background:var(--studio-film); color:var(--studio-film-text); font-size:var(--fs-xs); }
+.deck-developing .develop-track { position:absolute; left:0; right:0; bottom:0; margin:0; }
+@media(max-width:767px) { .studio-mobile-back { display:inline-flex; position:absolute; right:0; top:0; z-index:2; }.studio-header-actions { padding-top:36px; } }
+@media(max-width:520px) { .studio-header-actions { padding-top:0; }.studio-heading h1 { font-size:clamp(44px,13vw,58px); gap:18px; }.studio-club { max-width:calc(100vw - 92px); font-size:9px; letter-spacing:.06em; } }
 </style>

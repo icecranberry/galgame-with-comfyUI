@@ -1,8 +1,15 @@
-import { onScopeDispose, ref } from 'vue'
+import { effectScope, onScopeDispose, ref } from 'vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
 
-export function usePhotoStudio({ apiClient = api, subscribe = onEvent } = {}) {
+let persistentStudio
+
+export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persistent = false } = {}) {
+  if (persistent) {
+    // The app session owns live studio jobs; a route unmount must not unsubscribe.
+    persistentStudio ||= effectScope(true).run(() => usePhotoStudio({ apiClient, subscribe }))
+    return persistentStudio
+  }
   const catalog = ref([]), characters = ref([]), jobs = ref([]), capability = ref(null)
   const revisions = new Map()
   const terminalJobs = new Map()

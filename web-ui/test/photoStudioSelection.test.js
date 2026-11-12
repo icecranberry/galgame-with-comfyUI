@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as dimensions from '../src/utils/photoStudioDimensions.js'
+import { createPhotoStudioBurst } from '../src/composables/photoStudioBurst.js'
 import { STUDIO_OUTFIT_LABELS } from '../src/utils/studioWardrobe.js'
 import { usePhotoStudio as createStudio } from '../src/composables/usePhotoStudio.js'
 
@@ -30,7 +31,7 @@ test('image pasting shares pose upload, preserves text paste and only handles th
     describePhotoStudioPose: (image, signal) => { calls.push({ image, signal }); return new Promise(resolve => { finish = resolve }) },
     usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
   }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -91,7 +92,7 @@ test('supplementary descriptions expand without a request, revise the saved imag
     describePhotoStudioPose: async (image, signal, direction) => { calls.push({ image, signal, direction }); if (failure) throw new Error('识别失败'); return result },
     usePhotoStudio: () => ({ catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }), load: async () => {}, poll: async () => {}, create: async () => {} }),
   }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -144,7 +145,7 @@ test('uploaded pose prompts save immediately, restore across mounts and reach on
     catalog: Vue.ref([{ id: 'pose', posePrompt: 'standing', system: '单人' }]), characters: Vue.ref([{ id: 1, name: 'Alice' }]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   const mount = () => {
     let state
     const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
@@ -181,7 +182,7 @@ test('pose scrolling appends batches without losing selection, resets on filteri
     catalog: Vue.ref(poses), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -232,7 +233,7 @@ test('switching pose systems keeps system choices available and clears dependent
     catalog: Vue.ref(poses), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -266,7 +267,7 @@ test('both avatar and outfit entry points promote the selected partner to protag
     catalog: Vue.ref([]), characters: Vue.ref([first, partner]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -294,7 +295,7 @@ test('background selection persists and sends only the preset ID or the frozen c
     catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -336,7 +337,7 @@ test('AI polishing defaults off and remembers either explicit choice across page
     catalog: Vue.ref([]), characters: Vue.ref([]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   const mount = () => {
     let state
     const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
@@ -377,7 +378,7 @@ test('extra polish requirements persist and shutter collapses the editor without
     catalog: Vue.ref([{ id: 'pose', posePrompt: 'standing', system: '单人' }]), characters: Vue.ref([{ id: 1, name: 'Alice' }]), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: input => { submitted = input; return new Promise(resolve => { finish = resolve }) },
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -406,7 +407,7 @@ test('the first shutter after enabling polish submits a new job and asynchronous
     catalog: Vue.ref([{ id: 'pose', posePrompt: 'standing', system: '单人' }]), characters: Vue.ref([{ id: 1, name: 'Alice' }]), jobs, capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async input => { submissions.push(input); return { id: input.id } },
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -437,7 +438,7 @@ test('shooting slots migrate saved outfits and keep clothes and drafts across ac
     catalog: Vue.ref([{ id: 'pair', posePrompt: 'standing', system: '双人' }]), characters: Vue.ref(actors), jobs: Vue.ref([]), capability: Vue.ref({ available: true }),
     load: async () => {}, poll: async () => {}, create: async () => {},
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   const mount = () => {
     let state
     const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
@@ -504,6 +505,29 @@ test('shooting slots migrate saved outfits and keep clothes and drafts across ac
   second.state.characterSlot.value = 'first'
   second.state.selectOutfitCharacter(actors[0])
   assert.equal(second.state.shotInput().outfitScene, 'casual')
+  for (const slot of ['first', 'second']) {
+    second.state.characterSlot.value = slot
+    second.state.selectRandomCharacter()
+    assert.equal(second.state.randomSlotSelected.value, true)
+  }
+  await Vue.nextTick()
+  assert.equal(second.state.shootDisabled.value, false, 'both random slots can shoot a pair pose')
+  assert.equal(second.state.shootCharactersLabel.value, '随机主角 + 随机搭档')
+  assert.deepEqual([second.state.shotInput().characterId, second.state.shotInput().secondCharacterId], [null, null])
+  assert.deepEqual([second.state.shotInput().outfitScene, second.state.shotInput().secondOutfitScene], ['casual', 'home'])
+  assert.deepEqual(second.state.customOutfits.value, { first: main, second: partner })
+  assert.equal(second.state.clothingDrafts.value.first.brief, '还没翻译')
+  second.state.persistSelection()
+  const randomRestored = mount()
+  await Vue.nextTick(); await Promise.resolve(); await Vue.nextTick()
+  assert.equal(randomRestored.state.characterId.value, '', 'loading must preserve an explicitly random protagonist')
+  assert.equal(randomRestored.state.secondCharacterId.value, '')
+  assert.deepEqual(randomRestored.state.slotOutfits.value, { first: 'casual', second: 'home' })
+  assert.deepEqual(randomRestored.state.customOutfits.value, { first: main, second: partner })
+  assert.equal(randomRestored.state.clothingDrafts.value.first.brief, '还没翻译')
+  second.state.characterSlot.value = 'first'
+  second.state.selectOutfitCharacter(actors[0])
+  assert.equal(second.state.randomSlotSelected.value, false)
   second.state.applyClothing({ slot: 'first', outfit: null })
   assert.deepEqual(JSON.parse(stored.get('photo-studio-selection')).customOutfits, { second: partner })
   assert.equal(Object.hasOwn(JSON.parse(stored.get('photo-studio-selection')).clothingDrafts, 'first'), false)
@@ -525,7 +549,7 @@ test('polish-to-render SSE updates and late HTTP responses produce one completio
       createPhotoStudioJob: input => { submitted = input; posts++; return new Promise(resolve => { finishPost = resolve }) },
     },
   }) }
-  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || {}))
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
   let state
   const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
   const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
@@ -549,4 +573,277 @@ test('polish-to-render SSE updates and late HTTP responses produce one completio
   assert.equal(sounds, 1)
   assert.equal(posts, 1)
   assert.equal(state.currentPhoto.value.id, submitted.id)
+})
+
+async function mountBurstStudio(t, { failPost = false } = {}) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
+  const stored = new Map(), handlers = new Map(), posts = [], serverJobs = new Map()
+  let sounds = 0, sidebarOpens = 0
+  for (const key of ['sessionStorage', 'localStorage']) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key)
+    Object.defineProperty(globalThis, key, { configurable: true, value: { getItem: name => stored.get(name) || null, setItem: (name, value) => stored.set(name, value) } })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key] })
+  }
+  const sessionScope = Vue.effectScope(true)
+  t.after(() => sessionScope.stop())
+  const sharedStudio = sessionScope.run(() => createStudio({
+    subscribe: (name, fn) => { handlers.set(name, fn); return () => handlers.delete(name) },
+    apiClient: {
+      getPhotoStudioCatalog: async () => ({ poses: [{ id: 'pose', posePrompt: 'standing', system: '单人' }] }),
+      getPhotoStudioCharacters: async () => ({ characters: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] }),
+      getPhotoStudioCapability: async () => ({ available: true }), getPhotoStudioJobs: async () => ({ jobs: [...serverJobs.values()].reverse() }),
+      getPhotoStudioJob: async id => ({ job: serverJobs.get(id) }),
+      createPhotoStudioJob: input => new Promise((resolve, reject) => {
+        posts.push({ input, resolve: job => {
+          const row = { ...input, ...job }
+          if (!['done', 'failed'].includes(serverJobs.get(input.id)?.status)) serverJobs.set(input.id, row)
+          resolve({ job: row })
+        } })
+        if (failPost) reject(new Error('提交失败'))
+      }),
+    },
+  }))
+  const deps = { ...dimensions, STUDIO_OUTFIT_LABELS, prepareCameraShutterSound() {}, playCameraShutterSound() { sounds++ }, usePhotoStudio: options => { assert.equal(options.persistent, true); return sharedStudio } }
+  const component = new Function('Vue', ...bindings, code)(Vue, ...bindings.map(name => deps[name] || (name === 'createPhotoStudioBurst' ? (studio, options) => { const burst = createPhotoStudioBurst(studio, options); t.after(() => burst.dispose()); return burst } : {})))
+  const mount = () => {
+    let state
+    const renderer = Vue.createRenderer({ createComment: () => ({}), insert() {}, remove() {}, parentNode() {}, nextSibling() {} })
+    const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
+    app.provide('toggleMobileSidebar', () => { sidebarOpens++ })
+    app.mount({})
+    let mounted = true
+    const unmount = () => { if (mounted) { app.unmount(); mounted = false } }
+    t.after(unmount)
+    return { state, unmount }
+  }
+  const { state, unmount } = mount()
+  await state.load(); await Vue.nextTick()
+  state.poseId.value = 'pose'; state.characterId.value = ''
+  const emitJob = (index, status = 'done') => {
+    const job = { ...posts[index].input, status, stage: status, output_url: status === 'done' ? `/images/photo_studio/burst-${index}.png` : '', error: status === 'failed' ? '冲印失败' : '' }
+    serverJobs.set(job.id, job)
+    handlers.get('photo_studio_ready')({ job })
+    return job
+  }
+  const settle = async () => { await Promise.resolve(); await Vue.nextTick(); await Promise.resolve(); await Vue.nextTick() }
+  return { state, posts, emitJob, settle, stored, unmount, mount, sharedStudio, serverJobs, sounds: () => sounds, sidebarOpens: () => sidebarOpens }
+}
+
+test('burst repeats the ordinary shutter sequentially, builds only the current group and retains per-shot polish settings', async t => {
+  const { state, posts, emitJob, settle, stored, sounds, sidebarOpens } = await mountBurstStudio(t)
+  state.burstCount.value = 3
+  state.polishPrompt.value = false
+  const first = state.shoot()
+  posts[0].resolve({ status: 'running' }); await first; await settle()
+  await state.shoot()
+  t.mock.timers.tick(5000); await settle()
+  assert.equal(posts.length, 1, 'neither another click nor time passing may submit ahead of completion')
+  assert.equal(posts[0].input.characterId, null, 'random protagonist is resolved anew by the normal backend request')
+  emitJob(0); await settle()
+  state.polishPrompt.value = true
+  state.polishInstruction.value = '保留服装'
+  emitJob(0); await settle()
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 2, 'duplicate completion may advance the batch only once')
+  assert.equal(posts[1].input.polishPrompt, true)
+  assert.equal(posts[1].input.polishInstruction, '保留服装')
+  assert.equal(posts[0].input.polishPrompt, false)
+  assert.equal(state.groupPhotos.value.length, 1)
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1); await settle()
+  state.polishPrompt.value = false
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 3)
+  assert.equal(posts[2].input.polishPrompt, false)
+  posts[2].resolve({ status: 'running' }); await settle()
+  emitJob(2); await settle()
+  t.mock.timers.tick(5000); await settle()
+  assert.equal(posts.length, 3)
+  assert.equal(new Set(posts.map(post => post.input.id)).size, 3)
+  assert.equal(sounds(), 3)
+  assert.deepEqual(state.groupPhotos.value.map(photo => photo.id), posts.map(post => post.input.id))
+  assert.equal(state.currentPhoto.value.id, posts[2].input.id)
+  state.groupIndex.value = 0
+  assert.equal(state.currentPhoto.value.id, posts[0].input.id)
+  state.openPhoto(state.currentPhoto.value.output_url)
+  assert.equal(state.lightboxImages.value.length, 3)
+  assert.equal(state.lightboxIndex.value, 0)
+  assert.equal(JSON.parse(stored.get('photo-studio-selection')).burstCount, 3)
+  state.toggleMobileSidebar()
+  assert.equal(sidebarOpens(), 1)
+  state.burstCount.value = 1
+  const next = state.shoot()
+  posts[3].resolve({ status: 'running' }); await next; await settle()
+  emitJob(3); await settle()
+  assert.deepEqual(state.groupPhotos.value.map(photo => photo.id), [posts[3].input.id], 'a new click starts a new group')
+})
+
+test('burst waits for a late submission response after SSE completion and stops immediately on a failed print', async t => {
+  const { state, posts, emitJob, settle } = await mountBurstStudio(t)
+  state.burstCount.value = 10
+  const pending = state.shoot()
+  emitJob(0); await settle()
+  t.mock.timers.tick(5000); await settle()
+  assert.equal(posts.length, 1)
+  posts[0].resolve({ status: 'running', stage: 'polishing' }); await pending; await settle()
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 2)
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1, 'failed'); await settle()
+  t.mock.timers.tick(10000); await settle()
+  assert.equal(posts.length, 2)
+  assert.equal(state.burstRunning.value, false)
+  assert.equal(state.lastFailure.value, '冲印失败')
+  assert.equal(state.currentPhoto.value.id, posts[0].input.id)
+  assert.equal(state.groupPhotos.value.length, 1)
+})
+
+test('submission failure stops a burst without retries', async t => {
+  const { state, posts, settle } = await mountBurstStudio(t, { failPost: true })
+  state.burstCount.value = 5
+  await state.shoot(); await settle()
+  t.mock.timers.tick(10000); await settle()
+  assert.equal(posts.length, 1)
+  assert.equal(state.lastFailure.value, '提交失败')
+  assert.equal(state.burstRunning.value, false)
+})
+
+test('leaving during a pending print continues the batch and returning reuses the same stack without resubmitting', async t => {
+  const { state, posts, emitJob, settle, stored, unmount, mount } = await mountBurstStudio(t)
+  state.burstCount.value = 3
+  state.polishPrompt.value = true
+  state.polishInstruction.value = '保留本次服装与动作'
+  state.customOutfits.value.first = { tags: ['shirt'], brief: '', customPrompt: 'blue shirt' }
+  const pending = state.shoot()
+  unmount()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  emitJob(0); await settle()
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 2)
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1); await settle()
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 3)
+  for (const { input } of posts) {
+    assert.equal(input.polishPrompt, true)
+    assert.equal(input.polishInstruction, '保留本次服装与动作')
+    assert.equal(input.characterId, null)
+    assert.deepEqual(input.clothingTags, ['shirt'])
+    assert.equal(input.customClothingPrompt, 'blue shirt')
+  }
+  const returning = mount()
+  await returning.state.load(); await settle()
+  assert.equal(returning.state.shootDisabled.value, true)
+  assert.equal(returning.state.groupPhotos.value.length, 2)
+  await returning.state.shoot()
+  assert.equal(posts.length, 3, 're-entering or pressing the disabled shutter cannot duplicate a group')
+  posts[2].resolve({ status: 'running' }); await settle()
+  emitJob(2); await settle()
+  assert.equal(returning.state.groupPhotos.value.length, 3)
+  assert.equal(returning.state.currentPhoto.value.id, posts[2].input.id)
+  returning.state.groupIndex.value = 0
+  returning.unmount()
+  const finished = mount()
+  await finished.state.load(); await settle()
+  assert.equal(finished.state.groupIndex.value, 0, 'returning retains the photo being viewed')
+  assert.deepEqual(finished.state.groupPhotos.value.map(photo => photo.id), posts.map(post => post.input.id))
+  assert.deepEqual(JSON.parse(stored.get('photo-studio-group')), posts.map(post => post.input.id))
+  t.mock.timers.tick(30000); await settle()
+  assert.equal(posts.length, 3)
+})
+
+test('leaving between two shutters keeps the scheduled continuation alive', async t => {
+  const { state, posts, emitJob, settle, unmount } = await mountBurstStudio(t)
+  state.burstCount.value = 2
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  emitJob(0); await settle()
+  unmount()
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 2)
+  assert.equal(posts[1].input.polishPrompt, false, 'disabled polish stays disabled off-page')
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1); await settle()
+  assert.equal(state.groupPhotos.value.length, 2)
+})
+
+test('burst count is capped at ten and never creates an eleventh job', async t => {
+  const { state, posts, emitJob, settle } = await mountBurstStudio(t)
+  state.burstCount.value = 99
+  const first = state.shoot()
+  posts[0].resolve({ status: 'running' }); await first; await settle()
+  for (let index = 0; index < 10; index++) {
+    if (index) { posts[index].resolve({ status: 'running' }); await settle() }
+    emitJob(index); await settle()
+    t.mock.timers.tick(800); await settle()
+  }
+  t.mock.timers.tick(10000); await settle()
+  assert.equal(posts.length, 10)
+  assert.equal(state.groupPhotos.value.length, 10)
+  assert.equal(state.shootDisabled.value, false)
+})
+
+test('a new group failing on its first photo restores the previous complete stack', async t => {
+  const { state, posts, emitJob, settle } = await mountBurstStudio(t)
+  state.burstCount.value = 2
+  const first = state.shoot()
+  posts[0].resolve({ status: 'running' }); await first; await settle()
+  emitJob(0); await settle()
+  t.mock.timers.tick(800); await settle()
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1); await settle()
+  state.burstCount.value = 1
+  const next = state.shoot()
+  posts[2].resolve({ status: 'running' }); await next; await settle()
+  emitJob(2, 'failed'); await settle()
+  assert.deepEqual(state.groupPhotos.value.map(photo => photo.id), posts.slice(0, 2).map(post => post.input.id))
+  assert.equal(state.lastFailure.value, '冲印失败')
+})
+
+
+test('off-page recovery polls a missed completion and continues the ordinary shutter without SSE', async t => {
+  const { state, posts, settle, serverJobs, unmount, emitJob } = await mountBurstStudio(t)
+  state.burstCount.value = 2
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  unmount()
+  serverJobs.set(posts[0].input.id, { ...posts[0].input, status: 'done', output_url: '/images/photo_studio/recovered.png' })
+  t.mock.timers.tick(15000); await settle()
+  assert.equal(state.groupPhotos.value.length, 1, 'the detached subscription recovers a lost terminal update')
+  t.mock.timers.tick(800); await settle()
+  assert.equal(posts.length, 2)
+  posts[1].resolve({ status: 'running' }); await settle()
+  emitJob(1); await settle()
+  assert.equal(state.groupPhotos.value.length, 2)
+})
+
+test('a failure off-page stops remaining shutters and remains visible when returning', async t => {
+  const { state, posts, emitJob, settle, unmount, mount } = await mountBurstStudio(t)
+  state.burstCount.value = 3
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  unmount()
+  emitJob(0, 'failed'); await settle()
+  t.mock.timers.tick(30000); await settle()
+  assert.equal(posts.length, 1)
+  const returning = mount()
+  await returning.state.load(); await settle()
+  assert.equal(returning.state.lastFailure.value, '冲印失败')
+  assert.equal(returning.state.shootDisabled.value, false)
+})
+
+test('the current stack survives history eviction while away from the studio', async t => {
+  const { state, posts, emitJob, settle, unmount, mount, serverJobs, sharedStudio } = await mountBurstStudio(t)
+  const pending = state.shoot()
+  posts[0].resolve({ status: 'running' }); await pending; await settle()
+  emitJob(0); await settle()
+  unmount()
+  serverJobs.clear()
+  for (let i = 0; i < 30; i++) serverJobs.set(`other-${i}`, { id: `other-${i}`, status: 'done', output_url: `/images/photo_studio/other-${i}.png` })
+  sharedStudio.jobs.value = [...serverJobs.values()]
+  await settle()
+  const returning = mount()
+  await returning.state.load(); await settle()
+  assert.equal(returning.state.groupPhotos.value.length, 1)
+  assert.equal(returning.state.currentPhoto.value.id, posts[0].input.id)
 })

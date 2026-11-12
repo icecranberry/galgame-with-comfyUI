@@ -112,17 +112,29 @@ export function createPhotoStudioService({
     const pose = poseId === 'custom-upload'
       ? resolveCustomStudioPose(customPose)
       : (await catalog()).find(item => item.id === poseId);
-    const first = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(characterId));
-    if (!pose || !first) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
+    if (!pose) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
     if (!pose.posePrompt) throw Object.assign(new Error('该姿势的专属提示词尚未校准，请先选择已有完整描述的姿势'), { status: 400 });
 
     const duo = isPairPose(pose);
+    const randomFirst = characterId === null || characterId === '';
+    const randomSecond = secondCharacterId === null || secondCharacterId === '';
     let second = null;
+    if (duo && !randomSecond) {
+      second = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(secondCharacterId));
+      if (!second) throw Object.assign(new Error('请选择有效的第二位角色'), { status: 400 });
+    }
+    let first;
+    if (randomFirst) {
+      const candidates = db().prepare('SELECT * FROM characters WHERE COALESCE(archived, 0) = 0 AND id != ? ORDER BY pinned DESC, id DESC').all(second?.id ?? -1);
+      if (!candidates.length) throw Object.assign(new Error(duo ? '双人姿势至少需要两位可用角色' : '没有可选择的角色'), { status: 400 });
+      first = random(candidates);
+    } else {
+      first = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(characterId));
+      if (!first) throw Object.assign(new Error('请选择有效的姿势和主角'), { status: 400 });
+    }
     if (duo) {
-      if (secondCharacterId !== null && secondCharacterId !== '') {
-        if (Number(secondCharacterId) === Number(first.id)) throw Object.assign(new Error('双人姿势需要选择两位不同角色'), { status: 400 });
-        second = db().prepare('SELECT * FROM characters WHERE id = ? AND COALESCE(archived, 0) = 0').get(Number(secondCharacterId));
-        if (!second) throw Object.assign(new Error('请选择有效的第二位角色'), { status: 400 });
+      if (!randomSecond) {
+        if (second.id === first.id) throw Object.assign(new Error('双人姿势需要选择两位不同角色'), { status: 400 });
       } else {
         const candidates = db().prepare('SELECT * FROM characters WHERE COALESCE(archived, 0) = 0 AND id != ? ORDER BY pinned DESC, id DESC').all(first.id);
         if (!candidates.length) throw Object.assign(new Error('双人姿势至少需要两位可用角色'), { status: 400 });
@@ -139,7 +151,7 @@ export function createPhotoStudioService({
       return { tags: entries.map(entry => entry.tag), custom: custom.trim() };
     });
     const scenes = [outfitScene, secondOutfitScene];
-    const overrides = [appearanceOverride, secondCharacterId ? secondAppearanceOverride : ''];
+    const overrides = [randomFirst ? '' : appearanceOverride, randomSecond ? '' : secondAppearanceOverride];
     const characters = [first, ...(second ? [second] : [])].map((character, index) => {
       const scene = scenes[index];
       if (!outfitScenes.includes(scene)) throw Object.assign(new Error('请选择有效的服装：默认、私服、居家或睡衣'), { status: 400 });
@@ -148,7 +160,7 @@ export function createPhotoStudioService({
         selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, overrides[index].trim()) };
       } else if (scene !== 'work') {
         const outfit = db().prepare('SELECT description FROM character_outfits WHERE character_id = ? AND scene = ? ORDER BY id ASC LIMIT 1').get(character.id, scene);
-        if (!outfit?.description?.trim() && (index === 0 || secondCharacterId)) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
+        if (!outfit?.description?.trim() && !(index === 0 ? randomFirst : randomSecond)) throw Object.assign(new Error(`${character.display_name || character.name}尚未配置所选服装，请选择默认服装或先到人物详情卡配置`), { status: 400 });
         // Scene descriptions contain the complete appearance. Replace, rather than layer over, the default clothes.
         if (outfit?.description?.trim()) selected = { ...character, base_prompt: replaceAppearanceSection(character.base_prompt, outfit.description) };
       }

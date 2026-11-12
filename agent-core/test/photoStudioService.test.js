@@ -651,6 +651,54 @@ test('studio exposes only configured outfits and rejects missing or invalid outf
   } finally { f.db.close(); }
 });
 
+test('both casting slots support random selection, exclude archived actors and never repeat a partner', async () => {
+  const f = await fixture({ random: choices => choices[0] });
+  try {
+    f.db.exec("UPDATE characters SET archived = 1 WHERE id = 1; INSERT INTO characters (id, name, display_name, pinned) VALUES (3, 'third', 'C', 0)");
+    const cases = [
+      { characterId: null, poseId: 'pose', expected: [3, null] },
+      { characterId: '', secondCharacterId: 2, poseId: 'pair-pose', expected: [3, 2] },
+      { characterId: 2, secondCharacterId: null, poseId: 'pair-pose', expected: [2, 3] },
+      { characterId: null, secondCharacterId: null, poseId: 'pair-pose', expected: [3, 2] },
+    ];
+    for (const [index, { expected, ...input }] of cases.entries()) {
+      const id = `random-casting-${index}`;
+      const preview = await f.service.preview(input);
+      await f.service.submit({ id, ...input });
+      const job = await waitForJob(f.service, id);
+      assert.equal(job.status, 'done');
+      assert.deepEqual([job.character_id, job.character2_id], expected);
+      assert.equal(job.prompt, preview.prompt);
+    }
+    f.db.exec('UPDATE characters SET archived = 1 WHERE id = 3');
+    await assert.rejects(f.service.preview({ characterId: null, poseId: 'pair-pose' }), { status: 400 });
+    await assert.rejects(f.service.preview({ characterId: null, secondCharacterId: 2, poseId: 'pair-pose' }), { status: 400 });
+    f.db.exec('UPDATE characters SET archived = 1');
+    await assert.rejects(f.service.preview({ characterId: null, poseId: 'pose' }), { status: 400 });
+  } finally { f.db.close(); }
+});
+
+test('a random protagonist keeps slot clothing, uses available scenes and falls back without stale appearance overrides', async () => {
+  const f = await fixture({ persona: undefined, random: choices => choices[0] });
+  try {
+    f.db.prepare('UPDATE characters SET base_prompt = ? WHERE id = 1').run('## 你的外观\nwhite hair, blue eyes, white coat');
+    f.db.prepare('UPDATE characters SET base_prompt = ? WHERE id = 2').run('## 你的外观\nblack hair, purple eyes, blue coat');
+    f.db.exec("INSERT INTO character_outfits (character_id, scene, description) VALUES (1, 'home', 'white hair, blue eyes, home dress')");
+    const input = { characterId: null, secondCharacterId: null, poseId: 'pair-pose', outfitScene: 'home', secondOutfitScene: 'sleep', clothingTags: ['striped_shirt'], customClothingPrompt: 'blue coat', secondClothingTags: ['skirt'], appearanceOverride: 'stale protagonist appearance', secondAppearanceOverride: 'stale partner appearance' };
+    const available = await f.service.preview(input);
+    assert.match(available.prompt, /home dress/);
+    assert.match(available.prompt, /blue coat/);
+    assert.match(available.prompt, /striped_shirt/);
+    assert.match(available.prompt, /skirt/);
+    assert.doesNotMatch(available.prompt, /stale/);
+    const fallback = await f.service.preview({ ...input, outfitScene: 'sleep' });
+    assert.match(fallback.prompt, /white hair, blue eyes, white coat/);
+    assert.match(fallback.prompt, /striped_shirt/);
+    assert.match(fallback.prompt, /skirt/);
+    assert.equal(f.db.prepare('SELECT description FROM character_outfits WHERE character_id = 1').get().description, 'white hair, blue eyes, home dress');
+  } finally { f.db.close(); }
+});
+
 test('a random partner with a missing wardrobe scene falls back and Chinese names use English role labels', async () => {
   const f = await fixture({ persona: undefined, random: choices => choices[0] });
   try {

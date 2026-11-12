@@ -1,7 +1,7 @@
 <template>
   <div
     class="studio-button"
-    :class="[`studio-button--${variant}`, `studio-button--${size}`, { 'is-disabled': disabled || loading, 'is-block': block, 'is-exposing': exposing, 'is-active': active }]"
+    :class="[`studio-button--${variant}`, `studio-button--${size}`, { 'is-disabled': disabled || loading, 'is-block': block, 'is-exposing': exposing, 'is-active': active, 'is-joined': joined }]"
     role="button"
     :tabindex="disabled || loading ? -1 : 0"
     :aria-disabled="disabled || loading || undefined"
@@ -27,6 +27,7 @@ const props = defineProps({
   loading: Boolean,
   exposing: Boolean,
   active: Boolean,
+  joined: Boolean,
 })
 const emit = defineEmits(['click'])
 function activate(event) {
@@ -53,6 +54,10 @@ function activate(event) {
 .studio-button--lg { min-height:52px; padding:12px 24px; font-size:17px; letter-spacing:-.02em; }
 .studio-button--primary { border:0; border-radius:0; background:var(--studio-shutter); color:var(--studio-film); box-shadow:none; min-height:56px; padding-left:28px; }
 .studio-button--primary::before { content:''; position:absolute; top:8px; bottom:8px; left:10px; border-left:2px dashed var(--studio-film); opacity:.45; }
+.studio-button--primary.is-joined { padding-right:12px; white-space:nowrap; }
+.studio-button--primary.is-joined .studio-button__content { gap:6px; }
+@media(max-width:600px) { .studio-button--primary.is-joined { padding-left:22px; padding-right:8px; font-size:14px; } }
+.studio-button--shutter-toggle { width:44px; min-height:56px; padding:8px; border:0; border-left:1px dashed color-mix(in srgb,var(--studio-film) 40%,transparent); border-radius:0; background:var(--studio-shutter); color:var(--studio-film); box-shadow:none; }
 .studio-button--nav { color:var(--studio-ink); border:1px solid var(--studio-ink); background:var(--studio-paper); box-shadow:none; }
 
 .studio-button--chip { padding:6px 12px; box-shadow:none; border-color:var(--studio-line); background:transparent; font-weight:750; }
