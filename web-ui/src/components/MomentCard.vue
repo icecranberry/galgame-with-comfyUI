@@ -616,7 +616,8 @@ function onDeckTouchEnd(e) {
   const dy = t.clientY - start.y
   // 横向滑动且够长才翻，纵向留给页面滚动
   if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return
-  flipDeck(dx < 0 ? 1 : -1)
+  // 右划甩出顶张，左划从底下抽回，与现有卡片动画方向一致
+  flipDeck(dx > 0 ? 1 : -1)
 }
 
 // 首次加载评论（store.loadComments 直接设置 post._comments，computed 自动同步）
