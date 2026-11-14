@@ -92,12 +92,59 @@ test('missing tags are appended after one non-thinking request without a correct
     assert.equal(options.forceDisableThinking, true);
   }
   assert.equal(calls[0].messages.filter(message => message.role === 'user').length, 1);
-  let attempts = 0;
-  await assert.rejects(polishStudioPrompt(input, { chat: async () => { attempts++; return ''; } }), /有效的英文提示词/);
-  assert.equal(attempts, 1, 'invalid output must still fail instead of becoming a tag-only prompt');
-  attempts = 0;
-  await assert.rejects(polishStudioPrompt(input, { chat: async () => { attempts++; throw new Error('offline'); } }), /offline/);
-  assert.equal(attempts, 1, 'network failures are not tag corrections');
+});
+
+test('studio polishing retries transport errors and invalid output with the same request and stops on success', async () => {
+  const input = { prompt: 'A studio portrait.', requiredTags: ['upper-body view'], context: { systemRules: 'rules', model: 'test' } };
+  const output = 'Alice wears a blue dress in soft light.';
+  for (const failures of [1, 2]) {
+    const calls = [], delays = [];
+    const result = await polishStudioPrompt(input, {
+      chat: async (messages, options) => {
+        calls.push({ messages: structuredClone(messages), options: structuredClone(options) });
+        if (calls.length === 1) throw new Error('offline');
+        if (calls.length <= failures) return 'Pose: Alice wears a blue dress in soft light.';
+        return output;
+      },
+      sleep: async ms => { delays.push(ms); },
+    });
+    assert.equal(result, `${output}, upper-body view`);
+    assert.equal(calls.length, failures + 1);
+    assert.deepEqual(delays, [1000, 2000].slice(0, failures));
+    for (const call of calls) {
+      assert.deepEqual(call, calls[0], 'retries must preserve prompt bytes and options');
+      assert.equal(call.options.retries, 0);
+      assert.equal(call.options.maxRetries, 0);
+      assert.equal(call.options.freeEggFailover, false);
+    }
+  }
+});
+
+test('studio polishing gives up after two retries and preserves the final error', async () => {
+  const input = { prompt: 'A studio portrait.', requiredTags: ['upper-body view'], context: { systemRules: 'rules', model: 'test' } };
+  for (const failure of ['empty', 'network']) {
+    let attempts = 0;
+    const delays = [];
+    const finalError = new Error('offline on final attempt');
+    await assert.rejects(polishStudioPrompt(input, {
+      chat: async () => { attempts++; if (failure === 'network') throw attempts === 3 ? finalError : new Error('temporary offline'); return ''; },
+      sleep: async ms => { delays.push(ms); },
+    }), failure === 'network' ? error => error === finalError : /有效的英文提示词/);
+    assert.equal(attempts, 3);
+    assert.deepEqual(delays, [1000, 2000]);
+  }
+});
+
+test('cancelled studio polishing is not retried', async () => {
+  for (const name of ['AbortError', 'APIUserAbortError']) {
+    const cancelled = Object.assign(new Error('cancelled'), { name });
+    let attempts = 0;
+    await assert.rejects(polishStudioPrompt({ prompt: 'A studio portrait.', context: { systemRules: 'rules', model: 'test' } }, {
+      chat: async () => { attempts++; throw cancelled; },
+      sleep: async () => { assert.fail('cancelled requests must not wait for a retry'); },
+    }), error => error === cancelled);
+    assert.equal(attempts, 1);
+  }
 });
 
 

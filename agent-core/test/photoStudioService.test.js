@@ -326,12 +326,50 @@ test('AI polishing preserves the original, sends only the polished prompt, and k
   } finally { f.db.close(); }
 });
 
-test('a failed polish does not render or silently fall back', async () => {
-  const f = await fixture({ polish: async () => { throw new Error('润色模型离线'); } });
+test('polishing retries within the same job and renders only once after recovery', async () => {
+  let attempts = 0;
+  const delays = [], events = [];
+  const refined = 'Alice sits on the floor, leaning back in warm studio light.';
+  const f = await fixture({
+    publish: (event, data) => events.push({ event, ...data }),
+    polish: input => polishStudioPrompt(input, {
+      chat: async () => {
+        attempts++;
+        if (attempts === 1) throw new Error('temporary network failure');
+        if (attempts === 2) return '';
+        return refined;
+      },
+      sleep: async ms => {
+        delays.push(ms);
+        assert.equal(f.service.job(request.id).stage, 'polishing');
+        assert.equal(f.calls.length, 0);
+      },
+    }),
+  });
+  try {
+    await f.service.submit({ ...request, polishPrompt: true });
+    const job = await waitForJob(f.service, request.id);
+    assert.equal(job.status, 'done');
+    assert.equal(attempts, 3);
+    assert.deepEqual(delays, [1000, 2000]);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0].prompt, refined);
+    assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM photo_studio_jobs').get().count, 1);
+    assert.ok(events.every(({ job }) => job.status !== 'failed'));
+  } finally { f.db.close(); }
+});
+
+test('a polish that exhausts two retries does not render or silently fall back', async () => {
+  let attempts = 0;
+  const f = await fixture({ polish: input => polishStudioPrompt(input, {
+    chat: async () => { attempts++; throw new Error('润色模型离线'); },
+    sleep: async () => {},
+  }) });
   try {
     await f.service.submit({ ...request, polishPrompt: true });
     const job = await waitForJob(f.service, request.id);
     assert.equal(job.status, 'failed');
+    assert.equal(attempts, 3);
     assert.match(job.error, /润色模型离线/);
     assert.equal(f.calls.length, 0);
     assert.equal(f.db.prepare('SELECT status FROM image_tasks').get().status, 'failed');

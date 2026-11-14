@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { setTimeout as delay } from 'node:timers/promises';
 import { getSystemRules } from '../db/worldRepository.js';
 import { IMAGE_PROMPT_RULE } from '../builtinRules.js';
 import { chatSync } from './lorebook/runtime.js';
@@ -69,15 +70,28 @@ export function getStudioPolishContext() {
   };
 }
 
-export async function polishStudioPrompt({ prompt, personas, requiredTags = [], polishInstruction = '', context = getStudioPolishContext() }, { chat = chatSync } = {}) {
+export async function polishStudioPrompt({ prompt, personas, requiredTags = [], polishInstruction = '', context = getStudioPolishContext() }, { chat = chatSync, sleep = delay } = {}) {
   const request = buildStudioPolishRequest({ prompt, personas, requiredTags, polishInstruction, ...context });
   const options = {
     model: context.model, temperature: 0.35,
     thinking: { type: 'disabled' }, forceDisableThinking: true,
     label: '照相馆提示词润色', lorebook: request.lorebook,
+    // This layer retries both transport errors and invalid output. Disable client
+    // retries and provider failover so one polish makes at most three requests.
+    retries: 0, maxRetries: 0, freeEggFailover: false,
   };
-  const raw = await chat(request.messages, options);
-  return parseStudioPolish(raw, requiredTags);
+  const maxRetries = 2;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const raw = await chat(request.messages, options);
+      return parseStudioPolish(raw, requiredTags);
+    } catch (error) {
+      if (attempt >= maxRetries || error?.name === 'AbortError' || error?.name === 'APIUserAbortError') throw error;
+      const retryDelay = 1000 * 2 ** attempt;
+      console.warn(`[photoStudio] AI 润色失败，${retryDelay}ms 后重试（${attempt + 1}/${maxRetries}）：${error.message}`);
+      await sleep(retryDelay);
+    }
+  }
 }
 
 const CLOTHING_TRANSLATION_RULES = `你是服装词语翻译员。把用户的自定义服装描述准确翻译为简短英文服装词组，可用逗号分隔。

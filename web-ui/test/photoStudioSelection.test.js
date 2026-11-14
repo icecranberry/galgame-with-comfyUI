@@ -550,7 +550,8 @@ test('shooting slots migrate saved outfits and keep clothes and drafts across ac
   assert.equal(second.state.characterOutfit({ id: 1, outfitScenes: ['work'] }), 'work')
 })
 
-test('polish-to-render SSE updates and late HTTP responses produce one completion effect per shot', async t => {
+test('polish-to-render SSE updates and late HTTP responses never replay the shutter effect', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => null, setItem() {} } })
   t.after(() => { if (previous) Object.defineProperty(globalThis, 'sessionStorage', previous); else delete globalThis.sessionStorage })
@@ -573,6 +574,8 @@ test('polish-to-render SSE updates and late HTTP responses produce one completio
   await state.load(); await Vue.nextTick()
   state.characterId.value = 1; state.poseId.value = 'pose'; state.polishPrompt.value = true
   const shot = state.shoot()
+  t.mock.timers.tick(1000)
+  assert.equal(sounds, 0)
   for (const stage of ['polishing', 'polishing_retry', 'queued', 'generating', 'saving']) {
     handlers.get('photo_studio_progress')({ job: { id: submitted.id, status: 'running', stage } })
     await Vue.nextTick()
@@ -581,6 +584,11 @@ test('polish-to-render SSE updates and late HTTP responses produce one completio
   }
   const done = { id: submitted.id, status: 'done', stage: 'done', output_url: '/images/photo_studio/result.png' }
   handlers.get('photo_studio_ready')({ job: done }); await Vue.nextTick()
+  assert.equal(sounds, 0)
+  state.revealCurtainEnded({ animationName: 'studio-result-close-scope' })
+  await state.revealPhoto(done.id)
+  state.revealCurtainEnded({ animationName: 'studio-result-open-scope' })
+  await Vue.nextTick()
   assert.equal(sounds, 1)
   finishPost({ job: { ...done, status: 'running', stage: 'polishing' } }); await shot; await Vue.nextTick()
   handlers.get('photo_studio_ready')({ job: done }); await Vue.nextTick()
@@ -627,8 +635,14 @@ async function mountBurstStudio(t, { failPost = false } = {}) {
     const app = renderer.createApp({ setup() { state = component.setup({}, { expose() {} }); return () => null } })
     app.provide('toggleMobileSidebar', () => { sidebarOpens++ })
     app.mount({})
+    // Supply the CSS and image events absent from this setup-only renderer.
+    const stopPresentation = Vue.watch(state.revealPhase, phase => {
+      if (phase === 'closing') state.revealCurtainEnded({ animationName: 'studio-result-close-scope' })
+      else if (phase === 'closed') void state.revealPhoto(state.revealPhotoId.value)
+      else if (phase === 'opening') state.revealCurtainEnded({ animationName: 'studio-result-open-scope' })
+    })
     let mounted = true
-    const unmount = () => { if (mounted) { app.unmount(); mounted = false } }
+    const unmount = () => { if (mounted) { stopPresentation(); app.unmount(); mounted = false } }
     t.after(unmount)
     return { state, unmount }
   }

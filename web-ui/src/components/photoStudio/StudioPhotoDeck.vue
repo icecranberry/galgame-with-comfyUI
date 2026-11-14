@@ -2,7 +2,6 @@
   <div class="studio-photo-deck" role="group" :tabindex="photos.length > 1 ? 0 : -1" :aria-label="`本组照片，第 ${index + 1} 张，共 ${photos.length} 张`" @keydown.left.prevent="flip(-1)" @keydown.right.prevent="flip(1)" @wheel="wheel" @touchstart.passive="touchStart" @touchend="touchEnd" @touchcancel="touch = null">
     <figure v-for="(photo, i) in photos" :key="photo.id" class="photo-print" :class="{ 'is-top': i === index, 'is-peeking': i === index && flash }" :style="cardStyle(photo, i)" :aria-hidden="i !== index || undefined" :inert="i !== index || undefined">
       <img :src="photo.output_url" :alt="`${characters(photo)} · ${photo.pose_name || ''}`" role="button" :tabindex="i === index ? 0 : -1" @click="preview(photo)" @keydown.enter.prevent="preview(photo)" @keydown.space.prevent="preview(photo)" @load="$emit('load', photo.id)" @error="$emit('error', photo.id)" />
-      <span v-if="i === index && flash" class="photo-flash" aria-hidden="true"></span>
       <figcaption><strong>{{ characters(photo) }}</strong><span>{{ photo.pose_name }}</span></figcaption>
     </figure>
     <div v-if="photos.length > 1" class="photo-counter" aria-live="polite">{{ index + 1 }} / {{ photos.length }}</div>
@@ -65,9 +64,7 @@ function preview(photo) { if (Date.now() >= suppressClickUntil) emit('preview', 
 .photo-print figcaption span { font-size:11px; }
 .photo-counter { position:absolute; z-index:12; right:0; bottom:0; padding:3px 8px; color:var(--studio-film); background:var(--studio-shutter); font:700 12px/1.5 monospace; pointer-events:none; }
 .photo-print.is-peeking img { animation:photo-peek .42s ease both; }
-.photo-flash { position:absolute; inset:0; pointer-events:none; background:var(--dialogue-photo-paper); animation:photo-flash .42s ease-out both; }
 @keyframes photo-peek { from { opacity:.2; filter:brightness(1.4); } to { opacity:1; filter:none; } }
-@keyframes photo-flash { 0%,100% { opacity:0; } 7% { opacity:.96; } 38% { opacity:0; } }
 @media(max-width:520px) { .photo-print figcaption span { display:none; } }
-@media(prefers-reduced-motion:reduce) { .photo-print { transition:none; }.photo-print.is-peeking img,.photo-flash { animation:none; } }
+@media(prefers-reduced-motion:reduce) { .photo-print { transition:none; }.photo-print.is-peeking img { animation:none; } }
 </style>

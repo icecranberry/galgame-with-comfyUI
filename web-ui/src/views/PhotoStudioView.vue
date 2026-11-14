@@ -15,7 +15,7 @@
     <div v-if="showHistory" key="history" class="studio-history"><div class="history-heading"><h2>拍摄记录</h2><span>{{ jobs.length }} / 30</span></div><div v-if="jobs.length" class="history-grid"><article v-for="job in jobs" :key="job.id" class="history-item"><img v-if="job.output_url" :src="job.output_url" :alt="`${jobCharacters(job)} · ${job.pose_name}`" @click="openPhoto(job.output_url)" /><div v-else class="history-pending">{{ job.status === 'running' ? '冲印中…' : '拍摄失败' }}</div><div class="history-caption"><strong>{{ jobCharacters(job) }}</strong><span>{{ job.pose_name }}<template v-if="job.width && job.height"> · {{ job.width }} × {{ job.height }}</template></span><small v-if="job.error">{{ job.error }}</small></div></article></div><div v-else class="studio-empty">第一张照片还在等你拍摄。</div></div>
     <section v-else key="viewfinder" class="studio-body">
       <aside ref="posePanel" class="studio-pose" tabindex="-1">
-        <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">01</span>姿势底稿</h2></div><span v-if="recognizedPoses.length" class="rail-count">{{ recognizedPoses.length }} 张已识别</span></div><div class="pose-card" @click="poseOpen = true" @keydown.enter.prevent="poseOpen = true" @keydown.space.prevent="poseOpen = true" role="button" tabindex="0" aria-label="打开全屏姿势图库"><img v-if="selectedPose" :src="selectedPose.id === 'custom-upload' ? customPose.imageUrl : poseAsset(selectedPose.thumbnail)" :alt="selectedPose.name" /><div v-else class="pose-placeholder">姿势图库加载中…</div></div><div class="pose-caption"><strong>{{ selectedPose?.name || '请选择一个已识别的姿势' }}</strong><span v-if="selectedPose">{{ selectedPose.category }} · {{ selectedPose.system }}</span></div><div class="studio-pose-tools">
+        <div class="rail-title"><div><h2><span class="panel-number" aria-hidden="true">01</span>姿势底稿</h2></div></div><div class="pose-card" @click="poseOpen = true" @keydown.enter.prevent="poseOpen = true" @keydown.space.prevent="poseOpen = true" role="button" tabindex="0" aria-label="打开全屏姿势图库"><img v-if="selectedPose" :src="selectedPose.id === 'custom-upload' ? customPose.imageUrl : poseAsset(selectedPose.thumbnail)" :alt="selectedPose.name" /><div v-else class="pose-placeholder">姿势图库加载中…</div></div><div class="pose-caption"><strong>{{ selectedPose?.name || '请选择一个已识别的姿势' }}</strong><span v-if="selectedPose">{{ selectedPose.category }} · {{ selectedPose.system }}</span></div><div class="studio-pose-tools">
           <studio-button size="compact" :disabled="recognizedPoses.length < 2" @click="randomizePose">随机姿势</studio-button>
           <studio-button size="compact" :title="background ? `${background.label}：${background.description}` : '默认白色背景，点击更换'" @click="backgroundOpen = true"><span class="studio-background-label">{{ background ? background.label : '白色背景 ↗' }}</span></studio-button>
         </div>
@@ -35,7 +35,7 @@
   </svg>
 </div>
 <span class="film-margin-note" aria-hidden="true"><span>SIDE A</span><span>FILM CLUB</span></span><Transition name="studio-exposure" mode="out-in">
-<div v-if="(activeJob || shooting) && !groupPhotos.length" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><StudioPhotoDeck v-else-if="currentPhoto" key="photos" :photos="displayPhotos" :index="groupPhotos.length ? groupIndex : 0" :flash="photoFlash" @update:index="groupIndex = $event" @preview="openPhoto" @load="revealPhoto" @error="pendingPhotoId = ''" /><div v-else key="empty" class="empty-negative">
+<div v-if="((activeJob || shooting) && !groupPhotos.length) || (revealPhase && !presentedPhotos.length)" key="developing" class="developing-state" role="status"><div class="spinner"></div><h3>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}</h3><p>{{ activeJob ? `正在为 ${jobCharacters(activeJob)} 冲印 ${activeJob.pose_name}` : shootCharactersLabel }}</p><div class="develop-track" role="progressbar" :aria-label="activeJob ? stageLabel(activeJob.stage) : '正在架好相机'" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div><StudioPhotoDeck v-else-if="presentedPhotos.length" key="photos" :photos="presentedPhotos" :index="presentedIndex" :flash="photoReveal" @update:index="!revealPhase && (groupIndex = $event)" @preview="openPhoto" @load="revealPhoto" @error="photoRevealFailed" /><div v-else key="empty" class="empty-negative">
 <svg class="negative-mark" viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
   <g transform="rotate(9 48 48)" opacity=".35"><path d="M25 14h51v67H25z" /><path d="M30 20h41v44H30z" /></g>
   <g transform="rotate(-9 44 48)">
@@ -52,10 +52,11 @@
 </div>
 </Transition>
 <div v-if="groupPhotos.length && (activeJob || shooting)" class="deck-developing" role="status"><StudioDevelopingIcon /><span>{{ activeJob ? stageLabel(activeJob.stage) : '正在架好相机' }}<template v-if="burstTotal > 1"> · {{ Math.min(groupPhotos.length + 1, burstTotal) }} / {{ burstTotal }}</template></span><div class="develop-track" role="progressbar" :aria-valuenow="studioProgress" aria-valuemin="0" aria-valuemax="100" aria-label="当前照片冲印进度"><span :style="{ transform: `scaleX(${studioProgress / 100})` }"></span></div></div>
-<div v-if="shutterPulse" class="shutter-sweep" aria-hidden="true"><i></i><i></i><span>EXPOSED</span></div>
+<div v-if="revealPhase" class="shutter-sweep photo-reveal-curtain" :class="`is-${revealPhase}`" aria-hidden="true"><i @animationend="revealCurtainEnded"></i><i></i><span>EXPOSED</span></div>
+<div v-if="photoFlash" class="studio-shutter-flash" aria-hidden="true"></div>
 </div><div class="portrait-actions">
 <div class="portrait-selection"><span class="next-shot">下一张</span><strong>{{ shootCharactersLabel }}</strong><span>{{ selectedPose?.name || '尚未选姿势' }} · {{ width }} × {{ height }}</span></div><div class="mobile-studio-links"><studio-button variant="link" size="sm" @click="jumpToPanel(characterPanel)">选角色 ↗</studio-button><studio-button variant="link" size="sm" @click="jumpToPanel(posePanel)" title="调整姿势与画幅">姿势 ↗</studio-button></div><div class="studio-shutter">
-  <studio-button variant="primary" size="lg" joined :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting && !canStopBurst" :title="canStopBurst ? '停止后续连拍，当前照片继续冲印' : undefined" @click="shoot">
+  <studio-button variant="primary" size="lg" joined :burst-count="!canStopBurst && !activeJob && !shooting ? burstCount : 1" :exposing="shutterPulse" :disabled="shootDisabled" :loading="shooting && !canStopBurst" :title="canStopBurst ? '停止后续连拍，当前照片继续冲印' : undefined" @click="shoot">
     <Transition name="shutter-action" mode="out-in">
       <span :key="canStopBurst ? 'stop' : activeJob ? 'printing' : shooting ? 'preparing' : 'ready'" class="shutter-action-content">
         <svg v-if="canStopBurst" class="nav-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
@@ -204,7 +205,7 @@ function jumpToPanel(panel) {
 const studio = usePhotoStudio({ persistent: true })
 const { catalog, characters, jobs, capability, load } = studio
 const burst = createPhotoStudioBurst(studio, { prepareSound: prepareCameraShutterSound, playSound: playCameraShutterSound })
-const { groupIndex, groupPhotos, burstRunning, burstTotal, shooting, exposure, lastFailure, selectedJobId } = burst
+const { groupIndex, groupPhotos, burstRunning, burstTotal, shooting, exposure, presenting, lastFailure, selectedJobId } = burst
 const saved = (() => { try { return JSON.parse(sessionStorage.getItem('photo-studio-selection') || '{}') } catch { return {} } })()
 const burstCount = ref(Math.max(1, Math.min(10, Math.round(Number(saved.burstCount) || 1))))
 const customPoseKey = 'photo-studio-custom-pose'
@@ -325,12 +326,13 @@ const outfitLabels = STUDIO_OUTFIT_LABELS
 const initialFrame = initialPhotoStudioFrame(saved)
 const width = ref(initialFrame.width), height = ref(initialFrame.height), characterSlot = ref('first')
 const aspectRatio = ref(initialFrame.aspectRatio)
-const poseOpen = ref(false), photoOpen = ref(false), showHistory = ref(false), photoFlash = ref(false)
+const poseOpen = ref(false), photoOpen = ref(false), showHistory = ref(false), photoFlash = ref(false), photoReveal = ref(false)
 const poseScrollRoot = ref(null)
 let pagingPoses = false
 const query = ref(''), systemFilter = ref(''), categoryFilter = ref(''), angleFilter = ref('')
 const lightboxImages = ref([]), lightboxIndex = ref(0), visiblePoseCount = ref(240)
-let flashTimer, studioReady = false, pendingPhotoId = '', disposed = false
+let flashTimer, shutterFlashTimer, revealSound, resolvePresentation, disposed = false
+const revealPhase = ref(''), revealPhotoId = ref(''), presentedPhotos = ref([]), presentedIndex = ref(0)
 const characterSlotOptions = [{ label: '主角', value: 'first' }, { label: '搭档', value: 'second' }]
 const aspectRatioOptions = PHOTO_ASPECT_RATIOS.map(value => {
   const [w, h] = value.split(':').map(Number)
@@ -404,7 +406,7 @@ const visiblePoses = computed(() => filteredPoses.value.slice(0, visiblePoseCoun
 const canUseCharacters = computed(() => characters.value.length >= (duoPose.value ? 2 : 1) && (!characterId.value || !!selectedCharacter.value) && (!duoPose.value || !secondCharacterId.value || !!selectedSecondCharacter.value))
 const shotUnavailable = computed(() => shooting.value || !!activeJob.value || !capability.value?.available || !selectedPose.value?.posePrompt?.trim() || !canUseCharacters.value)
 const canStopBurst = computed(() => burstRunning.value && burstTotal.value > 1)
-const shootDisabled = computed(() => !canStopBurst.value && (burstRunning.value || shotUnavailable.value))
+const shootDisabled = computed(() => !canStopBurst.value && (burstRunning.value || presenting.value || shotUnavailable.value))
 const dimensionControls = computed(() => photoDimensionControls(aspectRatio.value))
 function unique(field) { return [...new Set(catalog.value.filter(item => field === 'system' || !systemFilter.value || item.system === systemFilter.value).map(item => item[field]))].sort((a, b) => a.localeCompare(b, 'zh')) }
 async function loadMorePoses() {
@@ -436,23 +438,78 @@ watch(systemFilter, () => {
   if (!angleOptions.value.some(option => option.value === angleFilter.value)) angleFilter.value = ''
 })
 watch([query, systemFilter, categoryFilter, angleFilter], () => { visiblePoseCount.value = 240; if (poseScrollRoot.value) poseScrollRoot.value.scrollTop = 0 })
-watch(() => currentPhoto.value?.id, (id, previousId) => {
-  if (!studioReady || !id || id === previousId || showHistory.value) return
-  pendingPhotoId = id
-  photoFlash.value = false
-})
-function revealPhoto(id) {
-  // Wait for the actual image to decode; API completion alone can precede a slow image download.
-  if (id !== pendingPhotoId || activeJob.value || showHistory.value) return
-  pendingPhotoId = ''
-  photoFlash.value = true
-  clearTimeout(flashTimer)
-  flashTimer = setTimeout(() => { photoFlash.value = false }, 420)
+watch([displayPhotos, groupIndex], ([photos, index]) => {
+  if (revealPhase.value) return
+  // A completed job may reach Vue before the controller's presentation callback.
+  // Keep it out of the visible deck until the curtain has fully closed.
+  presentedPhotos.value = photos.filter(photo => !burst.isPendingPresentation(photo.id))
+  presentedIndex.value = Math.max(0, presentedPhotos.value.findIndex(photo => photo.id === photos[index]?.id))
+}, { immediate: true, flush: 'sync' })
+function reducedMotion() { return globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true }
+function presentPhoto(job, sound) {
+  if (disposed || showHistory.value) { sound(); return }
+  return new Promise(resolve => {
+    resolvePresentation = resolve
+    revealSound = sound
+    revealPhotoId.value = job.id
+    revealPhase.value = 'closing'
+    shutterPulse.value = false
+    photoFlash.value = false
+    photoReveal.value = false
+    clearTimeout(shutterTimer)
+    if (reducedMotion()) closeRevealCurtain()
+  })
 }
-watch(showHistory, () => {
-  pendingPhotoId = ''
-  photoFlash.value = false
+function closeRevealCurtain() {
+  if (revealPhase.value !== 'closing') return
+  revealPhase.value = 'closed'
+  presentedPhotos.value = [...displayPhotos.value]
+  presentedIndex.value = Math.max(0, presentedPhotos.value.findIndex(photo => photo.id === revealPhotoId.value))
+}
+async function revealPhoto(id) {
+  if (id !== revealPhotoId.value || revealPhase.value !== 'closed') return
+  await nextTick()
+  if (disposed || id !== revealPhotoId.value || revealPhase.value !== 'closed') return
+  // The new print is loaded behind a fully closed curtain. Sound and flash
+  // belong to the first frame of opening, never the task-start curtain.
+  revealPhase.value = 'opening'
+  photoReveal.value = true
+  photoFlash.value = !reducedMotion()
+  revealSound?.()
+  revealSound = null
   clearTimeout(flashTimer)
+  clearTimeout(shutterFlashTimer)
+  flashTimer = setTimeout(() => { photoReveal.value = false }, 420)
+  shutterFlashTimer = setTimeout(() => { photoFlash.value = false }, 160)
+  if (reducedMotion()) finishPresentation()
+}
+function finishPresentation() {
+  revealPhase.value = ''
+  revealPhotoId.value = ''
+  presentedPhotos.value = [...displayPhotos.value]
+  presentedIndex.value = groupPhotos.value.length ? groupIndex.value : 0
+  revealSound = null
+  const resolve = resolvePresentation
+  resolvePresentation = null
+  resolve?.()
+}
+function revealCurtainEnded(event) {
+  if (event.animationName.startsWith('studio-result-close')) closeRevealCurtain()
+  else if (event.animationName.startsWith('studio-result-open')) finishPresentation()
+}
+function photoRevealFailed(id) {
+  if (id !== revealPhotoId.value) return
+  revealSound = null
+  revealPhase.value = 'opening'
+  if (reducedMotion()) finishPresentation()
+}
+const detachPresentation = burst.attachPresentation(presentPhoto)
+watch(showHistory, () => {
+  finishPresentation()
+  photoFlash.value = false
+  photoReveal.value = false
+  clearTimeout(flashTimer)
+  clearTimeout(shutterFlashTimer)
 })
 function poseAsset(relative) { return `/api/photo-studio/assets/${relative}` }
 function randomizePose() {
@@ -559,8 +616,8 @@ async function refreshSavedBackground() {
 onMounted(refreshSavedBackground)
 onMounted(() => { globalThis.document?.addEventListener('paste', pastePose) })
 onBeforeUnmount(() => { globalThis.document?.removeEventListener('paste', pastePose) })
-onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (saved.characterId !== '' && saved.characterId !== null && !sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; studioReady = true; persistSelection() })
-onBeforeUnmount(() => { burst.detachInput(shotInput); disposed = true; poseRequest?.abort(); stopFakeProgress(); clearTimeout(flashTimer); clearTimeout(shutterTimer); promptRevision++ })
+onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (saved.characterId !== '' && saved.characterId !== null && !sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; persistSelection() })
+onBeforeUnmount(() => { burst.detachInput(shotInput); detachPresentation(); finishPresentation(); disposed = true; poseRequest?.abort(); stopFakeProgress(); clearTimeout(flashTimer); clearTimeout(shutterFlashTimer); clearTimeout(shutterTimer); promptRevision++ })
 </script>
 
 <style scoped>
@@ -579,8 +636,17 @@ onBeforeUnmount(() => { burst.detachInput(shotInput); disposed = true; poseReque
 .studio-exposure-enter-active{transition:opacity .3s,transform .3s}.studio-exposure-enter-from{opacity:0;transform:translateY(14px)}.studio-exposure-leave-active{transition:opacity .3s,transform .3s,filter .3s}.studio-exposure-leave-to{opacity:0;transform:translateY(-20px) rotate(-4deg) scale(.94);filter:blur(2px)}
 .studio-photo-deck.studio-exposure-leave-active{transform-origin:50% 0;animation:studio-print-away .45s cubic-bezier(.55,0,.8,.4) both;transition:none}
 @keyframes studio-print-away{0%{opacity:1;transform:none}25%{opacity:1;transform:translateY(8px) rotate(-2deg)}100%{opacity:0;transform:translateY(-65%) rotate(9deg) scale(.82);filter:blur(3px)}}
-.shutter-sweep{position:absolute;inset:0;z-index:3;overflow:hidden;pointer-events:none}.shutter-sweep i{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 6px,var(--studio-film-edge) 7px 8px),var(--studio-film);border-bottom:3px solid var(--studio-shutter);animation:studio-curtain .7s cubic-bezier(.7,0,.2,1) both;clip-path:polygon(0 0,100% 0,100% 52%,0 48%)}.shutter-sweep i:nth-child(2){rotate:180deg}.shutter-sweep span{position:absolute;left:50%;top:50%;padding:8px 18px;border:3px solid var(--studio-shutter);color:var(--studio-shutter);font:italic 900 clamp(28px,4vw,56px)/1 Impact,sans-serif;letter-spacing:.06em;animation:studio-exposed .7s ease both}
-@keyframes studio-curtain{0%{transform:translateY(-100%)}35%,55%{transform:translateY(0)}100%{transform:translateY(-100%)}}@keyframes studio-exposed{0%,25%{opacity:0;transform:translate(-50%,-50%) rotate(-10deg) scale(1.4)}40%,55%{opacity:1;transform:translate(-50%,-50%) rotate(-10deg) scale(1)}85%,100%{opacity:0;transform:translate(-50%,-65%) rotate(-10deg) scale(.98)}}
+.shutter-sweep{position:absolute;inset:0;z-index:3;overflow:hidden;pointer-events:none}.shutter-sweep i{position:absolute;inset:0;background:repeating-linear-gradient(0deg,transparent 0 6px,var(--studio-film-edge) 7px 8px),var(--studio-film);border-bottom:3px solid var(--studio-shutter);clip-path:polygon(0 0,100% 0,100% 52%,0 48%)}.shutter-sweep i:nth-child(2){rotate:180deg}.shutter-sweep span{position:absolute;left:50%;top:50%;padding:8px 18px;border:3px solid var(--studio-shutter);color:var(--studio-shutter);font:italic 900 clamp(28px,4vw,56px)/1 Impact,sans-serif;letter-spacing:.06em;}
+
+/* The result stays covered until both curtain closure and image load finish. */
+.photo-reveal-curtain { z-index:14; }
+.photo-reveal-curtain.is-closing i { animation:studio-result-close .245s cubic-bezier(.7,0,.2,1) both; }
+.photo-reveal-curtain.is-closed i { animation:none; transform:translateY(0); }
+.photo-reveal-curtain.is-opening i { animation:studio-result-open .315s cubic-bezier(.7,0,.2,1) both; }
+.photo-reveal-curtain span { animation:none; opacity:1; transform:translate(-50%,-50%) rotate(-10deg); }
+.photo-reveal-curtain.is-opening span { opacity:0; transition:opacity .16s; }
+@keyframes studio-result-close { from { transform:translateY(-100%); } to { transform:translateY(0); } }
+@keyframes studio-result-open { from { transform:translateY(0); } to { transform:translateY(-100%); } }
 
 /* Film darkroom: sprockets, contact prints and engraved camera controls. */
 .studio-page { position:absolute; inset:0; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; padding:22px 30px 10px; color:var(--studio-ink); background:url('../assets/studio-photocopy.svg'),repeating-linear-gradient(174deg,transparent 0 75px,color-mix(in srgb,var(--studio-ink) 4%,transparent) 76px,transparent 78px 150px),var(--studio-bg); animation:studio-enter .3s ease both; }
@@ -670,6 +736,9 @@ onBeforeUnmount(() => { burst.detachInput(shotInput); disposed = true; poseReque
 @keyframes studio-enter{from{opacity:0}to{opacity:1}}@keyframes studio-spin{to{transform:rotate(360deg)}}
 .studio-shutter { display:flex; min-width:0; }
 .studio-shutter>.studio-button { flex:1; min-width:0; }
+.studio-shutter-flash { position:absolute; inset:0; z-index:15; pointer-events:none; background:var(--dialogue-photo-paper); animation:studio-shutter-flash .16s ease-out both; }
+@keyframes studio-shutter-flash { from { opacity:.96; } to { opacity:0; } }
+@media(prefers-reduced-motion:reduce) { .studio-shutter-flash { display:none; } }
 .shutter-action-content { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .shutter-action-enter-active,.shutter-action-leave-active { transition:opacity .3s; }
 .shutter-action-enter-from,.shutter-action-leave-to { opacity:0; }
