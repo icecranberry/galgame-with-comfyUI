@@ -1,0 +1,58 @@
+/* 关系图专属的星图 / 档案 UI。只作用于独立窗口，不覆盖通用组件。 */
+.relationship-veil {
+  --rel-paper: color-mix(in srgb, var(--bg-secondary) 94%, var(--fun-gold));
+  --rel-ink: var(--text-primary);
+  --rel-muted: var(--text-secondary);
+  --rel-line: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  --rel-gold: color-mix(in srgb, var(--fun-gold) 55%, var(--text-primary));
+  --rel-canvas-bg: var(--rel-paper);
+  position: fixed; inset: 0; display: grid; place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  background: rgb(12 16 23 / 64%); color: var(--rel-ink);
+}
+.relationship-window { width: min(480px, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; position: relative; background: var(--rel-paper); border: 1px solid var(--rel-gold); border-radius: 4px 28px 4px 28px; box-shadow: 0 24px 90px rgb(0 0 0 / 30%), inset 0 0 0 5px var(--rel-paper), inset 0 0 0 6px var(--rel-line); outline: none; overflow: hidden; }
+.relationship-window:focus-visible { outline: none; }
+.relationship-window.is-wide { width: min(740px, 100%); }
+.relationship-window.is-atlas { width: min(1440px, 100%); height: min(960px, 100%); }
+.relationship-window-heading { display: flex; align-items: center; gap: 14px; flex-shrink: 0; padding: 18px 24px; border-bottom: 1px solid var(--rel-line); }
+.relationship-seal { color: var(--rel-gold); font-size: 34px; line-height: 1; }
+.relationship-window-heading h2 { margin: 0; min-width: 0; font-family: 'Noto Serif SC', 'Songti SC', SimSun, serif; font-size: 24px; font-weight: 600; letter-spacing: .12em; overflow-wrap: anywhere; }
+.relationship-window-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-left: auto; font-size: 12px; color: var(--rel-muted); }
+.relationship-window-extra strong { font-size: 16px; font-variant-numeric: tabular-nums; color: var(--rel-ink); margin-left: 4px; }
+.relationship-window .relationship-close { margin-left: auto; flex-shrink: 0; }
+.relationship-window-body { padding: 24px; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--rel-gold) transparent; }
+.is-atlas > .relationship-window-body { flex: 1; padding: 0; gap: 0; overflow: hidden; }
+.relationship-window-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--rel-line); }
+.relationship-window .rel-button { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 16px; border: 1px solid var(--rel-line); border-radius: 2px 12px 2px 12px; background: transparent; color: var(--rel-ink); font: inherit; font-size: 13px; line-height: 1.4; text-align: center; cursor: pointer; box-shadow: none; transition: color .3s, background .3s, border-color .3s; }
+.relationship-window .rel-button:hover:not(:disabled) { background: color-mix(in srgb, var(--rel-gold) 12%, transparent); border-color: var(--rel-gold); transform: none; }
+.relationship-window .rel-button:active { transform: none; }
+.relationship-window .rel-button:disabled { opacity: .45; cursor: not-allowed; }
+.relationship-window .rel-button.rel-primary { background: var(--rel-ink); color: var(--rel-paper); border-color: var(--rel-ink); }
+.relationship-window .rel-button.rel-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--rel-ink) 85%, var(--rel-gold)); }
+.relationship-window .rel-button.rel-quiet { border-color: transparent; }
+.relationship-window .rel-button.rel-danger { color: var(--danger); }
+.relationship-window .rel-button.rel-icon { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 22px; }
+.relationship-window .rel-input { appearance: none; box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--rel-line); border-radius: 3px; padding: 11px 12px; background: color-mix(in srgb, var(--bg-secondary) 75%, transparent); color: var(--rel-ink); font: inherit; font-size: 14px; line-height: 1.6; box-shadow: none; transition: border-color .3s, background .3s; }
+.relationship-window textarea.rel-input { resize: vertical; min-height: 112px; }
+.relationship-window select.rel-input { appearance: auto; }
+.relationship-window .rel-input:focus { outline: 2px solid var(--rel-gold); outline-offset: 2px; border-color: var(--rel-gold); box-shadow: none; }
+.relationship-window .rel-input::placeholder { color: var(--rel-muted); opacity: .8; }
+.relationship-window .rel-button:focus-visible { outline: 2px solid var(--rel-gold); outline-offset: 3px; }
+.relationship-window-enter-active, .relationship-window-leave-active { transition: opacity .3s; }
+.relationship-window-enter-active .relationship-window, .relationship-window-leave-active .relationship-window { transition: transform .3s; }
+.relationship-window-enter-from, .relationship-window-leave-to { opacity: 0; }
+.relationship-window-enter-from .relationship-window, .relationship-window-leave-to .relationship-window { transform: translateY(14px) scale(.985); }
+@media (max-width: 767px) {
+  .relationship-veil { padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); }
+  .relationship-window { border-radius: 3px 20px 3px 20px; }
+  .relationship-window-heading { padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+  .relationship-window-heading h2 { font-size: 19px; letter-spacing: .05em; flex: 1; }
+  .relationship-seal { font-size: 28px; }
+  .relationship-window-extra { order: 4; width: 100%; padding-left: 36px; gap: 12px; }
+  .relationship-window-extra .rel-button { margin-left: auto; }
+  .relationship-window-body { padding: 18px; }
+  .relationship-window-footer { padding: 12px 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .relationship-veil *, .relationship-window-enter-active, .relationship-window-leave-active { transition: none !important; }
+}

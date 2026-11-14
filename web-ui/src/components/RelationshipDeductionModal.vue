@@ -1,26 +1,20 @@
 <template>
-  <linshe-modal :visible="visible" :title="`推演${mode === 'user' ? '用户' : '角色'}关系`" wide :close-on-backdrop="false" :z-index="11010" @close="$emit('close')" panel-class="deduction-modal">
-    <template #title>
-      <div class="modal-heading-content">
-            <h3>推演{{ mode === 'user' ? '用户' : '角色' }}关系 — {{ mode === 'user' ? userName : character?.display_name }}</h3>
-
-          </div>
-    </template>
-
-    <div class="modal-content-section">
+  <RelationshipWindow :visible="visible" :title="`推演关系 · ${mode === 'user' ? userName : character?.display_name}`" wide :close-on-backdrop="false" :z-index="11010" @close="$emit('close')" :close-disabled="saving">
+    <p v-if="error" class="ded-error" role="alert">{{ error }}</p>
+    <div class="ded-content-section">
             <Transition name="ded-collapse" mode="out-in">
               <div v-if="loading" key="loading" class="ded-loading">
                 <span class="ded-spinner"></span>
                 <p>正在自动推演角色关系图，等待构史完毕确认...</p>
               </div>
               <div v-else key="results">
-              <div class="ded-glass-panel">
+              <div class="ded-results">
               <div class="ded-columns">
                 <div class="ded-col ded-col-left">
                   <div class="ded-col-header">
                     <div>
                       <span>推演结果</span>
-                      <p class="ded-col-subtitle">{{ mode === 'user' ? userName : character?.display_name }} → 小明，代表小明是{{ mode === 'user' ? userName : character?.display_name }}的老板。</p>
+                      <p class="ded-col-subtitle">{{ mode === 'user' ? userName : character?.display_name }} → 小明，关系写“老板”时，代表小明是{{ mode === 'user' ? userName : character?.display_name }}的老板。</p>
                     </div>
                     <span class="ded-col-count">{{ suggestions.length }}条</span>
                   </div>
@@ -39,7 +33,7 @@
                         <div class="ded-item-text">{{ item.relationship_text }}</div>
                       </div>
                       <div class="ded-item-edit" v-else>
-                        <linshe-input v-model="editText" class="fi" size="sm" @keyup.enter="saveEdit(idx, 'left')" @blur="saveEdit(idx, 'left')" />
+                        <input v-model="editText" class="rel-input" aria-label="关系描述" @keyup.enter="saveEdit(idx, 'left')" @blur="saveEdit(idx, 'left')" />
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
                         <div class="ded-act-row">
@@ -55,12 +49,12 @@
                   </div>
                 </div>
                 <div class="ded-col-ctrl">
-                  <linshe-button variant="icon" size="sm" class="ded-ctrl-right" title="全部导入右侧" :disabled="suggestions.length === 0" @click="importAll">
+                  <button type="button" class="rel-button rel-icon ded-ctrl-right" title="全部导入右侧" :disabled="suggestions.length === 0" @click="importAll">
                     <svg class="ded-ctrl-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M415.744 937.179429a43.885714 43.885714 0 0 1 0-62.098286l363.154286-363.154286-363.154286-363.154286a43.885714 43.885714 0 0 1 62.025143-62.025142l394.24 394.166857a43.885714 43.885714 0 0 1 0 62.025143l-394.24 394.24a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path><path d="M261.558857 762.441143a43.885714 43.885714 0 0 1 0-62.098286L449.974857 512 261.558857 323.584a43.885714 43.885714 0 0 1 62.025143-62.098286l219.428571 219.428572a43.885714 43.885714 0 0 1 0 62.098285l-219.428571 219.428572a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path></svg>
-                  </linshe-button>
-                  <linshe-button variant="icon" size="sm" class="ded-ctrl-left" title="全部推回左侧" :disabled="confirmed.length === 0" @click="pushAllBack">
+                  </button>
+                  <button type="button" class="rel-button rel-icon ded-ctrl-left" title="全部推回左侧" :disabled="confirmed.length === 0" @click="pushAllBack">
                     <svg class="ded-ctrl-icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path d="M415.744 937.179429a43.885714 43.885714 0 0 1 0-62.098286l363.154286-363.154286-363.154286-363.154286a43.885714 43.885714 0 0 1 62.025143-62.025142l394.24 394.166857a43.885714 43.885714 0 0 1 0 62.025143l-394.24 394.24a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path><path d="M261.558857 762.441143a43.885714 43.885714 0 0 1 0-62.098286L449.974857 512 261.558857 323.584a43.885714 43.885714 0 0 1 62.025143-62.098286l219.428571 219.428572a43.885714 43.885714 0 0 1 0 62.098285l-219.428571 219.428572a43.885714 43.885714 0 0 1-62.025143 0z" fill="currentColor"></path></svg>
-                  </linshe-button>
+                  </button>
                 </div>
                 <div class="ded-col ded-col-right">
                   <div class="ded-col-header">
@@ -82,7 +76,7 @@
                         <div class="ded-item-text">{{ item.relationship_text }}</div>
                       </div>
                       <div class="ded-item-edit" v-else>
-                        <linshe-input v-model="editText" class="fi" size="sm" @keyup.enter="saveEdit(idx, 'right')" @blur="saveEdit(idx, 'right')" />
+                        <input v-model="editText" class="rel-input" aria-label="关系描述" @keyup.enter="saveEdit(idx, 'right')" @blur="saveEdit(idx, 'right')" />
                       </div>
                       <div class="ded-item-actions" v-if="!saving">
                         <div class="ded-act remove" role="button" tabindex="0" title="移回左侧" @click="removeFromConfirmed(idx)" @keydown.enter.prevent="removeFromConfirmed(idx)" @keydown.space.prevent="removeFromConfirmed(idx)">&larr;</div>
@@ -97,31 +91,28 @@
               </div>
               <div class="ded-footer">
                 <div class="ded-footer-row">
-                  <linshe-button variant="secondary" class="ded-btn" :disabled="loading || saving" @click="boostDeduce">加大药量</linshe-button>
-                  <linshe-button variant="secondary" class="ded-btn" :disabled="loading || saving" @click="normalDeduce">常规推理</linshe-button>
+                  <button type="button" class="rel-button ded-btn" :disabled="loading || saving" @click="boostDeduce">加大药量</button>
+                  <button type="button" class="rel-button ded-btn" :disabled="loading || saving" @click="normalDeduce">常规推理</button>
                 </div>
                 <div class="ded-footer-row">
-                  <linshe-button variant="primary" class="ded-btn" :loading="saving" :disabled="loading || saving || confirmed.length === 0" @click="confirmAll">
+                  <button type="button" class="rel-button rel-primary ded-btn" :disabled="loading || saving || confirmed.length === 0" @click="confirmAll">
                     {{ saving ? '保存中...' : '确定关系' }}
-                  </linshe-button>
+                  </button>
                 </div>
               </div>
               </div>
               </div>
             </Transition>
           </div>
-
-  </linshe-modal>
+  </RelationshipWindow>
 </template>
 
 <script setup>
-import LinsheModal from './ui/LinsheModal.vue'
+import RelationshipWindow from './RelationshipWindow.vue'
 
 import { ref, watch, nextTick } from 'vue'
 import * as api from '../api/index.js'
 import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
-import LinsheButton from './ui/LinsheButton.vue'
-import LinsheInput from './ui/LinsheInput.vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -132,6 +123,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved'])
 
+const error = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const suggestions = ref([])
@@ -145,6 +137,7 @@ const editText = ref('')
 async function deduce(boost) {
   if (props.mode === 'character' && !props.character) return
   loading.value = true
+  error.value = ''
   suggestions.value = []
   try {
     const excludeNames = getExcludedNames()
@@ -159,7 +152,7 @@ async function deduce(boost) {
     if (boost) isBoosted.value = true
   } catch (e) {
     suggestions.value = []
-    console.error('[deduce]', e)
+    error.value = `推演失败：${e.message}`
   } finally {
     loading.value = false
   }
@@ -239,7 +232,7 @@ function startEdit(idx, side, text) {
   editingSide.value = side
   editText.value = text
   nextTick(() => {
-    document.querySelector('.ded-item-edit input.fi')?.focus()
+    document.querySelector('.ded-item-edit input')?.focus()
   })
 }
 
@@ -254,6 +247,7 @@ function saveEdit(idx, side) {
 async function confirmAll() {
   if (confirmed.value.length === 0) return
   saving.value = true
+  error.value = ''
   try {
     if (props.mode === 'user') {
       for (const item of confirmed.value) {
@@ -287,7 +281,7 @@ async function confirmAll() {
     emit('saved')
     emit('close')
   } catch (e) {
-    console.error('[confirmAll]', e)
+    error.value = `保存失败：${e.message}`
   } finally {
     saving.value = false
   }
@@ -309,25 +303,14 @@ watch(() => props.visible, (val) => {
 </script>
 
 <style scoped>
-/* ═══ 弹窗骨架已迁移至全局 .modal-*（styles/components.css）═══ */
-.ded-modal { width: min(780px, 96vw); }
-
-.ded-glass-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border);
-  border-radius: 14px;
-  padding: 16px;
-}
-/* .modal-header / .modal-body 使用全局类（styles/components.css） */
-
 /* ── 加载态 ── */
 .ded-loading {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 60px 20px; gap: 16px;
 }
 .ded-spinner {
-  width: 36px; height: 36px; border: 3px solid var(--glass-border);
-  border-top-color: var(--accent, var(--accent)); border-radius: 50%;
+  width: 36px; height: 36px; border: 3px solid var(--rel-line);
+  border-top-color: var(--rel-gold); border-radius: 50%;
   animation: ded-spin 0.7s linear infinite;
 }
 @keyframes ded-spin { to { transform: rotate(360deg); } }
@@ -381,11 +364,11 @@ watch(() => props.visible, (val) => {
 /* ── 关系条目 ── */
 .ded-item {
   display: flex; align-items: center; gap: 6px;
-  background: var(--bg-secondary); border: 1px solid var(--glass-border);
-  border-radius: 10px; padding: 8px 8px 8px 10px;
-  transition: border-color 0.15s;
+  background: var(--bg-secondary); border: 1px solid var(--rel-line);
+  border-radius: 2px 10px 2px 10px; padding: 8px 8px 8px 10px;
+  transition: border-color 0.3s;
 }
-.ded-item:hover { border-color: var(--accent, var(--accent)); }
+.ded-item:hover { border-color: var(--rel-gold); }
 .ded-item.confirmed { border-color: rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.04); }
 
 .ded-item-body { flex: 1; min-width: 0; }
@@ -395,12 +378,12 @@ watch(() => props.visible, (val) => {
   margin-bottom: 2px;
 }
 .ded-arrow { color: var(--text-secondary, var(--text-secondary)); font-size: 12px; }
-.ded-item-text { font-size: 12px; color: var(--text-secondary, var(--text-secondary)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ded-item-text { font-size: 12px; color: var(--text-secondary, var(--text-secondary)); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
 
 .ded-item-edit {
   flex: 1; display: flex; gap: 6px; align-items: center;
 }
-.ded-item-edit .fi { height: 28px; font-size: 12px; padding: 0 8px; flex: 1; }
+
 
 /* ── 操作按钮 ── */
 .ded-item-actions {
@@ -410,13 +393,13 @@ watch(() => props.visible, (val) => {
   display: flex; gap: 3px;
 }
 .ded-act {
-  width: 24px; height: 24px; border: none; border-radius: 6px;
+  width: 44px; height: 44px; border: none; border-radius: 6px;
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   font-size: 14px; line-height: 1; padding: 0;
-  transition: all 0.15s;
+  transition: all 0.3s;
   user-select: none;
 }
-.ded-act.push { width: auto; background: rgba(var(--accent-rgb), 0.1); color: var(--accent, var(--accent)); font-size: 16px; }
+.ded-act.push { width: auto; background: rgba(var(--accent-rgb), 0.1); color: var(--rel-gold); font-size: 16px; }
 .ded-act.push:hover { background: var(--accent); color: var(--on-accent); }
 .ded-act.remove { background: color-mix(in srgb, var(--danger) 8%, transparent); color: var(--danger); }
 .ded-act.remove:hover { background: var(--danger); color: var(--on-accent); }
@@ -428,7 +411,7 @@ watch(() => props.visible, (val) => {
 /* ── 底部按钮区（两行）── */
 .ded-footer {
   flex-shrink: 0; padding-top: 14px; margin-top: 10px;
-  border-top: 1px solid var(--glass-border);
+  border-top: 1px solid var(--rel-line);
   display: flex; flex-direction: column; gap: 8px;
 }
 .ded-footer-row {
@@ -439,7 +422,7 @@ watch(() => props.visible, (val) => {
 /* 弹窗动画已迁移至全局 animations.css */
 
 .ded-collapse-enter-active, .ded-collapse-leave-active {
-  transition: opacity 0.25s ease, transform 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .ded-collapse-enter-from {
   opacity: 0; transform: translateY(-6px);
@@ -449,9 +432,6 @@ watch(() => props.visible, (val) => {
 }
 
 @media (max-width: 767px) {
-  .ded-modal { width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
-  .modal-header { padding: 10px 16px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
-  .modal-header h3 { font-size: 15px; }
   .ded-columns { flex-direction: column; }
   .ded-col { min-height: 200px; }
   .ded-list { height: 200px; max-height: 200px; }
@@ -459,5 +439,6 @@ watch(() => props.visible, (val) => {
   .ded-ctrl-right .ded-ctrl-icon { transform: rotate(90deg); }
   .ded-ctrl-left .ded-ctrl-icon { transform: rotate(270deg); }
 }
-:global(.linshe-modal.deduction-modal) { width: min(780px, 96vw); }
+
+.ded-error { margin: 0; color: var(--danger); font-size: 14px; line-height: 1.6; }
 </style>

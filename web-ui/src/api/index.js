@@ -439,6 +439,8 @@ export async function getWorkflows() {
 }
 
 // ── Character Relationships ──
+export const getRelationshipGraph = () => request('/relationships/graph')
+
 export async function getRelationships(characterId) {
   return request(`/relationships?character_id=${characterId}`)
 }
