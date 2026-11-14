@@ -3,10 +3,17 @@ export const characterKey = id => `character:${id}`
 /** 拖入另一头像的圆形热区才建立关系，避开姓名和矩形容器的误命中。 */
 export function findRelationshipDropTarget(dragged, nodes) {
   if (!dragged) return null
-  return nodes.filter(node => node.key !== dragged.key)
-    .map(node => ({ node, distance: Math.hypot(node.x - dragged.x, node.y - dragged.y) }))
-    .filter(({ node, distance }) => distance <= (node.radius || 32) + (dragged.radius || 32) * 0.45)
-    .sort((a, b) => a.distance - b.distance || a.node.key.localeCompare(b.node.key))[0]?.node || null
+  let closest = null, nearestSquared = Infinity
+  for (const node of nodes) {
+    if (node.key === dragged.key) continue
+    const distanceSquared = (node.x - dragged.x) ** 2 + (node.y - dragged.y) ** 2
+    const reach = (node.radius || 32) + (dragged.radius || 32) * 0.45
+    if (distanceSquared > reach ** 2) continue
+    if (distanceSquared < nearestSquared || (distanceSquared === nearestSquared && node.key.localeCompare(closest.key) < 0)) {
+      closest = node; nearestSquared = distanceSquared
+    }
+  }
+  return closest
 }
 
 export function incidentRelationships(edges, key) {

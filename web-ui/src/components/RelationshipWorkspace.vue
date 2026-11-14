@@ -1,29 +1,27 @@
 <template>
   <RelationshipWindow
-    :visible="visible" :title="title" full :z-index="11000" :suspended="pairOpen || chooserOpen || !!confirmation"
+    :visible="visible" :title="title" full :z-index="11000" :suspended="pairOpen || !!confirmation"
     @close="$emit('close')" @after-leave="resetWorkspace"
   >
     <template #header-extra>
       <span class="relationship-stat">角色 <strong>{{ graph.nodes.length }}</strong></span>
       <span class="relationship-stat">关系 <strong>{{ scoped.edges.length }}</strong></span>
-      <button type="button" class="rel-button" v-if="mode === 'user'" @click="$emit('auto-deduce')">推演关系</button>
+      <button type="button" class="rel-button rel-deduce" v-if="mode === 'user'" @click="$emit('auto-deduce')"><span aria-hidden="true">✦</span>推演关系</button>
     </template>
-    <div class="relationship-toolbar">
-      <input v-model.trim="search" placeholder="搜索角色" aria-label="搜索角色" class="rel-input relationship-search" type="search" />
-      <button type="button" class="rel-button" :disabled="!loaded || !graph.nodes.length" @click="openChooser">添加关系</button>
-      <button type="button" class="rel-button" v-if="focusKey !== centerKey" @click="focusKey = centerKey">返回全图</button>
-    </div>
     <div v-if="error" class="relationship-status is-error" role="alert">
       <span>{{ error }}</span><button type="button" class="rel-button" @click="loadGraph">重试</button>
     </div>
     <div v-if="!loaded" class="relationship-status" role="status">{{ loading ? '正在展开关系图…' : '暂未加载关系图' }}</div>
     <div v-else class="relationship-content">
-      <aside class="relationship-roster">
-        <div class="relationship-roster-heading">
+      <aside class="relationship-roster" :class="{ 'is-focused': focusKey !== centerKey, 'is-revealed': rosterEmphasis }" @animationend.self="rosterEmphasis = false">
+        <div ref="rosterHeading" class="relationship-roster-heading" tabindex="-1" role="heading" aria-level="3">
+          <div v-if="focusKey !== centerKey" class="relationship-roster-avatar relationship-focus-avatar"><span>{{ nameOf(focusKey).slice(0, 1) }}</span><img v-if="byKey.get(focusKey)?.avatar_path && !failedAvatars.has(byKey.get(focusKey).avatar_path)" :src="byKey.get(focusKey).avatar_path" alt="" @error="failedAvatars.add(byKey.get(focusKey).avatar_path)" /></div>
           <strong>{{ focusKey !== centerKey ? `${nameOf(focusKey)}的关系` : mode === 'user' ? '关系名册' : '相关角色' }}</strong>
-          <span>{{ roster.length }}</span>
+          <span class="relationship-roster-count">{{ roster.length }}</span>
+          <button v-if="focusKey !== centerKey" type="button" class="rel-button rel-icon relationship-roster-back" aria-label="返回全部关系" title="返回全部关系" @click="setRosterFocus(centerKey)">↶</button>
         </div>
-        <div class="relationship-roster-list">
+        <Transition name="relationship-roster-view" mode="out-in">
+        <div :key="focusKey" ref="rosterList" class="relationship-roster-list">
           <div
             v-for="node in roster" :key="node.key" class="relationship-roster-row" role="button" tabindex="0"
             :class="{ 'is-active': pairOpen && pairKeys.includes(node.key) }"
@@ -34,26 +32,22 @@
             <div class="relationship-roster-copy"><span>{{ node.display_name }}</span><small v-if="relationSummary(node.key)">{{ relationSummary(node.key) }}</small></div>
             <span class="relationship-row-arrow" aria-hidden="true">›</span>
           </div>
-          <p v-if="!roster.length" class="relationship-empty">{{ search ? (searchKeys.length ? '尚无相关关系，点击图中头像创建' : '没有找到这个角色') : '还没有相关关系' }}</p>
+          <p v-if="!roster.length" class="relationship-empty">还没有相关关系</p>
         </div>
+        </Transition>
       </aside>
       <RelationshipCanvas
+        ref="relationshipCanvas"
         :nodes="canvasNodes" :edges="scoped.edges" :groups="graph.groups" :center-key="centerKey"
-        :focus-key="highlightKey" :preview-key="previewKey" :searching="!!search" :search-keys="searchKeys" @connect="openPair" @node-click="onNodeClick" @edge-click="edge => openPair(edge.source, edge.target)"
+        :focus-key="focusKey === 'user' ? '' : focusKey" :preview-key="previewKey" @connect="openPair" @node-click="onNodeClick" @edge-click="edge => openPair(edge.source, edge.target)"
       />
     </div>
     <div class="relationship-hint"><span class="relationship-desktop-hint">悬停读关系 · 点击头像编辑 · 拖动头像重合建立关系</span><span class="relationship-touch-hint">点击头像读写关系 · 拖动头像重合建立关系</span><span class="relationship-legend">实线 角色之间 <i /> 虚线 与我相关</span></div>
   </RelationshipWindow>
 
-  <RelationshipWindow :visible="chooserOpen" title="添加关系" :z-index="11010" @close="chooserOpen = false">
-    <label v-if="mode === 'user'" class="relationship-field">从谁的视角<select class="rel-input" v-model="chosenSource" aria-label="关系发起人"><option v-for="option in sourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-    <label class="relationship-field">关系对象<select class="rel-input" v-model="chosenTarget" aria-label="关系对象"><option disabled value="">选择一个角色</option><option v-for="option in targetOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
-    <template #footer><button type="button" class="rel-button rel-primary" :disabled="!chosenTarget || chosenSource === chosenTarget" @click="choosePair">建立连结</button></template>
-  </RelationshipWindow>
-
   <RelationshipWindow
     :visible="pairOpen" :title="`${nameOf(pairKeys[0])} 与 ${nameOf(pairKeys[1])}`" :z-index="11020"
-    :suspended="!!confirmation" :close-disabled="saving" :before-close="confirmPairClose" wide @close="pairOpen = false"
+    :suspended="!!confirmation" :close-disabled="saving" :before-close="confirmPairClose" wide @close="pairOpen = false" @after-leave="revealRoster"
   >
     <div class="relationship-pair-people">
       <div v-for="key in pairKeys" :key="key" class="relationship-pair-person">
@@ -73,7 +67,7 @@
     </div>
     <p v-if="pairError" class="relationship-pair-error" role="alert">{{ pairError }}</p>
     <template #footer>
-      <button type="button" class="rel-button" v-if="mode === 'user' && pairKeys.some(key => key !== 'user')" :disabled="saving" @click="focusPerson">查看{{ nameOf(pairKeys.find(key => key !== 'user')) }}的关系</button>
+      <button type="button" class="rel-button" v-if="mode === 'user' && pairKeys.some(key => key !== 'user')" :disabled="saving" @click="focusPerson">在名册中查看{{ nameOf(pairKeys.find(key => key !== 'user')) }}的关系</button>
       <button type="button" class="rel-button rel-primary" :disabled="saving || !hasChanges || hasBlankChange" @click="savePair">{{ saving ? '保存中…' : pairSaved && !hasChanges ? '已保存' : '保存关系' }}</button>
     </template>
   </RelationshipWindow>
@@ -87,7 +81,7 @@
 </template>
 
 <script setup>
-import { computed, inject, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import * as api from '../api/index.js'
 import { userAvatar } from '../userConfig.js'
 import { emitRelationshipChanged } from '../utils/characterReactionProducers.js'
@@ -120,17 +114,32 @@ const canvasNodes = computed(() => {
   const center = byKey.value.get(centerKey.value) || { ...props.centerCharacter, key: centerKey.value }
   return [...nodes, center, ...(centerKey.value !== 'user' ? [me.value] : [])]
 })
-const focusKey = ref('user'), search = ref(''), loaded = ref(false), loading = ref(false), error = ref('')
+const focusKey = ref('user'), loaded = ref(false), loading = ref(false), error = ref('')
 const previewKey = ref('')
-const highlightKey = computed(() => previewKey.value || (focusKey.value !== 'user' ? focusKey.value : ''))
+const relationshipCanvas = ref(null), rosterHeading = ref(null), rosterList = ref(null), rosterEmphasis = ref(false)
+let pendingRosterReveal = false
+async function setRosterFocus(key) {
+  focusKey.value = key; previewKey.value = ''; rosterEmphasis.value = false
+  pendingRosterReveal = true
+  await nextTick()
+  if (!pairOpen.value) revealRoster()
+}
+async function revealRoster() {
+  if (!pendingRosterReveal || !props.visible || pairOpen.value) return
+  pendingRosterReveal = false
+  rosterEmphasis.value = true
+  await nextTick()
+  if (!props.visible || pairOpen.value) return
+  relationshipCanvas.value?.clearHover()
+  if (rosterList.value) rosterList.value.scrollTop = 0
+  rosterHeading.value?.focus({ preventScroll: true })
+}
 const failedAvatars = reactive(new Set())
-const searchKeys = computed(() => search.value ? canvasNodes.value.filter(node => node.display_name?.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())).map(node => node.key) : [])
 const focusEdges = computed(() => scoped.value.edges.filter(edge => edge.source === focusKey.value || edge.target === focusKey.value))
 const neighbors = computed(() => new Set(focusEdges.value.flatMap(edge => [edge.source, edge.target])))
 const connectedKeys = computed(() => new Set(scoped.value.edges.flatMap(edge => [edge.source, edge.target])))
 const roster = computed(() => canvasNodes.value.filter(node => node.key !== focusKey.value
-  && (focusKey.value === 'user' ? connectedKeys.value.has(node.key) : neighbors.value.has(node.key))
-  && node.display_name?.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))
+  && (focusKey.value === 'user' ? connectedKeys.value.has(node.key) : neighbors.value.has(node.key)))
   .sort((a, b) => a.display_name.localeCompare(b.display_name, 'zh-CN') || a.key.localeCompare(b.key)))
 function nameOf(key) { return byKey.value.get(key)?.display_name || props.centerCharacter?.display_name || '角色' }
 function relationSummary(key) {
@@ -159,15 +168,8 @@ watch(() => [props.visible, centerKey.value], ([visible]) => {
 })
 if (props.visible) { focusKey.value = centerKey.value; void loadGraph() }
 onBeforeUnmount(() => { ++loadVersion; answerConfirmation(false) })
-function resetWorkspace() { answerConfirmation(false); pairOpen.value = false; chooserOpen.value = false; search.value = ''; error.value = ''; previewKey.value = '' }
+function resetWorkspace() { pendingRosterReveal = false; rosterEmphasis.value = false; answerConfirmation(false); pairOpen.value = false; error.value = ''; previewKey.value = '' }
 
-const chooserOpen = ref(false), chosenSource = ref('user'), chosenTarget = ref('')
-const sourceOptions = computed(() => [me.value, ...graph.value.nodes].map(node => ({ label: node.display_name, value: node.key })))
-// 选中“我”时由 openPair 归一为唯一支持的“我 → 角色”存储方向。
-const targetOptions = computed(() => sourceOptions.value.filter(option => option.value !== chosenSource.value))
-function openChooser() { chosenSource.value = focusKey.value; chosenTarget.value = ''; chooserOpen.value = true }
-watch(chosenSource, () => { chosenTarget.value = '' })
-function choosePair() { if (chosenTarget.value) { chooserOpen.value = false; openPair(chosenSource.value, chosenTarget.value) } }
 const pairOpen = ref(false), pairKeys = ref([]), drafts = reactive({}), saving = ref(false), pairError = ref(''), pairSaved = ref(false)
 const pairDirections = computed(() => {
   if (pairKeys.value.length !== 2) return []
@@ -187,12 +189,12 @@ function openPair(a, b) {
   pairError.value = ''; pairSaved.value = false; pairOpen.value = true
 }
 function onRosterClick(key) {
-  if (focusKey.value === 'user' && !neighbors.value.has(key)) { focusKey.value = key; return }
+  if (focusKey.value === 'user' && !neighbors.value.has(key)) { void setRosterFocus(key); return }
   openPair(focusKey.value, key)
 }
 function onNodeClick(key) {
-  if (key === centerKey.value) { focusKey.value = centerKey.value; return }
-  if (key === focusKey.value) { focusKey.value = centerKey.value; return }
+  if (key === centerKey.value) { void setRosterFocus(centerKey.value); return }
+  if (key === focusKey.value) { void setRosterFocus(centerKey.value); return }
   openPair(focusKey.value, key)
 }
 async function confirmPairClose() {
@@ -201,7 +203,8 @@ async function confirmPairClose() {
 }
 async function focusPerson() {
   if (!await confirmPairClose()) return
-  focusKey.value = pairKeys.value.find(key => key !== 'user'); pairOpen.value = false
+  await setRosterFocus(pairKeys.value.find(key => key !== 'user'))
+  pairOpen.value = false
 }
 function notifyChange(direction, action) {
   const source = byKey.value.get(direction.source), target = byKey.value.get(direction.target)
@@ -246,12 +249,10 @@ async function deleteDirection(direction) {
 
 <style scoped>
 
-.relationship-toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--rel-line); flex-shrink: 0; }
-.relationship-search { width: 216px; min-width: 0; }
 .relationship-content { display: grid; grid-template-columns: 252px minmax(0, 1fr); flex: 1; min-height: 0; }
 .relationship-roster { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--rel-line); background: color-mix(in srgb, var(--rel-gold) 5%, var(--rel-paper)); }
-.relationship-roster-heading { display: flex; justify-content: space-between; gap: 10px; padding: 16px 16px 10px; font-size: var(--fs-sm); color: var(--text-secondary); }
-.relationship-roster-heading strong { color: var(--text-primary); overflow-wrap: anywhere; }
+.relationship-roster-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 16px 10px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.relationship-roster-heading strong { flex: 1; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .relationship-roster-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
 .relationship-roster-row { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px; cursor: pointer; border-radius: 0; border-bottom: 1px solid var(--rel-line); text-align: left; transition: background 0.3s; }
 .relationship-roster-row:hover, .relationship-roster-row:focus-visible, .relationship-roster-row.is-active { background: color-mix(in srgb, var(--rel-gold) 12%, var(--rel-paper)); }
@@ -265,7 +266,6 @@ async function deleteDirection(direction) {
 .relationship-status { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; padding: 24px; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.6; }
 .relationship-status.is-error, .relationship-pair-error { color: var(--danger); }
 .relationship-empty { margin: 16px 8px; font-size: var(--fs-sm); line-height: 1.6; color: var(--text-secondary); }
-.relationship-field { display: flex; flex-direction: column; gap: 8px; color: var(--text-primary); font-size: var(--fs-sm); }
 .relationship-pair-people { position: relative; display: flex; justify-content: center; align-items: flex-start; gap: 32px; padding: 6px 0 14px; }
 .relationship-pair-person { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; max-width: 44%; text-align: center; font-size: var(--fs-base); color: var(--text-primary); overflow-wrap: anywhere; }
 .relationship-pair-avatar { width: 80px; height: 80px; font-size: 24px; border: 1px solid var(--rel-gold); outline: 1px solid var(--rel-line); outline-offset: 5px; margin: 6px; }
@@ -276,8 +276,6 @@ async function deleteDirection(direction) {
 .relationship-direction-desc { margin: 8px 0 10px; font-size: var(--fs-sm); line-height: 1.6; color: var(--text-secondary); }
 .relationship-pair-error { margin: 0; font-size: var(--fs-sm); line-height: 1.6; }
 @media (max-width: 767px) {
-  .relationship-toolbar { padding: 10px; gap: 6px; flex-wrap: wrap; }
-  .relationship-search { flex: 1; width: auto; min-width: 120px; }
   .relationship-content { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 1fr) minmax(100px, 26%); }
   .relationship-roster { grid-row: 2; border-right: 0; border-top: 1px solid var(--rel-line); }
   .relationship-roster-heading { padding: 8px 12px 4px; }
@@ -301,5 +299,22 @@ async function deleteDirection(direction) {
   .relationship-roster { grid-row: auto; border-top: 0; border-right: 1px solid var(--rel-line); }
   .relationship-roster-list { display: block; }
 }
+.relationship-roster-heading:focus { outline: none; }
+.relationship-roster-count { font-variant-numeric: tabular-nums; }
+.relationship-roster-back { flex-shrink: 0; }
+.relationship-focus-avatar { flex-shrink: 0; }
+.relationship-roster.is-focused .relationship-roster-heading { background: color-mix(in srgb, var(--rel-gold) 14%, var(--rel-paper)); border-bottom: 1px solid var(--rel-gold); }
+.relationship-roster.is-revealed { animation: relationship-roster-attention 1.2s ease-out; }
+@keyframes relationship-roster-attention {
+  0%, 25% { box-shadow: inset 0 0 0 3px var(--rel-gold); background: color-mix(in srgb, var(--rel-gold) 20%, var(--rel-paper)); }
+  100% { box-shadow: inset 0 0 0 0 transparent; background: color-mix(in srgb, var(--rel-gold) 5%, var(--rel-paper)); }
+}
+.relationship-roster-view-enter-active, .relationship-roster-view-leave-active { transition: opacity .3s, transform .3s; }
+.relationship-roster-view-enter-from { opacity: 0; transform: translateX(-8px); }
+.relationship-roster-view-leave-to { opacity: 0; transform: translateX(8px); }
+@media (prefers-reduced-motion: reduce) {
+  .relationship-roster.is-revealed { animation: none; }
+  .relationship-roster-view-enter-active, .relationship-roster-view-leave-active { transition: none; }
+  .relationship-roster-heading:focus { outline: 2px solid var(--rel-gold); outline-offset: -2px; }
+}
 </style>
-
