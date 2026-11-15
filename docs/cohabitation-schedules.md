@@ -33,7 +33,7 @@
 
 ```powershell
 $env:LINSHE_COHABITATION_LIVE = '1'
-node --test test/cohabitationLive.test.js
+# 付费实测脚本 test/cohabitationLive.test.js 已随 2026-11-15 测试精简移除，需要时从 git 历史取回后按本节步骤执行。
 Remove-Item Env:LINSHE_COHABITATION_LIVE
 ```
 
@@ -44,10 +44,10 @@ Remove-Item Env:LINSHE_COHABITATION_LIVE
 免费回归测试：
 
 ```powershell
-node --test test/cohabitationBatch.test.js test/cohabitationSchedule.test.js
+node --test test/cohabitationBatch.test.js
 ```
 
-浏览器回归位于 `web-ui/test/cohabitationUi.test.js`，使用独立内存库和测试 HTTP 服务。已有 Playwright 时在 `web-ui` 目录执行：
+（`test/cohabitationSchedule.test.js` 已随 2026-11-15 测试精简移除，需要时从 git 历史取回。`web-ui/test/cohabitationUi.test.js` 从未入库，浏览器回归按下方手动步骤执行。）已有 Playwright 时在 `web-ui` 目录执行：
 
 ```powershell
 $env:LINSHE_BROWSER_TEST = '1'

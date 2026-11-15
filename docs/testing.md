@@ -13,14 +13,14 @@
 
 | 范围 | 代表性入口 | 保留原因 |
 | --- | --- | --- |
-| 角色人格、外观与反应 | `agent-core/test/characterPersona.test.js`、`characterReactionPackService.test.js`、`emojiOutfits.test.js`、`hiresTransparentBackground.test.js`、`web-ui/test/appearanceRefine.test.js` | 人格组装兼容性、反应台词包严格解析、外观互斥与外观段边界回归 |
-| 聊天与记忆 | `agent-core/test/consolidation.test.js`、`src/services/memoryV3.test.js`、`contextBudget.test.js`、`sseDisconnectAbort.test.js` | 记忆归并与检索、上下文预算、流式请求断开 |
-| 朋友圈与日程 | `agent-core/test/momentUserPostFlow.test.js`、`momentScheduler.test.js`、`scheduleEditor.test.js` | 发帖、配图、调度和日程编辑的真实执行路径 |
-| 小镇核心流程 | `agent-core/test/townTravel.test.js`、`townMapReset.test.js`、`townInteractionRuntime.test.js`、`townNpcServiceRuntime.test.js`、`townNpcStock.test.js` | 地图隔离、重置范围、邀请与奇遇、交易及状态恢复 |
-| 前端状态与交互 | `web-ui/test/godSays.test.js`、`angelSharedDetail.test.js`、`speechQueue.test.js`、`githubUpdate.test.js` | 会话流状态机、保存契约、播放队列与升级状态 |
-| 图像处理 | `agent-core/test/imageTranscode.test.js`、`imageCacheRevalidation.test.js`、`hiresWorkflow.test.js`、`web-ui/test/whiteGapDetection.test.js` | 转码、缓存再验证、放大工作流与留白检测 |
+| 角色人格与反应 | `agent-core/test/characterPersona.test.js`、`agent-core/test/characterReactionService.test.js` | AGENTS.md 钦定的逐字节人格组装回归、反应抽签与四层前缀稳定 |
+| 世界书与提示词分层 | `agent-core/test/lorebook{,Adaptation,CachePolicy,Layout,Messages,Repository}.test.js`、`agent-core/test/worldLanguageStyle.test.js`、`agent-core/test/godSaysPrompt.test.js` | 缓存边界、邻舍定位、槽位适配、风格注入与稳定前缀认证 |
+| LLM 输出解析与计量 | `agent-core/src/services/momentResponseParser.test.js`、`agent-core/src/services/momentTopicGenerate.test.js`、`agent-core/test/momentOutputFormat.test.js`、`agent-core/test/llmOutputTokens.test.js` | 解析正反例、朋友圈形态与动因、token 计量 |
+| 小镇核心流程 | `agent-core/test/townActionRunner.test.js`、`townSimMapScope.test.js`、`townEncounterSettlement.test.js`、`townBuildingFeature{Contract,Runtime}.test.js` | 游走 FSM、多图 scope 回归、奇遇结算幂等与重启恢复、特殊建筑契约与执行运行时 |
+| 活跃功能面 | `agent-core/test/photoStudioService.test.js`、`godSaysAcceptance.test.js`、`cohabitationBatch.test.js`、`diaryGenerator.test.js`、`relationshipGraphRepository.test.js`、`web-ui/test/photoStudio{Selection,Shutter}.test.js`、`web-ui/test/godSays.test.js`、`web-ui/test/relationship{Layout,CanvasGestures}.test.js` | 2026-11 活跃迭代：照相馆、神说、同居、日记、关系图（数据层聚合契约 + 布局 + 手势） |
+| 基础设施与既有回归 | `agent-core/test/speechGpuPolicy.test.js`、`ttsRuntimeLauncher.test.js`、`consolidation.test.js`、`scheduleEditor.test.js`、`groupMentionDossier.test.js`、`newspaperService.test.js`、`privateChatConcurrency.test.js`、`imageRegenerationCompatibility.test.js`、`web-ui/test/linsheModalMount.test.js` | TTS 显存调度、记忆归并、日程约定、点名资料、日报、发送锁并发、重生成兼容、Linshe 弹窗挂载契约 |
 
-表中是代表性入口，其余保留的正式测试覆盖提示词分层、世界书注入、LLM 输出解析等静默失败风险高的复杂逻辑（见下方 2026-11-06 精简记录）。前后端同名测试可能验证不同实现，不能仅凭文件名去重。
+上表即 2026-11-15 精简后保留的全部 38 个正式测试文件。前后端同名测试可能验证不同实现，不能仅凭文件名去重；各族删减口径见下方 2026-11-06 与 2026-11-15 精简记录。
 
 ## 浏览器回归样例
 
@@ -57,6 +57,17 @@
 - 同族重复测试的幸存者：godSays 18→15（HTTP 会话/替换提示词/天使引用微测移除）、speech 31→8（GPU 策略与队列、API 模式、进程生命周期保留）、lorebook 9→6、standing 30→6、chat/group 29→12、town 家族 97→53（全部 D2 呈现类与流程 smoke 移除）。
 - 已删测试都可从 git 历史恢复；`*.live` / `*.integration` / `*.browser` 的自跳过文件随本轮一并移除，需要真实环境验收时从历史取回。`test/fixtures/` 手动浏览器样例不受影响。
 
+## 2026-11-15 测试精简
+
+2026-11-06 基线（165 个）随功能开发回升到 200 个后，按「仅保留最重要的 20%」再精简一轮：200 → 38 个文件（agent-core 32、web-ui 6），删除 162 个测试文件与 3 个孤儿 fixture（`agent-core/test/helpers/audioTemp.js`、`agent-core/test/helpers/godAuditIsolation.mjs`、`web-ui/test/helpers/cohabitationUiFixture.js`）。精简当日 `npm test`：agent-core 382、web-ui 70 全绿。
+
+- **删除前核实**（git 历史出生日期 + 删除前全量对照）：被删文件并非陈年死重——3 个生于 7-8 月、62 个 9 月、42 个 10 月、56 个生于 11 月（删除前两周内）；且删除前全量套件本就有 6 个失败（1279/1286，45 秒），漂移最长 9 天无人发现。5 个在被删文件：momentForms（朋友圈字数上限 180→120 后测试没跟上）、godSaysImages（图片提示词规则文本变更）、llmConfig（NovelAI 夹具缺 `db.transaction`）、roleplayRules（system rules 前缀文本变更）——均为产品有意变更后的断言/夹具漂移；momentUserPostFlow（图片识别破限词注入顺序消失）有回归嫌疑，需要时从 git 历史取回对照。1 个在保留文件：photoStudioService 姿势库断言漂移，随轮已修。
+- **保留判据**：AGENTS.md 钦定的 `characterPersona.test.js`；跨调用提示词/缓存契约（lorebook 全家 6 个、`godSaysPrompt` 稳定前缀认证、`worldLanguageStyle` 风格注入）；历史真实 bug 回归（`townSimMapScope` 多图 scope、`townActionRunner` 写入管线）；幂等与资金结算（`townEncounterSettlement` 奇遇闭环、`townBuildingFeature{Contract,Runtime}`）；LLM 输出解析（moment 三件套）；2026-11 活跃迭代面（照相馆、神说验收、关系图、同居、日记、TTS 显存调度）。
+- **删除判据**：沿用 2026-11-06 判据，并把同族测试收缩到 1–3 个幸存者：godSays 家族 21→3、照相馆 15→3、town 家族 54→5、speech 8→2、朋友圈 12→3。幸存者优先保缓存契约、幂等结算与活跃面；呈现类、HTTP 变体、微边界与一次性迁移优先删除。
+- **补回**：`relationshipGraphRepository.test.js`（11-14 出生、次日精简时误删——关系图正在迭代，web-ui 幸存者只覆盖布局与手势，不覆盖数据层聚合契约，自查发现后恢复）。
+- 随轮修复一处断言漂移：`photoStudioService.test.js` 对 `pair60_P042_front` / `pair60_P054_front` 的期望仍是旧校准文本（`sits on their lap`、`bridal carry`），已按重校准后的 `assets/pose-gallery/pose-prompts.json` 改写（`seated on the floor facing each other`、`carried in arms`）。
+- 已删测试可从 git 历史取回：`git show <删除前提交>:agent-core/test/xxx.test.js`。`test/fixtures/` 手动浏览器样例不受影响。
+
 ## 绿基线与日常纪律
 
 两包 `npm test` 必须保持全绿。长期红着的套件等于没有套件——它会训练所有人无视红色，真正的回归就藏不住了。宁可删掉一个测试，也不要把红的留在仓库里。
@@ -78,14 +89,14 @@
 
 「描述驱动的可执行玩法」（见 `town-special-buildings-plan.md` §14）按职责维护三组测试，全部走真实生产入口、隔离内存库、注入式 LLM/生图：
 
-- `agent-core/test/townBuildingFeature{Contract,Source,Runtime,Effects,Trade,Media,Draw}.test.js`：14 模板 schema 与排除能力门控、来源优先级与绘图提示词检测、操作幂等/报价收据/配额/资金预留、外观与状态真实注入及到期恢复、交易真实钱物与回收估值封顶、生成模板一次调用与重试复用、固定种子抽取与跨日签运。共享夹具在 `test/helpers/townBuildingFeatureFixture.js`（`saveMap` 必须 `create: true`，否则按名 upsert 会覆盖第一张图）。
-- `web-ui/test/townBuildingFeatureOperations.test.js`：以 SFC 脚本提取 handler 的方式验证报价→执行顺序、失败文案映射与模板事件邀请流（原 `townBuildingFeatures.test.js` 面板切片用例已随 2026-11-06 精简移除）。夹具 state 必须提供 handler 引用的全部模块级名字，否则 `with(state)` 抛 ReferenceError 被组件 catch 吞掉，表现为「夹具没生效」而不是报错。
+- `agent-core/test/townBuildingFeature{Contract,Runtime}.test.js`：14 模板 schema 与排除能力门控、操作幂等/报价收据/配额/资金预留、执行运行时与重启恢复。原 {Source,Effects,Trade,Media,Draw,Candidates,MediaFiles} 专项已随 2026-11-15 精简移除，需要时从 git 历史取回。共享夹具在 `test/helpers/townBuildingFeatureFixture.js`（`saveMap` 必须 `create: true`，否则按名 upsert 会覆盖第一张图）。
+- `web-ui/test/townBuildingFeatureOperations.test.js` 已随 2026-11-15 精简移除（曾以 SFC 脚本提取 handler 验证报价→执行顺序、失败文案映射与模板事件邀请流；恢复时注意夹具 state 必须提供 handler 引用的全部模块级名字，否则 `with(state)` 抛 ReferenceError 被组件 catch 吞掉，表现为「夹具没生效」而不是报错）。
 - 功能有独立总开关 `config.features.townBuildingFeatures`（`FEATURE_TOWN_BUILDING_FEATURES`，默认开）；关闭后隐藏入口并拒绝新生成与新操作，已有预留仍按既有状态机结算或释放。旧镇建筑不自动建档，由管理面板「特殊建筑功能」逐栋启用。
 
 触摸样例还验证按下形变、松手回弹、最终恢复原形，以及图片节点不被重建。「完整触摸动效预览」只在测试页覆盖媒体偏好输入，以检查完整动画分支，不修改用户系统设置。
 
 ## 聊天与日记中断恢复
 
-`sentenceSplitter.test.js` 覆盖英文流式分句及中文 golden 回归。日记重启恢复与失败历史在 `diaryGenerator.test.js` 中验证；纯文字回复幂等与回放在 `privateChatImageTools.test.js` 中验证。
+日记重启恢复与失败历史在 `diaryGenerator.test.js` 中验证。原 `sentenceSplitter.test.js`（英文流式分句与中文 golden 回归）与 `privateChatImageTools.test.js`（纯文字回复幂等与回放、超时重试幂等契约）已随 2026-11-15 精简移除，需要时从 git 历史取回。
 
-前端恢复编排测试（原 `chatTimeoutRecovery`、`diaryRecovery`、`proactiveChatSwitch`）已随 2026-11-06 精简移除；超时重试的幂等契约仍由服务端 `privateChatImageTools.test.js` 覆盖。`/test/fixtures/chatDiaryRecovery.html` 保留为手动检查页。
+前端恢复编排测试（原 `chatTimeoutRecovery`、`diaryRecovery`、`proactiveChatSwitch`）已随 2026-11-06 精简移除。`/test/fixtures/chatDiaryRecovery.html` 保留为手动检查页。

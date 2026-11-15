@@ -48,9 +48,9 @@ test('the full catalog preserves uncalibrated entries while the studio catalog e
 
   const pair042 = studioCatalog.find(pose => pose.id === 'pair60_P042_front');
   assert.equal(pair042.name, '盘腿相拥');
-  assert.match(pair042.posePrompt, /sits on their lap/);
-  assert.match(pair042.characterRoles[0], /seated base/);
-  assert.match(pair042.characterRoles[1], /seated on character 1's lap/);
+  assert.match(pair042.posePrompt, /seated on the floor facing each other/);
+  assert.match(pair042.characterRoles[0], /seated toward the left side of the frame/);
+  assert.match(pair042.characterRoles[1], /seated toward the right side of the frame/);
 
   const pair051 = studioCatalog.find(pose => pose.id === 'pair60_P051_front');
   assert.equal(pair051.name, '耳边低语・手触脸颊');
@@ -60,9 +60,9 @@ test('the full catalog preserves uncalibrated entries while the studio catalog e
 
   const pair054 = studioCatalog.find(pose => pose.id === 'pair60_P054_front');
   assert.equal(pair054.name, '被横抱・背部后仰');
-  assert.match(pair054.posePrompt, /bridal carry/);
-  assert.match(pair054.characterRoles[0], /carried partner/);
-  assert.match(pair054.characterRoles[1], /carrier behind/);
+  assert.match(pair054.posePrompt, /carried in arms/);
+  assert.match(pair054.characterRoles[0], /carried in character 2's arms/);
+  assert.match(pair054.characterRoles[1], /carries character 1/);
 });
 
 async function fixture(overrides = {}) {

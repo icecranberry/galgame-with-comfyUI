@@ -2171,141 +2171,141 @@
       "id": "bg-301",
       "category": "纯色",
       "label": "纯白强烈阴影",
-      "description": "纯白单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid pure white background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "纯白单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid pure white background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-302",
       "category": "纯色",
       "label": "炭黑强烈阴影",
-      "description": "炭黑单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid charcoal black background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "炭黑单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid charcoal black background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-303",
       "category": "纯色",
       "label": "象牙白强烈阴影",
-      "description": "象牙白单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid ivory white background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "象牙白单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid ivory white background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-304",
       "category": "纯色",
       "label": "浅灰强烈阴影",
-      "description": "浅灰单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid light gray background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "浅灰单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid light gray background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-305",
       "category": "纯色",
       "label": "石墨灰强烈阴影",
-      "description": "石墨灰单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid graphite gray background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "石墨灰单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid graphite gray background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-306",
       "category": "纯色",
       "label": "米杏强烈阴影",
-      "description": "米杏单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid warm beige background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "米杏单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid warm beige background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-307",
       "category": "纯色",
       "label": "奶油黄强烈阴影",
-      "description": "奶油黄单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid cream yellow background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "奶油黄单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid cream yellow background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-308",
       "category": "纯色",
       "label": "柠檬黄强烈阴影",
-      "description": "柠檬黄单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid lemon yellow background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "柠檬黄单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid lemon yellow background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-309",
       "category": "纯色",
       "label": "焦橙强烈阴影",
-      "description": "焦橙单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid burnt orange background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "焦橙单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid burnt orange background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-310",
       "category": "纯色",
       "label": "朱红强烈阴影",
-      "description": "朱红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid vermilion red background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "朱红单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid vermilion red background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-311",
       "category": "纯色",
       "label": "酒红强烈阴影",
-      "description": "酒红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid burgundy red background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "酒红单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid burgundy red background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-312",
       "category": "纯色",
       "label": "樱粉强烈阴影",
-      "description": "樱粉单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid cherry blossom pink background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "樱粉单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid cherry blossom pink background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-313",
       "category": "纯色",
       "label": "玫红强烈阴影",
-      "description": "玫红单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid magenta background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "玫红单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid magenta background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-314",
       "category": "纯色",
       "label": "薰衣草紫强烈阴影",
-      "description": "薰衣草紫单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid lavender purple background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "薰衣草紫单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid lavender purple background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-315",
       "category": "纯色",
       "label": "深紫强烈阴影",
-      "description": "深紫单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid deep violet background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "深紫单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid deep violet background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-316",
       "category": "纯色",
       "label": "钴蓝强烈阴影",
-      "description": "钴蓝单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid cobalt blue background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "钴蓝单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid cobalt blue background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-317",
       "category": "纯色",
       "label": "天蓝强烈阴影",
-      "description": "天蓝单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid sky blue background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "天蓝单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid sky blue background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-318",
       "category": "纯色",
       "label": "薄荷绿强烈阴影",
-      "description": "薄荷绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid mint green background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "薄荷绿单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid mint green background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-319",
       "category": "纯色",
       "label": "森林绿强烈阴影",
-      "description": "森林绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid forest green background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "森林绿单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid forest green background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     },
     {
       "id": "bg-320",
       "category": "纯色",
       "label": "青绿强烈阴影",
-      "description": "青绿单一色块铺满背景，人物在纯色平面上投下强烈阴影，投影轮廓清晰、边缘硬朗；无场景、墙地分界或道具。",
-      "prompt": "A plain solid teal background filling the entire image, hard directional lighting producing strong, sharply defined cast shadows of the subject directly onto the flat color field, no scenery, horizon, texture, props or lettering."
+      "description": "青绿单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
+      "prompt": "A plain solid teal background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
     }
   ]
 }

@@ -33,4 +33,4 @@
 
 ## 验证入口
 
-旧挣钱策略测试和预览页已失效。原 `web-ui/test/townInteractions.test.js` 已随 2026-11-06 测试精简移除（幂等与迟到响应守卫由服务端 `townInteractionRuntime.test.js` 覆盖）；钱包、NPC 交易与奇遇链路等现行测试见 [测试维护说明](testing.md)。
+旧挣钱策略测试和预览页已失效。原 `web-ui/test/townInteractions.test.js`（2026-11-06）与服务端 `townInteractionRuntime.test.js`（2026-11-15）已随两轮测试精简移除，幂等与迟到响应守卫现由 `townActionRunner.test.js`、`townEncounterSettlement.test.js` 覆盖；钱包、NPC 交易与奇遇链路等现行测试见 [测试维护说明](testing.md)。

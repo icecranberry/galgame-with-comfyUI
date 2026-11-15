@@ -572,8 +572,8 @@ flowchart LR
 
 **测试**
 
-- `web-ui/test/characterReactionRules.test.js`（37 例）：目录与身份、白名单与 2 KiB、观察窗与历史、100 次重复只出一个候选、跨午夜、冷却与类别开关、失败事件、8 秒失效、0% / 10% / 强制命中抽签、额度回退、迟到终检、缓存短句与占位符、各生产者的正反例与只记录事件。
-- `agent-core/test/characterReactionService.test.js`（22 例）：事实校验与资源归属、四层前缀逐字稳定、user 层今天 / 时区 / 前三次操作、解析正反例、额度与并发、跨重启与跨日、幂等、成功 / 非法输出 / 超时 / 额度耗尽路径。
+- `web-ui/test/characterReactionRules.test.js`（37 例）：目录与身份、白名单与 2 KiB、观察窗与历史、100 次重复只出一个候选、跨午夜、冷却与类别开关、失败事件、8 秒失效、0% / 10% / 强制命中抽签、额度回退、迟到终检、缓存短句与占位符、各生产者的正反例与只记录事件。（已随 2026-11-15 测试精简移除，需要时从 git 历史取回）
+- `agent-core/test/characterReactionService.test.js`（22 例）：事实校验与资源归属、四层前缀逐字稳定、user 层今天 / 时区 / 前三次操作、解析正反例、额度与并发、跨重启与跨日、幂等、成功 / 非法输出 / 超时 / 额度耗尽路径。（现役，2026-11-15 精简后保留）
 
 **尚未覆盖（需要人工验收）**
 
@@ -588,7 +588,7 @@ flowchart LR
 - 短句包按角色保存，一次生成、反复使用：`getReactionPack` 只读库，不产生任何模型调用；只有 `POST /packs/:id/generate` 会请求模型一次，且不做自动重试、不逐角色批量生成。
 - 单次生成目标输出预算约 2,500 tokens（`PACK_MAX_TOKENS`），截断或不满足完整契约时整包不覆盖旧包，用户可手动重试。
 - 设置页「角色通知 → 专属短句包」列出全部角色与状态（未生成 / 已生成 / 可更新 / 已停用 / 生成中），可生成、编辑、停用、删除；编辑弹窗只改台词文本，结构固定为每类 3 条。
-- 测试：`agent-core/test/characterReactionPackService.test.js`（14 例）覆盖白名单与示例完整性、解析正反例、`packToOverrides`、人格指纹、生成与保存、非法包不覆盖旧包、人设变化标记、删除与手动保存、未知角色 / 空集合不请求模型、语义标记映射。
+- 测试：`agent-core/test/characterReactionPackService.test.js`（14 例）覆盖白名单与示例完整性、解析正反例、`packToOverrides`、人格指纹、生成与保存、非法包不覆盖旧包、人设变化标记、删除与手动保存、未知角色 / 空集合不请求模型、语义标记映射。（已随 2026-11-15 测试精简移除，需要时从 git 历史取回）
 
 ## 15. 实施记录（M3）
 
@@ -624,7 +624,7 @@ flowchart LR
 
 **测试**
 
-- `web-ui/test/characterReactionRules.test.js`：37 例，覆盖目录与身份、冷却与类别开关、在途占位、P1 生产者边界与 §2.3 只记录事件。
+- `web-ui/test/characterReactionRules.test.js`：37 例，覆盖目录与身份、冷却与类别开关、在途占位、P1 生产者边界与 §2.3 只记录事件。（已随 2026-11-15 测试精简移除，需要时从 git 历史取回）
 - `agent-core/test/characterReactionService.test.js`：22 例保持通过（system3 不再逐事件罗列边界，user 层用自然语言事实与角色名）。
 
 **尚未覆盖 / 需要人工验收**
