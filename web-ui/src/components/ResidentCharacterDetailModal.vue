@@ -151,9 +151,9 @@
                           <p class="split-hint">默认造型作为常态外观，其余服装随日程切换。</p>
                           <linshe-button
                             v-if="detail.sceneOutfits.length > 1" variant="secondary" size="sm"
-                            :disabled="outfitGenerating || outfitBatchRunning || standingBusy || !workOutfitText" :loading="outfitGenerating"
+                            :disabled="!!outfitGenerating || outfitBatchRunning || standingBusy || !workOutfitText" :loading="outfitGenerating === 'all'"
                             :title="workOutfitText ? '以默认外观为基准，只换衣服、保留身体特征' : '先填写默认外观，才能生成其余服装'"
-                            @click="generateOtherSceneOutfits"
+                            @click="generateOtherSceneOutfits()"
                           >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4ZM13 7l3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                             按默认生成其余三套
@@ -163,9 +163,18 @@
                         <Transition name="persona-fold" mode="out-in">
                           <div v-if="activeSceneOutfit" :key="activeSceneOutfit.scene" class="scene-edit">
                             <p class="split-hint">{{ activeSceneOutfit.scene === 'sleep' ? '睡眠时段优先使用睡衣；未配置时沿用其他有效服装。' : activeSceneOutfit.scene === 'work' ? '保留角色的常态形象，作为其他服装的生成基准。' : '只调整这套服装，保留角色的身体特征。' }}</p>
-                            <linshe-button v-if="profileAdapter" variant="secondary" size="sm" class="clothing-library-trigger" :disabled="outfitBatchRunning || outfitGenerating" @click="openClothingLibrary">衣服库 · 选 tag 搭配</linshe-button>
+                            <div class="scene-outfit-actions">
+                              <linshe-button variant="secondary" size="sm" :disabled="outfitBatchRunning || !!outfitGenerating" @click="openClothingLibrary">衣服库 · 选 tag 搭配</linshe-button>
+                              <linshe-button
+                                v-if="activeSceneOutfit.scene !== 'work'" variant="secondary" size="sm"
+                                :disabled="!!outfitGenerating || outfitBatchRunning || standingBusy || !workOutfitText"
+                                :loading="outfitGenerating === activeSceneOutfit.scene"
+                                :title="`按默认外观重新设计${activeSceneOutfit.sceneLabel}，并生成对应形象`"
+                                @click="generateOtherSceneOutfits(activeSceneOutfit.scene)"
+                              >重新生成{{ activeSceneOutfit.sceneLabel }}</linshe-button>
+                            </div>
                             <linshe-input
-                              v-model="activeSceneOutfit.description" type="textarea" rows="10" :disabled="outfitBatchRunning"
+                              v-model="activeSceneOutfit.description" type="textarea" rows="10" :disabled="outfitBatchRunning || !!outfitGenerating"
                               :aria-label="`${activeSceneOutfit.scene === 'work' ? '默认' : activeSceneOutfit.sceneLabel}外观描述`"
                               :placeholder="activeSceneOutfit.scene === 'work' ? '常态外观描述（中英混合），生图时作为基础外观' : '这套服装的外观描述（中英混合）'"
                               @input="detail.dirty = true"
@@ -228,7 +237,7 @@
               <slot name="footer-leading" />
               <linshe-button v-if="!profileAdapter" variant="danger" @click="deleteChar">&#x1F5D1; 删除角色</linshe-button>
               <linshe-button v-if="!profileAdapter" variant="secondary" :title="`声音 · ${voiceLabel}`" @click="showVoiceModal = true">声音设置</linshe-button>
-              <linshe-button variant="secondary" :disabled="profileSaving || outfitBatchRunning" @click="openRefineModal">
+              <linshe-button variant="secondary" :disabled="profileSaving || outfitBatchRunning || !!outfitGenerating" @click="openRefineModal">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 16 11-11a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /><path d="m13 7 3 3M19 13v6m-3-3h6M6 2v6M3 5h6" /></svg>
                 修正外观
               </linshe-button>
@@ -236,7 +245,7 @@
                 外观 tag 参考
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(character?.name).replaceAll('_', '+')}`" target="_blank" :title="character?.name">animadex · {{ character?.display_name || character?.name }}</a>
               </div>
-              <linshe-button variant="primary" :class="{ 'detail-save-right': profileAdapter }" :loading="profileSaving" :disabled="!detail.dirty || outfitBatchRunning" @click="saveCharDetail">保存</linshe-button>
+              <linshe-button variant="primary" :class="{ 'detail-save-right': profileAdapter }" :loading="profileSaving" :disabled="!detail.dirty || outfitBatchRunning || !!outfitGenerating" @click="saveCharDetail">保存</linshe-button>
             </div>
           </div>
         </div>
@@ -702,6 +711,7 @@ async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
   if (!characterId) { detail.sceneOutfits = []; return }
   try {
     const d = await api.listSceneOutfits(characterId)
+    if (props.character?.id !== characterId || !props.visible) return
     const scenes = d.scenes || []
     const exist = d.outfits || []
     detail.sceneOutfits = scenes.map(s => {
@@ -721,9 +731,10 @@ async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
         description: desc,
       }
     })
+    for (const outfit of detail.sceneOutfits) initialOutfitDescriptions[outfit.scene] = outfit.description
   } catch (err) {
     console.error('loadSceneOutfits failed:', err)
-    detail.sceneOutfits = []
+    if (props.character?.id === characterId && props.visible) detail.sceneOutfits = []
   }
 }
 
@@ -731,52 +742,75 @@ async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
 // 为什么这么设计：四套若各自从人设凭空设计，发色发型都可能漂移，看着不像同一个人。
 // 以工装为锚，只让模型换衣服，身体特征保持不变。
 // 注意变量名别与立绘的 sceneGenerating 撞（那是「生成某场景立绘」用的）。
-const outfitGenerating = ref(false)
+const outfitGenerating = ref('')
 const activeOutfitBatch = computed(() => imageEditTasks.tasks.find(task =>
   task.action === 'scene_outfits' && task.status === 'running' && Number(task.meta?.characterId) === Number(props.character?.id)
 ))
 const outfitBatchRunning = computed(() => props.profileAdapter ? !!props.profileAdapter.batchRunning : !!activeOutfitBatch.value)
 const refreshedOutfitTasks = new Set()
-watch(() => imageEditTasks.tasks.filter(task => task.action === 'scene_outfits'
+const outfitTaskDrafts = new Map()
+let profileOutfitDrafts = null
+watch(() => [props.visible, imageEditTasks.tasks.filter(task => task.action === 'scene_outfits'
   && Number(task.meta?.characterId) === Number(props.character?.id)
-  && ['ready', 'failed'].includes(task.status)).map(task => task.id).join(','), async () => {
+  && ['ready', 'failed'].includes(task.status)).map(task => task.id).join(',')], async (_, __, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
   const c = props.character
-  if (!c) return
+  if (!c || !props.visible || props.profileAdapter) return
   const finished = imageEditTasks.tasks.filter(task => task.action === 'scene_outfits'
     && Number(task.meta?.characterId) === Number(c.id) && ['ready', 'failed'].includes(task.status)
     && !refreshedOutfitTasks.has(task.id))
   if (!finished.length) return
   try {
     const [outfits, standings] = await Promise.all([api.listSceneOutfits(c.id), api.listSceneStandings(c.id)])
-    if (props.character?.id !== c.id) return
+    if (cancelled || props.character?.id !== c.id || !props.visible) return
     detail.sceneOutfits = detail.sceneOutfits.map(outfit => {
+      const targetTasks = finished.filter(task => task.meta?.scenes?.includes(outfit.scene))
       const saved = outfits.outfits?.find(row => row.scene === outfit.scene)
-      return outfit.scene !== 'work' && saved ? { ...outfit, name: saved.name, description: saved.description } : outfit
+      const unchanged = outfit.description === initialOutfitDescriptions[outfit.scene]
+        || targetTasks.some(task => {
+          const draft = outfitTaskDrafts.get(task.id)?.[outfit.scene]
+          // 设计失败、尚未写入时保留原草稿；出图失败但已保存设计时仍回填。
+          return draft && draft.description === outfit.description && saved?.description !== draft.savedDescription
+        })
+      if (!targetTasks.length || outfit.scene === 'work' || !saved || !unchanged) return outfit
+      initialOutfitDescriptions[outfit.scene] = saved.description
+      return { ...outfit, name: saved.name, description: saved.description }
     })
     standingScenes.value = standings.standings || []
     syncPromptFromScene()
-    finished.forEach(task => refreshedOutfitTasks.add(task.id))
+    finished.forEach(task => { refreshedOutfitTasks.add(task.id); outfitTaskDrafts.delete(task.id) })
   } catch (error) { toastFn('任务已结束，重新打开角色卡可刷新服装和形象', 'warning') }
 })
 
-async function generateOtherSceneOutfits() {
+async function generateOtherSceneOutfits(scene = null) {
   const c = props.character
-  if (!c || outfitGenerating.value || outfitBatchRunning.value || standingBusy.value) return
+  if (!c || profileSaving.value || outfitGenerating.value || outfitBatchRunning.value || standingBusy.value) return
   const base = workOutfitText.value
   if (!base) { toastFn('先填写默认（常态外观），才能以它为基准生成', 'warning'); return }
-  const targets = detail.sceneOutfits.filter(o => o.scene !== 'work').map(o => o.scene)
+  const targets = detail.sceneOutfits.filter(o => o.scene !== 'work' && (!scene || o.scene === scene)).map(o => o.scene)
   if (!targets.length) return
-  outfitGenerating.value = true
+  const drafts = Object.fromEntries(detail.sceneOutfits.filter(o => targets.includes(o.scene)).map(o => [o.scene, {
+    description: o.description, savedDescription: initialOutfitDescriptions[o.scene],
+  }]))
+  outfitGenerating.value = scene || 'all'
   try {
-    if (props.profileAdapter) { await props.profileAdapter.generateOutfits(base, targets); return }
+    if (props.profileAdapter) {
+      profileOutfitDrafts = drafts
+      const job = await props.profileAdapter.generateOutfits(base, targets)
+      if (!job) profileOutfitDrafts = null
+      return
+    }
     const result = await api.generateSceneOutfits(c.id, true, { baseAppearance: base, scenes: targets, generateImages: true })
     if (!result?.task_id) throw new Error('未收到后台任务，请重启后端加载自动生成形象功能')
+    outfitTaskDrafts.set(result.task_id, drafts)
     await imageEditTasks.refresh()
   } catch (err) {
+    if (props.profileAdapter) profileOutfitDrafts = null
     console.error('generateOtherSceneOutfits failed:', err)
     toastFn('生成失败：' + (err?.message || ''), 'error')
   } finally {
-    outfitGenerating.value = false
+    outfitGenerating.value = ''
   }
 }
 
@@ -862,15 +896,20 @@ function _parseCharLoras(raw) {
 
 watch(() => [props.visible, props.character], ([v, c], previous) => {
   if (!v || !c) return
+  if (!props.profileAdapter && previous?.[0] && previous[1]?.id === c.id && detail.dirty) return
   // 后台头像 / 形象完成不能覆盖正在编辑的系统角色草稿。
   if (props.profileAdapter && previous?.[0] && previous[1]?.id === c.id && detail.dirty) {
     // 后台新生成的衣服回填未编辑的槽位，保留用户在其他槽位里的草稿。
     for (const outfit of detail.sceneOutfits) {
       const fresh = c.outfits?.find(row => row.scene === outfit.scene)
-      if (outfit.scene !== 'work' && fresh && outfit.description === initialOutfitDescriptions[outfit.scene]) {
+      const draft = !outfitBatchRunning.value && profileOutfitDrafts?.[outfit.scene]
+      const unchanged = outfit.description === initialOutfitDescriptions[outfit.scene]
+        || (draft && outfit.description === draft.description && fresh?.description !== draft.savedDescription)
+      if (outfit.scene !== 'work' && fresh && unchanged) {
         Object.assign(outfit, fresh); initialOutfitDescriptions[outfit.scene] = fresh.description
       }
     }
+    if (!outfitBatchRunning.value) profileOutfitDrafts = null
     return
   }
   if (props.profileAdapter && previous?.[0] && previous[1]?.id === c.id) {
@@ -910,6 +949,7 @@ onUnmounted(() => window.removeEventListener('keydown', onProfileEscape))
 
 const initialOutfitDescriptions = {}
 function init(c) {
+  profileOutfitDrafts = null
   editorSection.value = 'persona'
   detail.editCharName = c.name || ''
   detail.editName = c.display_name || ''
@@ -978,7 +1018,7 @@ async function saveCharDetail() {
   const c = props.character
   // ⚠ 2026-10-08 合并 v3.7.0：上游新增 dirty 守卫与 previousName（用于改名后通知外部刷新）；
   //    本地是整卡重组。两者互不冲突，**合并保留**。
-  if (!c || !detail.dirty || outfitBatchRunning.value) return
+  if (!c || !detail.dirty || outfitBatchRunning.value || outfitGenerating.value) return
   if (props.profileAdapter) {
     if (profileSaving.value) return
     profileSaving.value = true
@@ -1027,6 +1067,7 @@ async function saveCharDetail() {
       return
     }
   }
+  for (const outfit of detail.sceneOutfits) initialOutfitDescriptions[outfit.scene] = outfit.description
   detail.dirty = false
   emit('saved', c)
   // P1：保存成功后新旧显示名确实不同才反馈；不声称已有独立昵称系统
@@ -1365,7 +1406,7 @@ const refineBasePrompt = computed(() => {
 })
 
 function openRefineModal() {
-  if (!props.character || profileSaving.value || outfitBatchRunning.value) return
+  if (!props.character || profileSaving.value || outfitBatchRunning.value || outfitGenerating.value) return
   refineSceneIdx.value = detail.sceneTab
   showRefineModal.value = true
 }
@@ -1996,7 +2037,7 @@ const displayStandingPanel = computed(() => props.profileAdapter?.standing || st
 .scene-block-head .split-hint { flex: 1 1 220px; margin: 0; }
 .scene-edit { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .scene-edit > .ls-input { flex: 1; }
-.clothing-library-trigger { margin-bottom: 8px; }
+.scene-outfit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .scene-edit-empty { font-size: var(--fs-xs); color: var(--text-secondary); padding: 12px 0; }
 .persona-fold-enter-active, .persona-fold-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
 .persona-fold-enter-from, .persona-fold-leave-to { opacity: 0; transform: translateY(-4px); }
