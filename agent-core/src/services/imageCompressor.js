@@ -11,14 +11,15 @@
  */
 
 import sharp from 'sharp';
-import { preserveImageWorkflow } from './imageWorkflowMetadata.js';
+import { writeImageWithWorkflow } from './imageWorkflowMetadata.js';
 import { readdir, stat, unlink, rename } from 'fs/promises';
 import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { broadcast } from './unifiedStreamBus.js';
 import { config, updateCompressConfig } from '../config.js';
-import { getAllImageDirs } from './imagePaths.js';
+import { getAllImageDirs, buildImageUrl } from './imagePaths.js';
+import { assignGalleryImageTimes } from './galleryImageTimes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = resolve(__dirname, '..', '..', 'data', 'image-compressor-state.json');
@@ -130,7 +131,8 @@ async function listAllPngFiles() {
           const fullPath = join(dir, name);
           try {
             const s = await stat(fullPath);
-            return { name, fullPath, folder: category, mtime: s.mtimeMs, size: s.size };
+            return { name, fullPath, folder: category, mtime: s.mtimeMs, birthtime: s.birthtimeMs,
+              url: buildImageUrl(category, name), size: s.size };
           } catch { return null; }
         })
       );
@@ -138,6 +140,8 @@ async function listAllPngFiles() {
     }
   }
 
+  // 即使尚未打开相册，也要在转码改变文件时间之前冻结首次时间。
+  assignGalleryImageTimes(allFiles);
   allFiles.sort((a, b) => a.mtime - b.mtime);
   return allFiles;
 }
@@ -164,10 +168,11 @@ async function compressOne(fileInfo) {
   try {
     if (isAvif) {
       const outPath = join(dir, `${baseName}.avif`);
-      const pipeline = await preserveImageWorkflow(sharp(inputPath), inputPath);
-      await pipeline
-        .avif({ quality: 50, effort: 4 })
-        .toFile(outPath);
+      const tmpPath = join(dir, `${name}.tmp`);
+      await writeImageWithWorkflow(
+        sharp(inputPath).avif({ quality: 50, effort: 4 }), inputPath, tmpPath, 'avif',
+      );
+      await rename(tmpPath, outPath);
 
       const outStat = await stat(outPath);
       result.compressedSize = outStat.size;
@@ -185,10 +190,9 @@ async function compressOne(fileInfo) {
       await unlink(inputPath);
     } else {
       const tmpPath = join(dir, `${name}.tmp`);
-      const pipeline = await preserveImageWorkflow(sharp(inputPath), inputPath);
-      await pipeline
-        .png({ compressionLevel: 9, palette: true, effort: 10 })
-        .toFile(tmpPath);
+      await writeImageWithWorkflow(
+        sharp(inputPath).png({ compressionLevel: 9, palette: true, effort: 10 }), inputPath, tmpPath, 'png',
+      );
 
       const tmpStat = await stat(tmpPath);
       result.compressedSize = tmpStat.size;
@@ -199,7 +203,6 @@ async function compressOne(fileInfo) {
         result.success = false;
         result.error = 'no_reduction';
       } else {
-        await unlink(inputPath);
         await rename(tmpPath, inputPath);
         result.success = true;
       }

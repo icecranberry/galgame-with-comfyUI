@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { assignGalleryImageTimes, rememberGalleryImageTime, forgetGalleryImageTime } from './galleryImageTimes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 默认落在 agent-core/data/images；测试或离线脚本可用 IMAGES_DIR 指到别处，
@@ -105,9 +106,15 @@ export function saveBase64Image(category, filename, dataUri) {
   const dir = getImageDir(category);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, filename);
+  const url = buildImageUrl(category, filename);
+  if (fs.existsSync(filePath)) {
+    const previous = fs.statSync(filePath);
+    assignGalleryImageTimes([{ url, name: filename, mtime: previous.mtimeMs, birthtime: previous.birthtimeMs }]);
+  }
   const base64 = dataUri.replace(/^data:image\/\w+;base64,/, '');
   fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
-  return buildImageUrl(category, filename);
+  rememberGalleryImageTime(url);
+  return url;
 }
 
 export function deleteImageFileByUrl(url) {
@@ -141,6 +148,7 @@ export function deleteImageFileByUrl(url) {
     try { fs.unlinkSync(avifTwin); } catch { /* 孪生删除失败不影响主流程 */ }
     removed = true;
   }
+  if (removed && !fs.existsSync(filePath) && (!avifTwin || !fs.existsSync(avifTwin))) forgetGalleryImageTime(cleanUrl);
   return removed;
 }
 

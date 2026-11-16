@@ -4,6 +4,7 @@
 import { readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { getAllImageDirs } from './imagePaths.js';
+import { assignGalleryImageTimes, compareGalleryImages } from './galleryImageTimes.js';
 
 export const galleryCache = {
   data: null,       // { images: [...], total: number }
@@ -25,7 +26,7 @@ async function scanDirectory(dirPath, category, urlPrefix) {
       const batchResults = await Promise.all(
         batch.map(async (name) => {
           const s = await stat(join(dirPath, name));
-          return { name, size: s.size, mtime: s.mtimeMs, folder: category, url: `${urlPrefix}/${name}` };
+          return { name, size: s.size, mtime: s.mtimeMs, birthtime: s.birthtimeMs, folder: category, url: `${urlPrefix}/${name}` };
         })
       );
       results.push(...batchResults);
@@ -51,7 +52,8 @@ export async function refreshGalleryCache() {
     allResults.push(...results);
   }
 
-  allResults.sort((a, b) => b.mtime - a.mtime);
+  assignGalleryImageTimes(allResults);
+  allResults.sort(compareGalleryImages);
 
   galleryCache.data = { images: allResults, total: allResults.length };
   galleryCache.mtime = Date.now();

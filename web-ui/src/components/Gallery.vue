@@ -172,7 +172,7 @@ const allDayGroups = computed(() => {
   const map = new Map()
 
   for (const img of images.value) {
-    const d = new Date(img.mtime)
+    const d = new Date(img.createdAt ?? img.mtime)
     const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 
     let label

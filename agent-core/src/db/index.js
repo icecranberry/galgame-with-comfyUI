@@ -41,6 +41,7 @@ import { migrateTtsSchema, recoverSpeechJobs } from './ttsSchema.js';
 import { migrateGodSaysSchema } from './godSaysSchema.js';
 import { migrateCohabitationSchema } from './cohabitationRepository.js';
 import { migratePhotoStudioSchema } from './photoStudioSchema.js';
+import { migrateGallerySchema } from './gallerySchema.js';
 
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -106,6 +107,7 @@ function cleanupOrphanedInFlight(database) {
 }
 
 function initSchema(db) {
+  migrateGallerySchema(db);
   db.exec(`
     -- 原始完整消息表（LLM 上下文用，不拆分）
     CREATE TABLE IF NOT EXISTS raw_messages (

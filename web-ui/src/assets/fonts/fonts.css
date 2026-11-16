@@ -1,3 +1,12 @@
+/* 月星楷 1.102 完整字库，无 unicode-range 分片；授权见 /licenses/moon-stars-kai.txt。 */
+@font-face {
+  font-family: 'Moon Stars Kai';
+  src: url('./MoonStarsKai-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @font-face {
   font-family: 'HarmonyOS Sans SC';
   src: url('./HarmonyOS_Sans_SC_Regular.woff2') format('woff2');

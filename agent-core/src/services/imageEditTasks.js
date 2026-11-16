@@ -14,6 +14,7 @@ import { randomBytes, randomUUID } from 'crypto';
 import { getPendingDir } from './imagePaths.js';
 import { broadcast } from './unifiedStreamBus.js';
 import { invalidateGalleryCache } from './galleryCache.js';
+import { assignGalleryImageTimes, rememberGalleryImageTime } from './galleryImageTimes.js';
 
 const tasks = new Map();
 
@@ -180,8 +181,13 @@ export async function applyEditTask(id, token) {
   if (typeof task.finalize === 'function') {
     task.appliedUrl = await task.finalize(task);
   } else {
+    if (fs.existsSync(task.targetPath)) {
+      const previous = fs.statSync(task.targetPath);
+      assignGalleryImageTimes([{ url: task.url, name: path.basename(task.targetPath), mtime: previous.mtimeMs, birthtime: previous.birthtimeMs }]);
+    }
     fs.mkdirSync(path.dirname(task.targetPath), { recursive: true });
     fs.renameSync(task.pendingPath, task.targetPath);
+    rememberGalleryImageTime(task.url);
   }
   task.status = 'applied';
   tasks.delete(id);

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { preserveImageWorkflow } from './imageWorkflowMetadata.js';
+import { encodeImageWithWorkflow } from './imageWorkflowMetadata.js';
 
 // 与图片实验室的 AVIF 压缩参数保持一致（quality 50 / effort 4）。
 const DATA_URI_RE = /^(data:image\/(?:png|jpe?g|webp|avif|gif);base64,)([A-Za-z0-9+/=\s]+)$/i;
@@ -20,12 +20,11 @@ export async function compressDataUriToAvif(dataUri, { maxEdge = 1920, quality =
 
   const input = Buffer.from(match[2], 'base64');
   const metadata = await sharp(input).metadata();
-  const pipeline = await preserveImageWorkflow(sharp(input, { animated: !!metadata.pages && metadata.pages > 1 }), input);
-  const buffer = await pipeline
+  const pipeline = sharp(input, { animated: !!metadata.pages && metadata.pages > 1 })
     .rotate()
     .resize({ width: maxEdge, height: maxEdge, fit: 'inside', withoutEnlargement: true })
-    .avif({ quality, effort })
-    .toBuffer();
+    .avif({ quality, effort });
+  const buffer = await encodeImageWithWorkflow(pipeline, input, 'avif');
 
   const compressed = 'data' + ':' + 'image' + '/avif;base64,' + buffer.toString('base64');
   if (compressed.length >= source.length) {

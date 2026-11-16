@@ -1,6 +1,8 @@
 const DEFAULT_FONT_ID = 'ma_shan_zheng'
 
 const FONT_CATALOG = {
+  // 完整字体随应用打包；loadFont 主动下载整份，不等待文字触发分片。
+  moon_stars_kai:   { family: "'Moon Stars Kai'", local: true },
   // ── fonts.font.im (Google Fonts 国内镜像) ──
   ma_shan_zheng:    { family: "'Ma Shan Zheng'",      cssUrl: 'https://fonts.googleapis.cn/css2?family=Ma+Shan+Zheng&display=swap' },
   zcool_kuaile:     { family: "'ZCOOL KuaiLe'",       cssUrl: 'https://fonts.googleapis.cn/css2?family=ZCOOL+KuaiLe&display=swap' },
@@ -18,7 +20,6 @@ const FONT_CATALOG = {
   cubic:            { family: "'Cubic'",              cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/cubic/dist/Cubic/result.css' },
   yozai:            { family: "'Yozai'",              cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/yozai/dist/Yozai-Regular/result.css' },
   xiaolai:          { family: "'Xiaolai'",            cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/xiaolai/dist/Xiaolai/result.css' },
-  moon_stars_kai:   { family: "'Moon Stars Kai'",     cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/moon-stars-kai/dist/MoonStarsKai-Regular/result.css' },
   chill_round:      { family: "'Chill Round F'",      cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/hcqyt/dist/ChillRoundFRegular/result.css' },
   yryxk:            { family: "'slideyouran'",        cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/ysyrxk/dist/slideyouran-Regular2.0/result.css' },
   lxgw_bright:      { family: "'LXGW Bright'",       cssUrl: 'https://cdn.jsdelivr.net/npm/@chinese-fonts/lxgwwenkaibright/dist/LXGWBright-Regular/result.css' },
@@ -53,6 +54,15 @@ export function loadFont(fontId) {
   if (loadedFonts.has(fontId)) return
 
   loadedFonts.add(fontId)
+
+  if (font.local) {
+    // @font-face 在全局 fonts.css 注册；进入页面即可预热全部字形。
+    void document.fonts.load(`16px ${font.family}`).catch((error) => {
+      loadedFonts.delete(fontId)
+      console.warn(`[handwriting-font] Failed to load ${fontId}`, error)
+    })
+    return
+  }
 
   const link = document.createElement('link')
   link.rel = 'stylesheet'
