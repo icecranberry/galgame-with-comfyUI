@@ -36,8 +36,10 @@ export function studioPhotoResult(data) {
   if (job.status === 'failed') throw new Error(job.error || '照相馆拍摄失败');
   if (!['running', 'done'].includes(job.status)) throw new Error('照相馆返回了无效的拍摄状态');
   if (job.status !== 'done') return { ...result, success: false, images: [] };
-  if (!/^\/images\/photo_studio\/[a-zA-Z0-9_-]+\.(?:png|jpe?g|webp|avif)$/.test(job.output_url || '')) throw new Error('照相馆成片地址无效');
-  return { ...result, success: true, images: [{ url: job.output_url, width: job.width, height: job.height }] };
+  const url = job.finish?.output_url || job.output_url;
+  if (!/^\/images\/photo_studio\/[a-zA-Z0-9_-]+\.(?:png|jpe?g|webp|avif)$/.test(url || '')) throw new Error('照相馆成片地址无效');
+  return { ...result, success: true, ...(job.finish_error ? { finish_error: job.finish_error } : {}),
+    images: [{ url, width: job.finish?.width || job.width, height: job.finish?.height || job.height }] };
 }
 
 // 等待原照相馆任务，不重新生图、不复制图片；停止等待不撤销已经受理的拍摄。

@@ -98,6 +98,7 @@ function _connect() {
     schedule_peek_progress: d => _dispatch('schedule_peek_progress', d),
     photo_studio_progress: d => _dispatch('photo_studio_progress', d),
     photo_studio_ready: d => _dispatch('photo_studio_ready', d),
+    photo_studio_batch: d => _dispatch('photo_studio_batch', d),
     schedule_reset_progress: d => _dispatch('schedule_reset_progress', d),
     schedule_state_change: d => _dispatch('schedule_state_change', d),
     schedule_changed: d => _dispatch('schedule_changed', d),

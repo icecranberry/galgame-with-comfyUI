@@ -37,7 +37,7 @@
           <div :key="mode === 'custom' ? 'custom' : selectedId" class="backdrop-proof">
             <span class="backdrop-proof-category">{{ mode === 'custom' ? '自定义场景' : selected?.category || '默认背景' }}</span>
             <strong>{{ mode === 'custom' ? '你的取景地' : selected?.label || '白色背景' }}</strong>
-            <p>{{ mode === 'custom' ? description || '把地点、时间与光线写在左侧。' : selected?.description || '白色无缝背景，硬质定向光与强烈阴影。' }}</p>
+            <p>{{ mode === 'custom' ? description || '把地点、时间与光线写在左侧。' : selected?.description || 'white background, simple background' }}</p>
           </div>
         </Transition>
         <studio-button class="backdrop-random" variant="primary" block :disabled="busy || loading || !!loadError || !randomCandidates.length" title="从全部背景中随机挑选" @click="randomize">随机挑选 ↗</studio-button>

@@ -7,6 +7,7 @@
         variant="chip"
         :size="size"
         :active="modelValue === option.value"
+        :disabled="disabled"
         :aria-pressed="modelValue === option.value"
         @click="$emit('update:modelValue', option.value)"
       >
@@ -25,6 +26,7 @@ const props = defineProps({
   options: { type: Array, default: () => [] },
   label: { type: String, required: true },
   size: { type: String, default: 'compact' },
+  disabled: Boolean,
 })
 defineEmits(['update:modelValue'])
 const optionsKey = computed(() => JSON.stringify(props.options.map(option => option.value)))

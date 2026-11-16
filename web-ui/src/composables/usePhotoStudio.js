@@ -11,6 +11,7 @@ export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persisten
     return persistentStudio
   }
   const catalog = ref([]), characters = ref([]), jobs = ref([]), capability = ref(null)
+  const batch = ref(null)
   const revisions = new Map()
   const terminalJobs = new Map()
   let capabilityLoaded = false, disposed = false
@@ -35,10 +36,24 @@ export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persisten
     mergeJob(job)
   }
 
+  function mergeBatch(incoming) {
+    if (disposed || !incoming?.id) return batch.value
+    const current = batch.value
+    if (current && (incoming.sequence < current.sequence || (incoming.id === current.id && incoming.revision < current.revision))) return current
+    batch.value = incoming
+    for (const job of incoming.jobs || []) {
+      // A batch snapshot can trail a job's SSE progress; only fill missing
+      // jobs or advance them to a terminal state, never roll progress back.
+      if (!jobs.value.some(item => item.id === job.id) || job.status !== 'running') mergeJob(job)
+    }
+    return batch.value
+  }
+
   async function refreshJobs() {
     const before = new Map(revisions)
     const result = await apiClient.getPhotoStudioJobs()
     if (disposed) return
+    mergeBatch(result.batch)
     const rows = result.jobs || []
     for (const job of rows) mergeJob(job, before, false)
     const current = new Map(jobs.value.map(job => [job.id, job]))
@@ -52,6 +67,7 @@ export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persisten
   const unsubscribers = [
     subscribe('photo_studio_progress', receive),
     subscribe('photo_studio_ready', receive),
+    subscribe('photo_studio_batch', ({ batch }) => mergeBatch(batch)),
     subscribe('connected', () => { void refreshJobs().catch(() => {}) }),
   ]
   onScopeDispose(() => { disposed = true; for (const unsubscribe of unsubscribers) unsubscribe() })
@@ -68,11 +84,8 @@ export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persisten
 
   // Low-frequency recovery only. Normal progress and completion use shared SSE.
   async function poll() {
-    const running = jobs.value.find(job => job.status === 'running')
-    const before = new Map(revisions)
     try {
-      if (running) mergeJob((await apiClient.getPhotoStudioJob(running.id)).job, before)
-      else await refreshJobs()
+      await refreshJobs()
     } catch { /* Reconnection or the next recovery check retries transient errors. */ }
   }
 
@@ -81,5 +94,15 @@ export function usePhotoStudio({ apiClient = api, subscribe = onEvent, persisten
     const result = await apiClient.createPhotoStudioJob(payload)
     return mergeJob(result.job, before) || result.job
   }
-  return { catalog, characters, jobs, capability, load, poll, create }
+  async function createBatch(payload) {
+    // If the POST response was lost after acceptance, recover by its stable
+    // request ID. Do not submit another batch and risk duplicate photos.
+    try { return mergeBatch((await apiClient.createPhotoStudioBatch(payload)).batch) }
+    catch (error) {
+      try { return mergeBatch((await apiClient.getPhotoStudioBatch(payload.id)).batch) }
+      catch { throw error }
+    }
+  }
+  async function stopBatch(id) { return mergeBatch((await apiClient.stopPhotoStudioBatch(id)).batch) }
+  return { catalog, characters, jobs, capability, batch, load, poll, create, createBatch, stopBatch }
 }

@@ -20,7 +20,7 @@ import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
 import memoryRoutes from './src/routes/memory.js';
 import imagesRoutes from './src/routes/images.js';
-import photoStudioRoutes from './src/routes/photoStudio.js';
+import photoStudioRoutes, { photoStudioQueue } from './src/routes/photoStudio.js';
 import charactersRoutes from './src/routes/characters.js';
 import emojiRoutes from './src/routes/emoji.js';
 import configRoutes from './src/routes/config.js';
@@ -205,6 +205,7 @@ console.log('============================================');
 
 // 初始化数据库
 getDb();
+photoStudioQueue.start();
 console.log('[db] SQLite initialized');
 
 // 恢复激活的 LLM profile 到内存 config。
@@ -423,6 +424,7 @@ let shuttingDown = false;
 const shutdown = () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  photoStudioQueue.dispose();
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
   stopConsolidationScheduler();

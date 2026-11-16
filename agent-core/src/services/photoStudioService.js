@@ -14,6 +14,7 @@ import { polishStudioPrompt, getStudioPolishContext, generateStudioClothing, spl
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { saveBase64Image } from './imagePaths.js';
 import { broadcast } from './unifiedStreamBus.js';
+import { createPhotoStudioFinishService } from './photoStudioFinish.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW, resolveCustomWorkflowPath } from './workflowTemplates.js';
 import { buildPhotoStudioPrompt, appendPhotoStudioOutfits, DEFAULT_PHOTO_STUDIO_DIMENSIONS, isPairPose, photoStudioDimensions } from './photoStudioWorkflow.js';
 
@@ -81,11 +82,18 @@ export function createPhotoStudioService({
   polishContext = getStudioPolishContext,
   clothing = generateStudioClothing,
   random = values => values[Math.floor(Math.random() * values.length)],
+  finishing,
 } = {}) {
   const db = () => database();
-  const job = id => db().prepare('SELECT * FROM photo_studio_jobs WHERE id = ?').get(id);
+  const finishes = finishing || createPhotoStudioFinishService({ database });
+  const withFinish = row => {
+    if (!row) return row;
+    const finish = finishes.get(row.id);
+    return finish ? { ...row, finish } : row;
+  };
+  const job = id => withFinish(db().prepare('SELECT * FROM photo_studio_jobs WHERE id = ?').get(id));
   const notify = (id, terminal = false) => publish(terminal ? 'photo_studio_ready' : 'photo_studio_progress', { job: job(id) });
-  const list = () => db().prepare('SELECT * FROM photo_studio_jobs ORDER BY created_at DESC, rowid DESC LIMIT 30').all();
+  const list = () => db().prepare('SELECT * FROM photo_studio_jobs ORDER BY created_at DESC, rowid DESC LIMIT 30').all().map(withFinish);
   const outfitScenes = ['work', 'casual', 'home', 'sleep'];
   // A bounded result cache survives navigation and image-render retries, but not
   // a server restart. Store only successful rewrites, never failures.
@@ -222,11 +230,20 @@ export function createPhotoStudioService({
     return { prompt, ...dimensions };
   }
 
-  async function submit(input) {
+  async function submit(input, batch = null) {
     const { id } = input;
     if (!/^[a-zA-Z0-9_-]{8,100}$/.test(id || '')) throw Object.assign(new Error('拍摄请求编号无效'), { status: 400 });
     const previous = job(id);
     if (previous) return previous;
+    function checkBatch() {
+      const active = db().prepare("SELECT * FROM photo_studio_batches WHERE status IN ('running','stopping') LIMIT 1").get();
+      if (batch) {
+        if (!active || active.id !== batch.id || active.status !== 'running' || active.current_job_id !== id) {
+          throw Object.assign(new Error('连拍已停止'), { status: 409 });
+        }
+      } else if (active) throw Object.assign(new Error('已有连拍任务，请等待完成或停止后续拍摄'), { status: 409 });
+    }
+    checkBatch();
     const { first, second, pose, backgroundId, prompt, dimensions, personas, loras, requiredTags, polishInstruction } = await prepare(input);
     const supported = await capability();
     if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
@@ -234,14 +251,17 @@ export function createPhotoStudioService({
     const secondName = second?.display_name || null;
     const created = db().transaction(() => {
       if (job(id)) return false;
+      checkBatch();
       const active = db().prepare("SELECT id FROM photo_studio_jobs WHERE status = 'running' LIMIT 1").get();
       if (active) throw Object.assign(new Error('已有照片正在拍摄，请等待完成'), { status: 409 });
       const task = db().prepare("INSERT INTO image_tasks (prompt_original, prompt_refined, status) VALUES (?, ?, 'running')").run(prompt, prompt);
+      const finishDefaults = finishes.defaults();
       db().prepare(`INSERT INTO photo_studio_jobs
-        (id, character_id, character2_id, character_kind, character2_kind, background_id, character_name, character2_name, pose_id, pose_name, image_task_id, prompt, width, height)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        (id, character_id, character2_id, character_kind, character2_kind, background_id, character_name, character2_name, pose_id, pose_name, image_task_id, prompt, width, height, finish_recipe, batch_id, batch_index)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id, first.angel ? null : first.id, second?.angel ? null : second?.id ?? null, first.angel ? 'angel' : 'resident', second?.angel ? 'angel' : 'resident', backgroundId,
-          firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height);
+          firstName, secondName, pose.id, `${pose.name} · ${pose.angle}`, Number(task.lastInsertRowid), prompt, dimensions.width, dimensions.height,
+          batch ? batch.finishRecipe : finishDefaults.enabled ? JSON.stringify(finishDefaults.recipe) : null, batch?.id ?? null, batch?.index ?? null);
       return true;
     })();
     if (created) {
@@ -302,6 +322,17 @@ export function createPhotoStudioService({
       database.prepare("UPDATE photo_studio_jobs SET stage = 'saving', progress = 0 WHERE id = ?").run(snapshot.id);
       notify(snapshot.id);
       const url = await save(result.images[0].base64, snapshot.id);
+      if (snapshot.finish_recipe) {
+        database.prepare("UPDATE photo_studio_jobs SET output_url = ?, stage = 'finishing' WHERE id = ?").run(url, snapshot.id);
+        notify(snapshot.id);
+        try {
+          const bytes = Buffer.from(result.images[0].base64.replace(/^data:image\/[^;]+;base64,/, ''), 'base64');
+          await finishes.automatic(snapshot.id, JSON.parse(snapshot.finish_recipe), bytes);
+        } catch (error) {
+          // The photo succeeded. A finishing failure must never discard it or retry image generation.
+          database.prepare('UPDATE photo_studio_jobs SET finish_error = ? WHERE id = ?').run(error.message, snapshot.id);
+        }
+      }
       database.transaction(() => {
         database.prepare("UPDATE photo_studio_jobs SET status = 'done', stage = 'done', progress = 1, output_url = ?, finished_at = datetime('now') WHERE id = ?").run(url, snapshot.id);
         database.prepare("UPDATE image_tasks SET status = 'done', prompt_refined = ?, output_paths = ?, workflow_template = ?, finished_at = datetime('now') WHERE id = ?")
@@ -324,7 +355,25 @@ export function createPhotoStudioService({
     return { prompt: await clothing({ brief: brief.trim() }) };
   }
 
-  return { submit, preview, clothingDraft, job, list, listCharacters };
+  async function retryFinish(id) {
+    const current = job(id);
+    if (!current) throw Object.assign(new Error('找不到这次拍摄'), { status: 404 });
+    if (current.status !== 'done' || current.stage === 'finishing') throw Object.assign(new Error('照片仍在处理中'), { status: 409 });
+    if (!current.finish_recipe) throw Object.assign(new Error('这张照片没有自动装裱设置'), { status: 400 });
+    db().prepare("UPDATE photo_studio_jobs SET stage = 'finishing', finish_error = NULL WHERE id = ?").run(id);
+    notify(id);
+    try {
+      await finishes.automatic(id, JSON.parse(current.finish_recipe));
+      db().prepare("UPDATE photo_studio_jobs SET stage = 'done', finish_error = NULL WHERE id = ?").run(id);
+      notify(id, true);
+      return job(id);
+    } catch (error) {
+      db().prepare("UPDATE photo_studio_jobs SET stage = 'done', finish_error = ? WHERE id = ?").run(error.message, id);
+      notify(id, true);
+      throw error;
+    }
+  }
+  return { submit, preview, clothingDraft, job, list, listCharacters, retryFinish };
 }
 
 export function savePhoto(dataUri, id) {

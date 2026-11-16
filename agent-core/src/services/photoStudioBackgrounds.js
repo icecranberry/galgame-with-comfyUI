@@ -6,7 +6,7 @@ import { chatSync } from './lorebook/runtime.js';
 
 const catalog = JSON.parse(readFileSync(new URL('../../resources/photo-studio-backgrounds.json', import.meta.url), 'utf8'));
 const byId = new Map(catalog.entries.map(entry => [entry.id, entry]));
-export const DEFAULT_STUDIO_BACKGROUND = 'A plain solid pure white background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering.';
+export const DEFAULT_STUDIO_BACKGROUND = 'white background, simple background';
 export function getStudioBackgrounds() { return catalog; }
 
 export function validateBackgroundPrompt(value) {
