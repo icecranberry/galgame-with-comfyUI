@@ -55,6 +55,20 @@ const AGENT_CORE = resolve(ROOT, "agent-core");
 const WEB_UI = resolve(ROOT, "web-ui");
 const VECTOR_SVC = resolve(ROOT, "vector-service");
 
+// 用真实装裱 worker 验证 JS 包、平台原生绑定、滤镜与 Path2D 绘制均可用。
+// 两个阶段都使用对应目录及捆绑 Node.js，不启动服务、不写入照片或数据库。
+const STUDIO_FINISH_CHECK = `
+import assert from 'node:assert/strict';
+import sharp from 'sharp';
+import { renderAutomaticStudioFinish } from './src/services/photoStudioFinishRender.js';
+import { defaultFinishRecipe } from './src/shared/photoStudioFinishRenderer.js';
+const original = await sharp({ create: { width: 128, height: 160, channels: 3, background: '#cda48a' } }).png().toBuffer();
+const png = await renderAutomaticStudioFinish(original, { ...defaultFinishRecipe(), frame: 'polaroid', filter: 'clear', caption: 'Studio' });
+const result = await sharp(png).metadata();
+assert.equal(result.format, 'png');
+assert.ok(result.width > 128 && result.height > 160, '装裱成品尺寸异常');
+`;
+
 // 镜像源
 const MIRRORS = {
   node: `https://npmmirror.com/mirrors/node/v${NODE_VERSION}/node-v${NODE_VERSION}-win-x64.zip`,
@@ -355,7 +369,8 @@ async function main() {
   // 不要预先删除或无条件重建原生模块：开发服务运行时 Windows 会锁住 .node 文件。
   log("agent-core npm install (~3-8min)...");
   {
-    const r = await exec(npmCmd, ["install", "--no-audit", "--no-fund"], { cwd: AGENT_CORE, print: true });
+    // canvas 的平台绑定属于 optionalDependencies，不能受本机 omit=optional 配置影响。
+    const r = await exec(npmCmd, ["install", "--include=optional", "--no-audit", "--no-fund"], { cwd: AGENT_CORE, print: true });
     if (!r.ok) { fail("agent-core npm install 失败!"); process.exit(1); }
 
     // 先验证现有绑定。大多数情况下 npm install 已经准备好依赖，且正在运行的
@@ -386,7 +401,15 @@ async function main() {
       if (sqliteSmokeTest.stderr) log(`  ${sqliteSmokeTest.stderr.slice(-1000)}`);
       process.exit(1);
     }
-    ok("agent-core 完成（better-sqlite3 已通过捆绑 Node.js 验证）");
+    const studioSmokeTest = await exec(bundledNode, ["--input-type=module", "-e", STUDIO_FINISH_CHECK], {
+      cwd: AGENT_CORE, shell: false, timeout: 30000,
+    });
+    if (!studioSmokeTest.ok) {
+      fail("照相馆装裱验证失败（含 @napi-rs/canvas 平台原生绑定），终止打包!");
+      if (studioSmokeTest.stderr) log(`  ${studioSmokeTest.stderr.slice(-1000)}`);
+      process.exit(1);
+    }
+    ok("agent-core 完成（SQLite 与照相馆装裱已通过捆绑 Node.js 验证）");
   }
 
   // web-ui — 同样始终安装，确保依赖与 package.json 一致
@@ -691,6 +714,14 @@ async function main() {
     if (!releaseSqliteTest.ok) {
       fail("release 中的 better-sqlite3 验证失败，终止打包!");
       if (releaseSqliteTest.stderr) log(`  ${releaseSqliteTest.stderr.slice(-1000)}`);
+      process.exit(1);
+    }
+    const releaseStudioTest = await exec(releaseNode, ["--input-type=module", "-e", STUDIO_FINISH_CHECK], {
+      cwd: releaseCore, shell: false, timeout: 30000,
+    });
+    if (!releaseStudioTest.ok) {
+      fail("release 中的照相馆装裱验证失败，终止打包!");
+      if (releaseStudioTest.stderr) log(`  ${releaseStudioTest.stderr.slice(-1000)}`);
       process.exit(1);
     }
     ok("agent-core\\node_modules（发布目录验证通过）");
