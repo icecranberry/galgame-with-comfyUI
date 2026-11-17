@@ -1,5 +1,5 @@
 <template>
-  <linshe-modal :model-value="open && !showTouchLines && !outfitConfirmation.open" :transition-ms="300" full :panel-class="{ 'es-detail-modal': editing }" body-class="es-manager-body" :title="`${character?.display_name || ''} · 立绘管理`" @close="$emit('close')">
+  <linshe-modal :model-value="open && !showTouchLines && !outfitConfirmation.open" :transition-ms="300" full :panel-class="{ 'es-detail-modal': editing }" body-class="es-manager-body" :title="player ? '我的表情立绘' : `${character?.display_name || ''} · 立绘管理`" @close="$emit('close')">
     <template #header-extra>
       <span v-if="!editing" class="es-count" :aria-label="`已生成 ${imageCount} 张，共 ${slots.length} 张立绘`" title="已生成 / 总数">{{ imageCount }}/{{ slots.length }}</span>
       <linshe-button v-if="editing" variant="ghost" size="sm" @click="editing = null">← 全部立绘</linshe-button>
@@ -19,7 +19,7 @@
       <section v-if="editing" :key="editing.id" class="es-detail">
         <div class="es-detail-heading"><span class="es-name">{{ editing.name }}</span><span class="es-status">{{ statusLabels[editing.status] || '未生成' }}</span></div>
         <TownImageEditor
-v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asset-id="character.id" crop-mode is-portrait fit-container
+v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asset-id="subject" crop-mode is-portrait fit-container
           generation-step="npcs" :generation-params="generation" :show-generation="false"
           :save-image="saveImage" :crop-image="cropImage" @saved="refresh" @cropped="refresh"
 >
@@ -41,14 +41,16 @@ v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asse
         <input ref="fileInput" class="es-file" type="file" accept="image/png,image/jpeg,image/webp" @change="upload">
       </section>
       <section v-else key="grid" class="es-overview">
-        <StandingGenerationDirection v-model="requirement" v-model:outfit-scene="outfitScene" input-id="standing-character-direction" :disabled="directionLocked" />
+        <StandingGenerationDirection v-model="requirement" v-model:outfit-scene="outfitScene" :input-id="player ? 'standing-player-direction' : 'standing-character-direction'" :hide-outfits="player" :disabled="directionLocked" />
+        <p v-if="player && reference && !hasReference" class="es-help">请先在酒馆上传头像或填写你的外观。</p>
         <div class="es-toolbar">
-          <linshe-button variant="primary" :disabled="(paused ? submitting || !!working : locked) || controlling || !targets.length" :loading="submitting || (paused && controlling)" @click="paused ? controlTask('restart') : generate()">{{ paused ? '重新生成' : busy ? '正在生成…' : imageCount > 0 ? '重新生成立绘' : '一键生成立绘' }}</linshe-button>
+          <linshe-button variant="primary" :disabled="(paused ? submitting || !!working : locked) || controlling || !targets.length || !hasReference" :loading="submitting === 'all' || (paused && controlling)" @click="paused ? controlTask('restart') : start(targets)">{{ paused ? '重新生成' : busy ? '正在生成…' : imageCount > 0 ? '重新生成立绘' : '一键生成立绘' }}</linshe-button>
+          <linshe-button :disabled="locked || controlling || !missingTargets.length || !hasReference" :loading="submitting === 'missing'" @click="start(missingTargets, { missingOnly: true })">补齐缺失表情</linshe-button>
           <linshe-button v-if="busy || job?.resumable" size="sm" :loading="controlling" :disabled="job?.status === 'stopping' || controlling || submitting" @click="controlTask()">{{ paused || job?.resumable ? '继续任务' : job?.status === 'stopping' ? '正在停止…' : '停止任务' }}</linshe-button>
           <p v-if="job" class="es-progress" role="status">{{ jobText }} <span v-if="job.error"> · {{ job.error }}</span></p>
-          <linshe-button class="es-touch-manage" size="sm" @click="showTouchLines=true">触摸台词管理</linshe-button>
+          <linshe-button v-if="!player" class="es-touch-manage" size="sm" @click="showTouchLines=true">触摸台词管理</linshe-button>
         </div>
-        <div class="es-touch-row"><p class="es-touch-status" role="status">{{ touchLineText }}</p></div>
+        <div v-if="!player" class="es-touch-row"><p class="es-touch-status" role="status">{{ touchLineText }}</p></div>
         <div class="es-strip">
         <div class="es-grid" role="region" aria-label="立绘列表，可横向滚动" tabindex="0" @wheel="scrollStandings">
           <article v-for="slot in slots" :key="slot.id" class="es-slot">
@@ -79,7 +81,7 @@ v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asse
     </div>
     <template #footer><linshe-button variant="primary" :disabled="locked || prompt.trim().length < 10" @click="savePrompt">保存提示词与配置</linshe-button></template>
   </linshe-modal>
-  <StandingTouchLinesManager :open="open && showTouchLines" :character-id="character?.id" :name="character?.display_name" @close="showTouchLines=false" @saved="refresh" />
+  <StandingTouchLinesManager v-if="!player" :open="open && showTouchLines" :character-id="character?.id" :name="character?.display_name" @close="showTouchLines=false" @saved="refresh" />
   <StandingOutfitConfirmation :state="outfitConfirmation" @choose="chooseOutfitPolicy" />
 </template>
 
@@ -96,15 +98,18 @@ import TownImageEditor from './town/TownImageEditor.vue'
 import TownPromptPanel from './town/TownPromptPanel.vue'
 import * as api from '../api/index.js'
 import { onEvent } from '../stores/unifiedStream.js'
-const props = defineProps({ open: Boolean, character: Object, initialOutfitScene: { type: String, default: 'work' } })
+const props = defineProps({ open: Boolean, character: Object, player: Boolean, initialOutfitScene: { type: String, default: 'work' } })
 defineEmits(['close'])
 const { outfitConfirmation, confirmStandingOutfits, chooseOutfitPolicy } = useStandingOutfitConfirmation()
 const confirm = inject('confirm', async () => false)
+const subject = computed(() => props.player ? 'player' : props.character?.id)
 const slots = ref([]), jobs = ref([]), busy = ref(false)
+const reference = ref(null)
+const hasReference = computed(() => !props.player || Boolean(reference.value?.avatar || reference.value?.appearance))
 const showTouchLines=ref(false)
 const touchLines = ref({status:"empty"})
 const touchLineText = computed(() => ({empty:"全身触摸默认开启；没有台词时，生成整套立绘会同步生成专属反应。",generating:"正在后台生成全身触摸台词，不影响立绘出图…",ready:"全身触摸台词已就绪 · 10 个部位，每处 3 句",failed:"触摸台词生成失败；保留已有台词，下次生成整套立绘时重试。"})[touchLines.value.status])
-const requirement = ref(''), error = ref(''), submitting = ref(false), working = ref('')
+const requirement = ref(''), error = ref(''), submitting = ref(''), working = ref('')
 const outfitScene = ref(props.initialOutfitScene)
 const editingId = ref(null), prompt = ref(''), generation = ref({}), showPrompt = ref(false), fileInput = ref(null)
 const editing = computed({ get: () => slots.value.find(s => s.id === editingId.value), set: value => { editingId.value = value?.id || null } })
@@ -122,15 +127,17 @@ async function controlTask(action = paused.value || job.value?.resumable ? 'resu
   error.value = ''
   controlling.value = true
   try {
-    const characterId = props.character.id, jobId = job.value.id
+    const id = subject.value, jobId = job.value.id
     let body
     if (action === 'restart') {
       body = { requirement: requirement.value, outfitScene: outfitScene.value }
-      const missingOutfitPolicy = await confirmStandingOutfits(() => api.preflightExpressionStandings(characterId, body))
-      if (missingOutfitPolicy === null) return
-      body.missingOutfitPolicy = missingOutfitPolicy
+      if (!props.player) {
+        const missingOutfitPolicy = await confirmStandingOutfits(() => api.preflightExpressionStandings(id, body))
+        if (missingOutfitPolicy === null) return
+        body.missingOutfitPolicy = missingOutfitPolicy
+      }
     }
-    await api.controlExpressionStandingTask(characterId, jobId, action, body)
+    await api.controlExpressionStandingTask(id, jobId, action, body)
     await refresh()
   }
   catch (e) { error.value = e.message }
@@ -157,14 +164,15 @@ watch(promptGenerating, active => {
 onBeforeUnmount(() => clearInterval(scanTipTimer))
 const statusLabels = { empty: '未生成', queued: '等待出图', generating: '正在出图', done: '已完成', failed: '失败' }
 const targets = computed(() => slots.value.map(s => s.id))
+const missingTargets = computed(() => slots.value.filter(s => !s.image_url).map(s => s.id))
 const imageCount = computed(() => slots.value.filter(s => s.image_url).length)
 const jobText = computed(() => ({ queued: '等待任务', outfits: '正在自动补全所选服装，完成后继续生成立绘…', stopping: '当前步骤完成后停止，不再提交下一张', paused: '任务已停止，可按原设置继续剩余立绘，或修改服装与生成方向后重新生成本批次', prompts: '正在一次生成全部提示词…', generating: `正在逐张出图 ${job.value?.completed || 0}/${JSON.parse(job.value?.slots_json || '[]').length}`, done: '本批次已完成', partial_failed: '部分图片失败，可单独重试', failed: '任务失败' })[job.value?.status] || '')
 let timer, requestSeq = 0, directionJobId = ''
 async function refresh() {
-  if (!props.open || !props.character?.id) return
+  if (!props.open || !subject.value) return
   const seq = ++requestSeq
   try {
-    const data = await api.listExpressionStandings(props.character.id)
+    const data = await api.listExpressionStandings(subject.value)
     if (seq !== requestSeq) return
     if ((data.busy || data.jobs[0]?.resumable) && data.jobs[0]?.id && data.jobs[0].id !== directionJobId) {
       const request = JSON.parse(data.jobs[0].request_json || '{}')
@@ -173,33 +181,38 @@ async function refresh() {
       directionJobId = data.jobs[0].id
     }
     touchLines.value = data.touchLines || {status:"empty"}
+    reference.value = data.reference || null
     slots.value = data.slots; jobs.value = data.jobs; busy.value = data.busy
   } catch (e) { if (seq === requestSeq) error.value = e.message }
 }
-watch(() => [props.open, props.character?.id], () => {
+watch(() => [props.open, subject.value], () => {
   chooseOutfitPolicy()
   clearInterval(timer); requestSeq++
   directionJobId = ''
   showPrompt.value = false
   showTouchLines.value = false
-  if (props.open) { outfitScene.value = props.initialOutfitScene; editingId.value = null; error.value = ''; refresh(); timer = setInterval(refresh, 2500) }
+  if (props.open) {
+    slots.value = []; jobs.value = []; busy.value = false; reference.value = null
+    outfitScene.value = props.initialOutfitScene; editingId.value = null; error.value = ''
+    refresh(); timer = setInterval(refresh, 2500)
+  }
 }, { immediate: true })
-const unsubscribe = onEvent('expression_standings_updated', d => { if (d.characterId === props.character?.id) refresh() })
+const unsubscribe = onEvent('expression_standings_updated', d => { if ((d.subject ?? d.characterId) === subject.value) refresh() })
 onBeforeUnmount(() => { clearInterval(timer); requestSeq++; unsubscribe() })
 function edit(slot) { editingId.value = slot.id; prompt.value = slot.prompt || ''; generation.value = { ...slot.generation, portraitLoras: true }; showPrompt.value = false }
-async function start(ids, reusePrompts = false) {
+async function start(ids, { reusePrompts = false, missingOnly = false } = {}) {
   if (locked.value || controlling.value) return
-  error.value = ''; submitting.value = true
+  error.value = ''; submitting.value = missingOnly ? 'missing' : reusePrompts ? 'single' : 'all'
   try {
-    const characterId = props.character.id
-    const body = { slotIds: ids, requirement: requirement.value, outfitScene: outfitScene.value, reusePrompts }
-    const missingOutfitPolicy = reusePrompts ? undefined : await confirmStandingOutfits(() => api.preflightExpressionStandings(characterId, body))
+    const id = subject.value
+    const body = { slotIds: ids, requirement: requirement.value, outfitScene: outfitScene.value, reusePrompts, missingOnly }
+    const missingOutfitPolicy = reusePrompts || props.player ? undefined : await confirmStandingOutfits(() => api.preflightExpressionStandings(id, body))
     if (missingOutfitPolicy === null) return
-    await api.generateExpressionStandings(characterId, { ...body, missingOutfitPolicy })
+    await api.generateExpressionStandings(id, { ...body, missingOutfitPolicy })
     await refresh()
   }
   catch (e) { error.value = e.message }
-  finally { submitting.value = false }
+  finally { submitting.value = '' }
 }
 let scrollTarget = 0, scrollList = null, lastWheelAt = 0
 function scrollStandings(event) {
@@ -217,16 +230,15 @@ function scrollStandings(event) {
   scrollTarget = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, scrollTarget + delta * unit))
   list.scrollTo({ left: scrollTarget, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
 }
-function generate() { return start(targets.value) }
 async function savePrompt() {
-  try { await api.updateExpressionStandingPrompt(props.character.id, editingId.value, prompt.value, generation.value); await refresh(); showPrompt.value = false; return true }
+  try { await api.updateExpressionStandingPrompt(subject.value, editingId.value, prompt.value, generation.value); await refresh(); showPrompt.value = false; return true }
   catch (e) { error.value = e.message; return false }
 }
-async function regenerate() { if (await savePrompt()) await start([editingId.value], true) }
+async function regenerate() { if (await savePrompt()) await start([editingId.value], { reusePrompts: true }) }
 async function imageAction(action, body = {}) {
   const slot = editingId.value
   working.value = action; error.value = ''
-  try { await api.editExpressionStanding(props.character.id, slot, action, body); await refresh() }
+  try { await api.editExpressionStanding(subject.value, slot, action, body); await refresh() }
   catch (e) { error.value = e.message; throw e }
   finally { working.value = '' }
 }
@@ -242,7 +254,7 @@ async function upload(event) {
 }
 async function removeImage() {
   if (!(await confirm({ title: '删除立绘', message: `删除「${editing.value.name}」的图片？提示词会保留。`, danger: true }))) return
-  try { await api.deleteExpressionStanding(props.character.id, editingId.value); await refresh() } catch (e) { error.value = e.message }
+  try { await api.deleteExpressionStanding(subject.value, editingId.value); await refresh() } catch (e) { error.value = e.message }
 }
 </script>
 

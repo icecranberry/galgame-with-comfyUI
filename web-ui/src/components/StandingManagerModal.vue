@@ -1,5 +1,8 @@
 <template>
-  <linshe-modal :model-value="open && !detailOpen && !outfitConfirmation.open" title="立绘管理" full :transition-ms="300" @close="$emit('close')">
+  <linshe-modal :model-value="open && !detailOpen && !playerOpen && !outfitConfirmation.open" title="立绘管理" full :transition-ms="300" @close="$emit('close')">
+    <template #header-extra>
+      <linshe-button size="sm" variant="ghost" @click="playerOpen = true">我的表情立绘</linshe-button>
+    </template>
     <div class="standing-manager">
       <StandingGenerationDirection v-model="requirement" v-model:outfit-scene="outfitScene" input-id="standing-batch-direction" :disabled="!!submitting" batch />
       <div class="standing-actions">
@@ -54,6 +57,7 @@
     </div>
   </linshe-modal>
   <ExpressionStandingManager :open="open && detailOpen" :character="selectedCharacter" :initial-outfit-scene="outfitScene" @close="closeDetail" />
+  <ExpressionStandingManager player :open="open && playerOpen" @close="playerOpen = false" />
   <StandingOutfitConfirmation :state="outfitConfirmation" @choose="chooseOutfitPolicy" />
 </template>
 
@@ -75,7 +79,7 @@ const { outfitConfirmation, confirmStandingOutfits, chooseOutfitPolicy } = useSt
 const requirement = ref(''), submitting = ref(''), error = ref(''), message = ref('')
 const outfitScene = ref('work')
 const overview = ref({}), loading = ref(false), loaded = ref(false)
-const selectedCharacter = ref(null), detailOpen = ref(false)
+const selectedCharacter = ref(null), detailOpen = ref(false), playerOpen = ref(false)
 const rows = computed(() => props.characters.map(c => overview.value[c.id]).filter(Boolean))
 
 const activity = computed(() => standingTaskActivity(rows.value))
@@ -142,6 +146,7 @@ watch(() => props.open, open => {
   clearTimeout(eventTimer)
   requestSeq++
   detailOpen.value = false
+  playerOpen.value = false
   message.value = ''
   if (open) {
     loading.value = true

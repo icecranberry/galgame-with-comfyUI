@@ -10,6 +10,7 @@ const DATA_DIR = process.env.IMAGES_DIR
   ? path.resolve(process.env.IMAGES_DIR)
   : path.resolve(__dirname, '..', '..', 'data', 'images');
 const AVATARS_DIR = path.resolve(__dirname, '..', '..', 'data', 'avatars');
+export const USER_AVATAR_FILE = path.join(AVATARS_DIR, 'user_avatar.png');
 
 export const IMAGE_CATEGORIES = {
   photo_studio: { dir: 'photo_studio', label: '照相馆' },

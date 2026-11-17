@@ -2127,7 +2127,7 @@ export { getTownWallet, executeTownLifeCommand, createTownTargetTradeCommand,
 
 
 // 独立角色表情立绘；与普通立绘和小镇素材分开存储。
-const expressionStandingPath = (id, slot = '') => `/characters/${id}/expression-standings${slot ? '/' + encodeURIComponent(slot) : ''}`
+const expressionStandingPath = (id, slot = '') => `${id === 'player' ? '/expression-standings/player' : `/characters/${id}/expression-standings`}${slot ? '/' + encodeURIComponent(slot) : ''}`
 export const getStandingOverview = () => request('/expression-standings/overview')
 export const preflightAllExpressionStandings = body => request('/expression-standings/preflight', { method: 'POST', body })
 export const preflightExpressionStandings = (id, body) => request(expressionStandingPath(id) + '/preflight', { method: 'POST', body })

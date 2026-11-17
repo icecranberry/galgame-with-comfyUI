@@ -2,7 +2,7 @@
   <div class="standing-generation-direction">
     <label :for="inputId">生成方向</label>
     <div class="standing-generation-controls">
-      <linshe-tabs v-model="outfitScene" :options="outfitOptions" size="sm" :disabled="disabled" aria-label="生成使用的角色形象" />
+      <linshe-tabs v-if="!hideOutfits" v-model="outfitScene" :options="outfitOptions" size="sm" :disabled="disabled" aria-label="生成使用的角色形象" />
       <linshe-input :id="inputId" v-model="requirement" :maxlength="2000" :disabled="disabled" placeholder="例如换成冬装、修改发色、动作更含蓄…（可选）" />
     </div>
   </div>
@@ -12,7 +12,7 @@
 import LinsheTabs from '../ui/LinsheTabs.vue'
 import LinsheInput from '../ui/LinsheInput.vue'
 
-defineProps({ inputId: { type: String, required: true }, disabled: Boolean, batch: Boolean })
+defineProps({ inputId: { type: String, required: true }, disabled: Boolean, batch: Boolean, hideOutfits: Boolean })
 const outfitScene = defineModel('outfitScene', { type: String, default: 'work' })
 const requirement = defineModel({ type: String, default: '' })
 const outfitOptions = [

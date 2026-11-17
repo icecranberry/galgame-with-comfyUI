@@ -24,7 +24,7 @@ export function createStandingInteractionService({ db, imageExists, emit = () =>
     return row;
   }
   function images(id) {
-    return db.prepare(`SELECT s.*, c.emoji_key FROM character_expression_standings s
+    return db.prepare(`SELECT s.*, c.emoji_key FROM expression_standings s
       LEFT JOIN emoji_categories c ON s.slot_id = 'emoji:' || c.id WHERE s.character_id=?`).all(id)
       .filter(row => row.image_url && imageExists(row.image_url));
   }

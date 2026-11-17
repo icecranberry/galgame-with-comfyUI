@@ -115,7 +115,7 @@ import { applyWhiteGapStrength, normalizeWhiteGapStrength, MAX_WHITE_GAP_PIXELS 
 
 const props = defineProps({
   src: { type: String, required: true },
-  assetId: { type: Number, required: true },
+  assetId: { type: [Number, String], required: true },
   hint: { type: String, default: '' },
   loadingText: { type: String, default: '' },
   /** 兼容旧调用；显示高度现在由浏览器可视区决定 */
