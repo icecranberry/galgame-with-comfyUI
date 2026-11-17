@@ -1,0 +1,225 @@
+<template>
+  <main class="game-theme game-theme--pixel game-world" @dragover.prevent @drop.prevent="dropZip">
+    <header class="arcade-topbar">
+      <router-link class="arcade-brand" to="/games" aria-label="游戏中心首页"><span class="arcade-brand__symbol"><GamePixelIcon name="controller" /></span><strong>GAME<span class="arcade-brand__dot">.</span></strong></router-link>
+      <div class="arcade-topbar__actions">
+        <GameAction variant="quiet" compact aria-label="连接设置" :disabled="!!busy" @click="showSettings = true"><GamePixelIcon name="settings" /><span>连接设置</span></GameAction>
+      </div>
+    </header>
+
+    <div class="arcade-floor">
+    <div class="arcade-backdrop" aria-hidden="true"><img class="arcade-backdrop__art arcade-backdrop__art--left" :src="playgroundArtwork" alt=""><img class="arcade-backdrop__art arcade-backdrop__art--right" :src="playgroundArtwork" alt=""></div>
+    <div class="arcade-room">
+    <div class="arcade-toolbar">
+      <nav role="tablist" aria-label="游戏收藏" @keydown="moveTabFocus">
+        <GameAction v-for="item in tabs" :id="`game-tab-${item.value}`" :key="item.value" role="tab" variant="tab" :active="tab === item.value" :aria-selected="tab === item.value" aria-controls="game-shelf" :tabindex="tab === item.value ? 0 : -1" @click="tab = item.value"><GamePixelIcon :name="item.value === 'installed' ? 'cartridge' : 'globe'" />{{ item.label }}<span v-if="item.value === 'installed'" class="arcade-tab-count">{{ installed.length }}</span></GameAction>
+      </nav>
+      <GameAction v-if="tab === 'community'" compact variant="quiet" :busy="loading" :disabled="!!busy" @click="discover(true)">刷新工坊 ↻</GameAction>
+    </div>
+    <div v-if="error" class="arcade-notice" role="alert"><span>{{ error }}</span><GameAction variant="quiet" compact :disabled="!!busy || loading" @click="retryCatalog">重试</GameAction></div>
+
+    <Transition name="arcade-content" mode="out-in">
+      <section id="game-shelf" :key="tab" class="arcade-shelf" role="tabpanel" :aria-labelledby="`game-tab-${tab}`" :aria-busy="loading">
+        <div v-if="loading && !visibleGames.length" class="arcade-loading" role="status"><span class="arcade-loading__light" aria-hidden="true"></span>正在打开{{ tab === 'community' ? '社区工坊' : '游戏馆' }}</div>
+        <article v-if="featuredGame" class="arcade-cartridge arcade-cartridge--official">
+          <div class="cartridge-windowbar"><span><span class="cartridge-windowbar__light" aria-hidden="true"></span>01 / 官方首发</span><span class="cartridge-windowbar__pixels" aria-hidden="true"><i></i><i></i><i></i></span></div>
+          <div class="cartridge-copy">
+            <span class="cartridge-number"><GamePixelIcon name="star" />{{ featuredGame.id === 'trpg-simulator' ? 'TRPG / 和邻舍一起冒险' : 'OFFICIAL / 官方游戏' }}</span>
+            <h2 class="cartridge-title"><span v-if="featuredGame.id === 'trpg-simulator'">深夜</span><strong>{{ featuredGame.id === 'trpg-simulator' ? '跑团局' : featuredGame.name }}<span class="cartridge-title__dot">.</span></strong></h2>
+            <p><template v-if="featuredGame.id === 'trpg-simulator'"><span>关掉小镇的灯，和熟悉的人围坐一桌。</span><span>今晚你是守秘人，还是入局的调查员？</span></template><template v-else>{{ featuredGame.description }}</template></p>
+            <div class="cartridge-copy__bottom"><GameAction variant="primary" :disabled="!featuredGame.enabled || !featuredGame.compatible || !!busy" @click="openGame(featuredGame)">{{ featuredGame.compatible ? featuredGame.enabled ? '开始游戏' : '已停用' : '需要更新邻舍' }}<GamePixelIcon name="arrow" /></GameAction><span>{{ featuredGame.author || '官方作品' }} <i>／</i> v{{ featuredGame.version }}</span></div>
+          </div>
+          <div class="cartridge-art" aria-hidden="true"><img :src="featuredGame.id === 'trpg-simulator' ? diceArtwork : featuredGame.coverUrl || diceArtwork" alt=""><span v-if="featuredGame.id === 'trpg-simulator'" class="cartridge-art__stamp">LET THE DICE DECIDE.</span><span class="cartridge-art__corner"></span></div>
+        </article>
+        <article v-for="item in remainingGames" :key="item.repoUrl || item.id" class="arcade-cartridge community-cartridge">
+          <GameCardMenu v-if="tab === 'installed' && item.source !== 'official'" :game="item" :disabled="!!busy" @uninstall="openRemove(item)" />
+          <div class="community-cartridge__art" aria-hidden="true"><img v-if="item.coverUrl" :src="item.coverUrl" alt=""><template v-else>{{ item.name.slice(0, 1) }}<span>{{ item.source === 'official' ? 'OFFICIAL' : 'INDEPENDENT' }}<br>GAME MODULE</span></template></div>
+          <div class="community-cartridge__copy">
+            <span class="arcade-eyebrow">{{ item.author || '社区创作者' }} / v{{ item.version }}</span><div class="community-cartridge__title"><h2>{{ item.name }}</h2><span v-if="item.stars !== undefined" class="cartridge-stars">☆ {{ item.stars }}</span></div><p>{{ item.description }}</p>
+            <div v-if="tab === 'installed'" class="community-cartridge__actions"><GameAction variant="primary" :disabled="!item.enabled || !item.compatible || !!busy" @click="openGame(item)">{{ !item.compatible ? '需要更新邻舍' : item.enabled ? '开始游戏 ↗' : '已停用' }}</GameAction></div>
+            <div v-else class="community-cartridge__actions"><GameAction variant="primary" :disabled="!!busy || isInstalled(item.id)" :busy="busy === item.repoUrl" @click="install(item.repoUrl)">{{ isInstalled(item.id) ? '已安装' : '安装游戏 ↗' }}</GameAction><a :href="item.repoUrl" target="_blank" rel="noopener noreferrer">查看仓库 ↗</a></div>
+          </div>
+        </article>
+        <div v-if="!loading && !visibleGames.length" class="arcade-empty"><GamePixelIcon name="cartridge" class="arcade-empty__icon" /><h2>{{ tab === 'community' ? '下一款游戏，还在路上。' : '第一盒游戏，就从这里开始。' }}</h2><p>{{ tab === 'community' ? '暂未发现社区作品，也可以通过仓库链接或 ZIP 安装。' : '通过 GitHub 仓库或 ZIP 游戏包，把新的玩法装进来。' }}</p><GameAction :disabled="!!busy" @click="openImport">安装游戏<GamePixelIcon name="plus" /></GameAction></div>
+      </section>
+    </Transition>
+    <div class="arcade-import-strip"><span class="arcade-import-strip__icon" aria-hidden="true"><GamePixelIcon name="cartridge" /></span><span class="arcade-import-strip__copy">带了新卡带？<span>把下一份快乐，装进游戏馆。</span></span><GameAction :disabled="!!busy" @click="openImport">导入游戏<GamePixelIcon name="plus" /></GameAction></div>
+    <footer class="arcade-footer"><span><GamePixelIcon name="heart" />每一局记忆，都留在这个房间里。</span><span class="arcade-footer__pixels" aria-hidden="true"><GamePixelIcon name="star" /><span>HAVE A GOOD GAME</span><GamePixelIcon name="star" /></span></footer>
+    </div>
+    </div>
+
+    <GameOverlay v-model="showImport" theme="pixel" title="装进一盒新游戏" :close-disabled="!!busy">
+      <form class="arcade-form" @submit.prevent="install(repoUrl)"><label for="game-repo">GitHub 仓库</label><input id="game-repo" v-model.trim="repoUrl" class="arcade-input" placeholder="owner/repo 或 GitHub 仓库链接" :disabled="!!busy" autocomplete="off"><GameAction type="submit" variant="primary" :busy="!!busy && busy !== 'settings'" :disabled="!repoUrl || !!busy">从仓库安装 ↗</GameAction></form>
+      <div class="arcade-zip-zone"><GameAction :disabled="!!busy" @click="fileInput?.click()">选择 ZIP 文件</GameAction><span>或拖入窗口 · 最大 50MB</span><input ref="fileInput" class="arcade-file" type="file" accept=".zip,application/zip" aria-label="选择游戏包" @change="chooseZip"></div>
+      <p class="arcade-dialog-description arcade-dialog-description--muted">含后端扩展的游戏会执行本机代码，请选择信任的作者。</p><p v-if="importError" class="arcade-dialog-error" role="alert">{{ importError }}</p>
+    </GameOverlay>
+    <GameOverlay v-model="showSettings" theme="pixel" title="工坊连接设置" :close-disabled="!!busy" @after-leave="token = ''">
+      <form id="game-settings-form" class="arcade-form" @submit.prevent="saveSettings(false)"><label for="game-token">GitHub Token（可选）</label><input id="game-token" v-model="token" class="arcade-input" type="password" autocomplete="new-password" :disabled="!!busy" :placeholder="hasToken ? '已保存，留空保留' : '可留空'"><label for="game-mirror">Raw / Archive 镜像前缀（可选）</label><input id="game-mirror" v-model.trim="mirrorPrefix" class="arcade-input" :disabled="!!busy" placeholder="https://镜像域名"><p v-if="settingsError" class="arcade-dialog-error" role="alert">{{ settingsError }}</p></form>
+      <template #footer><GameAction v-if="hasToken" variant="quiet" :disabled="!!busy" @click="saveSettings(true)">清除 Token</GameAction><GameAction type="submit" form="game-settings-form" variant="primary" :busy="busy === 'settings'" :disabled="!!busy">保存设置</GameAction></template>
+    </GameOverlay>
+    <GameOverlay v-model="removeOpen" theme="pixel" title="取下这盒游戏？" :close-disabled="!!busy" @after-leave="toRemove = null">
+      <p class="arcade-dialog-description">卸载《{{ toRemove?.name }}》？之后可以重新安装。</p><label class="arcade-check"><input v-model="clearData" type="checkbox" :disabled="!!busy"><span class="arcade-check__box" aria-hidden="true"></span><span>同时删除存档和游戏图片</span></label><p v-if="removeError" class="arcade-dialog-error" role="alert">{{ removeError }}</p>
+      <template #footer><GameAction :disabled="!!busy" @click="removeOpen = false">留下</GameAction><GameAction variant="danger" :busy="!!busy" @click="uninstall">卸载游戏</GameAction></template>
+    </GameOverlay>
+  </main>
+</template>
+<script setup>
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import GameAction from '../games/components/GameAction.vue'
+import GameCardMenu from '../games/components/GameCardMenu.vue'
+import GamePixelIcon from '../games/components/GamePixelIcon.vue'
+import GameOverlay from '../games/components/GameOverlay.vue'
+import playgroundArtwork from '../games/assets/arcade-playground.svg'
+import diceArtwork from '../games/assets/pixel-dice.svg'
+import '../games/styles/game-ui.css'
+import { gameRequest } from '../api/games.js'
+
+const router = useRouter(), tab = ref('installed'), installed = ref([]), community = ref([]), loading = ref(false), busy = ref(''), error = ref('')
+const showImport = ref(false), showSettings = ref(false), repoUrl = ref(''), fileInput = ref(null), toRemove = ref(null), removeOpen = ref(false), clearData = ref(true)
+const token = ref(''), hasToken = ref(false), mirrorPrefix = ref(''), settingsError = ref(''), importError = ref(''), removeError = ref('')
+const tabs = [{ label: '我的游戏', value: 'installed' }, { label: '社区工坊', value: 'community' }]
+const visibleGames = computed(() => tab.value === 'installed' ? installed.value : community.value)
+const featuredGame = computed(() => tab.value === 'installed' ? installed.value.find(game => game.source === 'official') : null)
+const remainingGames = computed(() => visibleGames.value.filter(game => game !== featuredGame.value))
+const isInstalled = id => installed.value.some(game => game.id === id)
+const reload = async () => { installed.value = await gameRequest() }
+const openGame = game => router.push(`/games/${game.id}`)
+const openImport = () => { if (!busy.value) { importError.value = ''; showImport.value = true } }
+const openRemove = item => { if (busy.value || item.source === 'official') return; toRemove.value = item; removeError.value = ''; removeOpen.value = true }
+async function moveTabFocus(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const index = tabs.findIndex(item => item.value === tab.value)
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
+  tab.value = tabs[next].value
+  await nextTick(); document.getElementById(`game-tab-${tab.value}`)?.focus()
+}
+async function discover(refresh = false) {
+  loading.value = true; error.value = ''
+  try { const result = await gameRequest(`/community/discover${refresh ? '?refresh=1' : ''}`); community.value = result.items; error.value = result.warning || '' }
+  catch (e) { error.value = e.message } finally { loading.value = false }
+}
+watch(tab, value => { if (value === 'community') discover() })
+async function retryCatalog() { if (tab.value === 'community') return discover(true); loading.value = true; error.value = ''; try { await reload() } catch (e) { error.value = e.message } finally { loading.value = false } }
+async function mutate(key, action, target = error) {
+  if (busy.value) return
+  busy.value = key; target.value = ''
+  try { await action(); await reload() } catch (e) { target.value = e.message } finally { busy.value = '' }
+}
+const install = (url, replace = false) => mutate(url, async () => { await gameRequest('/import/github', { method: 'POST', body: { url, replace } }); showImport.value = false }, showImport.value ? importError : error)
+async function uploadZip(file) {
+  if (!file || busy.value) return
+  if (!file.name.toLowerCase().endsWith('.zip') || file.size > 50 * 1024 * 1024) { importError.value = '请选择不超过 50MB 的 ZIP 文件'; return }
+  await mutate('zip', async () => { await gameRequest('/import/zip', { method: 'POST', body: file, raw: true }); showImport.value = false }, importError)
+}
+function chooseZip(event) { const file = event.target.files?.[0]; event.target.value = ''; void uploadZip(file) }
+function dropZip(event) { if (busy.value || !event.dataTransfer.files?.length) return; showImport.value = true; importError.value = ''; void uploadZip(event.dataTransfer.files[0]) }
+const uninstall = () => { if (!toRemove.value || toRemove.value.source === 'official') return; return mutate(toRemove.value.id, async () => { await gameRequest(`/${toRemove.value.id}?clearData=${clearData.value ? '1' : '0'}`, { method: 'DELETE' }); removeOpen.value = false }, removeError) }
+async function saveSettings(clear) {
+  if (busy.value) return
+  busy.value = 'settings'; settingsError.value = ''
+  try { const result = await gameRequest('/settings', { method: 'PUT', body: { mirrorPrefix: mirrorPrefix.value, ...(clear ? { token: '' } : token.value ? { token: token.value } : {}) } }); hasToken.value = result.hasToken; token.value = ''; showSettings.value = false }
+  catch (e) { settingsError.value = e.message } finally { busy.value = '' }
+}
+onMounted(async () => { loading.value = true; try { await reload(); const settings = await gameRequest('/settings'); hasToken.value = settings.hasToken; mirrorPrefix.value = settings.mirrorPrefix } catch (e) { error.value = e.message } finally { loading.value = false } })
+</script>
+<style scoped>
+.game-world { flex:1;min-width:0;min-height:0;height:100%;overflow:auto;display:flex;flex-direction:column;isolation:isolate;background:var(--game-bg);background-image:radial-gradient(#c4b7d34d 1px,transparent 1px);background-size:18px 18px;scrollbar-color:#b8acc8 transparent; }
+.arcade-topbar { display:flex;align-items:center;justify-content:space-between;padding:18px max(32px,calc((100% - 1180px)/2));border-bottom:2px solid var(--game-line);gap:20px;background:var(--game-surface); }
+.arcade-brand { color:inherit;text-decoration:none;display:flex;align-items:center;gap:13px;white-space:nowrap; }
+.arcade-brand strong { font:900 27px/1 ui-monospace,'Courier New',monospace;letter-spacing:-1.5px; }
+.arcade-brand__dot { color:#9580bf; }
+.arcade-brand__symbol { display:grid;place-items:center;background:var(--game-lilac);border:2px solid var(--game-line);width:43px;height:39px;box-shadow:3px 3px 0 var(--game-line);font-size:25px; }
+.arcade-topbar__actions { display:flex;align-items:center;gap:16px; }
+.arcade-file { display:none; }
+.arcade-floor { position:relative;flex:1;display:flex;flex-direction:column;isolation:isolate; }
+.arcade-backdrop { position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;user-select:none; }
+.arcade-backdrop__art { position:absolute;width:clamp(300px,28vw,480px);height:auto;opacity:.18;image-rendering:pixelated; }
+.arcade-backdrop__art--left { left:clamp(-160px,calc((100% - 1680px)/2),60px);top:100px;transform:rotate(-16deg); }
+.arcade-backdrop__art--right { right:clamp(-160px,calc((100% - 1680px)/2),60px);top:310px;transform:rotate(16deg) scaleX(-1); }
+.arcade-room { position:relative;z-index:1;width:min(1180px,calc(100% - 80px));margin:0 auto;flex:1;display:flex;flex-direction:column;padding-top:22px;padding-bottom:22px; }
+.arcade-toolbar { display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 22px; }
+.arcade-toolbar nav { display:flex;gap:14px; }
+.arcade-tab-count { display:grid;place-items:center;min-width:21px;height:21px;padding:0 4px;background:var(--game-lilac);color:var(--game-cream);font:700 12px/1 ui-monospace,monospace; }
+.arcade-shelf { display:flex;flex-direction:column;gap:24px; }
+.arcade-cartridge { position:relative;display:flex;border:2px solid var(--game-line);background:var(--game-surface);box-shadow:5px 5px 0 #d3c8de; }
+.arcade-cartridge--official { display:grid;grid-template-columns:minmax(0,1.22fr) minmax(0,1fr); }
+.cartridge-windowbar { grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:2px solid var(--game-line);padding:11px 20px;background:#f4f0e6;font:700 11px/1.5 ui-monospace,'Microsoft YaHei',monospace;letter-spacing:1px; }
+.cartridge-windowbar>span:first-child { display:flex;align-items:center;gap:9px; }
+.cartridge-windowbar__light { width:8px;height:8px;background:#8ab599;box-shadow:2px 2px 0 #547862; }
+.cartridge-windowbar__pixels { display:flex;gap:6px; }
+.cartridge-windowbar__pixels i { width:7px;height:7px;border:1px solid #91869f; }
+.cartridge-windowbar__pixels i:last-child { background:#a794c5; }
+.cartridge-copy { min-width:0;position:relative;z-index:1;padding:30px 34px 32px;display:flex;flex-direction:column;align-items:flex-start; }
+.cartridge-number { display:flex;align-items:center;gap:7px;font:700 11px/1.6 ui-monospace,'Microsoft YaHei',monospace;color:var(--game-dim);letter-spacing:1px; }
+.cartridge-number svg { color:#8d77b3;width:13px;height:13px; }
+.cartridge-title { margin:18px 0 0;display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;line-height:1.2; }
+.cartridge-title>span { font-size:25px;font-weight:800;letter-spacing:2px; }
+.cartridge-title strong { font-size:clamp(38px,4vw,58px);font-weight:900;letter-spacing:-2px;line-height:1.2;overflow-wrap:anywhere; }
+.cartridge-title__dot { color:#9478ba; }
+.cartridge-copy p { max-width:450px;font-size:14px;line-height:1.9;color:var(--game-dim);margin:18px 0 25px;overflow-wrap:anywhere; }
+.cartridge-copy p>span { display:block;text-wrap:pretty; }
+.cartridge-copy__bottom { margin-top:auto;display:flex;align-items:center;gap:20px;flex-wrap:wrap; }
+.cartridge-copy__bottom>span { font-size:11px;color:var(--game-dim); }
+.cartridge-copy__bottom i { font-style:normal;color:#aaa0b5;margin:0 3px; }
+.cartridge-art { min-width:0;min-height:295px;position:relative;border-left:2px solid var(--game-line);background:#ece5f6;display:flex;align-items:center;justify-content:center;overflow:hidden; }
+.cartridge-art img { position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated; }
+.cartridge-art__stamp { position:absolute;bottom:19px;left:0;right:0;text-align:center;font:700 10px/1.6 ui-monospace,'Courier New',monospace;color:#6f5d8f;letter-spacing:2px; }
+.cartridge-art__corner { position:absolute;top:13px;right:13px;width:8px;height:8px;background:#fff9e9;box-shadow:-12px 0 0 #fff9e9,0 12px 0 #fff9e9; }
+.arcade-eyebrow { font:700 11px/1.6 ui-monospace,monospace;letter-spacing:1px;color:var(--game-dim); }
+.community-cartridge__art { width:200px;flex-shrink:0;background:var(--game-mint);border-right:2px solid var(--game-line);color:#52745f;display:grid;place-items:center;align-content:center;gap:15px;font-size:75px;font-weight:900;position:relative;overflow:hidden; }
+.community-cartridge__art img { width:100%;height:100%;position:absolute;inset:0;object-fit:cover; }
+.community-cartridge__art span { font:700 11px/1.7 ui-monospace,monospace;letter-spacing:1px;text-align:center; }
+.community-cartridge__copy { padding:28px;flex:1;min-width:0; }
+.community-cartridge__copy>.arcade-eyebrow { display:block;padding-right:52px;overflow-wrap:anywhere; }
+.community-cartridge__title { display:flex;justify-content:space-between;align-items:baseline;gap:14px; }
+.community-cartridge__copy h2 { font-size:28px;line-height:1.4;margin:8px 0 12px;overflow-wrap:anywhere; }
+.community-cartridge__copy p { font-size:14px;color:var(--game-dim);line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere; }
+.community-cartridge__actions { display:flex;align-items:center;gap:16px;margin-top:24px;flex-wrap:wrap; }
+.community-cartridge__actions a { color:var(--game-cream);font-size:12px;text-underline-offset:5px; }
+.cartridge-stars { font:700 12px ui-monospace,monospace;color:#8c6725;white-space:nowrap; }
+.arcade-import-strip { margin-top:26px;display:flex;align-items:center;gap:18px;padding:20px 26px;background:#edf1e7;border:2px dashed #b4bea5; }
+.arcade-import-strip__icon { color:#69816b;font-size:30px; }
+.arcade-import-strip__copy { display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 16px;flex:1;font-size:15px;font-weight:800;line-height:1.6; }
+.arcade-import-strip__copy>span { font-size:12px;font-weight:400;color:#637060; }
+.arcade-footer { margin-top:auto;padding:25px 0 0;display:flex;align-items:center;justify-content:space-between;gap:15px;font-size:11px;line-height:1.8;color:var(--game-dim); }
+.arcade-footer>span { display:flex;align-items:center;gap:8px; }
+.arcade-footer>span>svg { width:12px;height:12px;color:#bf869d; }
+.arcade-footer__pixels { font:700 10px/1.8 ui-monospace,'Courier New',monospace;letter-spacing:1px; }
+.arcade-footer .arcade-footer__pixels>svg { color:#b49acb;width:9px;height:9px; }
+.arcade-notice { margin-bottom:22px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#fbece4;border:2px solid #c29a82;color:#804d38;line-height:1.7;font-size:14px;overflow-wrap:anywhere; }
+.arcade-loading { min-height:260px;display:flex;align-items:center;justify-content:center;gap:16px;flex-direction:column;padding:30px;line-height:1.7;text-align:center;color:var(--game-dim);font-size:14px; }
+.arcade-loading__light { width:14px;height:14px;background:#b5a0d4;box-shadow:20px 0 0 #e5c571,-20px 0 0 #9fc3a5;animation:arcade-pulse 1.2s steps(2,end) infinite; }
+.arcade-empty { padding:40px 20px 48px;display:grid;justify-items:center;gap:18px;text-align:center;border:2px dashed #d3c7df;background:#fffef9b3; }
+.arcade-empty__icon { width:54px;height:54px;color:#a28bbf; }
+.arcade-empty h2 { font-size:23px;line-height:1.5;margin:0; }
+.arcade-empty p { font-size:14px;line-height:1.8;color:var(--game-dim);margin:0; }
+.arcade-form { display:grid;gap:14px; }
+.arcade-form label { font-size:13px;line-height:1.5;color:var(--game-dim);font-weight:700; }
+.arcade-input { appearance:none;width:100%;min-width:0;background:#f7f3fa;border:2px solid #b6a9c8;border-radius:0;padding:13px 14px;color:var(--game-cream);font:14px/1.5 'HarmonyOS Sans SC',sans-serif;box-shadow:inset 3px 3px 0 #e9e2f1;transition:border-color .3s; }
+.arcade-input::placeholder { color:#82778e;opacity:1; }
+.arcade-input:focus { outline:0;border-color:var(--game-line); }
+.arcade-input:focus-visible { outline:2px solid var(--game-focus);outline-offset:3px; }
+.arcade-input:disabled { opacity:.5; }
+.arcade-zip-zone { margin:24px 0;display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:20px 0;border-top:1px dashed #c5b8d4;border-bottom:1px dashed #c5b8d4; }
+.arcade-zip-zone>span { font-size:12px;color:var(--game-dim); }
+.arcade-dialog-description { font-size:15px;line-height:1.8;margin:0 0 18px;white-space:pre-wrap;overflow-wrap:anywhere; }
+.arcade-dialog-description--muted { font-size:12px;color:var(--game-dim);margin:0; }
+.arcade-dialog-error { font-size:14px;line-height:1.7;color:var(--game-error);margin:16px 0 0; }
+.arcade-check { position:relative;display:flex;align-items:center;gap:12px;min-height:44px;font-size:14px;line-height:1.7;cursor:pointer; }
+.arcade-check input { position:absolute;left:0;width:24px;height:24px;opacity:0;margin:0;padding:0; }
+.arcade-check__box { width:24px;height:24px;flex-shrink:0;border:2px solid #a393b7;display:grid;place-items:center;background:#f7f3fa;transition:background .3s,border-color .3s; }
+.arcade-check input:checked+.arcade-check__box { background:var(--game-acid);border-color:var(--game-line); }
+.arcade-check input:checked+.arcade-check__box:after { content:'✓';font-size:18px;color:var(--game-cream);font-weight:800; }
+.arcade-check input:focus-visible+.arcade-check__box { outline:2px solid var(--game-focus);outline-offset:4px; }
+.arcade-check:has(input:disabled) { opacity:.5;cursor:not-allowed; }
+.arcade-content-enter-active,.arcade-content-leave-active { transition:opacity .3s,transform .3s; }
+.arcade-content-enter-from,.arcade-content-leave-to { opacity:0;transform:translateY(8px); }
+@keyframes arcade-pulse { 50% { opacity:.35; } }
+@media(min-width:1600px) { .arcade-room { width:min(1280px,calc(100% - 120px)); }.arcade-topbar { padding-inline:max(40px,calc((100% - 1280px)/2)); }.cartridge-copy { padding:38px 42px; }.cartridge-art { min-height:330px; } }
+@media(max-width:900px) { .arcade-room { width:calc(100% - 48px); }.arcade-topbar { padding:16px 24px; }.arcade-topbar__actions { gap:6px; }.cartridge-copy { padding:26px; }.cartridge-title strong { font-size:44px; }.cartridge-copy__bottom { gap:14px; }.cartridge-art { min-height:300px; }.arcade-import-strip__copy { flex-direction:column;gap:2px; } }
+@media(max-width:600px) { .arcade-backdrop__art { width:240px;opacity:.1; }.arcade-backdrop__art--left { left:-170px;top:90px; }.arcade-backdrop__art--right { right:-170px;top:400px; }.arcade-topbar { padding:12px 16px;gap:10px;flex-wrap:wrap; }.arcade-brand { gap:10px; }.arcade-brand strong { font-size:24px; }.arcade-brand__symbol { width:36px;height:33px;font-size:21px; }.arcade-topbar__actions { margin-left:auto;gap:6px; }.arcade-topbar__actions .game-action--quiet { width:44px;padding-inline:0; }.arcade-topbar__actions .game-action--quiet span { display:none; }.arcade-room { width:calc(100% - 36px);padding-bottom:18px; }.arcade-toolbar { margin:16px 0 20px;gap:8px;flex-wrap:wrap; }.arcade-toolbar nav { gap:10px; }.arcade-tab-count { min-width:18px;height:18px;font-size:11px; }.arcade-cartridge--official { grid-template-columns:minmax(0,1fr); }.cartridge-windowbar { padding:10px 15px;font-size:10px; }.cartridge-copy { padding:23px 23px 25px; }.cartridge-number { font-size:10px;letter-spacing:0; }.cartridge-title { margin-top:12px; }.cartridge-title>span { font-size:23px; }.cartridge-title strong { font-size:45px; }.cartridge-copy p { font-size:13px;line-height:1.85;margin:13px 0 22px; }.cartridge-copy__bottom { gap:16px; }.cartridge-copy__bottom>span { font-size:10px; }.cartridge-art { min-height:0;height:170px;border-left:0;border-top:2px solid var(--game-line); }.cartridge-art img { object-fit:contain; }.cartridge-art__stamp { bottom:7px;font-size:8px;letter-spacing:1.5px; }.arcade-import-strip { margin-top:22px;padding:16px;gap:12px; }.arcade-import-strip__icon { font-size:25px; }.arcade-import-strip__copy { font-size:14px; }.arcade-import-strip__copy>span { display:none; }.arcade-footer { padding-top:22px;font-size:10px;justify-content:center; }.arcade-footer__pixels { display:none !important; }.community-cartridge__art { width:105px;font-size:50px; }.community-cartridge__art span { font-size:9px;letter-spacing:0; }.community-cartridge__copy { padding:22px 18px; }.community-cartridge__copy h2 { font-size:22px; }.community-cartridge__copy p { font-size:13px; }.community-cartridge__actions { gap:12px; }.arcade-notice { font-size:13px;padding:12px;gap:12px; }.arcade-empty { padding:28px 15px; }.arcade-empty h2 { font-size:20px; }.arcade-input { font-size:16px; } }
+@media(max-width:360px) { .arcade-topbar { padding-inline:12px; }.arcade-brand { gap:7px; }.arcade-brand strong { font-size:21px; }.arcade-brand__symbol { width:30px;height:30px;font-size:18px; }.arcade-topbar__actions { gap:4px; }.arcade-room { width:calc(100% - 28px); }.cartridge-copy { padding:20px; }.cartridge-title strong { font-size:40px; }.community-cartridge { flex-direction:column; }.community-cartridge__art { width:100%;height:125px;min-height:125px;border-right:0;border-bottom:2px solid var(--game-line);gap:5px; }.community-cartridge__art span { display:none; }.arcade-import-strip { padding:13px;gap:10px; }.arcade-import-strip__icon { display:none; } }
+@media(prefers-reduced-motion:reduce) { .arcade-loading__light { animation:none; }.arcade-content-enter-active,.arcade-content-leave-active,.arcade-input,.arcade-check__box { transition:none; } }
+</style>

@@ -7,6 +7,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
+      '/game-assets': { target: 'http://localhost:3099', changeOrigin: true },
+      '/game-media': { target: 'http://localhost:3099', changeOrigin: true },
+      '/game-sdk.js': { target: 'http://localhost:3099', changeOrigin: true },
       '/api': {
         target: 'http://localhost:3099',
         changeOrigin: true,

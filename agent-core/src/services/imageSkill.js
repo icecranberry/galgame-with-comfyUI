@@ -15,6 +15,7 @@
  */
 
 import fs from 'fs';
+import { saveGameOutput } from '../games/gameMedia.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui, guiToApi } from './comfyClient.js';
@@ -116,7 +117,7 @@ export function findNegativeEncodeNode(wf) {
   return null;
 }
 
-async function submitNovelaiImage(promptText, { onProgress } = {}) {
+async function submitNovelaiImage(promptText, { onProgress, width, height, negativePrompt } = {}) {
   const novelaiArtist = String(config.comfyui.novelaiArtist || '').trim();
   const qualityPrompt = String(config.comfyui.novelaiQualityPrompt || '').trim();
   const finalPrompt = [qualityPrompt, novelaiArtist, finalizeCountTags(String(promptText || '').trim())]
@@ -130,10 +131,10 @@ async function submitNovelaiImage(promptText, { onProgress } = {}) {
   const payload = await generateNovelaiImage(finalPrompt, {
     apiFormat: settings.novelaiApiFormat, url: settings.novelaiUrl,
     apiKey: getNovelaiApiKey(), proxyUrl: settings.novelaiProxyUrl,
-    model: settings.novelaiModel, width: settings.novelaiWidth, height: settings.novelaiHeight,
+    model: settings.novelaiModel, width: width ?? settings.novelaiWidth, height: height ?? settings.novelaiHeight,
     steps: settings.novelaiSteps, sampler: settings.novelaiSampler,
     noiseSchedule: settings.novelaiNoiseSchedule, scale: settings.novelaiGuidance,
-    negativePrompt: settings.novelaiNegativePrompt || '',
+    negativePrompt: negativePrompt ?? settings.novelaiNegativePrompt ?? '',
   });
   const { images } = payload;
   onProgress?.({ phase: 'executed' });
@@ -464,11 +465,12 @@ async function submitWithRetry(rawPrompt, {
   loras, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
   sourceWorkflow,
   imageProvider = config.comfyui.imageProvider,
+  outputScope,
 } = {}) {
   if (!sourceWorkflow && imageProvider === 'novelai') {
     // NovelAI receives the same prepared scene description and artist tags as ComfyUI,
     // but does not use either character or global LoRA data.
-    return submitNovelaiImage(rawPrompt, { artist, onProgress });
+    return submitNovelaiImage(rawPrompt, { artist, onProgress, ...(outputScope === 'game' ? { width, height, negativePrompt } : {}) });
   }
 
   // 1. 最终阀门
@@ -545,7 +547,7 @@ async function _execute(rawPrompt, opts) {
         await acquireSlot();
         slotAcquired = true;
       }
-      return await submitWithRetry('', opts);
+      return await saveGameOutput(await submitWithRetry('', opts), opts);
     }
     const preparation = await prepareImagePrompt(rawPrompt, {
       ragQuery: opts.ragQuery,
@@ -560,7 +562,7 @@ async function _execute(rawPrompt, opts) {
       await acquireSlot();
       slotAcquired = true;
     }
-    const result = await submitWithRetry(preparation.promptRefined, opts);
+    const result = await saveGameOutput(await submitWithRetry(preparation.promptRefined, opts), opts);
     return {
       ...result,
       promptOriginal: preparation.promptOriginal,

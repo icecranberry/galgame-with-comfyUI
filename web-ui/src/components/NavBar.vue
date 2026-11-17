@@ -92,6 +92,10 @@
 </div>
 
     <div class="nav-bottom">
+      <router-link to="/games" data-nav="games" class="nav-item" :class="{ active: $route.path.startsWith('/games') }" title="游戏中心">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M7 9h6m-3-3v6m6 3h1m-9 3h1"/></svg>
+        <span class="nav-label">游戏</span>
+      </router-link>
       <router-link to="/settings" data-nav="settings" class="nav-item" :class="{ active: $route.path === '/settings' }" :title="updateInfo.hasUpdate ? '设置 · 有新版本' : '设置'">
         <div class="nav-icon-wrap">
           <gear-icon :size="24" />
@@ -175,6 +179,7 @@ const activeNavKey = computed(() => {
   if (p.startsWith('/gallery')) return 'gallery'
   if (p.startsWith('/media')) return 'media'
   if (p.startsWith('/tavern')) return 'tavern'
+  if (p.startsWith('/games')) return 'games'
   if (p.startsWith('/settings')) return 'settings'
   return 'chat'
 })

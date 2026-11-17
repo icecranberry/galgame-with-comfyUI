@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { migrateGameSchema } from './gameSchema.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -1035,6 +1036,7 @@ function initSchema(db) {
   migrateScheduleSchema(db);
   migrateCohabitationSchema(db);
   migratePhotoStudioSchema(db);
+  migrateGameSchema(db);
 
   // 迁移: moment_comments 新增 auto_trigger + thread_root_id（朋友圈关系网互动）
   migrateMomentAutoTrigger(db);

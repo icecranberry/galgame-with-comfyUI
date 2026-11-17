@@ -37,6 +37,8 @@ Outlet 在缓存模式保留原占位符，以保证命中/未命中不修改前
 
 ## 新提示词的插槽约定
 
+游戏跑团请求由 `games/gameServices.js` 统一组装：基础规则与世界观 → 可选 interaction 强化 → 固定任务规范及完整 JSON 示例 → 实际角色原文 → 本次游戏材料 → 唯一最终 user。`staticTexts` 仅含前面的共用规则，`cacheBoundary` 从本次结构计算并截止任务规范末尾；角色原文通过 `personaTexts` 定位，不认证剧情状态为静态。`history` 单独提供本次可见的游戏材料与任务。KP 工具续轮保留 assistant/tool 配对；调查员扫描上下文只能使用公共日志与该角色自己的密信，不读取完整存档或KP真相。外部 SDK 自定义 LLM 请求默认 `lorebook:false`，由游戏明确选择是否接入。
+
 玩家表情立绘通过 `expressionStandingPrompt.js` 共用批量立绘的 JSON 协议。固定规则之后依次放玩家资料、本批槽位及完整示例、唯一末条 user。已设置的酒馆头像只作为末条 user 的视觉附件，世界书扫描只读取文本。缓存边界截止玩家立绘固定规范末尾，实际资料层通过 `personaTexts` 定位。
 
 照相馆上传姿势识图 `photoStudioPose.js`：system0 仅 `getSystemRules({ roleplay: false })` 破甲规则 → 固定姿势描述规范与完整 JSON 示例 → 唯一 user（简短任务与图片附件）。不传角色资料、世界观或强化，显式 `lorebook:false`，防止世界书引入世界内容；前两层逐字稳定，图片只在最终 user；「再次修改」的补充描述也只追加到该 user 的任务文本，要求按补充需求调整最终输出，不新增消息、不改变 system 前缀。该识图请求显式传 `thinking:{type:"disabled"}` 与 `forceDisableThinking:true`，强制关闭思考并覆盖全局及 extraBody 的开启参数。JSON 的 `personCount` 为1或2，`posePrompt` 为英文四肢动作、表情、简单场景与物品，禁止外貌和服装。成功后保存参考图，前端实时保存可编辑文本；预览、润色、拍摄统一把该文本作为普通姿势放入 `Pose:` 段，不再识图或翻译，character 1/2 沿用原有人物名称替换。

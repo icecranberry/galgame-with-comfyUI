@@ -177,6 +177,7 @@
             </div>
             <span>奇遇</span>
           </router-link>
+          <router-link to="/games" class="more-menu-item" @click="onMenuItemClick"><span aria-hidden="true">◇</span><span>游戏中心</span></router-link>
           <router-link to="/tavern" class="more-menu-item" @click="onMenuItemClick">
             <div class="nav-icon-wrap">
               <svg viewBox="0 0 1024 1024" width="20" height="20" fill="currentColor">

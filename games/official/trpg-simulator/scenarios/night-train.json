@@ -1,0 +1,22 @@
+{
+  "id": "night-train",
+  "meta": { "title": "没有终点的末班车", "era": "现代 · 冬夜", "stylePrompt": "dark cinematic illustration, vintage railway mystery, cold fog, dim amber lamps, subtle film grain, no text" },
+  "briefing": {
+    "version": "1.0", "tags": ["都市怪谈", "时间循环"], "duration": "15–30 分钟", "risk": "中等", "party": "1–4 名调查员",
+    "note": "下一站请别下车。",
+    "objective": "查清列车反复驶过同一盏红灯的原因，找到返回现实的方法。"
+  },
+  "scenes": [
+    { "id": "carriage", "name": "空座车厢", "publicDesc": "零点之后的末班列车钻进隧道，手机同时失去信号。窗外本应只有黑暗，却不断掠过同一盏红灯。对面座椅上留着一只还温热的纸杯，车票背面有人用铅笔写着：“下一站请别下车。”广播开始呼叫一个不在时刻表里的站名。", "hiddenNotes": "侦查纸杯得到旧票，聆听听出广播有两层声音。失败时乘务员主动送来同一张旧票。前往service无需检定。", "imagePrompt": "empty last subway train carriage at midnight, warm amber interior lights, red signal in dark tunnel, paper cup on seat, no people" },
+    { "id": "service", "name": "乘务室", "publicDesc": "狭小的乘务室里摆着两套时间表，相差整整二十年。玻璃上的霜从内侧结起。年轻乘务员说列车需要一张“已经使用过的终点票”才能停下，声音却和广播里的那道低语完全不同。角落的应急电话一直在响。", "hiddenNotes": "图书馆/侦查可读旧时刻表，说服乘务员可得事故剪报。电话可直接接，告知行李中有已盖章旧票，聆听成功额外得知不能拉闸停车。失败也传达票的消息但SAN-1。前往platform由广播停车后开门。", "imagePrompt": "narrow train conductor compartment, frosted window, two railway timetables and ringing emergency phone, antique amber light, no people" },
+    { "id": "platform", "name": "雾中的终点站", "publicDesc": "车门滑开，月台的瓷砖湿得发亮。站台时钟没有秒针，远处闸机亮着唯一一盏绿灯。广播温柔地催促大家下车，年轻乘务员却把手按在车门边缘，等你们做最后的选择。", "hiddenNotes": "把旧票投入车内验票机并按返程键可结束循环。侦查辨认返程按钮，说服乘务员可由其指出；无需双重卡检定。拉应急闸会造成HP-2、SAN-2但短暂打开前往驾驶室通路，可手动倒车。直接下车被雾引走，队友用话术/说服可拉回，SAN-3。用票返程所有人回到现实，乘务员留下一顶帽子；强行倒车众人获救但忘记乘务员；下车不回头则在二十年前天亮时醒来，作为开放结局。", "imagePrompt": "deserted foggy railway platform, old green ticket gate, wet ceramic tiles, train door open, ghostly distant clock, no people" }
+  ],
+  "clues": [
+    { "id": "ticket", "title": "盖过章的旧票", "content": "一张二十年前事故当晚的终点票，背面的孔洞拼出返程箭头。它可以被现在的验票机识别。", "sceneId": "carriage", "requiredSkill": "侦查", "isSecret": false },
+    { "id": "timetable", "title": "两张时间表", "content": "新表只写着返程，旧表的终点站被黑笔划掉；下一站停靠时间始终是00:17。", "sceneId": "service", "requiredSkill": "图书馆", "isSecret": false },
+    { "id": "phone", "title": "电话里的嘱托", "content": "“我是二十年前的你。别拉应急闸，把票留在车上。年轻乘务员想送你们回家。”", "sceneId": "service", "requiredSkill": "聆听", "isSecret": true },
+    { "id": "return", "title": "被遮住的返程键", "content": "验票机下方的黄铜键被胶带盖住，按键上刻着反向箭头；揭下胶带即可按下。", "sceneId": "platform", "requiredSkill": "侦查", "isSecret": false }
+  ],
+  "npcs": [{ "id": "conductor", "name": "小周", "persona": "年轻乘务员，紧张却认真，反复核对乘客人数。", "secret": "二十年前事故中最后一名没能逃生的乘务员；想把新乘客送回现实。" }],
+  "keeperSecrets": "列车进入二十年前事故的残留时段，广播中的低语诱人下车成为新乘客，小周的灵魂努力送人返程。旧票就在开局纸杯下，不应卡在检定之后；失败可由乘务员送来。三幕依次调查车厢、理解事故、决定返程方式。私密电话线索只给接听者，但核心返程方法可由公开时刻表和乘务员得知。结局：旧票投入验票机再按返程，所有人回归现实并带走小周的帽子；破闸倒车，代价是HP/SAN损失与记忆消退；留在月台，在二十年前醒来。避免强制战斗，容许调查员自创合理方案，目标15–30分钟。"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "old-house",
+  "meta": { "title": "雨夜的第十三声钟", "era": "1926年 · 初秋", "stylePrompt": "dark lovecraftian oil painting, muted umber and antique gold, rain, cinematic chiaroscuro, atmospheric, no text" },
+  "briefing": {
+    "version": "1.0", "tags": ["古宅调查", "失踪谜案"], "duration": "15–30 分钟", "risk": "较高", "party": "1–4 名调查员",
+    "note": "午夜以前，找到林恩。",
+    "objective": "进入宅邸寻找失踪学生林恩，查清停摆的古钟与这场失踪的联系。"
+  },
+  "scenes": [
+    { "id": "gate", "name": "铁门外", "publicDesc": "雨水沿铁门上缠绕的藤蔓流下。失踪学生林恩的姐姐请你们来找他：三天前，他来此抄录一座停摆古钟的铭文，再也没有回家。门缝里夹着一张新车票，宅邸二楼却亮着蜡烛。时钟指向十一点四十五分。", "hiddenNotes": "入门不需要强制检定，铁门只是虚掩。侦查成功找到反向脚印，失败也可听见管家呼唤但损失15分钟。聆听成功听见地下重复的敲击。愿意进门即可前往hall。", "imagePrompt": "rusted iron gate of an abandoned manor at rainy midnight, single lit upper window, wet cobblestones, no people" },
+    { "id": "hall", "name": "停钟的前厅", "publicDesc": "宅邸里有干燥的木屑气味。一座没有指针的落地钟占据整面墙，钟摆却仍在缓慢摆动。管家伊文端来热茶，说年轻客人正在楼下修钟。窗边书桌压着一本维修簿，通往地下室的门后传来第二个人的呼吸声。", "hiddenNotes": "维修簿图书馆普通成功找到拆卸法；失败得到同样知识但惊动伊文。心理学可发现他害怕钟而非调查员，说服可让他交出钥匙，锁匠也可开门；破门可行但每人HP-1。不要因失败卡住剧情。前往cellar前告知钟接近午夜。", "imagePrompt": "dusty victorian manor foyer, enormous grandfather clock without hands, desk with aged maintenance ledger, candlelit, no people" },
+    { "id": "cellar", "name": "钟的心脏", "publicDesc": "地下室中央，铜管连着一个浸在黑水里的齿轮。林恩缩在墙角，嘴里数着一到十二；每数完一遍，水面就映出一个并不存在于房间里的影子。上方传来第一声钟响。你们还来得及让它停下。", "hiddenNotes": "看见倒影可SAN-1，失败检定SAN-3。通过急救让林恩清醒、格斗/力量叙事破坏齿轮、或按维修簿逆转阀门均可救人。侦查成功辨认安全阀；失败爆出蒸汽HP-2但暴露阀门位置。午夜前停钟→救出林恩与伊文；只带人离开→林恩获救而宅邸消失；犹豫至第13响→失去一段记忆后在门外醒来，SAN-5，不必强制死亡。", "imagePrompt": "flooded cellar with antique brass clock mechanism above black water, reflected impossible shadow, single lantern, no people" }
+  ],
+  "clues": [
+    { "id": "footprints", "title": "反向的脚印", "content": "泥脚印的鞋尖朝着门外，落水的深浅却显示穿鞋的人一直在倒退进门。", "sceneId": "gate", "requiredSkill": "侦查", "isSecret": false },
+    { "id": "ledger", "title": "维修簿末页", "content": "“钟响十二声，打开回流阀；不要触碰黑色主齿轮。第十三声不是钟发出的。”旁边画着地下室阀门的位置。", "sceneId": "hall", "requiredSkill": "图书馆", "isSecret": false },
+    { "id": "butler", "title": "管家的请求", "content": "伊文悄悄告诉你：他每天都记得前一天的结局，唯独不记得自己还能否走出这扇门。他只求你们带走林恩。", "sceneId": "hall", "requiredSkill": "心理学", "isSecret": true },
+    { "id": "valve", "title": "回流阀", "content": "铜管上的回流箭头指向黑水。逆时针转三圈可卸掉钟的压力，齿轮将停止。", "sceneId": "cellar", "requiredSkill": "侦查", "isSecret": false }
+  ],
+  "npcs": [{ "id": "ivan", "name": "伊文", "persona": "礼貌、寡言、习惯反复擦拭已经干净的茶杯。", "secret": "五年前困在钟的重复夜晚中，是受害者而非幕后黑手。害怕亲自接触齿轮。" }, { "id": "lynn", "name": "林恩", "persona": "年轻的历史学生，细心而胆小。", "secret": "误把铭文念了出来，替古钟重新上弦，被当作新的计时者。" }],
+  "keeperSecrets": "古钟把午夜前的一小时反复折叠，黑水中的影子借第十三声钟响进入现实。林恩三天前读出铭文使停钟复活，伊文试图阻止但不敢碰齿轮。开局23:45，调查顺利每场约5分钟，失败可消耗时间但必须给新线索。铁门虚掩，不能锁死入口。第一幕发现异常，第二幕获得停钟方法，第三幕救人或逃离。三种结局：停钟使循环结束，林恩和伊文获救；带林恩逃跑，宅邸在身后消失；第十三响后众人在铁门外醒来，丢失一段记忆。战斗非必须，任何合理拆卸或排水方案都可代替固定解法，15–30分钟可结团。"
+}

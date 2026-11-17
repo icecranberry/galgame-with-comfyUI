@@ -1,0 +1,45 @@
+/* Game module palette, carried over from game-test / 92af58cf. */
+.game-theme {
+  --game-bg: #131d20;
+  --game-surface: #202c29;
+  --game-acid: #d2fa72;
+  --game-line: #3b4a45;
+  --game-hover: #29392e;
+  --game-cream: #f4f0df;
+  --game-dim: #a8b2a9;
+  --game-error: #ffad98;
+  color-scheme: dark;
+  color: var(--game-cream);
+  font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* Opt-in skin for the game hall; standalone games keep their own visual language. */
+.game-theme--pixel {
+  --game-bg: #faf8f0;
+  --game-surface: #fffef9;
+  --game-acid: #ffda62;
+  --game-line: #51476b;
+  --game-hover: #eee7f9;
+  --game-cream: #403653;
+  --game-dim: #746b82;
+  --game-error: #a83c54;
+  --game-lilac: #eae1f5;
+  --game-mint: #dcefe1;
+  --game-control-bg: #fffef9;
+  --game-control-border: 2px;
+  --game-control-radius: 0;
+  --game-control-shadow: 3px 3px 0 #51476b;
+  --game-primary-border: #51476b;
+  --game-primary-ink: #403653;
+  --game-primary-hover: #ffe895;
+  --game-danger-ink: #a83c54;
+  --game-danger-border: #be8390;
+  --game-focus: #8170bc;
+  --game-window-bg: #fffef9;
+  --game-window-border: #51476b;
+  --game-window-header: #eee6f7;
+  --game-window-hover: #eee7f9;
+  --game-window-shadow: 7px 7px 0 #51476b;
+  --game-window-backdrop: #40365355;
+  color-scheme: light;
+}

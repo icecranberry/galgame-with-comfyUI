@@ -14,6 +14,10 @@
 除非任务明确要求，不要随意重做已有设计或引入新的 UI 体系。
 Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.
 
+### 游戏模块 UI 例外
+
+整个游戏模块（`web-ui/src/views/GameCenter.vue`、`GamePlayer.vue`、`web-ui/src/games/` 与 `games/official/`）按用户要求独立制作 UI，不使用任何 Linshe 组件。游戏中心沿用本地 `game-test` 分支的游戏馆风格及 `GameAction` / `GameOverlay`，独立游戏保持各自视觉语言。主站其他页面继续遵循下方统一组件约定。窗口、页签和页面切换保留300ms过渡，关闭动画完成后再卸载。
+
 ## 小镇游戏化 UI
 
 小镇玩法以「奇遇」为唯一链路：NPC 互动（`TownResidentActions.vue`）发出邀请 → 服务线索/特殊奇遇走 LLM 叙事事件 → 玩家在奇遇页（`EventsView.vue`）用选项推进。建筑服务（按摩、喝酒、喝咖啡等）、NPC 邀请与 NPC 服务都由奇遇承载，不做步骤式结算面板。

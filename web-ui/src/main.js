@@ -34,6 +34,8 @@ import PhotoStudioView from './views/PhotoStudioView.vue'
 
 const routes = [
   { path: '/standing-display', component: StandingDisplayView, meta: { standingDisplay: true } },
+  { path: '/games', component: () => import('./views/GameCenter.vue') },
+  { path: '/games/:gameId', component: () => import('./views/GamePlayer.vue'), meta: { gamePlayer: true } },
   { path: '/', redirect: '/chat' },
   { path: '/chat', component: ChatView },
   { path: '/god-says', component: GodSaysView },

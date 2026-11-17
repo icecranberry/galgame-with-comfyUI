@@ -15,6 +15,7 @@ import { imageAvifFallback } from './src/middleware/imageAvifFallback.js';
 import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import godSaysRoutes from './src/routes/godSays.js';
+import gameRoutes, { initGames, mountGameAssets, closeGames } from './src/games/gameRoutes.js';
 import logRoutes from './src/routes/logs.js';
 import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
@@ -138,6 +139,8 @@ app.use('/api', godCommitGuard);
 app.use('/api', wrapRouterAsync(expressionStandingRoutes));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/god-says', wrapRouterAsync(godSaysRoutes));
+app.use('/api/games', gameRoutes);
+mountGameAssets(app);
 app.use('/api/logs', wrapRouterAsync(logRoutes));
 app.use('/api/tts', wrapRouterAsync(ttsRoutes));
 app.use('/api/memory', wrapRouterAsync(memoryRoutes));
@@ -205,6 +208,7 @@ console.log('============================================');
 
 // 初始化数据库
 getDb();
+initGames();
 photoStudioQueue.start();
 console.log('[db] SQLite initialized');
 
@@ -421,14 +425,17 @@ process.on('uncaughtException', (err) => {
 
 // 优雅退出（幂等 — 防止 shutdown 端点 + 信号双重触发）
 let shuttingDown = false;
-const shutdown = () => {
+const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
+  // Plugin cleanup must not delay the existing hard shutdown deadline.
+  setTimeout(() => process.exit(1), 5000).unref();
   photoStudioQueue.dispose();
   console.log('\n[agent-core] shutting down...');
   stopMemoryIndexWorker();
   stopConsolidationScheduler();
   stopGodSays();
+  await closeGames().catch(error => console.warn('[games] unload:', error.message));
   stopTownScheduler();
   stopTownNpcStockScheduler();
 
@@ -446,8 +453,6 @@ const shutdown = () => {
     closeDb();
     process.exit(0);
   });
-  // 5 秒硬超时兜底
-  setTimeout(() => process.exit(1), 5000).unref();
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

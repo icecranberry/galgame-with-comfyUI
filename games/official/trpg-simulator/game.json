@@ -1,0 +1,13 @@
+{
+  "id": "trpg-simulator",
+  "name": "跑团模拟器",
+  "version": "1.0.0",
+  "author": "icecranberry",
+  "description": "一张桌，几个熟悉的面孔，一桩尚未揭开的秘密。由你主持，或邀请邻舍角色担任守秘人。",
+  "cover": "web/cover.svg",
+  "entry": "web/index.html",
+  "serverEntry": "server/index.mjs",
+  "minAppVersion": "3.5.0",
+  "permissions": ["bridge:read", "llm:chat", "image:generate", "save:rw"],
+  "tags": ["TRPG", "CoC", "官方"]
+}
