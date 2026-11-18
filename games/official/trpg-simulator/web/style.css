@@ -149,6 +149,11 @@ button{min-height:44px}input,textarea{font-size:16px}.narrative-table{flex-direc
 #pool-count { width: 4.5rem; flex: 0 0 auto; }
 #pool-reason { min-width: 0; }
 #pool-reason, #pool-count { margin-bottom: 8px; }
+.secret-ho-card h4 { margin: 14px 0 5px; font: 700 11px/1.5 var(--sans); }
+.secret-ho-card p { margin: 0; line-height: 1.7; overflow-wrap: anywhere; }
+.secret-ho-disclosure { margin-bottom: 12px; }
+.secret-ho-disclosure .secret-ho-card { margin: 12px 0 8px; padding: 12px 0; background: transparent; }
+.lobby-drawer .secret-ho-card { color: var(--table-ivory); background: transparent; padding: 0; }
 @media (max-width: 767px) {
   .check-request small { display: block; overflow-wrap: anywhere; }
   .stage-cast { top: 82px; }

@@ -142,6 +142,22 @@
     for (const token of tokens) content = content.split(esc(token)).join(`<mark>${esc(token)}</mark>`);
     return content;
   }
+  function handoutCard(handout) {
+    return `<article class="handout-note secret-ho-card"><span class="evidence-label">${esc(handout.id)}</span><h3>${esc(handout.title)}</h3>
+      <h4>表层身份</h4><p>${esc(handout.publicSummary)}</p>
+      ${handout.secretContent ? `<h4>秘密与任务</h4><p>${esc(handout.secretContent)}</p>
+        ${handout.recommendedTrait ? `<h4>扮演建议</h4><p>${esc(handout.recommendedTrait)}</p>` : ''}` : ''}</article>`;
+  }
+  function secretHandouts(state) {
+    const keeper = state.mode === 'keeper';
+    const own = state.investigators.find(actor => actor.player);
+    const content = keeper ? state.investigators.map(actor =>
+      `<details class="keeper-truth secret-ho-disclosure"><summary>${esc(actor.name)} · ${esc(actor.handout ? `${actor.hoId} ${actor.handout.title}` : '未分配 HO')}</summary>
+        ${actor.handout ? handoutCard(actor.handout) : ''}
+        ${state.ended ? '' : button('ho-focus-kp', '在 KP 控制台选中', 'quiet-action', `data-id="${esc(actor.id)}"`)}</details>`).join('')
+      : own?.handout ? handoutCard(own.handout) : '<p class="empty-copy">本局没有分配秘密 HO。</p>';
+    return `<section class="evidence-collection"><div class="panel-heading"><h2>${keeper ? '全员 HO 总览' : '我的秘密 HO'}</h2></div>${content}</section>`;
+  }
   function clues(state) {
     const items = state.partyItems || [];
     const pocket = items.length ? `<section class="handout-note"><h3>队伍道具</h3><p>${items.map(item => `${esc(item.label)} · ${item.status === 'spent' ? '已使用' : '持有中'}`).join('<br>')}</p></section>` : '';
@@ -178,10 +194,12 @@
   }
   function table(state, ui) {
     const background = state.imageJobs.filter(j => j.status === 'done' && j.kind === 'scene' && j.sceneId === state.scene.id).at(-1);
-    const tabs = [{ id: 'narrative', label: '叙事流' }, ...(state.mode === 'keeper' ? [{ id: 'keeper', label: 'KP 控制台' }] : []), { id: 'clues', label: '线索背包' }, { id: 'cards', label: '角色卡' }];
+    const tabs = [{ id: 'narrative', label: '叙事流' }, ...(state.mode === 'keeper' ? [{ id: 'keeper', label: 'KP 控制台' }] : []), { id: 'clues', label: '线索背包' },
+      ...(state.hasSecretHO ? [{ id: 'ho', label: '秘密 HO' }] : []), { id: 'cards', label: '角色卡' }];
+    const hoPanel = state.hasSecretHO ? `<section id="panel-ho" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-ho" ${ui.tab === 'ho' ? '' : 'hidden'}>${secretHandouts(state)}</section>` : '';
     const rendered = logs(state, state.publicLog.filter(log => !ui.pendingRolls.has(log.id)));
     const extraRolls = ui.rolls.filter(roll => !state.publicLog.some(log => log.id === roll.logId));
-    return `<main class="table narrative-table ${ui.entering ? 'is-entering' : ''}"><section class="visual-stage" aria-label="场景与人物">${ui.previousBackground ? `<div class="stage-backdrop has-image" style="--scene:url('${image(ui.previousBackground)}')"></div>` : ''}<div class="stage-backdrop ${background ? 'has-image' : ''} ${ui.backgroundChanged ? 'is-new-background' : ''}" ${background ? `style="--scene:url('${image(background.url)}')"` : ''}></div><div class="stage-grain" aria-hidden="true"></div><div class="stage-vignette" aria-hidden="true"></div>${button('exit-game', '← 游戏馆', 'stage-link stage-exit')}<header class="stage-navigation"><span class="mode-badge">${state.mode === 'keeper' ? '守秘人视角' : '调查员视角'}<i></i>第 ${state.round + 1} 轮</span><div>${button('lobby', '收起卷宗', 'stage-link')}${button('finish-dialog', state.ended ? '结团回忆' : '结团', 'stage-link', 'data-network')}</div></header><section class="hud" aria-label="调查员状态">${hud(state)}</section><div class="stage-cast"><div class="stage-line" hidden><strong></strong><p></p></div></div><div class="stage-caption"><span class="eyebrow">${esc(state.title)}</span><h2>${esc(state.scene.name)}</h2><span class="stage-caption-rule"></span></div>${state.ended ? '<span class="ended-stamp">本局落幕</span>' : ''}</section><aside class="narrative-column"><header class="story-heading"><span class="eyebrow">${esc(state.title)}</span><h1>${esc(state.scene.name)}</h1><div class="story-heading-rule"><span></span><i>✦</i><span></span></div></header><nav class="story-tabs" role="tablist" aria-label="调查桌">${tabs.map(tab => button('tab', tab.label, ui.tab === tab.id ? 'is-active' : '', `data-tab="${tab.id}" id="tab-${tab.id}" role="tab" aria-selected="${ui.tab === tab.id}" aria-controls="panel-${tab.id}" tabindex="${ui.tab === tab.id ? 0 : -1}"`)).join('')}</nav><div class="story-scroll" id="story-scroll"><section id="panel-narrative" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-narrative" ${ui.tab === 'narrative' ? '' : 'hidden'}><div class="transcript" id="transcript" aria-label="本幕叙事">${rendered}${extraRolls.map(roll => rollCard(roll)).join('')}</div></section>${state.mode === 'keeper' ? `<section id="panel-keeper" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-keeper" ${ui.tab === 'keeper' ? '' : 'hidden'}>${consoleMarkup(state, ui)}</section>` : ''}<section id="panel-clues" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-clues" ${ui.tab === 'clues' ? '' : 'hidden'}>${clues(state)}</section><section id="panel-cards" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-cards" ${ui.tab === 'cards' ? '' : 'hidden'}>${cards(state)}</section></div><div class="story-utilities">${button('lobby', '卷宗目录', 'quiet-action')}${button('history', '往日记录', 'quiet-action')}${button('images', '场景印相', 'quiet-action')}</div>${composer(state, ui)}</aside></main>`;
+    return `<main class="table narrative-table ${ui.entering ? 'is-entering' : ''}"><section class="visual-stage" aria-label="场景与人物">${ui.previousBackground ? `<div class="stage-backdrop has-image" style="--scene:url('${image(ui.previousBackground)}')"></div>` : ''}<div class="stage-backdrop ${background ? 'has-image' : ''} ${ui.backgroundChanged ? 'is-new-background' : ''}" ${background ? `style="--scene:url('${image(background.url)}')"` : ''}></div><div class="stage-grain" aria-hidden="true"></div><div class="stage-vignette" aria-hidden="true"></div>${button('exit-game', '← 游戏馆', 'stage-link stage-exit')}<header class="stage-navigation"><span class="mode-badge">${state.mode === 'keeper' ? '守秘人视角' : '调查员视角'}<i></i>第 ${state.round + 1} 轮</span><div>${button('lobby', '收起卷宗', 'stage-link')}${button('finish-dialog', state.ended ? '结团回忆' : '结团', 'stage-link', 'data-network')}</div></header><section class="hud" aria-label="调查员状态">${hud(state)}</section><div class="stage-cast"><div class="stage-line" hidden><strong></strong><p></p></div></div><div class="stage-caption"><span class="eyebrow">${esc(state.title)}</span><h2>${esc(state.scene.name)}</h2><span class="stage-caption-rule"></span></div>${state.ended ? '<span class="ended-stamp">本局落幕</span>' : ''}</section><aside class="narrative-column"><header class="story-heading"><span class="eyebrow">${esc(state.title)}</span><h1>${esc(state.scene.name)}</h1><div class="story-heading-rule"><span></span><i>✦</i><span></span></div></header><nav class="story-tabs" role="tablist" aria-label="调查桌">${tabs.map(tab => button('tab', tab.label, ui.tab === tab.id ? 'is-active' : '', `data-tab="${tab.id}" id="tab-${tab.id}" role="tab" aria-selected="${ui.tab === tab.id}" aria-controls="panel-${tab.id}" tabindex="${ui.tab === tab.id ? 0 : -1}"`)).join('')}</nav><div class="story-scroll" id="story-scroll"><section id="panel-narrative" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-narrative" ${ui.tab === 'narrative' ? '' : 'hidden'}><div class="transcript" id="transcript" aria-label="本幕叙事">${rendered}${extraRolls.map(roll => rollCard(roll)).join('')}</div></section>${state.mode === 'keeper' ? `<section id="panel-keeper" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-keeper" ${ui.tab === 'keeper' ? '' : 'hidden'}>${consoleMarkup(state, ui)}</section>` : ''}<section id="panel-clues" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-clues" ${ui.tab === 'clues' ? '' : 'hidden'}>${clues(state)}</section>${hoPanel}<section id="panel-cards" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-cards" ${ui.tab === 'cards' ? '' : 'hidden'}>${cards(state)}</section></div><div class="story-utilities">${button('lobby', '卷宗目录', 'quiet-action')}${button('history', '往日记录', 'quiet-action')}${button('images', '场景印相', 'quiet-action')}</div>${composer(state, ui)}</aside></main>`;
   }
   const lobbyIcons = {
     back: '<path d="m10 5-7 7 7 7M3 12h18"/>',
@@ -228,13 +246,13 @@
     return `${ongoing.length ? `<ul class="lobby-list">${ongoing.map(run).join('')}</ul>` : '<p class="lobby-empty">暂无进行中的牌局。</p>'}
       ${archived.length ? `<details class="lobby-archive"><summary>已结案 <span>${archived.length}</span></summary><ul class="lobby-list">${archived.map(run).join('')}</ul></details>` : ''}`;
   }
-  function briefing({ scenarios, scenario }) {
+  function briefing({ scenarios, scenario, mode }) {
     if (!scenario) return '<p class="lobby-empty">导入剧本后即可查看简报。</p>';
     const { meta, opening, scenes, briefing: details = {} } = scenario;
     const metrics = [['clock', '预计时长', details.duration], ['layers', '场景数', `${scenes} 幕`], ['risk', '理智风险', details.risk]];
     const checklist = [['调查目标', details.objective], ['时代背景', meta.era], ['推荐人数', details.party]];
     return `<article class="briefing-document">
-      <div class="briefing-kicker"><span>模组 ${sceneNumber(scenarios.indexOf(scenario))}</span>${scenario.id === 'custom' ? button('edit-scenario', '编辑导入剧本', 'briefing-edit', 'data-network') : ''}</div>
+      <div class="briefing-kicker"><span>模组 ${sceneNumber(scenarios.indexOf(scenario))}</span>${scenario.draftId && mode === 'keeper' ? button('edit-scenario', '编辑导入剧本', 'briefing-edit', 'data-network') : ''}</div>
       <h1>${esc(meta.title)}</h1>
       ${opening ? `<p class="briefing-intro">${esc(opening)}</p>` : ''}
       <dl class="briefing-metrics">${metrics.map(([glyph, label, value]) => `<div>${icon(glyph)}<dt>${label}</dt><dd>${esc(value || '未标注')}</dd></div>`).join('')}</dl>
@@ -253,7 +271,8 @@
     }).join('');
   }
   function partyStatus({ mode, selected, limit, characters }) {
-    const hint = mode === 'keeper' ? '邀请 1–4 位 AI 调查员' : characters.length ? '用眼睛指定守秘人，可另选队友' : '请先招募一位邻舍担任守秘人';
+    const hint = selected.length > limit ? '当前阵容超出模组容量，请移除多余角色' :
+      mode === 'keeper' ? `邀请 1–${limit} 位 AI 调查员` : characters.length ? '用眼睛指定守秘人，可另选队友' : '请先招募一位邻舍担任守秘人';
     return `<span>${hint}</span><strong>${mode === 'keeper' ? '调查员' : 'AI 队友'} ${selected.length} / ${limit}</strong>`;
   }
   const standingGroups = ['表情立绘齐全', '表情立绘待补齐', '没有表情立绘'];
@@ -272,12 +291,15 @@
     return button('manage-standings', label, 'party-standing-link',
       `id="party-standing-${subject}" data-subject="${subject}" data-network aria-label="${label} · ${esc(name)}"`);
   }
-  function roster({ mode, characters, selected, keeperId, castAssets }) {
+  function roster({ mode, characters, selected, keeperId, castAssets, hoChoices, hoRows }) {
     const player = castAssets.player;
     const playerComplete = standingRank(castAssets, player.expressions) === 0;
     const playerRow = `<li class="party-self">${avatar(player)}<span class="party-person"><strong>${esc(player.name)}</strong>
       <small>你 · ${mode === 'keeper' ? '守秘人' : '调查员'}</small></span>${standingButton('player', '我', playerComplete)}</li>`;
-    if (!characters.length) return playerRow + '<li class="lobby-empty">先去邻舍酒馆邀请一位角色。</li>';
+    const preview = hoChoices.length ? `<li class="party-ho-preview"><h3>秘密 HO 分配</h3>
+      ${hoRows.length ? `<ul>${hoRows.map(({ id, name, handout }) => `<li><span>${esc(id === 'player' ? '你' : name)}</span>
+        ${handout ? button('preview-ho', `${esc(handout.id)} · ${esc(handout.title)}`, 'party-standing-link', `id="ho-preview-${esc(id)}" data-id="${esc(id)}" data-network`) : '<span>未分配</span>'}</li>`).join('')}</ul>` : '<p>选择调查员后自动分配。</p>'}</li>` : '';
+    if (!characters.length) return playerRow + preview + '<li class="lobby-empty">先去邻舍酒馆邀请一位角色。</li>';
     let group = -1;
     const rows = orderCharacters(characters, castAssets).map(character => {
       const { id, personaSummary } = character;
@@ -298,7 +320,7 @@
       const reminder = rank > 0 && (keeper || invited) ? `<div class="party-standing-note"><span>${rank === 1 ? '表情立绘未齐' : '缺少表情立绘'}</span>${standingButton(id, name, false)}</div>` : '';
       return `${heading}<li class="party-row${keeper ? ' is-keeper' : ''}"><div class="party-member">${row}${assignKeeper}</div>${reminder}</li>`;
     }).join('');
-    return playerRow + '<li class="party-priority">优先邀请表情立绘齐全的角色</li>' + rows;
+    return playerRow + preview + '<li class="party-priority">优先邀请表情立绘齐全的角色</li>' + rows;
   }
   function launch({ canStart }) {
     return button('start', `<span>开始调查 <small>BEGIN INVESTIGATION</small></span>${icon('forward')}`, 'lobby-launch', `id="lobby-start" data-network ${canStart ? '' : 'disabled'}`);
@@ -413,5 +435,5 @@
     }
   }
   document.addEventListener('error', event => { const el = event.target; if (el instanceof HTMLImageElement && el.hasAttribute('data-portrait-fallback') && !el.src.endsWith('/portrait-placeholder.svg')) el.src = './portrait-placeholder.svg'; }, true);
-  window.TrpgPresentation = { avatar, choices, logs, table, updateCast, lobby, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, rollCard, rollKey, animateDice, highlight };
+  window.TrpgPresentation = { avatar, choices, logs, table, updateCast, lobby, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, rollCard, rollKey, animateDice, highlight, handoutCard };
 })();

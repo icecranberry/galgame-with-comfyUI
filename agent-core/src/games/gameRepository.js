@@ -9,10 +9,12 @@ export function createGameRepository(db) {
   };
   function write(gameId, id, title, state, expectedRevision) {
     validId(gameId); id = validId(id || randomUUID());
-    if (!game(gameId)?.installed) throw bad('游戏未安装', 404);
+    const installed = game(gameId);
+    if (!installed?.installed) throw bad('游戏未安装', 404);
     if (state === null || typeof state !== 'object') throw bad('存档状态必须是 JSON 对象或数组');
     const json = JSON.stringify(state);
-    if (Buffer.byteLength(json) > 4 * 1024 * 1024) throw bad('存档超过 4MB');
+    const maxMiB = installed.source === 'official' && gameId === 'trpg-simulator' ? 32 : 4;
+    if (Buffer.byteLength(json) > maxMiB * 1024 * 1024) throw bad(`存档超过 ${maxMiB} MiB`);
     db.transaction(() => {
       const previous = db.prepare('SELECT game_id,revision FROM game_sessions WHERE session_id=?').get(id);
       if (previous && previous.game_id !== gameId) throw bad('存档不属于当前游戏', 403);

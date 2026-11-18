@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "id": "foggy-inn-guest-ho",
+    "title": "雾夜民宿的第四位房客",
+    "era": "现代 / 民俗悬疑",
+    "playerCount": "3~4人（支持隐匿HO）",
+    "estimatedTime": "25~40分钟",
+    "sanityRisk": "中高",
+    "synopsis": "一场罕见的浓雾封死了通往山外唯一的盘山公路。几名各怀心事的旅人被困在深山老宅改建的民宿里，老板娘在晚饭后离奇失踪，而登记簿上明明只写着三个人的名字，餐桌上却摆着四副碗筷。",
+    "stylePrompt": "atmospheric japanese-style mountain inn in thick midnight fog, warm paper lantern glow against deep shadows, folk horror mystery, visual novel CG"
+  },
+  "handouts": [
+    {
+      "id": "HO1",
+      "title": "寻人而来的访客",
+      "publicSummary": "你自称是来山里写生/采风的普通游客，因大雾被迫投宿。",
+      "secretContent": "你其实是来寻找半年前在这家民宿失踪的挚友的。你在出发前收到过他寄来的最后一张明信片，背面只画着一盏没有灯芯的红灯笼。你怀疑老板娘和另外的住客里有人知情。",
+      "recommendedTrait": "执着、暗中核对每个人说话的真假"
+    },
+    {
+      "id": "HO2",
+      "title": "受雇的民俗记者",
+      "publicSummary": "你对当地流传的“山神借宿”旧俗很感兴趣，随身带着相机。",
+      "secretContent": "你手里有一份地方志残页，上面记载每逢大雾封山之夜，村人会把“多余的那位客人”献给山里的无名神龛以求平安。你隐约觉得老板娘今晚失踪并不是遇害，而是在准备仪式。",
+      "recommendedTrait": "好奇心极强、擅长用话术套取情报"
+    },
+    {
+      "id": "HO3",
+      "title": "返乡的旧识",
+      "publicSummary": "你对这栋老宅的结构颇为熟悉，说话时总带着几分避讳。",
+      "secretContent": "你小时候曾在这座村子住过，甚至记得这间民宿以前是村里的祠堂。你手腕上有一道幼年时留下的旧疤，今晚一进门就开始隐隐作痛。你很害怕大家去打开后院的地下贮藏室。",
+      "recommendedTrait": "矛盾、下意识阻拦他人靠近危险区域"
+    },
+    {
+      "id": "HO4",
+      "title": "迟到的投宿者",
+      "publicSummary": "你比其他人更晚一步敲开民宿的门，浑身被夜雾打湿。",
+      "secretContent": "你在来时的山路上其实撞见过一个撑着油纸伞的模糊身影，对方递给你一张写着“别数餐桌上的筷子”的纸条后就消失在雾里。你不确定自己是不是也被当成了那个“多余的人”。",
+      "recommendedTrait": "神经紧绷、时刻留意人数变化"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s1_dining_hall",
+      "name": "留着四副碗筷的堂屋",
+      "publicDesc": "木质堂屋里点着昏黄的吊灯，窗外是浓得化不开的白雾。餐桌上摆着四副整齐的碗筷和冒着热气的山菌汤，但前厅的住宿登记簿上却只有三行名字。老板娘端完汤后说去后院添柴，二十分钟过去仍未回来。",
+      "hiddenNotes": "第四副碗筷是给“山雾里的存在”留的供奉；汤里并没有毒，但喝下后更容易听见屋外的低语。",
+      "imagePrompt": "dimly lit traditional wooden inn dining room, four bowls and chopsticks on low table, thick white fog outside sliding glass door, folk horror"
+    },
+    {
+      "id": "s2_attic_corridor",
+      "name": "挂满面具的二楼走廊",
+      "publicDesc": "木楼梯踩上去发出沉闷的吱呀声。二楼走廊两侧挂着几张年代久远的木雕傩面，其中一张面具的眼眶空洞处似乎正对着楼梯口。尽头半掩的房门里传出微弱的翻纸声。",
+      "hiddenNotes": "尽头房间是老板娘的账房，里面藏着历年大雾夜失踪客人的遗物与仪式日记。",
+      "imagePrompt": "dark wooden inn upstairs corridor, traditional carved wooden masks hanging on wall, eerie shadows, half-open door at the end"
+    },
+    {
+      "id": "s3_backyard_shrine",
+      "name": "后院石阶与无名神龛",
+      "publicDesc": "推开后门，潮湿的青苔石阶隐没在浓雾里，尽头是一座被红绳缠绕的石砌小神龛。神龛前地上放着老板娘遗落的煤油灯，雾气深处隐约传来缓慢而沉重的脚步声。",
+      "hiddenNotes": "真正被献祭的仪式将在午夜十二点完成。调查员可以选择毁掉红绳与神龛核心、或用关键遗物唤醒被迷惑的老板娘并逃出山雾。",
+      "imagePrompt": "mossy stone steps leading into dense mountain fog, small ancient stone shrine wrapped in frayed red ropes, abandoned lantern on ground"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_guestbook",
+      "title": "被撕掉一页的登记簿",
+      "content": "前厅柜台上的登记簿只写着你们三人的名字，但装订线处有明显刚被撕掉一页的毛边。用铅笔轻涂下一页压痕，能隐约认出半年前失踪者的名字。",
+      "sceneId": "s1_dining_hall",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_extra_chopsticks",
+      "title": "第四副碗筷的细节",
+      "content": "第四副碗筷摆在最靠近门的位置，碗底压着一张折成三角的黄纸，上面用朱砂画着“借宿”二字。",
+      "sceneId": "s1_dining_hall",
+      "requiredSkill": "神秘学",
+      "isSecret": false
+    },
+    {
+      "id": "c3_ledger_diary",
+      "title": "老板娘的仪式手记",
+      "content": "二楼账房抽屉里锁着一本旧笔记：每当山雾起、无名神龛躁动时，必须让“多出来的人”在午夜前离开堂屋前往神龛，否则整栋宅子都会被浓雾吞没。（阅读后 0/1D3 SAN Check）",
+      "sceneId": "s2_attic_corridor",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    },
+    {
+      "id": "c4_mask_whisper",
+      "title": "走廊傩面后的刻字",
+      "content": "那张眼眶空洞的木面具背面刻着一行小字：“凡带走旧物者，皆为第四人。”",
+      "sceneId": "s2_attic_corridor",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c5_shrine_core",
+      "title": "神龛内的无芯红灯笼",
+      "content": "神龛里面没有神像，只摆着一盏熄灭的无芯红灯笼，灯笼底座压着失踪挚友的证件与一把生锈的铜钥匙。",
+      "sceneId": "s3_backyard_shrine",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_landlady",
+      "name": "民宿老板娘（林婶）",
+      "persona": "表面热情周到，实则被村里旧俗折磨多年、神情恍惚的中年妇人。",
+      "secret": "她并非凶手，只是为了保住全屋人的性命而试图按旧俗独自去神龛“顶替”第四人的位置。"
+    }
+  ],
+  "keeperSecrets": "这座民宿建在山中旧祭坛之上，大雾起时空间会被模糊的旧神眷属（山雾之影）笼罩。老板娘并不想害任何人，她悄悄前往后院神龛是想自己顶替祭品。如果调查员们能解开彼此的HO心结（HO1找回挚友遗物、HO3直面童年旧事、HO2破译仪式漏洞），在后院神龛用火烧断红绳并击碎无芯红灯笼（或通过仪式逆转），即可救回老板娘并驱散浓雾。"
+}

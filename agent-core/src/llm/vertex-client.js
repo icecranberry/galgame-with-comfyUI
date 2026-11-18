@@ -1,4 +1,5 @@
 import { createPrivateKey, createSign, createHash, randomUUID } from 'node:crypto';
+import { normalizeModelCapabilities } from './modelCapabilities.js';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const tokens = new Map();
@@ -225,6 +226,7 @@ export async function listVertexModels({ vertexServiceAccount, vertexRegion = 'g
   const signal = AbortSignal.timeout(15000);
   const token = await getVertexAccessToken(vertexServiceAccount, { signal, fetchImpl });
   const models = new Set();
+  const capabilities = Object.create(null);
   let pageToken = '';
   const seen = new Set();
   do {
@@ -235,12 +237,15 @@ export async function listVertexModels({ vertexServiceAccount, vertexRegion = 'g
     const data = await readResponse(response, 'Vertex AI 模型列表');
     for (const row of data.publisherModels || []) {
       const id = row.name?.split('/').pop();
-      if (id?.startsWith('gemini-') && !/embedding|image|live|tts/.test(id)) models.add(id);
+      if (id?.startsWith('gemini-') && !/embedding|image|live|tts/.test(id)) {
+        models.add(id);
+        Object.assign(capabilities, normalizeModelCapabilities([{ ...row, id }]));
+      }
     }
     pageToken = data.nextPageToken || '';
     if (seen.has(pageToken)) break;
     seen.add(pageToken);
   } while (pageToken);
   if (!models.size) throw new Error('未获取到 Gemini 文本模型，请手动填写模型名称');
-  return { ok: true, models: [...models].sort(), capabilities: {} };
+  return { ok: true, models: [...models].sort(), capabilities };
 }

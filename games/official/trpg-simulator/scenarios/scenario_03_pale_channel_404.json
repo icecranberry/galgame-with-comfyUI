@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "id": "pale-channel-404-ho",
+    "title": "苍白频道 404",
+    "era": "现代都市 / 规则怪谈",
+    "playerCount": "3~4人（支持隐匿HO）",
+    "estimatedTime": "20~30分钟",
+    "sanityRisk": "高",
+    "synopsis": "深夜十一点半，城中一座早已废弃的旧广播大楼突然重新亮起信号灯。几名因不同原因闯入大楼的调查者被反锁在三楼演播室，而监视器里正实时播放着他们自己的背影——画面右上角写着：404 频道，正在直播。",
+    "stylePrompt": "abandoned 1990s broadcast studio at night, glowing CRT monitors with pale static, eerie cyan and amber rim light, modern urban horror"
+  },
+  "handouts": [
+    {
+      "id": "HO1",
+      "title": "深夜听众",
+      "publicSummary": "你自称只是被朋友拉来废弃大楼探险的路人。",
+      "secretContent": "其实过去一周的每天凌晨，你的手机都会自动收到一段来自这栋大楼的空白录音。今晚是录音里一个极像你自己的声音叫你“上来关掉开关”的。你害怕如果告诉大家，会被当成诱饵。",
+      "recommendedTrait": "不安、对监视器画面高度敏感"
+    },
+    {
+      "id": "HO2",
+      "title": "前电台实习生",
+      "publicSummary": "你曾经在这家广播台打过零工，对楼层分布略有印象。",
+      "secretContent": "你离职的原因是半年前目睹过一位深夜主播在直播间“凭空消失”，台长事后封锁了 404 频道并塞给你一笔封口费。你今晚回来是为了销毁当时留在这里的一盘备份磁带。",
+      "recommendedTrait": "内疚、急于找回特定物品"
+    },
+    {
+      "id": "HO3",
+      "title": "信号追踪者",
+      "publicSummary": "你带着一台便携式频谱仪，看起来像个无线电爱好者。",
+      "secretContent": "你追踪到这个异常频率里藏着某种能改写人记忆的模因波形。你的真正目的是录下完整的信号样本，但前提是不能在信号过载前彻底丧失理智。",
+      "recommendedTrait": "理性甚至有些冷酷、关注仪器读数"
+    },
+    {
+      "id": "HO4",
+      "title": "被困的物业巡检",
+      "publicSummary": "你穿着便服，但口袋里确实有一串旧大楼的钥匙。",
+      "secretContent": "大楼总闸明明在两周前就已经断电了，但三楼的设备今晚依然在满负荷运转。你刚刚在一楼值班室看见了“另一个自己”签下的交接班记录，日期写着明天。",
+      "recommendedTrait": "务实、怀疑时间或空间出了错"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s1_studio_room",
+      "name": "三楼 404 演播室",
+      "publicDesc": "厚重的隔音门在身后咔哒锁死。演播室中央摆着一张长桌和四支立式麦克风，玻璃窗对面是漆黑的导播间。墙上的三台 CRT 监视器同时雪花闪烁，突然切出了你们此刻站在房间里的实时画面——但画面里，麦克风后面多坐着一个低着头的身影。",
+      "hiddenNotes": "直播间遵循三条规则怪谈（贴在麦克风底座下）：1.红灯亮时不要对准麦克风说真名；2.不要回应导播间的敲窗声；3.切勿让屏幕里的自己走出镜头。",
+      "imagePrompt": "dark abandoned radio broadcast studio, glass window to control room, glowing pale static CRT monitors, four microphones on desk"
+    },
+    {
+      "id": "s2_control_room",
+      "name": "隔音玻璃后的导播间",
+      "publicDesc": "撬开或找到钥匙进入导播间后，密密麻麻的调音推子正自动缓缓上推。控制台中央放着一盘贴着“404 - 最终播音”标签的开盘磁带，旁边的打印机正吐出一条条印着你们刚才对话的文字记录。",
+      "hiddenNotes": "调音台上的“主输出推子”已经被黑色绝缘胶带粘死，必须查明磁带内容或通过电子/神秘学检定切断发射源，否则信号会同步覆盖所有人的记忆。",
+      "imagePrompt": "retro broadcast control room at night, glowing mixer faders and reel-to-reel tape machine, eerie pale cyan monitor light"
+    },
+    {
+      "id": "s3_rooftop_tower",
+      "name": "天台信号发射塔下",
+      "publicDesc": "推开生锈的消防门，冷风呼啸着灌入天台。头顶的红色航空警示灯把整座信号塔染成诡异的暗红，塔底的配电箱剧烈震动，空中隐约传来无数人重叠在一起的播音低语。",
+      "hiddenNotes": "最终决战/破局点：拔除主发射天线或销毁母带即可彻底终结直播；若广播倒计时结束，全体调查员将被永远留作“404 频道的下一批主播”。",
+      "imagePrompt": "abandoned building rooftop at night, giant radio transmission tower with glowing red warning beacon in mist, dramatic thriller lighting"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_mic_rules",
+      "title": "麦克风底座下的便签",
+      "content": "泛黄的便利贴上用圆珠笔急促地写着：《404 直播守则》——红灯亮起时切勿说出本名；若导播间有人敲玻璃，不要回头看；一旦信号满格，必须有人按下物理断路器。",
+      "sceneId": "s1_studio_room",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_monitor_anomaly",
+      "title": "监视器里的延迟画面",
+      "content": "仔细盯着屏幕会发现，监视器里的画面比现实慢了整整三秒——而且屏幕里的那个陌生身影正缓缓抬起手，指向你们中的某一个人。（目击者需进行 0/1D4 SAN Check）",
+      "sceneId": "s1_studio_room",
+      "requiredSkill": "心理学",
+      "isSecret": false
+    },
+    {
+      "id": "c3_tape_recording",
+      "title": "“404 - 最终播音”备份磁带",
+      "content": "磁带记录了半年前那位失踪主播的最后三十秒：他在节目里念出了一段来自未知维度的坐标频率，随后大楼的所有电源被异化成了信号发射器。",
+      "sceneId": "s2_control_room",
+      "requiredSkill": "聆听",
+      "isSecret": false
+    },
+    {
+      "id": "c4_transcript_paper",
+      "title": "提前打印出的对话稿",
+      "content": "打印机吐出的纸上，除了你们刚才说过的话，最下方还多印了一行尚未发生的时间戳：“00:15 —— 某位调查员决定交出他的秘密。”",
+      "sceneId": "s2_control_room",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c5_tower_breaker",
+      "title": "配电箱里的逆向接线",
+      "content": "天台配电箱的物理断路器被人为焊死了，需要强行撬开外壳或精准剪断标有苍白符号的主馈线才能彻底停播。",
+      "sceneId": "s3_rooftop_tower",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_phantom_anchor",
+      "name": "苍白主播（电波幻影）",
+      "persona": "声音极具磁性和亲和力，擅长用温和的广播腔精准戳中每位调查员隐藏的秘密。",
+      "secret": "它是被困在 404 频率里的集体意识残响，最喜欢诱导带有秘密 HO 的调查员互相猜忌，借此延长直播时间直到信号过载。"
+    }
+  ],
+  "keeperSecrets": "半年前的深夜直播事故把整栋广播楼变成了一个“吃记忆”的无线电信标。404 频道之所以把这几位各自有隐情（HO1~HO4）的人锁在一起，是因为秘密与猜忌产生的精神波动能为信号塔充能。如果调查员们在猜忌中内耗、或者红灯亮起时违反守则，信号塔会彻底激活；如果他们选择坦诚关键信息并合力冲上天台破坏馈线与母带，即可在零点前掐断直播，逃出生天。"
+}

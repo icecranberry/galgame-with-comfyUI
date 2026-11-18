@@ -1,0 +1,168 @@
+{
+  "meta": {
+    "id": "white-ridge-beyond-noon-ho",
+    "title": "白昼尽头的雪脊",
+    "era": "现代 / 极地雪山探险",
+    "playerCount": "3~4人（强隐匿HO）",
+    "estimatedTime": "40~60分钟",
+    "sanityRisk": "高",
+    "synopsis": "南纬某处无人区突然出现一座海拔超过八千米的未知雪峰。半年前，第一支装备精良的先遣科考队在接近峰顶后全员失联。如今第二支登山队站在暴风雪前的大本营里——每个人都声称自己是为了科学或挑战而来，但行囊深处却各自藏着不能见光的秘密。",
+    "stylePrompt": "cinematic harsh polar mountain expedition, blinding snowstorm, dark basalt rock jutting through glacier ice, moody dramatic lighting, anime visual novel background"
+  },
+  "handouts": [
+    {
+      "id": "HO1",
+      "title": "失忆的归来者",
+      "publicSummary": "你是本次登山队聘请的资深高山向导，对极寒环境有着近乎本能的直觉。",
+      "secretContent": "【绝对隐匿】你其实半年前就随第一支失踪的先遣队上过这座山，而且是唯一一个活着走下山脚的人——但你彻底失去了海拔六千米以上的所有记忆。你的左肩胛骨下方有一道呈规则六边形的冻伤旧疤，每当接近山体就会隐隐发烫。如果队友提起先遣队失踪细节或拿出遗物，你的内心会产生强烈动摇，但不要主动承认自己曾上去过。",
+      "recommendedTrait": "沉稳寡言、对雪山地形有莫名其妙的熟悉感"
+    },
+    {
+      "id": "HO2",
+      "title": "财团的回收专员",
+      "publicSummary": "你以“探险赞助方代表兼摄影师”的身份随队同行，负责记录全程。",
+      "secretContent": "【绝对隐匿】你的真实雇主是一家秘密生物科技财团。他们不在乎山顶有什么，也不在乎先遣队的死活。你的唯一任务是在海拔 6800 米的 C2 废弃营地找到一只印有白色三角标记的【防辐射铅盒】，并确保里面的活体组织样本完整带下山。必要时你可以隐瞒线索、甚至阻挠他人毁掉样本。",
+      "recommendedTrait": "圆滑、优先确保自身安全与目标物品"
+    },
+    {
+      "id": "HO3",
+      "title": "寻亲的追查者",
+      "publicSummary": "你自费加入队伍，理由是想挑战人生第一座八千米级未登峰。",
+      "secretContent": "【绝对隐匿】半年前失踪的先遣队领队“陆沉”正是你最亲近的人。你在他失踪前收到过一张卫星传回的加密照片：画面里山体岩石呈现出不自然的蜂窝状几何切面，角落里还有一个穿着红色冲锋衣的背影（看似正在独自下山）。你怀疑队伍里有人知道内情，甚至参与了那场抛弃。",
+      "recommendedTrait": "敏锐执拗、随时准备通过心理学和观察抓出说谎者"
+    },
+    {
+      "id": "HO4",
+      "title": "聆听低语的学者",
+      "publicSummary": "你是随队的地质与古文献顾问，带着一套便携式声波探测仪。",
+      "secretContent": "【绝对隐匿】你在古籍残卷中见过这座雪峰的描述——它根本不是地壳挤压形成的山脉，而是一座被冰川封存的“巨大共鸣器官”。你私下破译了先遣队最后一段无线电杂音，里面并不是求救，而是一段极富规律的低频颂歌。你渴望亲眼见到峰顶的真相，哪怕为此付出理智的代价。",
+      "recommendedTrait": "学术狂热、对非自然现象接受度极高"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s1_base_camp",
+      "name": "海拔 4800m · 暴雪前夜的大本营",
+      "publicDesc": "橙色的抗风帐篷在狂风中剧烈拍打，气压计指针正在急速下跌。距离窗口期结束只剩不到两小时，远处那座被云雾遮住顶端的黑色雪峰像一头蛰伏的巨兽。随队气象员老陈正在最后核对氧气瓶与卫星电话，而你们四位队员围坐在煤油炉旁整理各自的行囊。",
+      "hiddenNotes": "此处是重要的 Roleplay 互相试探阶段。老陈会无意间提起“奇怪，半年前那支队伍好像也有人带过同款的红色登山镐”（暗示HO1）。若有人对其他队友做心理学检定成功，可察觉对方刻意避开视线或护住背包。",
+      "imagePrompt": "orange expedition tents at snowy mountain base camp at dusk, fierce wind blowing snow, towering ominous black mountain peak in background"
+    },
+    {
+      "id": "s2_c1_camp",
+      "name": "海拔 5900m · 被撕裂的 C1 废弃营地",
+      "publicDesc": "经过六小时的艰难攀登，你们抵达了先遣队半年前建立的一号营地。眼前的景象令人毛骨悚然：三顶防风帐篷不是被大风吹垮的，而是像被某种巨大的钝器从内部向外撕开。雪地里半埋着几只摔碎的氧气表，以及一台外壳结满冰霜的卫星终端。",
+      "hiddenNotes": "帐篷撕裂口没有血迹，说明先遣队当时在没有遭遇猛兽的情况下仓皇向上攀登而非下撤。这里可以搜出先遣队的日志残页与 HO3 照片里的线索吻合。",
+      "imagePrompt": "abandoned high altitude snow camp at 5900m, torn expedition tents buried in snow, broken oxygen tanks, eerie blue twilight"
+    },
+    {
+      "id": "s3_ice_crevasse",
+      "name": "海拔 6400m · 幽蓝冰隙与冻结的背影",
+      "publicDesc": "穿过一段几乎垂直的冰壁时，狂风卷起雪雾，能见度骤降至五米以内。就在你们用冰镐固定路绳时，幽蓝色的半透明冰壁内部突然映出一个模糊的人形轮廓——一名穿着先遣队制服的队员正被封冻在冰层里，双手保持着向上朝拜的姿势，脸上竟挂着诡异而安详的微笑。",
+      "hiddenNotes": "全员目击冰中微笑遗体需进行 1/1D4 SAN Check。HO3 认出这是先遣队的副领队（但不是他要找的陆沉）。此时风雪中会传来类似人类合唱的低频风鸣。",
+      "imagePrompt": "deep glowing blue glacial ice crevasse, silhouette of frozen climber inside translucent ice wall, blinding snowstorm"
+    },
+    {
+      "id": "s4_c2_bunker",
+      "name": "海拔 6800m · 背风岩棚与白色铅盒",
+      "publicDesc": "在接近极限缺氧的高度，你们躲进一处天然黑色玄武岩岩棚避风。岩棚深处堆着先遣队最后留下的物资箱：几支彻底冻坏的肾上腺素、一台尚有微弱余电的录音笔，以及一只上了密码锁的【白色三角标记防辐射铅盒】。岩棚的岩壁上，有人用登山镐刻满了密密麻麻的同心圆符号。",
+      "hiddenNotes": "这是 HO2 任务的核心爆发点，也是 HO1 记忆恢复的关键点。打开录音笔会听到 HO1 自己的声音（半年前录下的警告）；铅盒里装着一块仍在微微搏动的黑色晶状生物组织（开启即触发全员 1/1D6 SAN Check）。",
+      "imagePrompt": "dark basalt rock shelter at extreme high altitude snow mountain, frost-covered equipment crates and a sealed white metallic box, carved geometric circles on rock wall"
+    },
+    {
+      "id": "s5_summit_ruin",
+      "name": "海拔 8200m · 非欧几里得雪脊神殿",
+      "publicDesc": "越过最后一道刃脊，山顶竟然没有积雪，而是露出了一片违背几何常理的巨大黑色石台。狂风在这里诡异地静止了，头顶是漆黑如墨的极地星空，石台中央矗立着一根不断散发着低频嗡鸣的六边形冰晶柱。一个穿着厚重羽绒服的身影正背对着你们跪在晶柱前——正是失踪半年的领队陆沉，但他身后的雪地上，却延伸出一条不属于人类的巨大拖拽痕迹。",
+      "hiddenNotes": "终局舞台。晶柱是古代外星存在留在地球的“声波信标”，陆沉已被同化成半晶体化的守望者。调查员必须决定：1）用炸药/攀登镐摧毁晶柱并带走幸存者下撤；2）满足 HO2 把样本或晶柱碎片带走；3）受 HO4 感召试图与信标沟通。暴风雪将在 3 轮行动后彻底封死下撤路线。",
+      "imagePrompt": "surreal summit of unknown black mountain at night, non-euclidean black stone monolith altar, glowing hexagonal ice crystal pillar under starry polar sky, lone kneeling figure"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_chen_gossip",
+      "title": "老陈的旧照片与无心之言",
+      "content": "气象员老陈擦着眼镜嘟囔：“说来奇怪，半年前那支队伍出发前，好像也有人用着跟你们一模一样的旧款红色冰镐……”（若对 HO1 使用心理学，可发现其瞬间攥紧了手指）",
+      "sceneId": "s1_base_camp",
+      "requiredSkill": "心理学",
+      "isSecret": false
+    },
+    {
+      "id": "c2_c1_terminal",
+      "title": "C1 营地的加密日志",
+      "content": "破译摔坏的卫星终端缓存，最后一条未发出的日志写着：“第4天，我们根本没在往山下走。向导告诉我们后路已经断了，上面有某种声音在叫我们上去。别相信财团的人。”",
+      "sceneId": "s2_c1_camp",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c3_tent_cuts",
+      "title": "帐篷内侧的抓痕与药瓶",
+      "content": "撕裂的帐篷内壁上没有野兽爪痕，只有人类的指甲划痕，地上滚落着几枚空的高浓度抗精神病与抗缺氧混合注射剂，瓶身印着白色的三角财团徽记。",
+      "sceneId": "s2_c1_camp",
+      "requiredSkill": "急救",
+      "isSecret": false
+    },
+    {
+      "id": "c4_ice_corpse_check",
+      "title": "冰壁遗体的异常生理状态",
+      "content": "仔细观察冰壁里的先遣队员：他的瞳孔已经完全变成了没有眼白的六边形晶体结构，胸口却没有冻僵的裂痕，仿佛是主动脱掉护目镜迎向风雪的。（需 0/1D3 SAN Check）",
+      "sceneId": "s3_ice_crevasse",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c5_ho3_secret_photo",
+      "title": "与照片吻合的红色袖口",
+      "content": "在冰隙岩石缝里卡着半截被撕破的红色 Gore-Tex 冲锋衣袖口，内侧缝着一个编号——与半年前唯一生还者留下的装备清单完全一致。",
+      "sceneId": "s3_ice_crevasse",
+      "requiredSkill": "侦查",
+      "isSecret": true
+    },
+    {
+      "id": "c6_voice_recorder",
+      "title": "C2 岩棚的录音笔",
+      "content": "按下播放键，冰冷的电流声中传出一个无比熟悉的声音（正是 HO1 自己的声音！）：“……如果还有人看到这个，听着，千万不要打开那个白色铅盒！是我把他们留在了上面，我得下去找人来……”（HO1 触发记忆闪回，需进行 1/1D6 SAN Check）",
+      "sceneId": "s4_c2_bunker",
+      "requiredSkill": "聆听",
+      "isSecret": false
+    },
+    {
+      "id": "c7_lead_box",
+      "title": "白色三角铅盒内的活体组织",
+      "content": "撬开或输入财团密码打开铅盒，里面浸泡在低温液氮中的是一块暗紫色的晶状肌肉组织，正随着山体的低频嗡鸣同步跳动，散发着令人作呕的甜腥味。（全员 1/1D6 SAN Check）",
+      "sceneId": "s4_c2_bunker",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    },
+    {
+      "id": "c8_wall_glyphs",
+      "title": "岩壁上的古代同心圆铭文",
+      "content": "结合地质与古文献知识破译岩壁刻痕：“当白昼尽头的冰脊苏醒，凡听见七重共鸣者，血肉将化为新星的基座。”",
+      "sceneId": "s4_c2_bunker",
+      "requiredSkill": "神秘学",
+      "isSecret": false
+    },
+    {
+      "id": "c9_summit_lu",
+      "title": "峰顶的半晶体化领队",
+      "content": "跪在晶柱前的陆沉缓缓转过头，他半边脸已经化作半透明的玄武岩冰晶，却还保留着一丝属于人类领队的清醒，嘶哑地挤出三个字：“快……炸掉……它……”",
+      "sceneId": "s5_summit_ruin",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_chen",
+      "name": "老陈（大本营气象员）",
+      "persona": "留守在 4800m 大本营的经验丰富的老后勤，负责无线电联络与天气预警。",
+      "secret": "他其实对半年前那支队伍的唯一生还者（HO1）有模糊印象，但被财团用高额封口费警告过不准多嘴。"
+    },
+    {
+      "id": "n2_lu_chen",
+      "name": "陆沉（失踪的先遣队领队）",
+      "persona": "半年前带队失踪的传奇登山家，也是 HO3 的挚友/亲人，如今在峰顶处于半异化状态。",
+      "secret": "半年前正是他看穿了财团想窃取晶柱样本的阴谋，在暴风雪中强行把受伤失忆的 HO1 推下绳索逃生，自己留在了山顶用最后意志压制信标扩散。"
+    }
+  ],
+  "keeperSecrets": "【核心真相】这座未知雪峰内部封存着远古旧神留下的“共鸣信标”。半年前，第一支先遣队在财团诱导下试图采集晶柱样本，导致信标苏醒。领队陆沉为了阻止样本被带出引发全球灾难，强行切断了与 HO1 的绳索让其滑坠逃生（HO1 因此撞击头部失忆并留下六边形冻伤疤），自己留在山顶压制晶柱。今晚，四个各自怀揣秘密的人再次聚齐：【结局分支】1）全员合作路线：在峰顶听完陆沉遗言后合力摧毁六边形晶柱（需格斗/爆破或利用铅盒反向共鸣），陆沉得以解脱，众人趁暴风雪封山前惊险下撤；2）自私/财团路线：若 HO2 强行带走样本且未摧毁晶柱，虽然能完成雇主任务，但下山后共鸣将在城市中扩散（Bad End）；3）疯狂/献祭路线：若 HO4 强行拥抱晶柱或全员 SAN 归零，众人将永远化作雪脊上的微笑冰雕。"
+}

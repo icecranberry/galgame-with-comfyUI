@@ -1,0 +1,92 @@
+{
+  "meta": {
+    "id": "social-emerald-cruise",
+    "title": "翡翠号游轮的第七道菜",
+    "era": "1920s / 豪华游轮社交推理",
+    "playerCount": "3~4人",
+    "estimatedTime": "35~50分钟",
+    "sanityRisk": "中",
+    "synopsis": "暴雨夜，驶往公海的复古豪华游轮“翡翠号”正在举行只有十二位贵宾的私人晚宴。正当第七道甜点端上桌时，宴会主人——大富豪霍华德突然捂住喉咙倒毙在水晶吊灯下。所有船舱已反锁，而甜点银盘底下压着一张写满拉莱耶文字符号的菜单。",
+    "stylePrompt": "1920s luxury cruise ship grand dining hall at night, crystal chandelier, storm waves outside porthole, dramatic murder mystery dinner party, anime visual novel background"
+  },
+  "handouts": [],
+  "scenes": [
+    {
+      "id": "s1_banquet_hall",
+      "name": "水晶灯下的主宴会厅",
+      "publicDesc": "长桌上铺着雪白的亚麻桌布，银质餐具在摇曳的烛光下泛着冷光。大富豪霍华德趴在主位上已经没有了呼吸，嘴角带着一丝诡异的青紫色微笑。三位同桌贵宾正神色各异地站在原地——没有人能离开这间反锁的餐厅，真凶与邪教徒就在这几人之中。",
+      "hiddenNotes": "这是一场高密度的对话推理舞台！三名 NPC（私人医生、古董商、船长）每人都有一段看似完美但其实有漏洞的不在场证明，调查员可以通过观察尸体、询问服务生以及心理学对峙戳穿谎言。",
+      "imagePrompt": "opulent 1920s cruise ship dining hall, crystal chandelier, long banquet table with silver domes, stormy ocean outside tall arched windows"
+    },
+    {
+      "id": "s2_ship_kitchen",
+      "name": "晃动的船尾配餐间",
+      "publicDesc": "穿过厚重的旋转木门来到配餐间，海浪让墙上挂着的铜锅叮当作响。刚才端出第七道甜点的主厨正脸色惨白地蹲在角落发抖，操作台上还剩下一半没用完的暗紫色糖浆，以及一本被海水浸湿了一角的奇怪食谱。",
+      "hiddenNotes": "暗紫色糖浆里混入了来自深海的微弱致幻毒素，但真正致命的不是毒药，而是与大富豪胸前护身符产生共鸣的诅咒餐刀。",
+      "imagePrompt": "1920s ship galley kitchen, hanging copper pots, stainless steel prep counter with strange glowing purple syrup bottle, moody lighting"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_silver_menu",
+      "title": "银盘底下的异常菜单",
+      "content": "掀开甜点银盘，背面用金粉写着第七道菜的名字：《献给深海主宰的醒神甜点——仅限违约者享用》。末尾盖着一个半圆形的古董商火漆印。",
+      "sceneId": "s1_banquet_hall",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_body_autopsy",
+      "title": "大富豪尸体的异常死因",
+      "content": "仔细检查（医学/急救检定）会发现霍华德的喉咙里根本没有食物残渣，他甚至一口甜点都没来得及吃——他的胸口内侧有三个冰冷的吸盘状青紫淤痕，仿佛被某种看不见的水下生物从内部捏碎了心脏。（0/1D3 SAN Check）",
+      "sceneId": "s1_banquet_hall",
+      "requiredSkill": "急救",
+      "isSecret": false
+    },
+    {
+      "id": "c3_doctor_alibi",
+      "title": "私人医生的袖口破绽",
+      "content": "用心理学或话术逼问私人医生时，会注意到他左手腕的袖扣少了一颗——且他的指甲缝里残留着极细微的蓝色海藻粉，与第七道甜点里的香料完全不同。",
+      "sceneId": "s1_banquet_hall",
+      "requiredSkill": "心理学",
+      "isSecret": false
+    },
+    {
+      "id": "c4_kitchen_recipe",
+      "title": "浸湿的古老祭祀食谱",
+      "content": "配餐间的食谱并不是常规西餐书，而是用古法语写成的“深海契约仪式”：凡在暴风雨夜背叛深海誓约之人，只要听见船钟敲响七下并看见那份菜单，便会被召唤来的契约代行者处决。",
+      "sceneId": "s2_ship_kitchen",
+      "requiredSkill": "图书馆",
+      "isSecret": false
+    },
+    {
+      "id": "c5_captain_compass",
+      "title": "主厨供出的换盘真相",
+      "content": "说服发抖的主厨后，他哭着交代：“那张金粉菜单不是我写的！开宴前二十分钟，是那位穿着燕尾服的古董商偷偷溜进配餐间塞到七号银盘底下的，而医生当时正在门口帮他望风！”",
+      "sceneId": "s2_ship_kitchen",
+      "requiredSkill": "说服",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_antique_dealer",
+      "name": "古董商维克多",
+      "persona": "谈吐优雅、戴着金丝单片眼镜的收藏家，面对质疑总是微笑着反问“证据呢？”",
+      "secret": "他是隐藏在贵宾中的深海教团执行人，霍华德当年吞并了教团资助的打捞船队，今晚的菜单正是触发处决的媒介。"
+    },
+    {
+      "id": "n2_doctor_lin",
+      "name": "私人医生（林医生）",
+      "persona": "表面镇定自若、第一时间主动宣布“大富豪死于突发心肌梗塞”的随行医生。",
+      "secret": "他因为欠下巨额赌债被古董商收买，负责开具虚假死因证明并在混乱中取回霍华德胸前的护身符。"
+    },
+    {
+      "id": "n3_captain",
+      "name": "老船长",
+      "persona": "满脸胡茬、脾气暴躁但其实对这艘船有深厚感情的老水手。",
+      "secret": "他是无辜的，但他隐瞒了“这艘游轮目前已经偏离航线驶入雾区”的事实，因为罗盘早已失灵。"
+    }
+  ],
+  "keeperSecrets": "【真相】霍华德十年前靠掠夺沉船里的深海圣物发家，与深潜者教团签过契约却违约独吞宝藏。今晚古董商维克多与医生合谋，在第七道菜上桌时利用菜单媒介唤醒契约诅咒处决了霍华德。调查员如果能在大厅里通过搜证与话术当众揭穿医生和古董商的合谋（并抢走或毁掉那份契约菜单/护身符），就能阻止隐藏在甲板下的深潜者登船屠杀，成功撑到暴风雨停歇。"
+}

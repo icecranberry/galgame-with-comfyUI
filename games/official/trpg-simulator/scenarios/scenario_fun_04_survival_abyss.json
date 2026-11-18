@@ -1,0 +1,79 @@
+{
+  "meta": {
+    "id": "survival-abyss-20min",
+    "title": "海沟下的 20 分钟",
+    "era": "现代深海科研 / 极限生存",
+    "playerCount": "2~4人",
+    "estimatedTime": "25~40分钟",
+    "sanityRisk": "极高",
+    "synopsis": "原型深海科研潜艇“海燕号”在下潜至水下 1500 米海沟时遭遇未知声波冲击，主动力彻底瘫痪并卡在了一座违背地质常识的巨型玄武岩柱上。船舱正在缓慢进水，氧气含量不断下跌，而声呐屏幕上显示，有什么庞然大物正围绕着艇身游弋。",
+    "stylePrompt": "cramped dark submarine control room underwater, glowing red emergency lights, leaking water pipes, green sonar radar screen showing huge unknown silhouette, tense survival horror"
+  },
+  "handouts": [],
+  "scenes": [
+    {
+      "id": "s1_control_bridge",
+      "name": "闪烁红灯的主控室与声呐台",
+      "publicDesc": "警报灯把狭窄的金属舱室染成一片血红，冰冷的海水正从头顶管道接缝处滋滋喷溅。主控台上的氧气表显示剩余含量仅够维持二十分钟；绿色声呐屏幕上，三个巨大的光点正发出规律的金属叩击声，由远及近地敲打着耐压壳。",
+      "hiddenNotes": "强压迫感倒计时舞台！每次在场景内磨蹭或检定失败，氧气压力就会恶化。必须先查明故障点在底舱压载阀门，还是去气闸室回收备用电池。",
+      "imagePrompt": "claustrophobic submarine command bridge bathed in red emergency alarm light, sparks from console, glowing green sonar screen"
+    },
+    {
+      "id": "s2_engine_flood",
+      "name": "半淹没的底层动力舱",
+      "publicDesc": "爬下湿滑的垂直铁梯，刺骨的海水已经没过脚踝。备用手动压载泵被一根扭曲的钢梁卡住了，水面下飘浮着一根还在滋滋冒着蓝色电火花的断裂高压线。旁边的舷窗外，一只苍白、布满吸盘的巨型利爪突然贴在了厚重的钢化玻璃上。",
+      "hiddenNotes": "此处触发全员 1/1D6 SAN Check。玩家必须在“先断电再涉水抢修阀门”（安全但耗费回合）和“直接强行扳动卡死阀门”（快但有触电受伤风险）之间做抉择。",
+      "imagePrompt": "flooded dark submarine engine room, knee-deep black water with blue electrical sparks, thick circular porthole with monstrous pale clawed hand pressed against glass outside"
+    },
+    {
+      "id": "s3_escape_pod",
+      "name": "尾部救生舱与道德抉择",
+      "publicDesc": "虽然主压载水舱终于开始艰难排水，但艇身受深海怪物撞击已经发出令人牙酸的金属撕裂声——全艇即将解体！尾部只有一具双人/三人型应急救生浮囊舱，而此时受伤的轮机长被倒塌的设备死死压住了左腿，氧气警报发出最后尖鸣。",
+      "hiddenNotes": "终极道德抉择与高潮：救出轮机长需要额外 1 轮高难度力量/急救检定（全员都要冒着跟潜艇一起沉没的风险）；或者大家合力启动深水声波诱饵炸弹吸引怪物，全员挤进超载的逃生舱惊险上浮。",
+      "imagePrompt": "narrow submarine escape hatch chamber, rushing seawater, glowing emergency exit lever, intense dramatic rescue moment"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_sonar_pattern",
+      "title": "声呐频谱里的非自然规律",
+      "content": "仔细辨认声呐传回的叩击声（聆听检定）：那根本不是海底乱流撞击，而是在模仿人类求救的摩尔斯电码频率——它们在学你们发出的声音，借此判断哪一侧舱壁最薄弱。",
+      "sceneId": "s1_control_bridge",
+      "requiredSkill": "聆听",
+      "isSecret": false
+    },
+    {
+      "id": "c2_decoy_torpedo",
+      "title": "主控台的声波诱饵发射按钮",
+      "content": "查阅潜艇紧急手册（侦查或图书馆）：海燕号搭载了一枚“热噪/声呐诱饵弹”，一旦在尾部发射，可以把外面的深海猎食者引开至少三分钟——但发射开关的保险丝被锁在了电路盒里。",
+      "sceneId": "s1_control_bridge",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c3_valve_jam",
+      "title": "卡死的手动压载阀门",
+      "content": "底层动力舱的红色手轮被变形金属死死卡住，强行拧开需要极高的机械技巧（锁匠/机械）或直接用蛮力（格斗/力量）撬断卡扣，但水里带电。",
+      "sceneId": "s2_engine_flood",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    },
+    {
+      "id": "c4_abyss_city",
+      "title": "探照灯扫过的海沟真相",
+      "content": "趁着外部探照灯最后一次闪烁，透过舷窗惊鸿一瞥：海燕号卡住的根本不是岩石，而是一座沉没在海底、表面刻满巨型浮雕的宏伟城市尖塔！（目击者 1/1D6 SAN Check）",
+      "sceneId": "s2_engine_flood",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_chief_engineer",
+      "name": "老周（受伤的轮机长）",
+      "persona": "浑身油污、腿部受伤却依然死死盯着压力表的硬汉老船员，嘴里念叨着“这破船还能再撑十分钟”。",
+      "secret": "他知道逃生舱的额定载重已经接近极限，如果自己拖累了大家，他会主动在最后一刻把救生舱阀门从外面反锁（除非调查员拼死把他一起拽出来）。"
+    }
+  ],
+  "keeperSecrets": "【生存压迫感控制】这是一个没有多余废话的纯正绝境逃生团。KP 需要在每次描述末尾明确播报【剩余氧气：XX 分钟】与【船壳裂纹声】。核心破局链条：1）在主控室发现并修好声呐诱饵弹；2）冒着触电和怪物贴脸的风险下到底舱释放手动压载阀门；3）在最后时刻决定是否花费宝贵回合救出腿部被压的轮机长，并在发射诱饵弹后全员挤进逃生舱冲出水面，看着远处深海幽暗的轮廓在身下消失。"
+}

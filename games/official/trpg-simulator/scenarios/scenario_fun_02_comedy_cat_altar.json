@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "id": "comedy-cat-altar",
+    "title": "千万别让猫碰那个祭坛",
+    "era": "现代小镇 / 黑色幽默喜剧",
+    "playerCount": "2~4人",
+    "estimatedTime": "20~30分钟",
+    "sanityRisk": "低（主打沙雕与混乱）",
+    "synopsis": "你们受镇上古怪的玛莎婆婆之托，帮她看管一晚老宅和她那只重达十六斤的肥橘猫“芝士”。临走前婆婆千叮咛万嘱咐：“千万别去地下室，更别让猫碰那个红布盖着的桌子！”结果凌晨两点，楼下传来一声清脆的陶瓷碎裂声和一声中气十足的“喵嗷——”。",
+    "stylePrompt": "cozy messy suburban house basement at night, comical chaos, chubby orange tabby cat sitting next to a glowing purple summoning circle, household brooms and duct tape, anime comedy visual novel"
+  },
+  "handouts": [],
+  "scenes": [
+    {
+      "id": "s1_living_room",
+      "name": "凌晨两点的客厅与玄关",
+      "publicDesc": "温暖的客厅里摆着茶几和热牛奶，电视里正放着深夜购物频道。突然地板微微震动，地下室木门缝里冒出一股淡淡的紫烟和海鲜味（？）。与此同时，门外传来热心邻居家张大妈的敲门声：“喂！你们屋里是不是在半夜煮海鲜火锅啊？这味儿怎么这么冲！”",
+      "hiddenNotes": "这里主打搞笑社交危机：需要有人去玄关用话术/说服敷衍张大妈（如果大失败，张大妈会直接端着碗进来蹭吃并看到触手，引发全员社死掉 SAN）。",
+      "imagePrompt": "cozy cluttered living room at 2am, purple mist seeping under basement door, startled atmosphere"
+    },
+    {
+      "id": "s2_basement_chaos",
+      "name": "失控的地下室魔法阵",
+      "publicDesc": "打开地下室灯，原本盖着红丝绒布的圆桌已经掀翻。十六斤的橘猫“芝士”正端坐在闪烁着紫光的粉笔魔法阵正中央舔爪子，而阵眼中间的时空裂缝里，正缓缓伸出三根滑溜溜、还挂着半罐打翻的猫罐头的不可名状触手……触手似乎对你们手里拿着的拖把和扫帚表现出了极大的好奇。",
+      "hiddenNotes": "触手怪（其实是误被召唤出来的弱小星之彩/幼年深潜者宠物）非常贪吃且怕强力胶带与吸尘器。玩家可以用猫罐头引诱它、用强力胶带/平底锅物理封门，或者通过神秘学逆向念咒（如果念错咒语会让橘猫临时学会说人话吐槽大家！）。",
+      "imagePrompt": "messy house basement, glowing chalk summoning circle on floor, chubby orange cat sitting calmly, comical wiggling purple tentacles reaching out of a spilled cat food can"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_grandma_note",
+      "title": "冰箱门上的应急便条",
+      "content": "玛莎婆婆留下的便利贴：“PS：如果芝士还是不小心把阵法踩亮了，千万别报警！用储藏柜里的【银色强力胶带】把裂缝贴上，或者用【金枪鱼罐头】把那东西哄回去，然后把粉笔印拖干净就行。这事儿挺常见的。”",
+      "sceneId": "s1_living_room",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_spellbook_recipe",
+      "title": "被猫抓烂的《家庭召唤退散指南》",
+      "content": "圆桌底下压着一本手写小册子，上面用红笔圈着两行字：“逆转咒语只要把拉丁文倒着念一遍……注意！千万别把‘退回深渊’念成‘再来一碗’。”（神秘学大失败时直接触发喜剧效果）",
+      "sceneId": "s2_basement_chaos",
+      "requiredSkill": "神秘学",
+      "isSecret": false
+    },
+    {
+      "id": "c3_cat_collar",
+      "title": "橘猫芝士的项圈暗扣",
+      "content": "肥橘猫脖子上戴着一枚刻有旧神印记的铜铃铛——原来它根本不是普通家猫，而是婆婆用来镇压地下室的“守护灵兽”，今晚只是因为宵夜没吃饱才故意搞破坏。",
+      "sceneId": "s2_basement_chaos",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_aunt_zhang",
+      "name": "隔壁热心张大妈",
+      "persona": "精力充沛、八卦欲极强、手里永远拎着一袋水果或刚出锅包子的邻里热心肠。",
+      "secret": "她其实只是想进来看看你们是不是背着她吃独食，如果被她看见触手，她大概率会以为你们买了一只超大号章鱼准备做铁板烧。"
+    },
+    {
+      "id": "n2_cat_cheese",
+      "name": "橘猫“芝士”",
+      "persona": "十六斤重、表情永远带着三分凉薄七分不屑的肥橘猫，是整个混乱的始作俑者。",
+      "secret": "只要给它喂一罐金枪鱼罐头并顺毛抚摸（心理学/话术大成功），它就会懒洋洋地一屁股坐回阵眼上把空间裂缝压住。"
+    }
+  ],
+  "keeperSecrets": "这是一场纯正的轻松搞笑向跑团！KP 应多鼓励玩家和 AI 邻舍使用荒唐的道具（平底锅、吸尘器、胶带、猫条、扫把）解决超自然危机。每次检定如果掷出【大失败】，不要直接撕卡，而是安排极富喜剧感的社死意外（比如一脚踩进猫砂盆、把触手当成大葱捆起来、或者张大妈热情帮忙把触手怪塞进高压锅）。只要在天亮婆婆回来前把裂缝封住、把猫喂饱并打扫干净地板，全员即可欢喜结团！"
+}

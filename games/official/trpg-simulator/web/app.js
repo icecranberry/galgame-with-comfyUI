@@ -6,6 +6,7 @@
   let castAssets, playerExpression = 'normal', turnPreview;
   const lineups = { keeper: [], investigator: [] };
   const partyLimits = { keeper: 4, investigator: 5 };
+  const hoSelections = new Map();
   const customScenarioId = 'custom';
   const view = window.TrpgPresentation;
   let activeTab = 'narrative', diceAnimating = false, secretRoll = null;
@@ -53,19 +54,41 @@
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
   dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeModal(); } });
   function wireChoices() { document.querySelectorAll('[data-picker]').forEach(group => { group.value = group.dataset.value; }); }
+  function hoPreview(scenario, selected) {
+    const hoChoices = scenario?.handouts || [];
+    const hoKey = `${scenario?.draftId || scenario?.id}:${mode}`;
+    const ids = selected.map(String);
+    if (mode === 'investigator') ids.unshift('player');
+    const saved = hoSelections.get(hoKey) || {};
+    const assigned = new Map();
+    const available = new Map(hoChoices.map(ho => [ho.id, ho]));
+    for (const id of ids) {
+      const choice = saved[id] || (id === 'player' ? 'HO1' : '');
+      if (available.has(choice)) {
+        assigned.set(id, available.get(choice));
+        available.delete(choice);
+      }
+    }
+    for (const id of ids) {
+      if (assigned.has(id) || !available.size) continue;
+      const [hoId, ho] = available.entries().next().value;
+      assigned.set(id, ho);
+      available.delete(hoId);
+    }
+    const hoRows = hoChoices.length ? ids.map(id => {
+      const character = characters.find(c => String(c.id) === id);
+      return { id, name: id === 'player' ? castAssets.player.name : character?.display_name || character?.name, handout: assigned.get(id) };
+    }) : [];
+    return { hoChoices, hoKey, hoRows };
+  }
   function lobbyData() {
     const scenarios = [...catalog.scenarios];
-    if (importedScenario) scenarios.push({
-      id: customScenarioId,
-      meta: importedScenario.meta,
-      scenes: importedScenario.scenes.length,
-      opening: importedScenario.scenes[0].publicDesc,
-      briefing: { tags: ['外部导入'] },
-    });
+    if (importedScenario) scenarios.push(importedScenario);
     const scenario = scenarios.find(item => item.id === scenarioId);
-    const selected = lineups[mode], limit = partyLimits[mode];
-    const canStart = !!scenario && (mode === 'keeper' ? selected.length > 0 : keeperId !== null);
-    return { scenarios, scenario, characters, saves, mode, selected, limit, keeperId, castAssets, imagesEnabled, canStart };
+    const selected = lineups[mode], preview = hoPreview(scenario, selected);
+    const limit = preview.hoChoices.length ? Math.min(partyLimits[mode], preview.hoChoices.length - (mode === 'investigator' ? 1 : 0)) : partyLimits[mode];
+    const canStart = !!scenario && selected.length <= limit && (mode === 'keeper' ? selected.length > 0 : keeperId !== null);
+    return { scenarios, scenario, characters, saves, mode, selected, limit, keeperId, castAssets, imagesEnabled, canStart, ...preview };
   }
   function lobby() {
     root.innerHTML = view.lobby(lobbyData());
@@ -91,21 +114,23 @@
       lineups.investigator = party.filter(member => member !== id);
     } else if (party.includes(id)) {
       lineups[mode] = party.filter(member => member !== id);
-    } else if (party.length < partyLimits[mode]) {
+    } else if (party.length < lobbyData().limit) {
       party.push(id);
     } else {
-      notice(`最多可邀请 ${partyLimits[mode]} 位调查员`);
+      notice(`当前模组最多可邀请 ${lobbyData().limit} 位 AI 调查员`);
       return;
     }
     updateLobby('partyStatus', 'roster', 'launch');
   }
-  function editScenario() {
+  async function editScenario() {
+    if (mode !== 'keeper' || !importedScenario?.draftId) return;
+    const source = await post('/scenario-draft', { mode, draftId: importedScenario.draftId });
     modal('编辑导入剧本', `<label for="scenario-draft">剧本 JSON</label>
-      <textarea id="scenario-draft" rows="12" spellcheck="false">${esc(JSON.stringify(importedScenario, null, 2))}</textarea>
+      <textarea id="scenario-draft" rows="12" spellcheck="false">${esc(JSON.stringify(source, null, 2))}</textarea>
       <p id="scenario-edit-error" class="lobby-form-error" role="alert"></p>
       <div class="dialog-footer">${button('apply-scenario', '应用修改', 'primary')}</div>`, true);
   }
-  function applyScenario() {
+  async function applyScenario() {
     const field = document.getElementById('scenario-draft');
     const errorLine = document.getElementById('scenario-edit-error');
     try {
@@ -114,14 +139,40 @@
           !Array.isArray(edited.scenes) || !edited.scenes.length || typeof edited.scenes[0]?.publicDesc !== 'string') {
         throw new Error('请填写剧本标题和开场场景描述。');
       }
-      importedScenario = edited;
+      importedScenario = await post('/parse-scenario', { content: field.value, format: 'json', draft: true, edit: true, mode });
       dialog.addEventListener('close', () => root.querySelector('[data-action="edit-scenario"]')?.focus({ preventScroll: true }), { once: true });
       closeModal();
-      updateLobby('scenarioList', 'briefing');
+      updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch');
     } catch (error) {
       errorLine.textContent = error instanceof SyntaxError ? 'JSON 格式有误，请检查后再应用。' : error.message;
       field.focus();
     }
+  }
+  async function previewHO(id) {
+    const { scenario, hoChoices, hoRows } = lobbyData();
+    const row = hoRows.find(actor => actor.id === id);
+    if (!row?.handout) return;
+    const canAssign = mode === 'keeper' || id === 'player';
+    const handout = mode === 'keeper' ? await post('/preview-handout', { mode, scenarioId: scenario.id, draftId: scenario.draftId, hoId: row.handout.id }) : row.handout;
+    modal(`${row.name} · 秘密 HO`, `${view.handoutCard(handout)}
+      ${canAssign ? `<div class="control-section"><h3>分配 HO</h3>${view.choices('ho-choice', hoChoices.map(ho => ({ label: `${ho.id} · ${ho.title}`, value: ho.id })), handout.id, '分配秘密 HO')}</div>
+      <div class="dialog-footer">${button('assign-ho', '确认分配', 'primary', `data-id="${esc(id)}"`)}</div>` : ''}`);
+  }
+  function assignHO(id) {
+    const { hoKey, hoRows, hoChoices } = lobbyData();
+    const choice = document.getElementById('ho-choice')?.value;
+    const row = hoRows.find(actor => actor.id === id);
+    if (!row || !hoChoices.some(ho => ho.id === choice)) return;
+    if (mode === 'keeper') {
+      const assigned = Object.fromEntries(hoRows.filter(actor => actor.handout).map(actor => [actor.id, actor.handout.id]));
+      const previous = hoRows.find(actor => actor.handout?.id === choice && actor.id !== id);
+      if (previous && row.handout) assigned[previous.id] = row.handout.id;
+      assigned[id] = choice;
+      hoSelections.set(hoKey, assigned);
+    } else if (id === 'player') hoSelections.set(hoKey, { player: choice });
+    dialog.addEventListener('close', () => document.getElementById(`ho-preview-${id}`)?.focus({ preventScroll: true }), { once: true });
+    closeModal();
+    updateLobby('roster');
   }
   function showRules() {
     modal('规则说明', `<dl class="lobby-rules">
@@ -295,9 +346,9 @@
       const file = e.target.files[0]; if (!file) return;
       e.target.value = '';
       if (file.size > 512 * 1024 || !/\.(md|txt|json)$/i.test(file.name)) throw new Error('请选择不超过 512KB 的 md / txt / json 剧本');
-      importedScenario = await post('/parse-scenario', { content: await file.text(), format: /\.json$/i.test(file.name) ? 'json' : 'text' });
+      importedScenario = await post('/parse-scenario', { content: await file.text(), format: /\.json$/i.test(file.name) ? 'json' : 'text', draft: true, mode });
       scenarioId = customScenarioId;
-      updateLobby('scenarioList', 'briefing', 'launch');
+      updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch');
       notice('已导入并选中外部剧本');
     });
   });
@@ -307,18 +358,44 @@
     if (e.target.id === 'message' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); work(async () => { await turn(); }); } });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-action]'); if (!el || el.disabled) return; const action = el.dataset.action; readControl();
-    if (action === 'choice') { const group = el.closest('[data-picker]'); group.dataset.value = el.dataset.value; group.value = el.dataset.value; group.querySelectorAll('button').forEach(item => { const chosen = item === el; item.classList.toggle('selected', chosen); item.setAttribute('aria-pressed', String(chosen)); }); readControl(); if (group.id === 'check-dice') { render(); root.querySelector('#check-dice .selected')?.focus({ preventScroll: true }); } return; }
+    if (action === 'choice') {
+      const group = el.closest('[data-picker]');
+      group.dataset.value = el.dataset.value;
+      group.value = el.dataset.value;
+      group.querySelectorAll('button').forEach(item => {
+        const chosen = item === el;
+        item.classList.toggle('selected', chosen);
+        item.setAttribute('aria-pressed', String(chosen));
+      });
+      const previousSkill = controlSkill;
+      readControl();
+      const changesSanDice = group.id === 'skill' && controlSkill !== previousSkill && [controlSkill, previousSkill].includes('理智');
+      if (changesSanDice) controlDice = controlSkill === '理智' ? 'd100' : 'd20';
+      if (changesSanDice || group.id === 'check-dice') {
+        render();
+        root.querySelector(`#${group.id} .selected`)?.focus({ preventScroll: true });
+      }
+      return;
+    }
     if (action === 'tab') { activeTab = el.dataset.tab; render(); document.getElementById('tab-' + activeTab)?.focus({preventScroll:true}); return; }
+    if (action === 'ho-focus-kp') {
+      if (state.mode !== 'keeper') return;
+      controlChar = el.dataset.id;
+      activeTab = 'keeper';
+      render();
+      root.querySelector('#target .selected')?.focus({ preventScroll: true });
+      return;
+    }
     if (action === 'evidence') { const clue = state.clues.find(c => c.id === el.dataset.id); if (clue) modal(clue.title, `<article class="evidence-detail"><span class="evidence-label">${clue.isSecret ? '私密证物' : '公开证物'}</span><p>${view.highlight(clue)}</p></article>`); return; }
     if (action === 'close') { closeModal(); return; }
     if (action === 'choose-scenario') {
-      if (scenarioId !== el.dataset.id) { scenarioId = el.dataset.id; updateLobby('scenarioList', 'briefing', 'launch'); }
+      if (scenarioId !== el.dataset.id) { scenarioId = el.dataset.id; updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch'); }
       return;
     }
     if (action === 'lobby-mode') {
       if (mode === el.dataset.mode) return;
       mode = el.dataset.mode;
-      updateLobby('partyMode', 'partyStatus', 'roster', 'launch');
+      updateLobby('partyMode', 'briefing', 'partyStatus', 'roster', 'launch');
       if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
         root.querySelector('.party-list').animate([{ opacity: .5 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' });
       }
@@ -333,8 +410,10 @@
       return;
     }
     if (action === 'import-scenario') { document.getElementById('scenario-file').click(); return; }
-    if (action === 'edit-scenario') { editScenario(); return; }
-    if (action === 'apply-scenario') { applyScenario(); return; }
+    if (action === 'edit-scenario') { work(editScenario); return; }
+    if (action === 'apply-scenario') { work(applyScenario); return; }
+    if (action === 'preview-ho') { work(() => previewHO(el.dataset.id)); return; }
+    if (action === 'assign-ho') { assignHO(el.dataset.id); return; }
     if (action === 'history') { modal('日志回溯', `<div class="history-log">${logs(state.publicLog)}</div>`, true); return; }
     if (action === 'images') { modal('场景印相', `${state.imageJobs.length ? state.imageJobs.map(j => `<article class="image-proof">${j.url ? `<img src="${esc(image(j.url))}" alt="游戏场景图">${button('promote', '收藏到邻舍相册', '', `data-url="${esc(j.url)}" data-network`)}` : `<p class="field-note">${j.status === 'running' ? '正在显影…' : esc(j.error || '显影中断')}</p>`}</article>`).join('') : '<p class="empty-copy">尚未拍下场景。生成图片会使用当前生图服务。</p>'}<div class="dialog-footer">${button('retry-image', '拍下当前场景', '', 'data-network')}</div>`); return; }
     if (action === 'finish-dialog') {
@@ -348,10 +427,12 @@
     work(async () => {
       switch (action) {
         case 'start': {
-          const { selected, canStart } = lobbyData();
+          const { selected, canStart, scenario, hoRows } = lobbyData();
           if (!canStart) return;
+          const hoAssignments = Object.fromEntries(hoRows.filter(actor => actor.handout && (mode === 'keeper' || actor.id === 'player'))
+            .map(actor => [actor.id, actor.handout.id]));
           state = await post('/start', { mode, characterIds: selected, scenarioId,
-            scenario: scenarioId === customScenarioId ? importedScenario : undefined, keeperId, imagesEnabled });
+            draftId: scenario.draftId, hoAssignments, keeperId, imagesEnabled });
           draft = ''; render(); break;
         }
         case 'load': {

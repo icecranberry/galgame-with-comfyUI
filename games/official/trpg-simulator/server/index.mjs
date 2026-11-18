@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 
 export const SKILLS = ['侦查', '图书馆', '聆听', '话术', '说服', '心理学', '格斗', '闪避', '急救', '神秘学', '锁匠', '潜行'];
+const CHECK_SKILLS = [...SKILLS, '理智'];
 const ATTRIBUTES = ['STR', 'CON', 'DEX', 'INT', 'POW', 'APP', 'SIZ', 'EDU'];
 const PLAYER_ID = 'player';
 const NORMAL_SLOT = 'normal';
@@ -8,7 +9,7 @@ const DIFFICULTIES = { regular: '普通', hard: '困难', extreme: '极难' };
 const DC = { regular: 10, hard: 14, extreme: 18 };
 const CHECK_DICE = ['d20', 'd100'];
 const D20_MODES = ['normal', 'advantage', 'disadvantage'];
-const DICE_SIDES = [4, 6, 8, 10, 12, 20, 100];
+const DICE_SIDES = [3, 4, 6, 8, 10, 12, 20, 100];
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status, gameMessage: message }); };
 const text = (v, max = 2000) => typeof v === 'string' ? v.slice(0, max) : '';
 const integer = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
@@ -21,8 +22,8 @@ export function rollD100(skill, difficulty = 'regular', value = randomInt(1, 101
   const rank = value === 1 ? 'critical' : value >= 96 ? 'fumble' : value <= Math.floor(skill / 5) ? 'extreme' : value <= Math.floor(skill / 2) ? 'hard' : value <= skill ? 'regular' : 'failure';
   return { value, skill, target, difficulty, rank, success: value === 1 || (value < 96 && value <= target) };
 }
-function checkDetails({ skill, difficulty = 'regular', dice = 'd20', mode = 'normal', reason }, reasonRequired = true) {
-  if (!SKILLS.includes(skill) || !Object.hasOwn(DC, difficulty) || !CHECK_DICE.includes(dice)
+function checkDetails({ skill, difficulty = 'regular', dice = skill === '理智' ? 'd100' : 'd20', mode = 'normal', reason }, reasonRequired = true) {
+  if (!CHECK_SKILLS.includes(skill) || !Object.hasOwn(DC, difficulty) || !CHECK_DICE.includes(dice)
     || !D20_MODES.includes(mode) || (dice !== 'd20' && mode !== 'normal')) fail('检定技能、难度或骰型无效');
   const explanation = text(reason, 200).trim();
   if (reasonRequired && !explanation) fail('请说明检定原因');
@@ -112,8 +113,48 @@ export function validateScenario(value) {
   });
   const npcs = value.npcs.map(n => { if (!validId(n?.id) || npcIds.has(n.id) || !text(n.name, 100).trim()) fail('NPC 编号或姓名无效'); npcIds.add(n.id); return { id: n.id, name: text(n.name, 100), persona: text(n.persona, 3000), secret: text(n.secret, 3000) }; });
   const rules = value.rules === undefined ? null : validateRules(value.rules, scenes, clues);
-  return { meta: { title: text(value.meta.title, 200), era: text(value.meta.era, 100), stylePrompt: text(value.meta.stylePrompt, 2000) }, scenes, clues, npcs,
-    keeperSecrets: text(value.keeperSecrets, 20000), ...(rules ? { rules } : {}) };
+  const handouts = validateHandouts(value.handouts);
+  const { id, title, era, stylePrompt, playerCount, estimatedTime, sanityRisk, synopsis } = value.meta;
+  return { meta: { ...(validId(id) ? { id } : {}), title: text(title, 200), era: text(era, 100), stylePrompt: text(stylePrompt, 2000),
+    playerCount: text(playerCount, 100), estimatedTime: text(estimatedTime, 100), sanityRisk: text(sanityRisk, 100), synopsis: text(synopsis, 1000) },
+    scenes, clues, npcs, handouts, keeperSecrets: text(value.keeperSecrets, 20000), ...(rules ? { rules } : {}) };
+}
+function validateHandouts(raw = []) {
+  if (!Array.isArray(raw) || raw.length > 12) fail('剧本的秘密 HO 必须是 0–12 项的数组');
+  const ids = new Set();
+  return raw.map(handout => {
+    const { id, title, publicSummary, secretContent, recommendedTrait } = handout || {};
+    if (!validId(id) || ids.has(id) || !text(title, 100).trim() || !text(publicSummary, 1500).trim()
+      || !text(secretContent, 6000).trim() || (recommendedTrait !== undefined && typeof recommendedTrait !== 'string')) fail('秘密 HO 编号重复或缺少公开身份、秘密内容');
+    ids.add(id);
+    return { id, title: text(title, 100), publicSummary: text(publicSummary, 1500), secretContent: text(secretContent, 6000), recommendedTrait: text(recommendedTrait, 300) };
+  });
+}
+const scenarioIdentifier = scenario => scenario.id || scenario.meta.id || scenario.meta.title;
+function scenarioPreview(scenario, id = scenarioIdentifier(scenario)) {
+  const { title, era, playerCount, estimatedTime, sanityRisk, synopsis } = scenario.meta;
+  return { id, meta: { title, era }, scenes: scenario.scenes.length, opening: scenario.scenes[0]?.publicDesc,
+    briefing: scenario.briefing || { duration: estimatedTime, risk: sanityRisk, objective: synopsis, party: playerCount },
+    handouts: (scenario.handouts || []).map(({ id, title, publicSummary }) => ({ id, title, publicSummary })) };
+}
+function assignHandouts(handouts, ids, mode, requested = {}) {
+  if (!requested || typeof requested !== 'object' || Array.isArray(requested)) fail('HO 分配格式无效');
+  const deck = new Map(handouts.map(handout => [handout.id, handout]));
+  const assignments = new Map();
+  const used = new Set();
+  if (deck.size && ids.length > deck.size) fail(`本模组共有 ${deck.size} 张秘密 HO，请减少调查员人数`);
+  for (const [actorId, hoId] of Object.entries(requested)) {
+    if (!ids.includes(actorId) || (mode === 'investigator' && actorId !== PLAYER_ID) || !deck.has(hoId) || used.has(hoId)) fail('HO 分配重复或不属于当前阵容');
+    assignments.set(actorId, deck.get(hoId));
+    used.add(hoId);
+  }
+  if (mode === 'investigator' && !assignments.has(PLAYER_ID) && deck.has('HO1')) {
+    assignments.set(PLAYER_ID, deck.get('HO1'));
+    used.add('HO1');
+  }
+  const available = handouts.filter(handout => !used.has(handout.id));
+  for (const actorId of ids) if (!assignments.has(actorId) && available.length) assignments.set(actorId, available.shift());
+  return assignments;
 }
 function partyItems(state) {
   return (state.scenario.rules?.items || []).flatMap(({ id, label }) => {
@@ -121,29 +162,41 @@ function partyItems(state) {
     return status ? [{ id, label, status }] : [];
   });
 }
+function promptTimeline(state, audience) {
+  const views = state.promptViews ||= {};
+  const timeline = views[audience] || {};
+  // Keep the active audiences when the public group changes after a retirement or replacement.
+  delete views[audience];
+  views[audience] = timeline;
+  const keys = Object.keys(views);
+  if (keys.length > 8) delete views[keys[0]];
+  return timeline;
+}
 export function investigatorContext(state, investigator) {
-  const minRound = Math.max(0, state.round - 14);
   // Build from an allowlist. Never serialize the state then remove secret keys.
-  return { scenario: { title: state.scenario.meta.title, era: state.scenario.meta.era },
+  return {
     scene: { name: state.scenario.scenes.find(s => s.id === state.sceneId).name, publicDesc: state.scenario.scenes.find(s => s.id === state.sceneId).publicDesc },
-    summaries: state.summaries.slice(-10), publicLog: state.publicLog.filter(l => l.sceneId === state.sceneId && l.round >= minRound),
+    summaries: state.summaries.slice(-10),
     publicClues: state.scenario.clues.filter(clue => state.revealed.includes(clue.id)).map(({ title, content }) => ({ title, content })),
     partyItems: partyItems(state),
     investigators: state.investigators.map(({ id, name, hp, san, outOfAction }) => ({ id, name, hp, san, outOfAction })),
-    ...(investigator ? { self: { id: investigator.id, attributes: investigator.attributes, skills: investigator.skills, inventory: investigator.inventory }, handout: state.handouts[investigator.id] || '' } : {}) };
+    ...(investigator ? { self: { id: investigator.id, attributes: investigator.attributes, skills: investigator.skills, inventory: investigator.inventory },
+      handout: state.handouts[investigator.id] || '' } : {}) };
 }
 const SCENARIO_RULES = `你是 CoC 短篇模组编辑。把材料提取为可运行短篇，保留原文真相与线索因果，不把秘密写进公开描述。只输出完整 JSON，不输出解释或代码围栏。严格按示例字段输出，示例字符串说明内容约束，实际填写对应正文：
-{"meta":{"title":"1–40字标题","era":"1920s或现代","stylePrompt":"仅英文画面风格，不含人物外貌"},"scenes":[{"id":"s1","name":"1–20字场景名","publicDesc":"80–300字玩家可见的现场，不泄露隐藏真相","hiddenNotes":"主持用进入条件、检定后果、推进路线与结局条件","imagePrompt":"英文场景空镜，无文字、无角色"}],"clues":[{"id":"c1","title":"1–20字线索名","content":"20–200字线索正文","sceneId":"s1","requiredSkill":"侦查","isSecret":false}],"npcs":[{"id":"n1","name":"1–20字姓名","persona":"性格与公开身份，20–150字","secret":"仅KP可见的动机与真相，20–200字"}],"keeperSecrets":"完整真相、时间线、至少两种结局和推进条件，200–1500字"}
-场景1–12个，线索1–30个，NPC0–12个；id唯一，sceneId须存在。requiredSkill仅能为空或：${SKILLS.join('、')}；isSecret必须为布尔值。`;
+{"meta":{"title":"1–40字标题","era":"1920s或现代","stylePrompt":"仅英文画面风格，不含人物外貌"},"handouts":[{"id":"HO1","title":"1–20字公开身份标题，不提前暴露秘密","publicSummary":"20–120字其他调查员可知的表层身份","secretContent":"50–500字仅所属调查员与KP知道的真实身份、私人情报和任务","recommendedTrait":"5–60字的扮演性格或行为建议"}],"scenes":[{"id":"s1","name":"1–20字场景名","publicDesc":"80–300字玩家可见的现场，不泄露隐藏真相","hiddenNotes":"主持用进入条件、检定后果、推进路线与结局条件","imagePrompt":"英文场景空镜，无文字、无角色"}],"clues":[{"id":"c1","title":"1–20字线索名","content":"20–200字线索正文","sceneId":"s1","requiredSkill":"侦查","isSecret":false}],"npcs":[{"id":"n1","name":"1–20字姓名","persona":"性格与公开身份，20–150字","secret":"仅KP可见的动机与真相，20–200字"}],"keeperSecrets":"完整真相、时间线、至少两种结局和推进条件，200–1500字"}
+场景1–12个，线索1–30个，NPC0–12个，秘密HO0–12个。保留原材料中已有的秘密身份卡，编号从HO1起并保持唯一。无身份卡时填空数组，不虚构；秘密只写在各自 secretContent 中，不把秘密混入公开身份、开场或公开线索。sceneId须存在。requiredSkill仅能为空或：${SKILLS.join('、')}。isSecret必须为布尔值。`;
 const CARD_RULES = `你是轻量CoC调查员设计师。根据每位角色人设一次生成全员卡，不复述角色外貌。每人选2–3项符合人设的特长（60–80），其余技能15–50。所有属性20–80整数。只输出JSON数组，不输出解释或代码围栏，必须完整覆盖给定角色id。严格按此完整示例：
 [{"id":"材料中的原始id，不得改写","attributes":{"STR":50,"CON":50,"DEX":50,"INT":60,"POW":50,"APP":50,"SIZ":50,"EDU":60},"skills":{"侦查":65,"图书馆":65,"聆听":40,"话术":30,"说服":40,"心理学":30,"格斗":30,"闪避":25,"急救":30,"神秘学":20,"锁匠":20,"潜行":30}}]
 attributes和skills字段及所有子字段不可缺失，数值为整数；不输出HP/SAN，由规则引擎计算。`;
 const INVESTIGATOR_RULES = `你是跑团调查员扮演器。只使用给定公共信息和当前角色自己的密信；未知真相保持未知，不替KP叙述场景结果，不操控其他角色。排除玩家控制与已退场角色。每位指定角色至多发言两次，总计最多8条，符合人设并互相回应。只有存在实质风险且结果不确定的行动才提出check，随后停止对结果的推测。只输出JSON数组，不输出解释或围栏，严格按完整示例：
 [{"speaker":"材料中原始角色id","dialogue":"10–100字角色发言，不泄露未知真相，不含表情标记","emotion":"惊讶","action":"0–60字可观察动作，不写行动已成功","check":{"skill":"侦查","reason":"1–80字具体行动和风险","difficulty":"regular","dice":"d20","mode":"normal"}},{"speaker":"材料中原始角色id","dialogue":"10–100字回应","emotion":"正常","action":"0–60字动作"}]
-每条必须填写 emotion，从本轮 expressionNames 中原样选一个适合当前台词的名称，平静时选正常。无需检定时省略check；check.skill仅限${SKILLS.join('、')}；difficulty仅regular、hard、extreme。dice默认d20，仅有百分骰要求时用d100。mode默认normal，明确有利或不利时可用advantage或disadvantage，仅限d20。speaker 填本轮 actors 中对应的 id 字符串，例如 "1092"，不填角色名。`;
+每条必须填写 emotion，从本轮 expressionNames 中原样选一个适合当前台词的名称，平静时选正常。无需检定时省略check；check.skill仅限${CHECK_SKILLS.join('、')}；difficulty仅regular、hard、extreme。dice默认d20，理智检定默认d100。mode默认normal，明确有利或不利时可用advantage或disadvantage，仅限d20。speaker 填本轮 actors 中对应的 id 字符串，例如 "1092"，不填角色名。
+secretHO 是你的秘密身份与私人任务。保留角色的性格和口吻，按 publicSummary 扮演本局的表层身份。开局或无人追问时，绝不能主动全盘托出，只用试探、回避或微妙的言行破绽来表现。只有遭到针对这件事的直接质询、证据对质，或守秘人已在公开记录里裁定你被心理学检定看穿时，才针对触发点透露必要部分。台词、动作和检定理由都会公开，任何时候都不在其中粘贴秘密卡正文。`;
 const KEEPER_RULES = `你是轻量跑团守秘人，按下方角色性格与口吻主持。完整模组和秘密仅供规划，叙事只公开调查员当前可以观察的信息。每轮80–250字，给出可行动的现场；不得一次剧透真相，不代替玩家行动。掷骰、状态变化、线索发放、切场景和密信必须调用对应工具，不能仅在正文声称执行；工具失败不能声称成功。只有结果不确定且有实际后果才需要检定，开虚掩的门、取得已给出的物品等确定性行动直接裁定。检定难度regular普通、hard困难、extreme极难。检定成功后根据模组给出线索与后果，失败也允许付出代价推进。已退场角色不能行动。遇到全员退场，提示引入替补或推进结局。遇到战斗调用trigger_encounter，再按检定与状态工具裁决。结束条件满足时提出结团，由玩家确认，不写主世界记忆。
 只在玩家本人采取需要检定的行动时，单独调用 request_check，填写具体原因、技能和难度。引擎自动投骰，工具返回真实骰值后再裁定后果。普通技能检定优先D20，有明确情境优势或劣势时用D20的advantage或disadvantage，模组或玩家明确要求百分骰时用D100。伤害、随机表等只需要点数时用 roll_dice，按用途选骰型和数量。
 玩家抵达新场景时，先调用 switch_scene，再处理该场景的检定、线索与叙事。公开线索用 all 发给全员，私密线索只给接触它的调查员，公开叙事不复述密信内容。已经公开的线索和玩家密信中已经交付的物品视为已取得，不重复问玩家是否有它。
+用 assignedHandouts 中的 hoId 在 scenario.handouts 查找调查员的秘密 HO，只供主持推演。保持其公开身份，公开叙事、线索和检定理由不得提前透露秘密；只有特定质询、证据对质或被心理学检定看穿时，才公开已经揭示的部分。无持有人的 HO 未入场，按模组的替代路径推进。
 AI 调查员自行决定行动和提出检定。玩家在原地等待或请队友观察时，玩家本人没有进行观察，不可调用 request_check。请把实际行动留给队友的发言。若有 checkToResolve，先按现有骰值和理由裁定队友检定的结果，不重复投骰。
 有 scenario.rules 时，以 partyItems 为道具账本，以 progress.actions 为已经完成的剧情动作。发放道具对应的公开线索时调用 reveal_clue，规则引擎会登记道具。玩家明确执行规则列出的动作时，调用 resolve_scenario_action，由引擎验证场景、前置条件、检定和道具，结算规则内的代价并返回是否达成结局。按工具结果叙事，不提前宣告成功、消耗道具或重复扣减。一次玩家行动最多提出一次技能检定，同一调查员的HP/SAN变化合并成一次工具调用。
 只在引擎返回 outcome 后为有规则的剧本调用 propose_ending，结尾必须符合该结果。无结构化规则的剧本按模组条件提议结团。调用 propose_ending 后简短告知玩家可以确认结团。
@@ -174,7 +227,7 @@ const tool = (name, description, properties, required = Object.keys(properties))
 const str = { type: 'string' }, num = { type: 'integer', minimum: -100, maximum: 100 };
 export const KP_TOOLS = [
   tool('request_check', '自动掷骰并返回玩家本人的技能检定结果。队友的行动由队友提出检定。请单独调用。', {
-    skill: { type: 'string', enum: SKILLS }, difficulty: { type: 'string', enum: Object.keys(DC) }, reason: str,
+    skill: { type: 'string', enum: CHECK_SKILLS }, difficulty: { type: 'string', enum: Object.keys(DC) }, reason: str,
     dice: { type: 'string', enum: CHECK_DICE }, mode: { type: 'string', enum: D20_MODES },
   }, ['skill', 'difficulty', 'reason']),
   tool('roll_dice', '掷随机表、伤害等点数骰。用于不需要技能或难度的随机结果。请单独调用。', {
@@ -191,7 +244,15 @@ export const KP_TOOLS = [
 
 export default function registerGamePlugin(ctx) {
   const { router, db, llm, bridgeTools, imageService } = ctx;
-  const busy = new Set(), mediaJobs = new Set(); let closed = false;
+  const busy = new Set(), mediaJobs = new Set(), scenarioDrafts = new Map(); let closed = false;
+  function selectedScenario({ scenarioId, draftId }) {
+    if (draftId !== undefined) {
+      const draft = scenarioDrafts.get(draftId);
+      if (!draft) fail('导入的剧本草稿已失效，请重新导入', 404);
+      return draft;
+    }
+    return ctx.scenarios().find(scenario => scenarioIdentifier(scenario) === scenarioId);
+  }
   function load(id) {
     const row = db.load(id);
     if (!row?.state?.scenario) fail('跑团存档不存在', 404);
@@ -296,7 +357,9 @@ export default function registerGamePlugin(ctx) {
     const keeper = s.mode === 'keeper';
     const own = s.investigators.find(c => c.player);
     return { sessionId: s.sessionId, title: s.title, mode: s.mode, player: publicPlayer(s.player), scene: { id: scene(s).id, name: scene(s).name, publicDesc: scene(s).publicDesc },
-      investigators: s.investigators.map(c => ({ ...c, persona: undefined, inventory: keeper || c.player ? c.inventory : [] })), publicLog: s.publicLog,
+      investigators: s.investigators.map(({ persona, hoId, handout, ...c }) => ({ ...c, inventory: keeper || c.player ? c.inventory : [],
+        ...((keeper || c.player) && hoId && handout ? { hoId, handout } : {}) })), publicLog: s.publicLog,
+      hasSecretHO: !!s.scenario.handouts?.length || s.investigators.some(c => c.hoId),
       summaries: s.summaries, round: s.round, pendingBatch: s.pendingBatch, pendingCheck: s.pendingCheck, awaitingRuling: !!s.checkToResolve,
       clues: s.scenario.clues.filter(c => s.revealed.includes(c.id) || (own && (s.privateClues[own.id] || []).includes(c.id)))
         .map(c => ({ ...c, isSecret: !s.revealed.includes(c.id) })),
@@ -362,7 +425,8 @@ export default function registerGamePlugin(ctx) {
     const c = character(s, targetChar); if (c.outOfAction) fail('已退场调查员不能检定');
     const { skill, difficulty, dice, mode, reason } = checkDetails(check, false);
     const sides = dice === 'd20' ? 20 : 100;
-    const rolled = sides === 20 ? rollD20(c.skills[skill], difficulty, mode) : rollD100(c.skills[skill], difficulty);
+    const rating = skill === '理智' ? c.san : c.skills[skill];
+    const rolled = sides === 20 ? rollD20(rating, difficulty, mode) : rollD100(rating, difficulty);
     const result = recordRoll(s, { kind: 'check', targetChar: c.id, name: c.name, skillName: skill, sides, mode, reason, ...rolled }, secret, effects);
     if (['critical', 'fumble'].includes(result.rank)) queueMedia(s, `${result.rank}, ominous dice on the table`, effects);
     return result;
@@ -498,15 +562,19 @@ export default function registerGamePlugin(ctx) {
   async function generateBatch(s, slots, signal) {
     const actors = s.investigators.filter(c => !c.player && !c.outOfAction);
     if (!actors.length) return;
-    // Public batch has no private knowledge at all. A holder of private clues is
-    // generated in a separate request with only their own handout, so a shared
-    // model call cannot disclose one investigator's knowledge to another.
-    const groups = [actors.filter(c => !s.handouts[c.id]), ...actors.filter(c => s.handouts[c.id]).map(c => [c])].filter(g => g.length);
+    // HO cards and in-play notes have the same visibility boundary.
+    const hasPrivateKnowledge = c => c.hoId || s.handouts[c.id];
+    const groups = [actors.filter(c => !hasPrivateKnowledge(c)), ...actors.filter(hasPrivateKnowledge).map(c => [c])].filter(g => g.length);
     const lines = [];
     for (const group of groups) {
+      const self = group.length === 1 ? group[0] : null;
+      const audience = `investigators:${group.map(c => c.id).join(',')}`;
       const raw = await llm.complete({ rules: INVESTIGATOR_RULES, personas: group.map(c => c.persona),
-        data: JSON.stringify({ context: investigatorContext(s, group.length === 1 ? group[0] : null), actors: group.map(c => ({ id: c.id, name: c.name, skills: c.skills })), expressionNames: slots.map(slot => slot.name) }),
-        task: '扮演指定名单，按示例输出含表情的行动与对话；需要检定时提出check。', scope: `${s.sessionId}:investigators` }, { signal });
+        stableData: JSON.stringify({ scenario: { title: s.scenario.meta.title, era: s.scenario.meta.era },
+          ...(self?.hoId && self.handout ? { secretHO: self.handout } : {}) }),
+        publicHistory: s.publicLog, timeline: promptTimeline(s, audience),
+        data: JSON.stringify({ ...investigatorContext(s, self), actors: group.map(c => ({ id: c.id, name: c.name, skills: c.skills })), expressionNames: slots.map(slot => slot.name) }),
+        task: '扮演指定名单，按示例输出含表情的行动与对话；需要检定时提出check。', scope: `${s.sessionId}:${audience}` }, { signal });
       const output = json(raw);
       if (!Array.isArray(output) || output.length > 8) fail('调查员发言格式不合法', 502);
       for (const l of output) {
@@ -537,7 +605,7 @@ export default function registerGamePlugin(ctx) {
     if (controller) res.once('close', cancel);
     try {
       const result = await handler(req.body || {}, req.query || {}, controller?.signal);
-      if (!res.destroyed) res.json(result);
+      if (!res.destroyed) res.set('Cache-Control', 'no-store').json(result);
     } catch (error) {
       if (!controller?.signal.aborted) throw error;
     } finally {
@@ -555,20 +623,38 @@ export default function registerGamePlugin(ctx) {
     if (body.operationId !== undefined) (s.receipts ||= []).push({ id: body.operationId, type, result });
   }
   route('get', '/catalog', async () => ({
-    skills: SKILLS, diceSides: DICE_SIDES,
-    scenarios: ctx.scenarios().map(s => ({ id: s.id || s.meta.title, meta: s.meta, scenes: s.scenes.length,
-      opening: s.scenes[0]?.publicDesc, briefing: s.briefing })),
+    skills: CHECK_SKILLS, diceSides: DICE_SIDES,
+    scenarios: ctx.scenarios().map(s => scenarioPreview(s)),
   }), { lock: false });
   route('get', '/cast', async () => ctx.castAssets(), { lock: false });
+  route('post', '/preview-handout', async body => {
+    if (body.mode !== 'keeper') fail('只有玩家 KP 可以预览秘密 HO', 403);
+    const scenario = selectedScenario(body);
+    const handout = scenario?.handouts?.find(card => card.id === body.hoId);
+    if (!handout) fail('秘密 HO 不存在', 404);
+    return handout;
+  }, { lock: false });
+  route('post', '/scenario-draft', async body => {
+    if (body.mode !== 'keeper') fail('只有玩家 KP 可以编辑含秘密的剧本', 403);
+    if (!body.draftId) fail('剧本草稿不存在', 404);
+    return selectedScenario(body);
+  }, { lock: false });
   route('post', '/parse-scenario', async body => {
     if (typeof body.content !== 'string' || !body.content.trim() || body.content.length > 100000) fail('请上传不超过 10 万字的剧本');
+    const parsedResponse = scenario => {
+      if (body.draft !== true && body.mode !== 'investigator') return scenario;
+      const draftId = randomUUID();
+      scenarioDrafts.set(draftId, scenario);
+      if (scenarioDrafts.size > 16) scenarioDrafts.delete(scenarioDrafts.keys().next().value);
+      return { ...scenarioPreview(scenario, 'custom'), draftId };
+    };
     if (body.format === 'json') {
       let parsed;
       try { parsed = JSON.parse(body.content); } catch { /* Free-form material goes through the extractor. */ }
-      if (parsed?.rules !== undefined) return validateScenario(parsed);
-      try { if (parsed) return validateScenario(parsed); } catch { /* Nonstandard JSON goes through the extractor. */ }
+      if (parsed?.rules !== undefined || (parsed?.meta && ['scenes', 'clues', 'npcs'].every(key => Array.isArray(parsed[key])))) return parsedResponse(validateScenario(parsed));
     }
-    return validateScenario(json(await llm.complete({ rules: SCENARIO_RULES, data: body.content, task: '提取剧本，按完整示例输出JSON。', scope: 'parse' })));
+    if (body.edit === true) fail('请保留剧本 JSON 的标题和场景结构');
+    return parsedResponse(validateScenario(json(await llm.complete({ rules: SCENARIO_RULES, data: body.content, task: '提取剧本，按完整示例输出JSON。', scope: 'parse' }))));
   }, { lock: false });
   route('post', '/start', async body => {
     if (!['keeper', 'investigator'].includes(body.mode)) fail('请选择游玩模式');
@@ -577,12 +663,18 @@ export default function registerGamePlugin(ctx) {
       fail(isKeeper ? '请选择 1–4 位不同的 AI 调查员' : '请选择至多 5 位不同的 AI 队友');
     }
     if (!isKeeper && (!integer(body.keeperId, 1, 2147483647) || body.characterIds.includes(body.keeperId))) fail('请指定一位未加入调查员阵容的守秘人');
-    const presets = ctx.scenarios();
-    const scenario = validateScenario(body.scenario || presets.find(s => (s.id || s.meta.title) === body.scenarioId));
+    const scenario = validateScenario(body.scenario || selectedScenario(body));
+    const actorIds = body.characterIds.map(String);
+    if (!isKeeper) actorIds.unshift(PLAYER_ID);
+    const assignments = assignHandouts(scenario.handouts, actorIds, body.mode, body.hoAssignments);
     const player = ctx.playerProfile();
     const profiles = await Promise.all(body.characterIds.map(characterId => bridgeTools.call('get_character_profile', { characterId })));
     const keeper = isKeeper ? null : await bridgeTools.call('get_character_profile', { characterId: body.keeperId });
     const investigators = await makeCards(isKeeper ? profiles : [playerCardProfile(player), ...profiles]);
+    for (const c of investigators) {
+      const handout = assignments.get(c.id);
+      if (handout) Object.assign(c, { hoId: handout.id, handout });
+    }
     const sessionId = randomUUID(), first = scenario.scenes[0];
     const state = { version: 3, sessionId, title: scenario.meta.title, scenario, keeper, player: publicPlayer(player), mode: body.mode, investigators, sceneId: first.id, publicLog: [],
       kpSecrets: { truth: scenario.keeperSecrets, darkRolls: [] }, handouts: {}, privateClues: {}, revealed: [], summaries: [], round: 0, pendingBatch: null, pendingCheck: null, imageJobs: [], imagesEnabled: body.imagesEnabled === true, ended: false };
@@ -654,8 +746,11 @@ export default function registerGamePlugin(ctx) {
       const effects = [];
       const { gender, appearance, persona } = ctx.playerProfile();
       const content = await llm.agent({ rules: KEEPER_RULES, personas: [s.keeper.base_prompt || s.keeper.short_prompt || ''],
-        data: JSON.stringify({ ...investigatorContext(s), scenario: s.scenario, progress: s.progress, kpSecrets: s.kpSecrets, handouts: s.handouts, checkToResolve: s.checkToResolve, playerIdentity: { id: PLAYER_ID, name: s.player.name, gender, appearance, persona },
-          investigators: s.investigators.map(({ persona, ...c }) => c), expressionNames: slots.map(slot => slot.name) }),
+        stableData: JSON.stringify({ scenario: s.scenario }), publicHistory: s.publicLog, timeline: promptTimeline(s, 'keeper'),
+        data: JSON.stringify({ ...investigatorContext(s), progress: s.progress, kpSecrets: { darkRolls: s.kpSecrets.darkRolls }, handouts: s.handouts, checkToResolve: s.checkToResolve, playerIdentity: { id: PLAYER_ID, name: s.player.name, gender, appearance, persona },
+          investigators: s.investigators.map(({ persona, handout, hoId, ...c }) => c),
+          assignedHandouts: s.investigators.filter(c => c.hoId && c.handout).map(c => ({ investigatorId: c.id, name: c.name, hoId: c.hoId })),
+          expressionNames: slots.map(slot => slot.name) }),
         task: rulingOnly ? '裁定 checkToResolve 中的检定，按约定以表情标记开头，只给公开叙事。' : '根据玩家行动主持下一段，按约定以表情标记开头，只给公开叙事。', scope: `${s.sessionId}:keeper` }, KP_TOOLS, (name, args, calls) => {
           if (s.proposedEnding) fail('结尾已备好，等待玩家确认');
           if (s.outcome && name !== 'propose_ending') fail('结局条件已达成，请提交结尾');
@@ -733,6 +828,8 @@ export default function registerGamePlugin(ctx) {
     if (!s.investigators.some(c => c.outOfAction)) fail('当前没有退场调查员');
     if (!integer(body.characterId, 1, 2147483647) || s.keeper?.id === body.characterId || s.investigators.some(c => c.id === String(body.characterId))) fail('请选择尚未入场的角色');
     const [card] = await makeCards([await bridgeTools.call('get_character_profile', { characterId: body.characterId })]);
+    const handout = s.scenario.handouts?.find(ho => !s.investigators.some(c => c.hoId === ho.id));
+    if (handout) Object.assign(card, { hoId: handout.id, handout });
     s.investigators.push(card); addLog(s, 'KP', `替补调查员「${card.name}」加入了调查。`); persist(s); return view(s);
   });
   route('post', '/retry-image', async body => {

@@ -76,6 +76,12 @@ button.lobby-nav-action:hover { color: var(--table-amber); }
   font: 700 15px/1.5 var(--sans);
 }
 .lobby-subhead > span { color: var(--lobby-muted); font: 11px/1.5 var(--lobby-mono); letter-spacing: .08em; }
+.party-ho-preview { padding: 10px 0; border-bottom: 1px solid var(--table-divider); }
+.party-ho-preview h3 { margin: 0 0 6px; font: 700 12px/1.5 var(--sans); color: var(--table-amber); }
+.party-ho-preview ul { list-style: none; padding: 0; margin: 0; }
+.party-ho-preview li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.party-ho-preview li > span, .party-ho-preview p { margin: 0; font: 12px/1.5 var(--sans); color: var(--lobby-muted); overflow-wrap: anywhere; }
+.party-ho-preview button { text-align: right; white-space: normal; }
 .index-scroll, .briefing-pane, .party-list {
   overflow-y: auto;
   scrollbar-width: thin;

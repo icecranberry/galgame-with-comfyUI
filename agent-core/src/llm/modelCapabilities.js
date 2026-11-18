@@ -26,7 +26,13 @@ export function normalizeModelCapabilities(rows) {
     // DeepSeek, Gemini native, OpenRouter and commonly used compatible endpoints.
     const maxTokens = [row.max_output_tokens, row.outputTokenLimit, row.max_completion_tokens,
       row.top_provider?.max_completion_tokens].find(isValidMaxTokens);
-    if (maxTokens) result[id] = { maxTokens };
+    const windows = [row.context_window, row.context_length, row.contextWindow, row.top_provider?.context_length].filter(isValidMaxTokens);
+    const inputs = [row.max_input_tokens, row.inputTokenLimit].filter(isValidMaxTokens);
+    if (maxTokens || windows.length || inputs.length) result[id] = {
+      ...(maxTokens ? { maxTokens } : {}),
+      ...(windows.length ? { contextWindow: Math.min(...windows) } : {}),
+      ...(inputs.length ? { inputLimit: Math.min(...inputs) } : {}),
+    };
   }
   return result;
 }

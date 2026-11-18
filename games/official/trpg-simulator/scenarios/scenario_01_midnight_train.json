@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "id": "midnight-train-ho",
+    "title": "没有终点的末班车",
+    "era": "现代都市怪谈",
+    "playerCount": "3~4人（支持隐匿HO）",
+    "estimatedTime": "20~35分钟",
+    "sanityRisk": "中",
+    "synopsis": "零点过后的末班地铁驶入一段不在时刻表上的隧道。窗外不断掠过同一盏红灯，对面座椅留着一只还温热的纸杯，而同行者们似乎都对“为什么搭上这班车”有所隐瞒。",
+    "stylePrompt": "cinematic dark urban horror, midnight subway carriage, eerie crimson tunnel light, wet reflections, moody anime visual novel background, high contrast"
+  },
+  "handouts": [
+    {
+      "id": "HO1",
+      "title": "末班乘客",
+      "publicSummary": "你只是一名加班到深夜、匆忙赶上末班车的普通乘车人。",
+      "secretContent": "你口袋里其实攥着一张七天前就已经作废的同一班次旧车票。你隐约记得自己上周也搭过这班车，但那晚之后发生了什么，你的记忆出现了整整三小时的空白。绝对不要轻易向陌生人坦白你有两张车票。",
+      "recommendedTrait": "警惕、试图找回丢失的记忆"
+    },
+    {
+      "id": "HO2",
+      "title": "异常记录员",
+      "publicSummary": "你看起来是个随身带着速写本或录音笔的自由撰稿人。",
+      "secretContent": "你其实是追查城市地铁失踪案的调查者，今晚是故意蹲点上车的。你的笔记本最后一页写着本次同车某位乘客的名字（可由KP指定为HO3或HO1），但你暂时不能打草惊蛇，需要先暗中观察谁在说谎。",
+      "recommendedTrait": "敏锐、不动声色地试探他人"
+    },
+    {
+      "id": "HO3",
+      "title": "违规携物者",
+      "publicSummary": "你提着一个不起眼的黑色帆布包，显得有些疲惫。",
+      "secretContent": "你的包里装着一台正在微微发烫的坏掉怀表（指针逆时针倒转），这是你在上一站垃圾桶旁捡到/受人之托带走的。只要列车靠近红灯，怀表就会发出只有你能听见的低频嗡鸣。你担心被人当成怪人或罪犯，尽量掩饰背包的异常。",
+      "recommendedTrait": "心虚、护住随身背包"
+    },
+    {
+      "id": "HO4",
+      "title": "站务知情者",
+      "publicSummary": "你对这条地铁线路的站名和换乘结构异常熟悉。",
+      "secretContent": "你曾经见过“幽灵站台”的内部检修通知，知道如果广播开始播报第14个不存在的站名，车门一旦打开绝对不能下车。你不确定今晚车里是不是已经混进了“非人乘客”，需要暗中确认同伴的身份。",
+      "recommendedTrait": "冷静、对车厢广播极度敏感"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "s1_carriage",
+      "name": "空座车厢",
+      "publicDesc": "零点之后的末班列车钻进隧道，手机同时失去信号。窗外本应只有黑暗，却每过三十秒就掠过同一盏孤零零的红灯。对面座椅上留着一只还温热的纸杯，车票背面有人用铅笔写着：“下一站请别下车。”广播开始沙沙作响。",
+      "hiddenNotes": "车厢里其实只有你们几人，但车窗玻璃反光中偶尔会多出一个模糊的站立剪影（需侦查发现）。广播正在倒计时播报不存在的“雾津站”。",
+      "imagePrompt": "empty midnight subway train interior, eerie red signal light outside dark window, warm paper cup on empty seat, moody dark lighting"
+    },
+    {
+      "id": "s2_driver_cab",
+      "name": "锁死的驾驶室门外",
+      "publicDesc": "穿过摇晃的金属连接通道，尽头是通往驾驶室的磨砂玻璃门。门内隐约透出冷绿色的仪表盘微光，却看不到任何驾驶员的身影，只有一只老式对讲机在不断重复一段走调的站名播报。",
+      "hiddenNotes": "强行开锁（锁匠）或透过门缝侦查会发现驾驶台上没有驾驶员，只有一个正在逆转的时钟装置，与HO3包里的怀表同源。",
+      "imagePrompt": "narrow subway train connecting corridor, frosted glass door to empty driver cabin glowing faint eerie green, dark thriller atmosphere"
+    },
+    {
+      "id": "s3_phantom_platform",
+      "name": "不存在的终点站台",
+      "publicDesc": "列车刺耳地刹停，车门缓缓滑开。门外是一座空旷得不合常理的复古地下站台，站牌上写着被黑墨涂掉一半的站名，潮湿的空气里飘来铁锈与旧报纸的味道。广播温柔地催促：“终点站到了，请所有乘客下车。”",
+      "hiddenNotes": "如果有人直接下车会被黑暗吞没；只有识破站台幻象、毁掉或逆转驱动装置（或集齐纸杯/车票/怀表线索中断循环），列车才会重新驶回现实黎明。",
+      "imagePrompt": "abandoned vintage underground subway platform in thick mist, dim flickering fluorescent lamps, ominous atmosphere, no people"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_cup_ticket",
+      "title": "温热的纸杯与铅笔字车票",
+      "content": "纸杯里是半杯黑咖啡，杯壁还有余温，说明前一位乘客刚消失不久。车票背面的铅笔字迹略显颤抖：“下一站请别下车，驾驶室里没有人。”",
+      "sceneId": "s1_carriage",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_window_reflection",
+      "title": "车窗反光中的多余倒影",
+      "content": "借着窗外红灯闪过的一瞬，玻璃倒影里清楚地映出车厢正中间站着一个穿着旧式列车员制服的无面轮廓——但你回头看时，过道里空无一人。（目击者需进行 0/1D3 SAN Check）",
+      "sceneId": "s1_carriage",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c3_broadcast_log",
+      "title": "对讲机里的循环录音",
+      "content": "驾驶室门缝传出的并非实时广播，而是一段卡带的循环录音，中间夹杂着微弱的求救声与怀表齿轮咬合的滴答声。",
+      "sceneId": "s2_driver_cab",
+      "requiredSkill": "聆听",
+      "isSecret": false
+    },
+    {
+      "id": "c4_reverse_clock",
+      "title": "驾驶台上的逆转母钟",
+      "content": "驾驶台中央嵌着一只生锈的黄铜母钟，指针正逆时针飞速倒转，表盘缺了一枚齿轮——形状与大小正好对应某种随身怀表的机芯。",
+      "sceneId": "s2_driver_cab",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    },
+    {
+      "id": "c5_station_truth",
+      "title": "涂改的站牌真相",
+      "content": "站台灯箱背面残留着十年前的封站通告：该站因地下渗水与集体失踪事件永久封闭，所有试图在零点后靠站的列车都会被困在时间夹缝里。",
+      "sceneId": "s3_phantom_platform",
+      "requiredSkill": "图书馆",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_conductor",
+      "name": "不存在的列车员",
+      "persona": "只存在于广播声和玻璃反光中的诡异存在，语气温柔机械，不断诱导乘客下车。",
+      "secret": "它是时间夹缝本身具象化的规则守卫，无法用常规物理攻击消灭，只能通过停止逆转母钟解除循环。"
+    }
+  ],
+  "keeperSecrets": "十年前该地铁支线发生过一次零点停电事故，一列满载的测试列车陷入了时间循环。今晚的列车被逆转怀表（HO3携带）与旧车票（HO1携带）的共鸣拉入了夹缝。结局条件：若玩家集齐线索并在驾驶室或站台前阻止怀表与母钟共鸣（破坏母钟、或由HO3/HO1配合切断共鸣），列车会在剧烈震动后冲出隧道回到黎明；若全员被诱导下车或SAN归零，则永远留在站台循环中。"
+}

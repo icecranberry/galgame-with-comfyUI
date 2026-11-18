@@ -12,11 +12,11 @@ import { applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72 } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72, requestBudget } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
   const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature, toolChoice });
-  applyOutputTokenLimit(params);
+  applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
   if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
   const logLabel = requestId ? `${label} [${requestId}]` : label;
   let usage;
@@ -27,8 +27,9 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
   let outcome = 'interrupted';
   try {
     signal?.throwIfAborted();
+    requestBudget?.validate(params, messages);
     console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
-    console.log(JSON.stringify(compressLogMessages(messages), null, 2));
+    console.log(JSON.stringify(compressLogMessages(messages, !!requestBudget), null, 2));
     console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, tool_choice=${params.tool_choice ?? 'none'}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
     if (!forceThinking) {
       const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
@@ -416,8 +417,9 @@ export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = co
 }
 
 // 日志打印前压缩超大内容：ANIMA3 模板与视觉消息里的图片 base64（几 MB）都不进控制台
-function compressLogMessages(messages) {
+function compressLogMessages(messages, summarize = false) {
   return messages.map(m => {
+    if (summarize) return { role: m.role, characters: m.content?.length || 0, toolCalls: m.tool_calls?.length || 0 };
     if (Array.isArray(m.content)) {
       return {
         ...m,
@@ -435,9 +437,9 @@ function compressLogMessages(messages) {
   });
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries, requestBudget } = {}) {
   throwIfSyncAborted(signal);
-  if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
+  if (config.features.mergeMessages && !requestBudget) messages = mergeConsecutiveRoles(messages);
   const limited = _limitEnabled();
   if (limited) await acquireSyncSlot(signal);
   try {
@@ -474,11 +476,11 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   if (forcedMode === 'enabled' || forcedMode === 'disabled') {
     applyForcedThinking(params, forcedMode, config.llm);
   }
-  applyOutputTokenLimit(params);
+  applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
   let canFallbackThinking = forcedMode === 'enabled' && fallbackToConfiguredThinking;
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
-  const logMsgs = compressLogMessages(messages);
+  const logMsgs = compressLogMessages(messages, !!requestBudget);
   // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
   const requestLog =
     `\n══════════ [${providerLabel()} → ${label}] ══════════\n` +
@@ -501,6 +503,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
       }
 
       throwIfSyncAborted(signal);
+      requestBudget?.validate(params, messages);
       let res;
       try {
         res = await getClient().chat.completions.create(params, requestOptions);
@@ -509,7 +512,8 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
         if (!canFallbackThinking || !isThinkingModeRejected(err)) throw err;
         canFallbackThinking = false;
         params = { ...configuredParams };
-        applyOutputTokenLimit(params);
+        applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
+        requestBudget?.validate(params, messages);
         console.warn(`[${providerLabel()} → ${label}] 强制开启思考失败，按 LLM 设置重试：${err.message}`);
         res = await getClient().chat.completions.create(params, requestOptions);
       }

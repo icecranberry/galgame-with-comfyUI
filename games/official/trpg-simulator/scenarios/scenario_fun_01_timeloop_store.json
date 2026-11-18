@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "id": "timeloop-convenience-1945",
+    "title": "19:45 的便利店",
+    "era": "现代都市 / 时间循环",
+    "playerCount": "2~4人",
+    "estimatedTime": "30~45分钟",
+    "sanityRisk": "中高",
+    "synopsis": "晚上 19:45，你和几名邻舍走进街角那家24小时便利店躲雨。19:59 分整条街道被乳白色浓雾吞没，一切在刺耳的收银机滴声中瞬间归零——你们回到了 19:45 推门进店的那一刻，而且只有你们还记得刚才发生过什么。",
+    "stylePrompt": "late night glowing convenience store in heavy white fog, cold fluorescent ceiling lights, glass storefront, eerie urban mystery, anime visual novel background"
+  },
+  "handouts": [],
+  "scenes": [
+    {
+      "id": "s1_store_front",
+      "name": "19:45 · 亮着白炽灯的便利店大厅",
+      "publicDesc": "自动门发出清脆的“欢迎光临”电子音。货架上的关东煮正冒着热气，收银台后的店员小周机械地低头刷着手机。墙上的电子挂钟显示 19:45:00。窗外是一堵厚得不透光的乳白色浓雾，玻璃门外三米处隐约亮着一座红色公用电话亭的灯。",
+      "hiddenNotes": "【循环机制】每当挂钟走到 20:00:00，浓雾会破门而入吞噬一切，全员触发 0/1D3 SAN Check 后重置回 19:45:00，但调查员保留所有已知线索记忆。第一轮店员小周会无视一切警告，直到第2轮后说出关键时间点。",
+      "imagePrompt": "brightly lit 24-hour convenience store interior at night, steaming oden counter, clerk behind register, thick impenetrable white mist pressed against glass doors"
+    },
+    {
+      "id": "s2_back_storage",
+      "name": "冷气嘶鸣的后仓与监控室",
+      "publicDesc": "推开“员工专用”的灰色铁门，里面堆满了尚未拆封的纸箱与发出低沉嗡鸣的饮料冷柜。角落里有一张窄小的办公桌，上面摆着一台四分屏的黑白监控显示器——但其中一个监控画面拍的不是店外街道，而是一片星辰扭曲的深邃虚空。",
+      "hiddenNotes": "监控硬盘里存着今晚 19:40（循环开始前5分钟）的录像：一个穿着黑风衣的陌生顾客把一只铜制沙漏塞进了关东煮锅底下的暗格，或者放进了外面的快递柜。",
+      "imagePrompt": "narrow convenience store backroom storage, humming metal refrigerator, old desk with 4-split black and white CCTV monitor showing eerie static"
+    },
+    {
+      "id": "s3_phone_booth",
+      "name": "白雾边缘的红色公用电话亭",
+      "publicDesc": "顶着刺骨的湿冷白雾冲出自动门三步，你们钻进了那座老式红色电话亭。听筒没有挂好，正垂在半空中发出规律的忙音。电话亭内壁贴着一张被雨水打湿的黄色便利贴，上面写着一串奇怪的四位数字与倒计时警告。",
+      "hiddenNotes": "电话亭是唯一不受店里时间锚点同步的区域，但待在雾里超过 2 轮会遭到“雾中触须”袭击（需闪避/格斗或强行撤回店里）。拨通便利贴上的内线号码会接通“五分钟前的自己”。",
+      "imagePrompt": "vintage red public telephone booth surrounded by swirling thick white fog at night, dangling phone receiver, eerie streetlight glow"
+    }
+  ],
+  "clues": [
+    {
+      "id": "c1_receipt_loop",
+      "title": "印着未来时间的收银小票",
+      "content": "翻看收银台垃圾桶里的废纸团，发现一张今天 20:03 打印出的作废小票，商品栏只有一行字：“异常锚点 ×1 —— 金额：生命”。",
+      "sceneId": "s1_store_front",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c2_clerk_secret",
+      "title": "店员小周的异常循环反应",
+      "content": "当你准确说出小周下一秒要掉落手机的动作（需在第二轮及以后用话术或心理学逼问），他会突然瞳孔放大抱头痛苦呻吟：“我已经在这里值了四百多次夜班了……那个穿黑风衣的人把沙漏藏在后仓冷柜后面！”（0/1D3 SAN Check）",
+      "sceneId": "s1_store_front",
+      "requiredSkill": "心理学",
+      "isSecret": false
+    },
+    {
+      "id": "c3_cctv_tape",
+      "title": "19:40 的监控回放",
+      "content": "倒回监控录像，19:40 分曾有一名面容模糊的访客在店里放置了一枚不断逆流的黑色晶体沙漏，随后拨打了门外电话亭的号码启动了“区域时间切片”。",
+      "sceneId": "s2_back_storage",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    },
+    {
+      "id": "c4_hourglass_anchor",
+      "title": "冷柜夹缝中的时间锚点（黑色沙漏）",
+      "content": "在后仓最深处的冷柜散热格栅后，摸到一个冰冷刺骨的铜框沙漏，里面的黑沙正违背重力向上飞流。沙漏底座刻着解除密码提示：“须在电话亭拨通零点指令的同时击碎玻璃。”",
+      "sceneId": "s2_back_storage",
+      "requiredSkill": "锁匠",
+      "isSecret": false
+    },
+    {
+      "id": "c5_booth_note",
+      "title": "电话亭内的求生指令",
+      "content": "泛黄便利贴上写着：“拨打 #0404 可暂时瘫痪白雾频率 10 秒，但必须有人在店里同时毁掉时间锚点，否则 20:00 后记忆将被彻底抹除。”",
+      "sceneId": "s3_phone_booth",
+      "requiredSkill": "侦查",
+      "isSecret": false
+    }
+  ],
+  "npcs": [
+    {
+      "id": "n1_clerk_zhou",
+      "name": "夜班店员小周",
+      "persona": "眼神涣散、对一切都提不起劲的便利店大学生兼职，其实已经受困数百次循环导致精神麻木。",
+      "secret": "他因为太害怕 20:00 的白雾，已经放弃逃生，需要调查员用强硬或温暖的话术唤醒他的求生欲，他才会交出后仓钥匙。"
+    }
+  ],
+  "keeperSecrets": "【循环规则与解法】外神信徒在街角测试“时间切片封锁场”，将便利店锁死在 19:45~20:00 的 15 分钟循环中。KP 需注意记录当前是第几轮循环：每次循环时间到点（约 4~5 轮行动）白雾便会破门重置时间（保留线索但扣 1 点 SAN）。破局唯一方法：团队分工合作——一人冲进白雾里的红色电话亭拨通 #0404 干扰频率，另一人趁那 10 秒窗口期在后仓用重物砸碎黑色沙漏。成功后白雾消散，挂钟跳到 20:01，众人平安走出便利店。"
+}
