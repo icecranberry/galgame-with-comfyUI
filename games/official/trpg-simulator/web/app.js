@@ -1,24 +1,72 @@
-/* Independent game frontend. All durable state lives in SDK saves. */
+/* Independent game frontend. Campaign state lives in SDK saves. */
 (() => {
   const sdk = window.LinSheGameSDK, root = document.getElementById('app'), dialog = document.getElementById('drawer');
-  let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, busy = false, playing = false, generation = 0, ackFlight, stopping;
-  let mode = 'keeper', scenarioId = '', keeperId = null, importedScenario, imagesEnabled = true, draft = '', npcSpeaker = '';
-  let castAssets, playerExpression = 'normal', turnPreview;
+  const picturePreview = document.getElementById('picture-preview');
+  const audio = new window.TrpgAudioManager(sdk?.trpgAudio);
+  let closeAudioControls;
+  let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, pendingAction = '', advanceFlight;
+  let mode = 'investigator', scenarioId = '', keeperId = null, importedScenario, draft = '', npcSpeaker = '';
+  let castAssets, castRequest = 0;
   const lineups = { keeper: [], investigator: [] };
   const partyLimits = { keeper: 4, investigator: 5 };
-  const hoSelections = new Map();
   const customScenarioId = 'custom';
   const view = window.TrpgPresentation;
-  let activeTab = 'narrative', diceAnimating = false, secretRoll = null;
-  const fields = {}, recentRolls = [], knownLogs = new Set(), scrollPositions = {};
+  const presetActions = {
+    keeper: [
+      '补充调查员眼前的环境',
+      '让一位 NPC 主动开口',
+      '请调查员说说各自的打算',
+      '描述现场传来的声音',
+      '补充现场的光线和气味',
+      '指出一个值得细看的地方',
+      '请调查员回顾已知线索',
+      '让调查员对照彼此的发现',
+      '问调查员打算先追哪条线索',
+      '请一位调查员说明行动方法',
+      '问调查员准备怎么分工',
+      '说明眼前有哪些路线',
+      '交代现场有没有旁人',
+      '让 NPC 说说自己的见闻',
+      '让 NPC 向调查员提个问题',
+      '描述等待片刻后的变化',
+      '交代行动前能察觉的风险',
+      '提醒调查员眼下的时间限制',
+      '请调查员盘点可用的装备',
+      '请调查员说说目前的推测',
+    ],
+    investigator: [
+      '问队友发现了什么',
+      '仔细查看周围',
+      '留在原地听一听',
+      '看看附近有没有出入口',
+      '找找有没有人经过的痕迹',
+      '靠近一点看清楚细节',
+      '退到安全处再观察',
+      '记下眼前的异常之处',
+      '对照一下手头的线索',
+      '按时间顺序梳理已知情况',
+      '问问在场的人看到了什么',
+      '追问对方是怎么知道的',
+      '先观察对方说话时的反应',
+      '把我的发现告诉队友',
+      '和队友商量怎么分工',
+      '请队友留意周围的动静',
+      '检查随身有哪些工具',
+      '沿原路回看遗漏的地方',
+      '确认现在的位置和方向',
+      '等一会儿看看情况有无变化',
+    ],
+  };
+  let actionSuggestionSample;
+  let activeTab = 'narrative', packTab = 'dossier', packActor = '', diceAnimating = false, secretRoll = null;
+  const recentRolls = [], knownLogs = new Set(), scrollPositions = {};
+  const knownPrivateClues = new Set();
   const diceQueue = [], pendingRolls = new Set(), seenRolls = new Set();
   const pendingOperations = new Map();
-  let submittedTurn;
-  let autoRuling = false, controlDice = 'd20', controlMode = 'normal';
+  let submittedTurn, firstNewFrame, turnIllustration = false;
   let uiSessionId, lastBackground = '';
-  let controlChar = '', controlSkill = '侦查', controlDifficulty = 'regular', clueId = '', sceneId = '', replacementId = '';
+  let controlChar = '', replacementId = '';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=& -]+$/.test(value || '') ? value : '';
   const button = (action, label, kind = '', extra = '') => `<button type="button" data-action="${action}" class="${kind}" ${extra}>${label}</button>`;
   const post = (url, body) => sdk.ext.request(url, { method: 'POST', body: JSON.stringify({ ...(state ? { sessionId: state.sessionId } : {}), ...body }) });
   const readState = sessionId => sdk.ext.request(`/state?sessionId=${encodeURIComponent(sessionId)}`);
@@ -31,66 +79,121 @@
     pendingOperations.delete(key);
     return result;
   }
-  const name = id => state?.investigators.find(c => c.id === id)?.name || '调查员';
-  function notice(message, error = false) { const el = document.getElementById('notice'); el.textContent = message; el.className = error ? 'visible error' : 'visible'; clearTimeout(notice.timer); notice.timer = setTimeout(() => { el.className = ''; }, 6000); }
-  async function work(fn) { if (busy) return; busy = true; refreshBusy(); try { await fn(); } catch (error) { notice(error.message, true); } finally { busy = false; refreshBusy(); advanceRuling(); } }
-  function advanceRuling() {
-    if (!autoRuling || !state || busy || playing || diceAnimating || dialog.open || stopping) return;
-    autoRuling = false;
-    if (state.pendingCheck) {
-      if (state.mode === 'investigator') work(state.pendingTurn ? turn : () => dice(false));
+  const isThinking = () => ['send', 'next', 'submit-ruling', 'replacement', 'random-item', 'use-item'].includes(pendingAction);
+  function notice(message, error = false) {
+    const inline = error && dialog.open && !dialog.classList.contains('closing') && dialog.querySelector('.drawer-notice');
+    if (inline) {
+      inline.textContent = message;
+      inline.hidden = false;
       return;
     }
-    if (state.pendingTurn || state.awaitingRuling) work(turn);
+    const el = document.getElementById('notice');
+    el.textContent = message;
+    el.className = error ? 'visible error' : 'visible';
+    clearTimeout(notice.timer);
+    notice.timer = setTimeout(() => { el.className = ''; }, 6000);
   }
-  function refreshBusy() { document.querySelectorAll('[data-network]').forEach(el => { el.dataset.blocked ??= String(el.disabled); el.disabled = busy || el.dataset.blocked === 'true'; }); document.body.classList.toggle('is-busy', busy); const status = document.getElementById('working'); if (status) status.textContent = busy ? '正在整理线索…' : ''; }
+  async function work(fn, action = 'background') {
+    if (pendingAction) return;
+    pendingAction = action;
+    const inline = dialog.querySelector('.drawer-notice');
+    if (inline) inline.hidden = true;
+    refreshBusy();
+    try { await fn(); }
+    catch (error) { notice(error.message, true); }
+    finally {
+      const repaint = isThinking() && state;
+      pendingAction = '';
+      if (repaint) render();
+      else refreshBusy();
+    }
+  }
+  function refreshBusy() {
+    const busy = Boolean(pendingAction);
+    const playbackLocked = Boolean(state?.playbackRemaining || state?.pendingTurn);
+    document.querySelectorAll('[data-network]').forEach(el => {
+      el.dataset.blocked ??= String(el.disabled);
+      el.disabled = busy || el.dataset.blocked === 'true' ||
+        (playbackLocked && el.closest('.keeper-console, .keeper-actor-panel') !== null);
+    });
+    const actorWait = dialog.querySelector('.keeper-actor-wait');
+    if (actorWait) actorWait.hidden = !playbackLocked;
+    const stageAdvance = root.querySelector('.stage-advance');
+    if (stageAdvance) {
+      stageAdvance.hidden = !state.playbackRemaining;
+      stageAdvance.setAttribute('aria-disabled', String(Boolean(advanceFlight) || diceAnimating));
+    }
+    document.body.classList.toggle('is-busy', busy);
+    const launch = document.getElementById('lobby-start');
+    const starting = pendingAction === 'start';
+    launch?.setAttribute('aria-busy', String(starting));
+    for (const el of document.querySelectorAll('[data-wait-label]')) {
+      const waiting = isThinking() && (el.dataset.action === pendingAction || el.dataset.action === 'waiting');
+      el.setAttribute('aria-busy', String(waiting));
+    }
+    const status = document.getElementById('working');
+    if (status) {
+      const startingInLobby = starting && Boolean(launch);
+      status.classList.toggle('sr-only', startingInLobby || isThinking());
+      status.textContent = startingInLobby ? '正在准备开局…' : isThinking() ? '正在推演…' : busy && !starting ? '正在整理线索…' : '';
+    }
+  }
   function modal(title, content, wide = false) {
+    delete dialog.dataset.imageCollection;
+    const switching = dialog.open;
+    if (!switching) dialog.dataset.returnFocus = document.activeElement?.id || '';
     dialog.classList.remove('closing'); dialog.classList.toggle('wide', wide); dialog.classList.toggle('lobby-drawer', !state);
-    dialog.innerHTML = `<header><div><span class="eyebrow">CASE FILE</span><h2 id="drawer-title">${esc(title)}</h2></div>${button('close', '×', 'close', 'aria-label="关闭"')}</header><div class="drawer-body">${content}</div>`;
+    dialog.innerHTML = `<header><div><span class="eyebrow">CASE FILE</span><h2 id="drawer-title" class="${switching ? 'drawer-switching' : ''}">${esc(title)}</h2></div>${button('close', '×', 'close', 'aria-label="关闭"')}</header><p class="drawer-notice" role="alert" hidden></p><div class="drawer-body ${switching ? 'drawer-switching' : ''}">${content}</div>`;
     wireChoices();
-    if (!dialog.open) dialog.showModal();
+    refreshBusy();
+    if (!switching) dialog.showModal();
   }
-  function closeModal() { if (!dialog.open || dialog.classList.contains('closing')) return; dialog.classList.add('closing'); setTimeout(() => { dialog.close(); dialog.classList.remove('closing'); if (state?.pendingBatch && !playing && !busy) play().catch(error => notice(error.message, true)); advanceRuling(); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300); }
-  dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
-  dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeModal(); } });
+  function keeperToolModal(title, content, actor) {
+    const back = actor ? button('hud-actor', '← 返回个人操作', 'quiet-action actor-panel-back',
+      `data-target="${esc(actor.id)}" data-network`) : '';
+    modal(title, back + content);
+  }
+  function closeModal(target = dialog) {
+    if (!target.open || target.classList.contains('closing')) return;
+    target.classList.add('closing');
+    setTimeout(() => {
+      target.close();
+      target.classList.remove('closing');
+      document.getElementById(target.dataset.returnFocus)?.focus({ preventScroll: true });
+    }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300);
+  }
+  for (const target of [dialog, picturePreview]) {
+    target.addEventListener('cancel', event => { event.preventDefault(); closeModal(target); });
+    target.addEventListener('close', playReadyFrame);
+    target.addEventListener('click', event => {
+      if (event.target !== target) return;
+      const rect = target.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeModal(target);
+    });
+  }
+  function openPicture(trigger) {
+    if (picturePreview.open || dialog.classList.contains('closing')) return;
+    const thumbnail = trigger.querySelector('img');
+    const full = picturePreview.querySelector('img');
+    full.src = thumbnail.getAttribute('src');
+    full.alt = thumbnail.alt;
+    picturePreview.dataset.returnFocus = trigger.id;
+    picturePreview.showModal();
+  }
   function wireChoices() { document.querySelectorAll('[data-picker]').forEach(group => { group.value = group.dataset.value; }); }
-  function hoPreview(scenario, selected) {
-    const hoChoices = scenario?.handouts || [];
-    const hoKey = `${scenario?.draftId || scenario?.id}:${mode}`;
-    const ids = selected.map(String);
-    if (mode === 'investigator') ids.unshift('player');
-    const saved = hoSelections.get(hoKey) || {};
-    const assigned = new Map();
-    const available = new Map(hoChoices.map(ho => [ho.id, ho]));
-    for (const id of ids) {
-      const choice = saved[id] || (id === 'player' ? 'HO1' : '');
-      if (available.has(choice)) {
-        assigned.set(id, available.get(choice));
-        available.delete(choice);
-      }
-    }
-    for (const id of ids) {
-      if (assigned.has(id) || !available.size) continue;
-      const [hoId, ho] = available.entries().next().value;
-      assigned.set(id, ho);
-      available.delete(hoId);
-    }
-    const hoRows = hoChoices.length ? ids.map(id => {
-      const character = characters.find(c => String(c.id) === id);
-      return { id, name: id === 'player' ? castAssets.player.name : character?.display_name || character?.name, handout: assigned.get(id) };
-    }) : [];
-    return { hoChoices, hoKey, hoRows };
-  }
   function lobbyData() {
     const scenarios = [...catalog.scenarios];
     if (importedScenario) scenarios.push(importedScenario);
     const scenario = scenarios.find(item => item.id === scenarioId);
-    const selected = lineups[mode], preview = hoPreview(scenario, selected);
-    const limit = preview.hoChoices.length ? Math.min(partyLimits[mode], preview.hoChoices.length - (mode === 'investigator' ? 1 : 0)) : partyLimits[mode];
+    const selected = lineups[mode];
+    const handoutCount = scenario?.handoutCount ?? 0;
+    const limit = handoutCount ? Math.min(partyLimits[mode], handoutCount - (mode === 'investigator' ? 1 : 0)) : partyLimits[mode];
     const canStart = !!scenario && selected.length <= limit && (mode === 'keeper' ? selected.length > 0 : keeperId !== null);
-    return { scenarios, scenario, characters, saves, mode, selected, limit, keeperId, castAssets, imagesEnabled, canStart, ...preview };
+    return { scenarios, scenario, characters, saves, mode, selected, limit, keeperId, castAssets, canStart };
   }
   function lobby() {
+    closeAudioControls = null;
+    audio.setScene(null, false);
     root.innerHTML = view.lobby(lobbyData());
     refreshBusy();
   }
@@ -105,6 +208,18 @@
     document.getElementById('scenario-count').textContent = `${data.scenarios.length} 个模组`;
     refreshBusy();
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
+  }
+  async function refreshCastAssets() {
+    const request = ++castRequest;
+    try {
+      const assets = await sdk.ext.request('/cast');
+      if (request !== castRequest) return false;
+      castAssets = assets;
+      return true;
+    } catch {
+      if (request === castRequest) notice('表情立绘刷新失败，请稍后重试', true);
+      return false;
+    }
   }
   function assignParty(action, id) {
     const party = lineups[mode];
@@ -121,6 +236,31 @@
       return;
     }
     updateLobby('partyStatus', 'roster', 'launch');
+  }
+  function animateParty() {
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      root.querySelector('.party-list').animate([{ opacity: .5 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' });
+    }
+  }
+  function randomizeParty() {
+    const { scenario, limit, characters } = lobbyData();
+    const pool = characters.map(character => character.id);
+    if (!pool.length) return;
+    const draw = () => pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    const playerSeats = mode === 'investigator' ? 1 : 0;
+    if (playerSeats) keeperId = draw();
+    const capacity = Math.min(limit, pool.length) + playerSeats;
+    const recommendation = String(scenario?.briefing?.party ?? '').normalize('NFKC')
+      .match(/^\s*([1-9]\d*)(?:\s*[-~–—至到]\s*([1-9]\d*))?\s*(?:人|名|位)?\s*(?:调查员|玩家|PL)?\s*(?=$|[(,。])/i);
+    const recommendedMin = Number(recommendation?.[1]);
+    const recommendedMax = Number(recommendation?.[2] ?? recommendation?.[1]);
+    const hasRecommendation = Number.isSafeInteger(recommendedMax) && recommendedMin <= recommendedMax;
+    const minimum = hasRecommendation ? Math.min(recommendedMin, capacity) : 1;
+    const maximum = hasRecommendation ? Math.min(recommendedMax, capacity) : capacity;
+    const count = minimum + Math.floor(Math.random() * (maximum - minimum + 1)) - playerSeats;
+    lineups[mode] = Array.from({ length: count }, draw);
+    updateLobby('partyStatus', 'roster', 'launch');
+    animateParty();
   }
   async function editScenario() {
     if (mode !== 'keeper' || !importedScenario?.draftId) return;
@@ -148,154 +288,285 @@
       field.focus();
     }
   }
-  async function previewHO(id) {
-    const { scenario, hoChoices, hoRows } = lobbyData();
-    const row = hoRows.find(actor => actor.id === id);
-    if (!row?.handout) return;
-    const canAssign = mode === 'keeper' || id === 'player';
-    const handout = mode === 'keeper' ? await post('/preview-handout', { mode, scenarioId: scenario.id, draftId: scenario.draftId, hoId: row.handout.id }) : row.handout;
-    modal(`${row.name} · 秘密 HO`, `${view.handoutCard(handout)}
-      ${canAssign ? `<div class="control-section"><h3>分配 HO</h3>${view.choices('ho-choice', hoChoices.map(ho => ({ label: `${ho.id} · ${ho.title}`, value: ho.id })), handout.id, '分配秘密 HO')}</div>
-      <div class="dialog-footer">${button('assign-ho', '确认分配', 'primary', `data-id="${esc(id)}"`)}</div>` : ''}`);
-  }
-  function assignHO(id) {
-    const { hoKey, hoRows, hoChoices } = lobbyData();
-    const choice = document.getElementById('ho-choice')?.value;
-    const row = hoRows.find(actor => actor.id === id);
-    if (!row || !hoChoices.some(ho => ho.id === choice)) return;
-    if (mode === 'keeper') {
-      const assigned = Object.fromEntries(hoRows.filter(actor => actor.handout).map(actor => [actor.id, actor.handout.id]));
-      const previous = hoRows.find(actor => actor.handout?.id === choice && actor.id !== id);
-      if (previous && row.handout) assigned[previous.id] = row.handout.id;
-      assigned[id] = choice;
-      hoSelections.set(hoKey, assigned);
-    } else if (id === 'player') hoSelections.set(hoKey, { player: choice });
-    dialog.addEventListener('close', () => document.getElementById(`ho-preview-${id}`)?.focus({ preventScroll: true }), { once: true });
-    closeModal();
-    updateLobby('roster');
-  }
   function showRules() {
     modal('规则说明', `<dl class="lobby-rules">
-      <div><dt>守秘人（KP）</dt><dd>描述现场、扮演 NPC、分发线索并裁定检定。受邀邻舍作为 AI 调查员行动。</dd></div>
+      <div><dt>守秘人（KP）</dt><dd>邻舍会先声明行动。在这条发言上直接描述结果，或要求检定后再描述后果。突发事件可在 KP 控制台发起临时检定。</dd></div>
       <div><dt>调查员（PL）</dt><dd>你以酒馆设置中的玩家身份调查。选择一位邻舍担任守秘人，也可邀请邻舍当 AI 队友。</dd></div>
       <div><dt>技能检定</dt><dd>通常掷 D20，点数加技能修正后需达到目标值 10／14／18。优势取两骰高值，劣势取低值。D100 按百分比判定，点数不高于目标值即通过。</dd></div>
       <div><dt>生命与理智</dt><dd>生命（HP）或理智（SAN）归零时角色退场。仍可引入替补或继续推进结局。</dd></div>
+      <div><dt>音乐</dt><dd>Dark Walk、Gloom Horizon — Music by Kevin MacLeod (incompetech.com)，CC BY 3.0。</dd></div>
     </dl>`);
   }
-  const ui = () => ({ tab: activeTab, characters, castAssets, playerExpression, catalog, controlChar, controlSkill, controlDifficulty, controlDice, controlMode, clueId, sceneId, replacementId, fields, secretRoll, rolls: recentRolls, pendingRolls, draft, npcSpeaker, playing });
-  function logs(list) { return view.logs(state, list); }
+  const ui = () => ({ tab: activeTab, packTab, packActor, characters, castAssets, catalog, controlChar, replacementId, secretRoll, rolls: recentRolls, pendingRolls, draft, npcSpeaker, turnIllustration, thinking: isThinking() });
+  function logs(list) { return view.logs(state, list, { characters }); }
+
+  function animateActionChange(element) {
+    if (!element || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    element.getAnimations().forEach(animation => animation.cancel());
+    element.animate([{ opacity: .45 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' });
+  }
+
+  function setDraft(value) {
+    draft = value;
+    const lines = new Set(draft.split('\n').map(line => line.trim()));
+    for (const chip of root.querySelectorAll('.action-suggestions > button')) {
+      chip.setAttribute('aria-disabled', String(lines.has(chip.textContent)));
+    }
+    if (state?.mode !== 'investigator') return;
+    const label = root.querySelector('#send-message .turn-button-label > span');
+    const text = view.playerTurnLabel(draft);
+    if (label && label.textContent !== text) {
+      label.textContent = text;
+      animateActionChange(label);
+    }
+  }
+
+  function sampleActionSuggestions(entering) {
+    const { mode, round, scene, suggestions } = state;
+    const generated = [...new Set(suggestions.map(action => action.replace(/\s+/g, ' ').trim()).filter(Boolean))];
+    const key = JSON.stringify([mode, round, scene.id, generated]);
+    if (!entering && actionSuggestionSample?.key === key) return actionSuggestionSample.actions;
+
+    const presets = presetActions[mode].filter(action => !generated.includes(action));
+    const actions = [];
+    while (actions.length < 2) {
+      const pool = generated.length ? generated : presets;
+      actions.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    actionSuggestionSample = { key, actions };
+    return actions;
+  }
+
+  function updateAudio(entering) {
+    const { scene, publicLog, investigators, ended } = state;
+    const averageSan = investigators.reduce((sum, c) => sum + c.san / c.maxSan, 0) / investigators.length;
+    // An encounter stays active through the current scene. The rules engine has no separate end-encounter action.
+    const sceneStart = publicLog.findLastIndex(log => log.kind === 'scene');
+    const encounter = publicLog.slice(sceneStart + 1).some(log => log.sceneId === scene.id && log.kind === 'encounter');
+    audio.setScene(scene, !ended && (averageSan < 0.45 || encounter));
+
+    if (entering) knownPrivateClues.clear();
+    const cues = new Set();
+    for (const clue of state.clues) {
+      if (!clue.isSecret) continue;
+      if (!entering && !knownPrivateClues.has(clue.id)) cues.add('clue_get');
+      knownPrivateClues.add(clue.id);
+    }
+    if (entering) return;
+    for (const log of publicLog) {
+      if (knownLogs.has(log.id)) continue;
+      if (log.kind === 'dialogue') audio.bubble(view.isKeeperLine(state, log));
+      if (log.kind === 'clue') cues.add('clue_get');
+      if (log.kind === 'scene') cues.add('scene_switch');
+      if (log.kind === 'item' && !log.dialogue.includes('未能使用道具：')) cues.add('item_get');
+      const sanLoss = log.sanDelta !== undefined ? log.sanDelta < 0 :
+        (log.kind === 'stat' && / HP [+-]\d+ \/ SAN -\d+：/.test(log.dialogue)) ||
+        (log.kind === 'item' && /」，(?:HP [+-]\d+ \/ )?SAN -\d+/.test(log.dialogue));
+      if (sanLoss) cues.add('fumble_san');
+    }
+    for (const cue of cues) audio.play(cue);
+  }
+
   function render() {
     if (!state) { lobby(); return; }
     const entering = uiSessionId !== state.sessionId;
     const previousTab = document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab;
-    if (entering) { lastBackground = ''; playerExpression = 'normal'; activeTab = 'narrative'; uiSessionId = state.sessionId; controlChar = ''; sceneId = state.scene.id; knownLogs.clear(); seenRolls.clear(); recentRolls.length = 0; secretRoll = null; }
+    const previousPackTab = root.querySelector('.pack-tabs [aria-selected=true]')?.dataset.tab;
+    const truthOpen = !entering && root.querySelector('#keeper-truth')?.open;
+    if (entering) { lastBackground = ''; activeTab = 'narrative'; packTab = 'dossier'; packActor = ''; uiSessionId = state.sessionId; controlChar = ''; knownLogs.clear(); seenRolls.clear(); recentRolls.length = 0; secretRoll = null; turnIllustration = false; }
     if (state.mode !== 'keeper' && activeTab === 'keeper') activeTab = 'narrative';
     const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart;
     const oldTranscript = document.getElementById('transcript');
     const follow = !oldTranscript || oldTranscript.scrollHeight - oldTranscript.scrollTop - oldTranscript.clientHeight < 70;
     if (oldTranscript?.clientHeight) scrollPositions.narrative = oldTranscript.scrollTop;
     for (const panel of document.querySelectorAll('.story-panel:not([hidden])')) if (panel.id !== 'panel-narrative') scrollPositions[panel.id] = panel.scrollTop;
-    controlChar ||= state.investigators.find(c => !c.outOfAction)?.id || '';
-    sceneId ||= state.scene.id;
+    if (!state.investigators.some(actor => actor.id === controlChar)) {
+      controlChar = state.investigators.find(actor => !actor.outOfAction)?.id || state.investigators[0]?.id || '';
+    }
     const background = state.imageJobs.filter(j => j.status === 'done' && j.kind === 'scene' && j.sceneId === state.scene.id).at(-1)?.url || '';
-    const previousCast = !entering && root.querySelector('.stage-cast');
-    root.innerHTML = view.table(state, { ...ui(), entering, tabChanged: previousTab !== activeTab, previousBackground: lastBackground !== background ? lastBackground : '', backgroundChanged: lastBackground !== background });
-    const cast = root.querySelector('.stage-cast');
-    if (previousCast) cast.replaceWith(previousCast);
-    view.updateCast(previousCast || cast, state, ui(), turnPreview);
+    const backgroundChanged = lastBackground !== background;
+    const previousSuggestions = [...root.querySelectorAll('.action-suggestions > button')].map(chip => chip.textContent).join('\n');
+    const suggestions = sampleActionSuggestions(entering);
+    const markup = view.table(state, { ...ui(), suggestions, entering, truthOpen, tabChanged: previousTab !== activeTab, packTabChanged: previousPackTab !== packTab,
+      previousBackground: backgroundChanged ? lastBackground : '', backgroundChanged });
+    const stage = !entering && root.querySelector('.visual-stage');
+    if (stage) {
+      const next = document.createElement('template');
+      next.innerHTML = markup;
+      if (backgroundChanged) {
+        stage.querySelectorAll('.stage-backdrop').forEach(el => el.remove());
+        stage.prepend(...next.content.querySelectorAll('.stage-backdrop'));
+      }
+      for (const selector of ['.stage-navigation', '.hud', '.stage-caption', '.ended-stamp']) {
+        const current = stage.querySelector(selector), updated = next.content.querySelector(selector);
+        if (current?.outerHTML === updated?.outerHTML) continue;
+        if (current && updated) current.replaceWith(updated);
+        else if (updated) stage.append(updated);
+        else current.remove();
+      }
+      root.querySelector('.narrative-column').replaceWith(next.content.querySelector('.narrative-column'));
+    } else {
+      root.innerHTML = markup;
+      const stage = root.querySelector('.visual-stage');
+      stage.insertAdjacentHTML('beforeend', button('next-frame', '', 'stage-advance', 'id="stage-advance" aria-label="播放下一幕" hidden'));
+      closeAudioControls = view.mountAudioControls(stage, audio);
+    }
+    view.updateCast(root.querySelector('.stage-cast'), state, ui());
     lastBackground = background;
+    setDraft(draft);
+    if (entering || suggestions.join('\n') !== previousSuggestions) animateActionChange(root.querySelector('.action-suggestions'));
     wireChoices(); refreshBusy();
     const transcript = document.getElementById('transcript');
-    transcript.scrollTop = follow || playing ? transcript.scrollHeight : scrollPositions.narrative || 0;
+    transcript.scrollTop = follow ? transcript.scrollHeight : scrollPositions.narrative || 0;
     for (const panel of document.querySelectorAll('.story-panel:not([hidden])')) if (panel.id !== 'panel-narrative') panel.scrollTop = scrollPositions[panel.id] || 0;
     const fresh = [...document.querySelectorAll('[data-log-id]')].filter(el => !knownLogs.has(el.dataset.logId));
     fresh.slice(-3).forEach(el => el.classList.add('is-new'));
+    updateAudio(entering);
     state.publicLog.forEach(log => knownLogs.add(log.id));
     if (focus) { const el = document.getElementById(focus); el?.focus({ preventScroll: true }); if (typeof pos === 'number' && el?.setSelectionRange) el.setSelectionRange(pos, pos); }
   }
-  async function stopQueue() {
-    playing = false; generation++;
-    if (stopping) return stopping;
-    stopping = (async () => {
-      if (ackFlight) await ackFlight;
-      if (state?.pendingBatch) { const batch = state.pendingBatch; state = await post('/ack', { batchId: batch.id, count: batch.acked, discard: true }); }
-    })().finally(() => { stopping = null; });
-    return stopping;
+  function acceptState(result) {
+    if (result.sessionId !== state?.sessionId || (result.revision ?? 0) < (state.revision ?? 0)) return false;
+    state = result;
+    return true;
   }
-  async function play() {
-    if (playing || !state?.pendingBatch || dialog.open || diceAnimating) return;
-    playing = true; const epoch = ++generation; render();
-    while (playing && generation === epoch && state.pendingBatch) {
-      const batch = state.pendingBatch;
-      const transcript = document.getElementById('transcript');
-      const line = batch.lines[batch.acked];
-      const spoken = { actorId: line.speaker, speaker: name(line.speaker), expressionSlot: line.expressionSlot, dialogue: line.dialogue, action: line.action, kind: 'dialogue' };
-      transcript.insertAdjacentHTML('beforeend', logs([spoken]));
-      view.updateCast(root.querySelector('.stage-cast'), state, ui(), spoken);
-      transcript.scrollTop = transcript.scrollHeight;
-      ackFlight = post('/ack', { batchId: batch.id, count: batch.acked + 1 });
-      try {
-        state = await ackFlight;
-        if (state.awaitingRuling) autoRuling = true;
-        if (state.roll) showDice(state.roll);
-      } finally { ackFlight = null; }
-      if (generation !== epoch) break;
-      render(); if (state.pendingCheck || !state.pendingBatch) break;
-      await new Promise(resolve => setTimeout(resolve, 1300));
+  async function syncState(sessionId) {
+    if (state?.sessionId !== sessionId) return;
+    await advanceFlight;
+    const current = await readState(sessionId);
+    await advanceFlight;
+    if (acceptState(current)) {
+      render();
+      if (dialog.open && dialog.dataset.imageCollection) {
+        dialog.querySelector('.drawer-body').innerHTML = view.imageCollection(state);
+        refreshBusy();
+      }
+      playReadyFrame();
     }
-    if (generation === epoch) { playing = false; render(); }
-    advanceRuling();
+  }
+  function playReadyFrame() {
+    if (!state) return;
+    // Tool results can arrive before the first reply and play in order with it.
+    if (firstNewFrame !== undefined && state.publicLog.slice(firstNewFrame)
+      .some(log => log.kind === 'dialogue' && log.actorId !== 'player')) firstNewFrame = undefined;
+    if (!state.playbackRemaining) return;
+    // Older hosts omit the hint, but queue the dice immediately after the check request.
+    const checkReady = state.checkPlaybackReady ??
+      (state.mode === 'investigator' && state.publicLog.at(-1)?.kind === 'check');
+    if (firstNewFrame !== undefined || checkReady || state.reactionReady) advanceFrame();
+  }
+  function advanceFrame() {
+    if (!state?.playbackRemaining || advanceFlight || diceAnimating || dialog.open || picturePreview.open) return;
+    const { sessionId, publicLog } = state;
+    const after = publicLog.length;
+    activeTab = 'narrative';
+    let advanced = false;
+    advanceFlight = post('/advance', { sessionId, after }).then(result => {
+      if (!acceptState(result)) return;
+      advanced = result.publicLog.length > after;
+      if (!result.pendingTurn && !result.playbackRemaining) firstNewFrame = undefined;
+      const roll = result.publicLog[after]?.roll;
+      if (roll) showDice(roll);
+      else render();
+    }).catch(error => notice(error.message, true)).finally(() => {
+      advanceFlight = null;
+      refreshBusy();
+      if (advanced) playReadyFrame();
+    });
+    refreshBusy();
   }
   async function turn() {
     const { pendingTurn, sessionId } = state;
-    if (!pendingTurn) await stopQueue();
+    if (state.playbackRemaining && !pendingTurn) return;
     const retired = state.investigators.some(c => c.player && c.outOfAction);
-    const request = pendingTurn ? { turnId: pendingTurn.id, resume: true } : submittedTurn || {
-      turnId: newOperationId(), message: retired || state.awaitingRuling ? '' : draft.trim(), speaker: npcSpeaker, expressionSlot: playerExpression,
+    const needsRuling = state.awaitingRuling || state.awaitingItem || state.pendingCheck;
+    const previous = needsRuling && submittedTurn?.message ? undefined : submittedTurn;
+    const request = pendingTurn ? { turnId: pendingTurn.id, resume: true } : previous || {
+      turnId: newOperationId(), message: retired || needsRuling ? '' : draft.trim(), speaker: npcSpeaker,
+      ...(turnIllustration && !needsRuling && state.mode === 'keeper' && state.imagesEnabled ? { illustrate: true } : {}),
     };
     if (!pendingTurn) submittedTurn = request;
     const { message } = request;
-    if (message) {
-      const signature = state.mode === 'keeper' ? npcSpeaker.trim() : '';
-      turnPreview = { actorId: 'player', speaker: signature || state.player.name,
-        expressionSlot: playerExpression, kind: 'dialogue', dialogue: message };
-      view.updateCast(root.querySelector('.stage-cast'), state, ui(), turnPreview);
-    }
+    firstNewFrame = state.playbackRemaining ? undefined : state.publicLog.length;
     try {
-      state = await post('/turn', request);
-      if (state.pendingTurn?.autoRollId) autoRuling = true;
-      for (const log of state.publicLog.filter(log => log.roll && !knownLogs.has(log.id))) showDice(log.roll);
+      const result = await post('/turn', request);
+      await advanceFlight;
+      acceptState(result);
       submittedTurn = undefined;
       if (message && draft.trim() === message) draft = '';
     } catch (error) {
+      await advanceFlight;
       const current = await readState(sessionId).catch(() => null);
-      if (current) {
-        state = current;
+      if (current && acceptState(current)) {
         submittedTurn = undefined;
         if (message && draft.trim() === message && (current.pendingTurn?.id === request.turnId || current.lastTurnId === request.turnId)) draft = '';
       }
-      if (state.pendingTurn) activeTab = 'narrative';
       throw error;
     } finally {
-      turnPreview = null;
-      render();
+      if (state.playbackRemaining) playReadyFrame();
+      else firstNewFrame = undefined;
     }
-    if (state.pendingBatch) setTimeout(() => { play().catch(error => { playing = false; notice(error.message, true); render(); }); }, 0);
   }
   async function control(tool, args) {
-    await stopQueue();
     state = await retryablePost('/control', { tool, args });
     if (tool === 'roll_dice') showDice(state.result, args.secret);
     render();
   }
-  function readControl() { controlChar = document.getElementById('target')?.value || controlChar; controlSkill = document.getElementById('skill')?.value || controlSkill; controlDifficulty = document.getElementById('difficulty')?.value || controlDifficulty; controlDice = document.getElementById('check-dice')?.value || controlDice; controlMode = document.getElementById('check-mode')?.value || controlMode; clueId = document.getElementById('clue')?.value || clueId; sceneId = document.getElementById('scene')?.value || sceneId; replacementId = document.getElementById('replacement')?.value || replacementId; }
+  function syncGrantPreset(form) {
+    const preset = view.itemPresets[form.elements.preset.value];
+    for (const field of form.querySelectorAll('[data-grant-effect]')) {
+      const mode = field.dataset.grantEffect;
+      field.hidden = mode === 'tool' ? preset.type !== 'tool' : !preset[mode];
+      const control = field.querySelector('[data-network]');
+      control.disabled = field.hidden;
+      control.dataset.blocked = String(field.hidden);
+    }
+  }
+  function givePackItem(random) {
+    const form = dialog.querySelector('#give-item-form');
+    const { preset, name, desc, hp, san, skill, bonus, uses } = form.elements;
+    const request = { targetChar: form.dataset.target };
+    if (random) request.random = true;
+    else {
+      if (!form.reportValidity()) return;
+      const definition = view.itemPresets[preset.value];
+      const effect = {};
+      if (definition.hp) effect.hpDelta = hp.valueAsNumber;
+      if (definition.san) effect.sanDelta = san.valueAsNumber;
+      if (definition.type === 'tool') effect.skillBonus = { skill: skill.value, bonus: bonus.valueAsNumber };
+      Object.assign(request, { name: name.value.trim(), desc: desc.value.trim(), type: definition.type, effect, uses: uses.valueAsNumber });
+    }
+    // Read the live fields before the work lock disables the controls.
+    work(async () => {
+      state = await retryablePost('/give-item', request);
+      notice(`已发放「${state.result.name}」`);
+      if (dialog.contains(form)) closeModal();
+      if (!random) render();
+    }, random ? 'random-item' : 'give-item');
+  }
+  async function usePackItem(el) {
+    state = await retryablePost('/use-item', { itemId: el.dataset.id, targetChar: el.dataset.target });
+    if (state.awaitingItem) {
+      activeTab = 'narrative';
+      render();
+      await turn();
+    } else notice('已使用道具');
+  }
+  function readControl() { replacementId = document.getElementById('replacement')?.value || replacementId; }
   async function dice(manual) {
-    const secret = document.getElementById('secret-roll')?.checked;
-    await stopQueue();
+    const secret = manual && dialog.querySelector('#secret-roll').checked;
     const checkId = state.pendingCheck?.id;
-    const result = await retryablePost('/roll', manual ? { targetChar: controlChar, skill: controlSkill, difficulty: controlDifficulty, dice: controlDice, mode: controlDice === 'd20' ? controlMode : 'normal', secret, checkId } : { checkId });
+    let request = { checkId };
+    if (manual) {
+      const form = dialog.querySelector('.check-form');
+      const value = id => form.querySelector('#' + id).value;
+      const dice = value('check-dice');
+      request = { skill: value('skill'), difficulty: value('difficulty'), dice, mode: dice === 'd20' ? value('check-mode') : 'normal', secret,
+        ...(form.dataset.log ? { actionLogId: form.dataset.log } : { targetChar: form.dataset.target || value('check-target') }) };
+    }
+    const result = await retryablePost('/roll', request);
     const roll = result.roll; delete result.roll; state = result;
-    if (state.mode === 'investigator') autoRuling = true;
+    if (manual) closeModal();
     showDice(roll, secret);
   }
   function showDice(roll, secret = false) {
@@ -306,15 +577,24 @@
     if (!diceAnimating) drainDice().catch(error => notice(error.message, true));
   }
   async function drainDice() {
+    const returnFocus = dialog.classList.contains('closing') ? dialog.dataset.returnFocus : '';
     diceAnimating = true;
     root.inert = true;
     try {
       while (diceQueue.length) {
         const { roll, secret } = diceQueue.shift();
         const key = view.rollKey(roll);
-        activeTab = secret ? 'keeper' : 'narrative';
+        activeTab = secret && !roll.actionLogId ? 'keeper' : 'narrative';
         render();
-        try { await view.animateDice(roll, secret); } catch (error) { console.warn('Dice animation failed', error); }
+        let resultSoundPlayed = false;
+        const playResult = () => {
+          if (resultSoundPlayed) return;
+          resultSoundPlayed = true;
+          if (roll.rank === 'fumble') audio.play('fumble_san');
+          if (roll.success && ['critical', 'extreme'].includes(roll.rank)) audio.play('crit_success');
+        };
+        try { await view.animateDice(roll, secret, speed => audio.impact(speed), playResult); } catch (error) { console.warn('Dice animation failed', error); }
+        playResult();
         pendingRolls.delete(key);
         if (secret) secretRoll = roll;
         else if (!state.publicLog.some(log => log.id === roll.logId)) recentRolls.push(roll);
@@ -326,21 +606,44 @@
     } finally {
       root.inert = false;
       diceAnimating = false;
-      if (state?.pendingBatch && !playing && !busy) play().catch(error => notice(error.message, true));
-      advanceRuling();
+      if (!dialog.open && returnFocus && document.activeElement === document.body) {
+        document.getElementById(returnFocus)?.focus({ preventScroll: true });
+      }
+      refreshBusy();
+      playReadyFrame();
     }
   }
-  async function reloadLobby() { saves = await sdk.save.list(); state = null; uiSessionId = null; submittedTurn = undefined; autoRuling = false; draft = ''; lobby(); }
+  async function reloadLobby() {
+    await advanceFlight;
+    [saves] = await Promise.all([sdk.save.list(), refreshCastAssets()]);
+    state = null; uiSessionId = null; submittedTurn = undefined; firstNewFrame = undefined; draft = '';
+    lobby();
+  }
+  document.addEventListener('pointerdown', event => closeAudioControls?.(event));
+  document.addEventListener('click', event => {
+    if (event.isTrusted && event.target.closest('button:not(:disabled)')) audio.unlock();
+  }, true);
   document.addEventListener('input', e => {
-    if (['stat-reason', 'handout', 'encounter', 'pool-count', 'pool-reason'].includes(e.target.id)) fields[e.target.id] = e.target.value;
-    if (e.target.id === 'message') { draft = e.target.value; if (playing || state?.pendingBatch) stopQueue().catch(error => notice(error.message, true)); }
+    if (e.target.id === 'message') setDraft(e.target.value);
     if (e.target.id === 'npc-speaker') npcSpeaker = e.target.value;
     if (e.target.id === 'scenario-draft') document.getElementById('scenario-edit-error').textContent = '';
   });
   document.addEventListener('change', e => {
-    if (e.target.id === 'secret-roll') fields['secret-roll'] = e.target.checked;
-    if (e.target.id === 'images-enabled') imagesEnabled = e.target.checked;
-    if (e.target.id === 'player-expression') playerExpression = e.target.value;
+    if (e.target.id === 'turn-illustration') turnIllustration = e.target.checked;
+    if (e.target.id === 'pack-actor') { packActor = e.target.value; render(); return; }
+    if (e.target.id === 'clue') {
+      const preview = dialog.querySelector('#keeper-clue-preview');
+      const clue = state.scenario.clues.find(item => item.id === e.target.value);
+      preview.textContent = clue?.content || '';
+      preview.hidden = !clue;
+      return;
+    }
+    if (e.target.id === 'grant-preset') {
+      const form = e.target.form;
+      form.elements.uses.value = ['key', 'gag'].includes(e.target.value) ? -1 : 1;
+      syncGrantPreset(form);
+      return;
+    }
     readControl();
     if (e.target.id === 'scenario-file') work(async () => {
       const file = e.target.files[0]; if (!file) return;
@@ -352,14 +655,26 @@
       notice('已导入并选中外部剧本');
     });
   });
+  document.addEventListener('submit', e => {
+    if (e.target.id !== 'give-item-form') return;
+    e.preventDefault();
+    document.getElementById('give-item-submit').click();
+  });
   document.addEventListener('keydown', e => {
     const group = e.target.closest('[data-picker], [role=tablist]');
     if (group && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)) { e.preventDefault(); const buttons = [...group.querySelectorAll('button:not(:disabled)')]; const i = buttons.indexOf(e.target); const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (['ArrowRight','ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length; buttons[n]?.click(); buttons[n]?.focus(); return; }
-    if (e.target.id === 'message' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); work(async () => { await turn(); }); } });
+    if (e.target.id === 'message' && e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      if (!draft.trim()) return;
+      if (e.isTrusted) audio.unlock();
+      document.getElementById('send-message')?.click();
+    }
+  });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-action]'); if (!el || el.disabled) return; const action = el.dataset.action; readControl();
     if (action === 'choice') {
       const group = el.closest('[data-picker]');
+      const previous = group.value;
       group.dataset.value = el.dataset.value;
       group.value = el.dataset.value;
       group.querySelectorAll('button').forEach(item => {
@@ -367,17 +682,78 @@
         item.classList.toggle('selected', chosen);
         item.setAttribute('aria-pressed', String(chosen));
       });
-      const previousSkill = controlSkill;
       readControl();
-      const changesSanDice = group.id === 'skill' && controlSkill !== previousSkill && [controlSkill, previousSkill].includes('理智');
-      if (changesSanDice) controlDice = controlSkill === '理智' ? 'd100' : 'd20';
-      if (changesSanDice || group.id === 'check-dice') {
+      if (group.id === 'target' && previous !== group.value) {
+        controlChar = group.value;
         render();
-        root.querySelector(`#${group.id} .selected`)?.focus({ preventScroll: true });
+        root.querySelector('#target .selected')?.focus({ preventScroll: true });
+        return;
+      }
+      if (group.id === 'skill' && previous !== group.value && [previous, group.value].includes('理智')) {
+        const dice = group.value === '理智' ? 'd100' : 'd20';
+        dialog.querySelector(`#check-dice [data-value="${dice}"]`).click();
+      }
+      if (group.id === 'check-dice') {
+        for (const row of dialog.querySelectorAll('[data-d20]')) row.hidden = group.value !== 'd20';
+        dialog.querySelector('[data-action="manual-roll"]').textContent = '掷 ' + group.value.toUpperCase();
       }
       return;
     }
-    if (action === 'tab') { activeTab = el.dataset.tab; render(); document.getElementById('tab-' + activeTab)?.focus({preventScroll:true}); return; }
+    if (action === 'hud-actor') {
+      if (state?.mode !== 'keeper' || dialog.classList.contains('closing')) return;
+      const actor = state.investigators.find(person => person.id === el.dataset.target);
+      if (!actor) return;
+      if (!dialog.open) el.focus({ preventScroll: true });
+      modal(actor.name, view.keeperActorPanel(state, actor));
+      (dialog.querySelector('.keeper-command:not(:disabled)') || dialog.querySelector('.close')).focus({ preventScroll: true });
+      return;
+    }
+    if (['temporary-check', 'check-action', 'keeper-tool'].includes(action)) {
+      if (dialog.classList.contains('closing') || state?.mode !== 'keeper') return;
+      const pinnedActor = el.dataset.target && state.investigators.find(person => person.id === el.dataset.target);
+      if (el.dataset.target && !pinnedActor) return;
+      if (action === 'keeper-tool') {
+        const task = view.keeperDialog(state, { ...ui(), controlChar: pinnedActor?.id ?? controlChar }, el.dataset.tool);
+        keeperToolModal(task.title, task.content, pinnedActor);
+        const form = dialog.querySelector('#give-item-form');
+        if (form) syncGrantPreset(form);
+        dialog.querySelector('.drawer-body :is(input, select, textarea):not(:disabled)')?.focus({ preventScroll: true });
+      } else {
+        const declaration = action === 'check-action' ? state.declaration : null;
+        if (action === 'check-action' && (!declaration || declaration.logId !== el.dataset.log || declaration.roll)) return;
+        const title = declaration ? '要求检定' : pinnedActor ? `临时检定 · ${pinnedActor.name}` : '临时检定';
+        keeperToolModal(title, view.checkForm(state, ui(), declaration, pinnedActor), pinnedActor);
+        if (pinnedActor) dialog.querySelector('#skill .selected')?.focus({ preventScroll: true });
+      }
+      return;
+    }
+    if (action === 'describe-action') {
+      const declaration = state.declaration;
+      if (!declaration || declaration.logId !== el.dataset.log) return;
+      const actor = state.investigators.find(person => person.id === declaration.actorId);
+      modal(declaration.roll ? '描述检定结果' : '直接描述结果',
+        `<p class="field-note">${esc(actor.name)} · ${esc(declaration.reason)}</p>
+        ${declaration.roll ? view.rollCard(declaration.roll, !declaration.roll.logId) : ''}
+        <label for="action-result">行动结果</label><textarea id="action-result" rows="3" maxlength="3000" required></textarea>
+        <div class="dialog-footer">${view.turnButton('submit-ruling', '发布结果', 'primary', `data-log="${esc(declaration.logId)}"`)}</div>`);
+      dialog.querySelector('textarea').focus();
+      return;
+    }
+    if (action === 'tab') { if (activeTab !== el.dataset.tab) { activeTab = el.dataset.tab; render(); } document.getElementById('tab-' + activeTab)?.focus({preventScroll:true}); return; }
+    if (action === 'pack-tab') { if (packTab !== el.dataset.tab) { packTab = el.dataset.tab; render(); } document.getElementById('pack-tab-' + packTab)?.focus({ preventScroll: true }); return; }
+    if (action === 'give-item' || action === 'random-item') { givePackItem(action === 'random-item'); return; }
+    if (action === 'next-frame') { advanceFrame(); return; }
+    if (action === 'suggest-action') {
+      const input = document.getElementById('message');
+      if (!input || pendingAction || el.getAttribute('aria-disabled') === 'true') return;
+      const value = [draft.trimEnd(), el.textContent].filter(Boolean).join('\n');
+      if (value.length > input.maxLength) return;
+      input.value = value;
+      setDraft(input.value);
+      input.focus();
+      input.setSelectionRange(draft.length, draft.length);
+      return;
+    }
     if (action === 'ho-focus-kp') {
       if (state.mode !== 'keeper') return;
       controlChar = el.dataset.id;
@@ -387,6 +763,8 @@
       return;
     }
     if (action === 'evidence') { const clue = state.clues.find(c => c.id === el.dataset.id); if (clue) modal(clue.title, `<article class="evidence-detail"><span class="evidence-label">${clue.isSecret ? '私密证物' : '公开证物'}</span><p>${view.highlight(clue)}</p></article>`); return; }
+    if (action === 'preview-picture') { openPicture(el); return; }
+    if (action === 'close-picture') { closeModal(picturePreview); return; }
     if (action === 'close') { closeModal(); return; }
     if (action === 'choose-scenario') {
       if (scenarioId !== el.dataset.id) { scenarioId = el.dataset.id; updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch'); }
@@ -396,11 +774,10 @@
       if (mode === el.dataset.mode) return;
       mode = el.dataset.mode;
       updateLobby('partyMode', 'briefing', 'partyStatus', 'roster', 'launch');
-      if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        root.querySelector('.party-list').animate([{ opacity: .5 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' });
-      }
+      animateParty();
       return;
     }
+    if (action === 'random-party') { randomizeParty(); return; }
     if (action === 'pick' || action === 'pick-keeper') { assignParty(action, Number(el.dataset.id)); return; }
     if (action === 'rules') { showRules(); return; }
     if (action === 'jump-party') {
@@ -412,78 +789,132 @@
     if (action === 'import-scenario') { document.getElementById('scenario-file').click(); return; }
     if (action === 'edit-scenario') { work(editScenario); return; }
     if (action === 'apply-scenario') { work(applyScenario); return; }
-    if (action === 'preview-ho') { work(() => previewHO(el.dataset.id)); return; }
-    if (action === 'assign-ho') { assignHO(el.dataset.id); return; }
     if (action === 'history') { modal('日志回溯', `<div class="history-log">${logs(state.publicLog)}</div>`, true); return; }
-    if (action === 'images') { modal('场景印相', `${state.imageJobs.length ? state.imageJobs.map(j => `<article class="image-proof">${j.url ? `<img src="${esc(image(j.url))}" alt="游戏场景图">${button('promote', '收藏到邻舍相册', '', `data-url="${esc(j.url)}" data-network`)}` : `<p class="field-note">${j.status === 'running' ? '正在显影…' : esc(j.error || '显影中断')}</p>`}</article>`).join('') : '<p class="empty-copy">尚未拍下场景。生成图片会使用当前生图服务。</p>'}<div class="dialog-footer">${button('retry-image', '拍下当前场景', '', 'data-network')}</div>`); return; }
+    if (action === 'images') { modal('场景印相', view.imageCollection(state)); dialog.dataset.imageCollection = 'true'; return; }
     if (action === 'finish-dialog') {
       const abandon = state.rulesEnabled && !state.outcome && !state.ended;
       modal(state.outcome?.label || (abandon ? '提前收团' : '让这场调查落幕'), `<label for="ending">这一局的结尾</label><textarea id="ending" rows="4" maxlength="1000" placeholder="留下最后一句话…">${esc(state.ended ? state.publicLog.at(-1)?.dialogue : state.proposedEnding)}</textarea><label class="checkbox-label"><input id="write-memory" type="checkbox" ${state.memoryWritten ? 'checked disabled' : ''}>作为“桌游／剧本杀回忆”写入角色长期记忆</label><div class="dialog-footer">${button('finish', state.ended ? '保存回忆' : abandon ? '确认提前收团' : '封存这份卷宗', 'primary', `data-network data-abandon="${abandon}"`)}</div>`);
       return;
     }
     if (action === 'delete-save') { modal('删除存档', '<p class="empty-copy">这份存档与对应游戏图片将一并删除。</p><div class="dialog-footer">' + button('confirm-delete', '删除存档', 'danger', `data-id="${esc(el.dataset.id)}" data-network`) + '</div>'); return; }
-    if (action === 'pause') { stopQueue().then(render).catch(error => notice(error.message, true)); return; }
-    if (action === 'next' && state.pendingBatch) { play().catch(error => { playing = false; notice(error.message, true); render(); }); return; }
+    if (action === 'send' && !draft.trim()) return;
     work(async () => {
       switch (action) {
         case 'start': {
-          const { selected, canStart, scenario, hoRows } = lobbyData();
+          const { selected, canStart, scenario } = lobbyData();
           if (!canStart) return;
-          const hoAssignments = Object.fromEntries(hoRows.filter(actor => actor.handout && (mode === 'keeper' || actor.id === 'player'))
-            .map(actor => [actor.id, actor.handout.id]));
           state = await post('/start', { mode, characterIds: selected, scenarioId,
-            draftId: scenario.draftId, hoAssignments, keeperId, imagesEnabled });
+            draftId: scenario.draftId, keeperId, imagesEnabled: true });
           draft = ''; render(); break;
         }
         case 'load': {
-          state = await readState(el.dataset.id);
-          const autoRollId = state.pendingTurn?.autoRollId;
-          autoRuling = !!autoRollId || (state.awaitingRuling && !state.pendingTurn) || (state.mode === 'investigator' && !!state.pendingCheck);
+          const [savedState] = await Promise.all([readState(el.dataset.id), refreshCastAssets()]);
+          state = savedState;
           render();
-          const savedRoll = autoRollId && state.publicLog.find(log => log.id === autoRollId)?.roll;
-          if (savedRoll) showDice(savedRoll);
+          playReadyFrame();
           break;
         }
         case 'manage-standings': await sdk.ui.openStandings(el.dataset.subject === 'player' ? 'player' : Number(el.dataset.subject)); break;
         case 'exit-game': await sdk.ui.exit(); break;
         case 'confirm-delete': await sdk.save.delete(el.dataset.id); closeModal(); await reloadLobby(); break;
-        case 'lobby': await stopQueue(); await reloadLobby(); break;
+        case 'lobby': await reloadLobby(); break;
         case 'next': await turn(); break;
-        case 'send': if (draft.trim()) await turn(); break;
+        case 'send': await turn(); break;
+        case 'use-item': await usePackItem(el); break;
         case 'roll': await dice(false); break;
         case 'manual-roll': await dice(true); break;
-        case 'pool-roll': await control('roll_dice', { sides: Number(el.dataset.sides), count: Number(fields['pool-count'] || 1), reason: fields['pool-reason']?.trim() || '随机掷骰', secret: !!fields['secret-roll'] }); break;
-        case 'switch-scene': await control('switch_scene', { sceneId }); break;
+        case 'pool-roll': {
+          await control('roll_dice', { sides: Number(el.dataset.sides), count: dialog.querySelector('#pool-count').valueAsNumber,
+            reason: dialog.querySelector('#pool-reason').value.trim() || '随机掷骰', secret: dialog.querySelector('#secret-roll').checked });
+          closeModal(); break;
+        }
+        case 'submit-ruling': {
+          const input = dialog.querySelector('#action-result');
+          if (!input.value.trim()) { input.focus(); notice('请填写行动结果'); break; }
+          state = await retryablePost('/describe-action', { logId: el.dataset.log, description: input.value.trim() });
+          closeModal();
+          activeTab = 'narrative';
+          render();
+          if (state.pendingTurn) await turn();
+          break;
+        }
+        case 'switch-scene': {
+          await control('switch_scene', { sceneId: dialog.querySelector('#scene').value });
+          closeModal();
+          break;
+        }
         case 'scenario-action': await control('resolve_scenario_action', { actionId: el.dataset.id }); break;
-        case 'stat': { const i = Number(el.dataset.stat); await control('update_investigator_stat', { targetChar: controlChar, hpDelta: i < 2 ? (i === 0 ? -1 : 1) : 0, sanDelta: i >= 2 ? (i === 2 ? -1 : 1) : 0, reason: document.getElementById('stat-reason').value }); break; }
-        case 'reveal-all': case 'reveal-private': await control('reveal_clue', { clueId, targetCharOrAll: action === 'reveal-all' ? 'all' : controlChar }); break;
-        case 'handout': await control('send_secret_handout', { targetChar: controlChar, content: document.getElementById('handout').value }); notice('密信已送达'); break;
-        case 'encounter': await control('trigger_encounter', { description: document.getElementById('encounter').value }); break;
-        case 'replacement': await stopQueue(); state = await post('/replacement', { characterId: Number(replacementId) }); render(); break;
-        case 'retry-image': state = await post('/retry-image', {}); closeModal(); render(); break;
+        case 'stat': {
+          const input = dialog.querySelector('#stat-reason');
+          const reason = input.value.trim();
+          if (!reason) { notice('请填写调整原因', true); input.focus(); break; }
+          const i = Number(el.dataset.stat), targetChar = el.dataset.target;
+          await control('update_investigator_stat', { targetChar, hpDelta: i < 2 ? (i === 0 ? -1 : 1) : 0,
+            sanDelta: i >= 2 ? (i === 2 ? -1 : 1) : 0, reason });
+          const actor = state.investigators.find(person => person.id === targetChar);
+          const status = dialog.querySelector('#stat-current');
+          if (status && actor) status.innerHTML = view.actorStats(actor);
+          break;
+        }
+        case 'reveal-all': case 'reveal-private': {
+          const input = dialog.querySelector('#clue');
+          if (!input.value) { notice('请选择线索', true); input.focus(); break; }
+          await control('reveal_clue', { clueId: input.value, targetCharOrAll: action === 'reveal-all' ? 'all' : el.dataset.target });
+          closeModal();
+          notice(action === 'reveal-all' ? '线索已公开' : '线索已发送');
+          break;
+        }
+        case 'handout': {
+          const input = dialog.querySelector('#handout');
+          const content = input.value.trim();
+          if (!content) { notice('请填写密信内容', true); input.focus(); break; }
+          await control('send_secret_handout', { targetChar: el.dataset.target, content });
+          closeModal();
+          notice('密信已送达');
+          break;
+        }
+        case 'encounter': {
+          const input = dialog.querySelector('#encounter');
+          const description = input.value.trim();
+          if (!description) { notice('请填写遭遇描述', true); input.focus(); break; }
+          await control('trigger_encounter', { description });
+          closeModal();
+          break;
+        }
+        case 'replacement': state = await post('/replacement', { characterId: Number(replacementId) }); render(); break;
+        case 'retry-image': {
+          acceptState(await post('/retry-image', { jobId: el.dataset.id }));
+          if (dialog.dataset.imageCollection) closeModal();
+          render();
+          break;
+        }
         case 'promote': await sdk.image.promote(state.sessionId, el.dataset.url.split('/').at(-1)); notice('已收藏到邻舍相册'); break;
-        case 'finish': await stopQueue(); state = await post('/finish', { ending: document.getElementById('ending').value, writeMemory: document.getElementById('write-memory').checked, abandon: el.dataset.abandon === 'true' }); closeModal(); render(); break;
+        case 'finish': state = await post('/finish', { ending: document.getElementById('ending').value, writeMemory: document.getElementById('write-memory').checked, abandon: el.dataset.abandon === 'true' }); closeModal(); render(); break;
       }
-    });
+    }, action);
   });
   async function boot() {
     try {
       if (!sdk) throw new Error('请从邻舍游戏中心打开本游戏');
       await sdk.ready;
-      [catalog, characters, saves, castAssets] = await Promise.all([sdk.ext.request('/catalog'), sdk.bridge.call('get_characters'), sdk.save.list(), sdk.ext.request('/cast')]);
+      [catalog, characters, saves, castAssets] = await Promise.all([sdk.ext.request('/catalog'), sdk.bridge.call('get_characters'), sdk.save.list(), sdk.ext.request('/cast'), audio.restore()]);
       const recommended = view.orderCharacters(characters, castAssets);
       lineups.keeper = recommended.slice(0, 3).map(c => c.id);
       keeperId = recommended[0]?.id ?? null;
       lineups.investigator = recommended.slice(1, 3).map(c => c.id);
       scenarioId = catalog.scenarios[0]?.id || '';
       lobby();
-      sdk.on?.('standing-assets', () => work(async () => {
-        castAssets = await sdk.ext.request('/cast');
-        if (!castAssets.player.expressions[playerExpression]) playerExpression = 'normal';
-        if (state) render(); else updateLobby('roster');
-      }));
-      sdk.on?.('media', async event => { if (state?.sessionId === event.sessionId) { state.imageJobs = state.imageJobs.map(j => j.id === event.id ? event : j); if (!playing && !busy) render(); notice(event.status === 'done' ? '一张新的场景印相已放到桌上。' : '场景显影失败，可从印相中重试。', event.status !== 'done'); } });
-      sdk.on?.('dice', event => { if (state?.sessionId === event.sessionId) showDice(event.roll); });
+      sdk.on?.('standing-assets', async () => {
+        if (!await refreshCastAssets()) return;
+        if (state) view.updateCast(root.querySelector('.stage-cast'), state, ui());
+        else {
+          updateLobby('partyStatus', 'roster');
+          animateParty();
+        }
+      });
+      const sync = event => syncState(event.sessionId).catch(error => notice(error.message, true));
+      sdk.on?.('turn-progress', sync);
+      sdk.on?.('media', sync);
     } catch (error) {
       root.innerHTML = `<div class="loading-screen"><p>${esc(error.message)}</p>${button('boot', '重新连接')}${sdk ? button('exit-game', '返回游戏馆') : ''}</div>`;
       root.querySelector('[data-action="boot"]').addEventListener('click', () => window.location.reload());

@@ -93,7 +93,7 @@
 
     <div class="nav-bottom">
       <router-link to="/games" data-nav="games" class="nav-item" :class="{ active: $route.path.startsWith('/games') }" title="游戏中心">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M7 9h6m-3-3v6m6 3h1m-9 3h1"/></svg>
+        <GamepadIcon />
         <span class="nav-label">游戏</span>
       </router-link>
       <router-link to="/settings" data-nav="settings" class="nav-item" :class="{ active: $route.path === '/settings' }" :title="updateInfo.hasUpdate ? '设置 · 有新版本' : '设置'">
@@ -121,6 +121,7 @@ import { useMediaStore } from '../stores/media.js'
 import { useUpdateStore } from '../stores/updateInfo.js'
 import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 import GearIcon from './GearIcon.vue'
+import GamepadIcon from './GamepadIcon.vue'
 
 const router = useRouter()
 const route = useRoute()

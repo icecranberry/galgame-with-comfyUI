@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "categories": [
     {
       "value": "几何抽象",
@@ -2306,6 +2306,27 @@
       "label": "青绿强烈阴影",
       "description": "青绿单一色块铺满背景，硬质定向光让人物在身后的竖直纯色背景上投下强烈阴影，人物轮廓投影向侧方偏移、清晰且边缘硬朗；阴影落在身后背景上，不在身下或脚下地面；无场景、可见地面、墙地分界或道具。",
       "prompt": "A plain solid teal background filling the entire image, a flat vertical backdrop immediately behind the subject, hard directional lighting from the front and one side casting a strong, sharply defined silhouette shadow onto the vertical backdrop behind the subject, visibly offset to the side of the body, crisp hard shadow edges, no shadows beneath the subject or on the ground, no visible floor, scenery, horizon, texture, props or lettering."
+    },
+    {
+      "id": "bg-321",
+      "category": "平面拼贴",
+      "label": "白边色块·橙色",
+      "description": "白底中央是一块杏橙色直角矩形，四周留白，人物轮廓可越过色块边缘。",
+      "prompt": "A minimalist 2D poster backdrop with one large, solid apricot orange rectangle centered on a plain white canvas, leaving a clear white margin on all four sides. The rectangle has crisp square corners and a flat, even fill. The subject overlaps the graphic in the foreground, with parts of the silhouette extending past the rectangle into the white margin. No gradients, textures, cast shadows on the backdrop, scenery or lettering."
+    },
+    {
+      "id": "bg-322",
+      "category": "平面拼贴",
+      "label": "白边色块·蓝色",
+      "description": "白底中央是一块天蓝色直角矩形，四周留白，人物轮廓可越过色块边缘。",
+      "prompt": "A minimalist 2D poster backdrop with one large, solid sky blue rectangle centered on a plain white canvas, leaving a clear white margin on all four sides. The rectangle has crisp square corners and a flat, even fill. The subject overlaps the graphic in the foreground, with parts of the silhouette extending past the rectangle into the white margin. No gradients, textures, cast shadows on the backdrop, scenery or lettering."
+    },
+    {
+      "id": "bg-323",
+      "category": "平面拼贴",
+      "label": "白边色块·黄色",
+      "description": "白底中央是一块明黄色直角矩形，四周留白，人物轮廓可越过色块边缘。",
+      "prompt": "A minimalist 2D poster backdrop with one large, solid bright yellow rectangle centered on a plain white canvas, leaving a clear white margin on all four sides. The rectangle has crisp square corners and a flat, even fill. The subject overlaps the graphic in the foreground, with parts of the silhouette extending past the rectangle into the white margin. No gradients, textures, cast shadows on the backdrop, scenery or lettering."
     }
   ]
 }

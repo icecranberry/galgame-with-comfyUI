@@ -45,12 +45,14 @@ export function createGameServices(gameId, repo, assertPermission) {
     const segment = fitted.segments.at(-1);
     const head = messages.at(-1).content.slice(0, -segment.userTail.length);
     const finalUser = prepared.messages.at(-1);
+    const frozenPrefix = saved?.prefix || prepared.messages.slice(0, prepared.messages.findIndex(message => message.role !== 'system'));
+    const historyStart = saved ? 0 : prefix.length;
+    const preparedHistoryStart = saved ? 0 : frozenPrefix.length;
     if (finalUser?.role !== 'user' || !finalUser.content.startsWith(head) ||
-      (saved && JSON.stringify(prepared.messages.slice(0, -1)) !== JSON.stringify(messages.slice(0, -1)))) {
+      JSON.stringify(prepared.messages.slice(preparedHistoryStart, -1)) !== JSON.stringify(messages.slice(historyStart, -1))) {
       throw bad('跑团世界书改写了已冻结的历史，请重试', 502);
     }
     const keys = (prepared.report?.placements || []).flatMap(entry => entry.frozenKey ? [entry.frozenKey] : []);
-    const frozenPrefix = saved?.prefix || prepared.messages.slice(0, -1);
     segment.userTail = finalUser.content.slice(head.length);
     if (saved && keys.length) segment.frozenLore = keys;
     const next = fitNativeReplay(fitted, records, frozenPrefix, [], tools, budget.inputLimit);
@@ -75,18 +77,19 @@ export function createGameServices(gameId, repo, assertPermission) {
     chat(messages, options = {}, { signal } = {}) {
       return chat(messages, options, signal);
     },
-    async request({ rules, personas = [], stableData = '', publicHistory = [], data = '', task, scope = 'turn', timeline }) {
+    async request({ rules, taskPersona = '', personas = [], stableData = '', publicHistory = [], data = '', task, scope = 'turn', timeline }) {
       const usesReplay = useReplay({ timeline });
       const { getSystemRulesWithWorld, getWorldSetting } = await import('../db/worldRepository.js');
       const { getWorldIntegrationRule } = await import('../builtinRules.js');
       const messages = [{ role: 'system', content: getSystemRulesWithWorld({ roleplay: false }) }];
       if (getWorldSetting()) messages.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
       const taskRules = usesReplay ? `${rules}\n${GAME_REPLAY_RULE}` : rules;
-      messages.push({ role: 'system', content: taskRules });
+      const staticTexts = [...messages.map(m => m.content), taskRules];
+      messages.push({ role: 'system', content: taskPersona ? `${taskRules}\n\n${taskPersona}` : taskRules });
       const rulesBoundary = { index: messages.length - 1, offset: taskRules.length };
-      const staticTexts = messages.map(m => m.content);
-      const personaTexts = personas.filter(Boolean);
-      for (const persona of personaTexts) messages.push({ role: 'system', content: persona });
+      const separatePersonas = personas.filter(Boolean);
+      for (const persona of separatePersonas) messages.push({ role: 'system', content: persona });
+      const personaTexts = taskPersona ? [taskPersona, ...separatePersonas] : separatePersonas;
       if (stableData) {
         messages.push({ role: 'system', content: stableData });
         staticTexts.push(stableData);
@@ -110,7 +113,6 @@ export function createGameServices(gameId, repo, assertPermission) {
         const budget = await trpgPromptBudget();
         const prepared = await prepareGamePrompt(input, built, budget);
         const result = await chat(prepared.messages, { lorebook: false }, signal, budget);
-        input.timeline.replay.segments.at(-1).responses = [{ role: 'assistant', content: result }];
         prepared.commit();
         return result;
       }
@@ -192,8 +194,6 @@ export function createGameServices(gameId, repo, assertPermission) {
           label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget })) if (event.type === 'assistant_end') message = event.message;
         if (!message) throw bad('KP 未返回完整回复', 502);
         if (!message.tool_calls?.length) {
-          const segment = input.timeline?.replay?.segments?.at(-1);
-          if (budget && segment?.userTail !== undefined) segment.responses = [...continuation, message];
           prepared?.commit();
           return message.content || '';
         }
@@ -215,6 +215,34 @@ export function createGameServices(gameId, repo, assertPermission) {
         alreadyPrepared: true, disableRAG: true, scene: 'events', promptScene: 'events' });
       if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
       return { url: result.url, urls: result.urls };
+    }, async generateScene({ sessionId, description, characters, playerName, style, background }) {
+      active(); assertPermission('image:generate'); assertPermission('llm:chat');
+      if (gameId !== 'trpg-simulator' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用跑团画面工具', 403);
+      if (!repo.session(gameId, sessionId)) throw bad('跑团存档不存在', 404);
+      if (typeof description !== 'string' || !description.trim() || description.length > 3000) throw bad('画面描述为空或过长');
+      const { generateStudioScenePrompt } = await import('../services/imageStudioScene.js');
+      const { generateImageRaw } = await import('../services/imageSkill.js');
+      const { RAG_TIMEOUT_FAST_MS } = await import('../services/imagePromptKnowledge.js');
+      const { config } = await import('../config.js');
+      let explicitCharacters = null;
+      if (background || characters !== undefined) {
+        const lookup = repo.db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE display_name = ?');
+        explicitCharacters = (background ? [] : characters.filter(name => name !== playerName)).map(name => {
+          const matches = lookup.all(name);
+          if (matches.length !== 1) throw bad(`无法唯一识别入镜角色「${name}」`);
+          return matches[0];
+        });
+      }
+      const includeUser = background ? false : characters?.includes(playerName);
+      const hints = [style, background ? '纯环境空镜，不画人物，不添加文字。' : '表现角色的动作和当前状态，不添加文字。'].filter(Boolean).join('\n');
+      const { prompt, loras } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
+        roleplay: false, scope: `image:trpg:${sessionId}`, signal: controller.signal });
+      controller.signal.throwIfAborted();
+      const { eventArtist, eventWidth, eventHeight } = config.comfyui;
+      const result = await generateImageRaw(prompt, { outputScope: 'game', gameId, sessionId, scene: 'events', promptScene: 'events',
+        artist: eventArtist, width: eventWidth, height: eventHeight, loras, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS });
+      if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
+      return { url: result.url };
     } },
   };
 }

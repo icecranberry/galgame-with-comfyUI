@@ -20,18 +20,20 @@ try {
   const upstream = join(temp, `dice-box-threejs-${revision}`);
   const output = join(here, '../web/vendor');
   await mkdir(output, { recursive: true });
-  await build({
+  const { outputFiles: [bundle] } = await build({
     entryPoints: [join(here, 'dice-3d.js')],
     outfile: join(output, 'dice-3d.js'),
     nodePaths: [join(here, 'node_modules')],
     alias: { '@drdreo/dice-box-threejs': join(upstream, 'src/index.js') },
     bundle: true,
+    write: false,
     minify: true,
     format: 'iife',
     target: 'es2022',
     legalComments: 'none',
     banner: { js: '/*! TRPG 3D dice. Rebuild with npm ci && npm run build in dice-build. See dice-3d.LICENSE.txt. */' }
   });
+  await writeFile(bundle.path, bundle.text.replace(/[ \t]+$/gm, ''));
   const licenses = await Promise.all([
     readFile(join(upstream, 'LICENSE'), 'utf8'),
     readFile(join(here, 'node_modules/three/LICENSE'), 'utf8'),

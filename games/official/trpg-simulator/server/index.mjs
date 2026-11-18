@@ -1,11 +1,14 @@
 import { randomInt, randomUUID } from 'node:crypto';
 
 export const SKILLS = ['侦查', '图书馆', '聆听', '话术', '说服', '心理学', '格斗', '闪避', '急救', '神秘学', '锁匠', '潜行'];
-const CHECK_SKILLS = [...SKILLS, '理智'];
+const CHECK_SKILLS = [...SKILLS, '幸运', '理智'];
+const ITEM_TYPES = ['consumable', 'tool', 'key', 'gag'];
+const PARTY_ID = 'party';
 const ATTRIBUTES = ['STR', 'CON', 'DEX', 'INT', 'POW', 'APP', 'SIZ', 'EDU'];
 const PLAYER_ID = 'player';
 const NORMAL_SLOT = 'normal';
 const DIFFICULTIES = { regular: '普通', hard: '困难', extreme: '极难' };
+const CHECK_RANK_LABELS = { critical: '大成功', extreme: '极难成功', hard: '困难成功', regular: '通过', failure: '失败', fumble: '大失败' };
 const DC = { regular: 10, hard: 14, extreme: 18 };
 const CHECK_DICE = ['d20', 'd100'];
 const D20_MODES = ['normal', 'advantage', 'disadvantage'];
@@ -72,7 +75,10 @@ function validateRules(raw, scenes, clues) {
     return values;
   };
   const clueIds = clues.map(clue => clue.id);
-  const items = entries(raw.items, item => ({ clueId: refs(item.clueId === undefined ? [] : [item.clueId], clues.filter(clue => !clue.isSecret).map(clue => clue.id))[0] }));
+  const items = entries(raw.items, item => ({
+    clueId: refs(item.clueId === undefined ? [] : [item.clueId], clues.filter(clue => !clue.isSecret).map(clue => clue.id))[0],
+    ...(item.desc ? { desc: text(item.desc, 600) } : {}),
+  }));
   const itemIds = items.map(item => item.id);
   const actionIds = raw.actions.map(action => action?.id);
   const actions = entries(raw.actions, action => {
@@ -140,32 +146,52 @@ function scenarioPreview(scenario, id = scenarioIdentifier(scenario)) {
   const { title, era, playerCount, estimatedTime, sanityRisk, synopsis } = scenario.meta;
   return { id, meta: { title, era }, scenes: scenario.scenes.length, opening: scenario.scenes[0]?.publicDesc,
     briefing: scenario.briefing || { duration: estimatedTime, risk: sanityRisk, objective: synopsis, party: playerCount },
-    handouts: (scenario.handouts || []).map(({ id, title, publicSummary }) => ({ id, title, publicSummary })) };
+    handoutCount: scenario.handouts?.length ?? 0 };
 }
-function assignHandouts(handouts, ids, mode, requested = {}) {
-  if (!requested || typeof requested !== 'object' || Array.isArray(requested)) fail('HO 分配格式无效');
-  const deck = new Map(handouts.map(handout => [handout.id, handout]));
-  const assignments = new Map();
-  const used = new Set();
-  if (deck.size && ids.length > deck.size) fail(`本模组共有 ${deck.size} 张秘密 HO，请减少调查员人数`);
-  for (const [actorId, hoId] of Object.entries(requested)) {
-    if (!ids.includes(actorId) || (mode === 'investigator' && actorId !== PLAYER_ID) || !deck.has(hoId) || used.has(hoId)) fail('HO 分配重复或不属于当前阵容');
-    assignments.set(actorId, deck.get(hoId));
-    used.add(hoId);
-  }
-  if (mode === 'investigator' && !assignments.has(PLAYER_ID) && deck.has('HO1')) {
-    assignments.set(PLAYER_ID, deck.get('HO1'));
-    used.add('HO1');
-  }
-  const available = handouts.filter(handout => !used.has(handout.id));
-  for (const actorId of ids) if (!assignments.has(actorId) && available.length) assignments.set(actorId, available.shift());
-  return assignments;
+function dealHandouts(handouts, seats) {
+  if (!handouts.length) return [];
+  if (seats > handouts.length) fail(`本模组共有 ${handouts.length} 张秘密 HO，请减少调查员人数`);
+  const deck = [...handouts];
+  return Array.from({ length: seats }, () => deck.splice(randomInt(deck.length), 1)[0]);
 }
 function partyItems(state) {
-  return (state.scenario.rules?.items || []).flatMap(({ id, label }) => {
+  return (state.scenario.rules?.items || []).flatMap(({ id, label, desc }) => {
     const status = state.progress?.held.includes(id) ? 'held' : state.progress?.spent.includes(id) ? 'spent' : '';
-    return status ? [{ id, label, status }] : [];
+    return status ? [{ id, label, status, ...(desc ? { desc } : {}) }] : [];
   });
+}
+function scenarioInventory(items) {
+  return items.map(({ id, label, status, desc }) => ({
+    id, name: label, type: 'key', desc: desc || '', uses: status === 'held' ? -1 : 0, effect: {}, ownerId: PARTY_ID,
+  }));
+}
+function partyInventory(state) {
+  return [...scenarioInventory(partyItems(state)), ...(state.partyInventory || [])];
+}
+function itemGrantText(name, ownerName) {
+  return ownerName === undefined ? `获得「${name}」。` : `${ownerName}获得了「${name}」。`;
+}
+function migrateInventory(items, ownerId) {
+  return (items || []).map((item, index) => typeof item === 'string' ? {
+    id: `legacy-${ownerId}-${index}`, name: item, type: 'key', desc: '', uses: -1, effect: {}, ownerId,
+  } : { ...item, ownerId });
+}
+function itemData({ name, type, desc, uses, effect }) {
+  name = text(name, 80).trim();
+  desc = text(desc, 600).trim();
+  if (!name || !ITEM_TYPES.includes(type) || !(uses === -1 || integer(uses, 1, 99))) fail('请填写道具名称、类别及正确的使用次数');
+  if (!effect || typeof effect !== 'object' || Array.isArray(effect)) fail('道具效果格式无效');
+  const fields = Object.keys(effect);
+  if (type === 'consumable') {
+    if (fields.some(key => !['hpDelta', 'sanDelta'].includes(key) || !integer(effect[key], -100, 100)) ||
+        !fields.some(key => effect[key] !== 0)) fail('消耗品需要一个非零的 HP 或 SAN 变化值');
+    effect = Object.fromEntries(fields.filter(key => effect[key] !== 0).map(key => [key, effect[key]]));
+  } else if (type === 'tool') {
+    const { skill, bonus } = effect.skillBonus || {};
+    if (fields.length !== 1 || !CHECK_SKILLS.includes(skill) || !integer(bonus, 1, 99)) fail('工具需要指定技能和 1–99 点加值');
+    effect = { skillBonus: { skill, bonus } };
+  } else if (fields.length) fail('关键物品或趣味杂物通过剧情裁定');
+  return { name, type, desc, uses, effect };
 }
 function promptTimeline(state, audience) {
   const views = state.promptViews ||= {};
@@ -182,7 +208,7 @@ function publicIdentity(role, handout) {
 }
 function investigatorNames(cards) {
   const names = new Map();
-  const used = new Set(['all', ...cards.map(card => String(card.id))]);
+  const used = new Set(['all', PARTY_ID, ...cards.map(card => String(card.id))]);
   const original = new Set(cards.map(card => card.name.trim()));
   for (const [index, card] of cards.entries()) {
     const base = card.name.trim() || '调查员';
@@ -196,7 +222,10 @@ function investigatorNames(cards) {
 function promptRoll(result, names) {
   if (!result) return undefined;
   const { logId, targetChar, ...roll } = result;
-  return names.has(targetChar) ? { ...roll, name: names.get(targetChar) } : roll;
+  const name = names.get(targetChar) ?? roll.name;
+  if (roll.kind === 'pool') return { ...roll, name };
+  const rank = !roll.success && roll.rank !== 'fumble' ? 'failure' : roll.rank;
+  return { outcome: CHECK_RANK_LABELS[rank], name, skillName: roll.skillName, reason: roll.reason };
 }
 function investigatorRoster(state, names) {
   const members = state.investigators.map((card, index) => {
@@ -214,45 +243,91 @@ function investigatorRoster(state, names) {
 export function investigatorContext(state, keeper = false, names = investigatorNames(state.investigators)) {
   // Build from an allowlist. Never serialize the state then remove secret keys.
   const scene = state.scenario.scenes.find(s => s.id === state.sceneId);
+  const illustrations = (state.publicLog || []).filter(log => log.kind === 'illustration');
   return {
     scene: keeper ? { id: scene.id, name: scene.name } : { name: scene.name, publicDesc: scene.publicDesc },
     publicClues: state.scenario.clues.filter(clue => state.revealed.includes(clue.id)).map(({ title, content }) => ({ title, content })),
-    partyItems: partyItems(state),
-    actorStates: Object.fromEntries(state.investigators.map(({ id, hp, san, outOfAction, inventory }) => [names.get(id), {
-      hp, san, ...(outOfAction ? { outOfAction: true } : {}), ...(keeper && inventory?.length ? { inventory } : {}),
+    partyItems: partyInventory(state).filter(item => item.uses !== 0),
+    ...(illustrations.length ? { illustrations: Object.fromEntries(illustrations.map(({ id, round, sceneId, description }) =>
+      [id, { round, sceneId, description }])) } : {}),
+    actorStates: Object.fromEntries(state.investigators.map(({ id, hp, san, player, outOfAction, inventory, skillBuffs }) => [names.get(id), {
+      hp, san, ...(outOfAction ? { outOfAction: true } : {}), ...((keeper || !player) ? {
+        inventory: (inventory || []).filter(item => item.uses !== 0), skillBuffs,
+      } : {}),
     }])),
   };
 }
 const SCENARIO_RULES = `你是 CoC 短篇模组编辑。把材料提取为可运行短篇，保留原文真相与线索因果，不把秘密写进公开描述。只输出完整 JSON，不输出解释或代码围栏。严格按示例字段输出，示例字符串说明内容约束，实际填写对应正文：
-{"meta":{"title":"1–40字标题","era":"1920s或现代","stylePrompt":"仅英文画面风格，不含人物外貌"},"investigatorRoles":[{"title":"1–20字剧本指定的公开职业或身份","publicSummary":"0–120字公开的关系、背景或职责"}],"handouts":[{"id":"HO1","title":"1–20字公开身份标题，不提前暴露秘密","publicSummary":"20–120字其他调查员可知的表层身份","secretContent":"50–500字仅所属调查员与KP知道的真实身份、私人情报和任务","recommendedTrait":"5–60字的扮演性格或行为建议"}],"scenes":[{"id":"s1","name":"1–20字场景名","publicDesc":"80–300字玩家可见的现场，不泄露隐藏真相","hiddenNotes":"主持用进入条件、检定后果、推进路线与结局条件","imagePrompt":"英文场景空镜，无文字、无角色"}],"clues":[{"id":"c1","title":"1–20字线索名","content":"20–200字线索正文","sceneId":"s1","requiredSkill":"侦查","isSecret":false}],"npcs":[{"id":"n1","name":"1–20字姓名","persona":"性格与公开身份，20–150字","secret":"仅KP可见的动机与真相，20–200字"}],"keeperSecrets":"完整真相、时间线、至少两种结局和推进条件，200–1500字"}
+{"meta":{"title":"1–40字标题","era":"1920s或现代","stylePrompt":"仅英文画面风格，不含人物外貌","playerCount":"3–4人"},"investigatorRoles":[{"title":"1–20字剧本指定的公开职业或身份","publicSummary":"0–120字公开的关系、背景或职责"}],"handouts":[{"id":"HO1","title":"1–20字公开身份标题，不提前暴露秘密","publicSummary":"20–120字其他调查员可知的表层身份","secretContent":"50–500字仅所属调查员与KP知道的真实身份、私人情报和任务","recommendedTrait":"5–60字的扮演性格或行为建议"}],"scenes":[{"id":"s1","name":"1–20字场景名","publicDesc":"80–300字玩家可见的现场，不泄露隐藏真相","hiddenNotes":"主持用进入条件、检定后果、推进路线与结局条件","imagePrompt":"英文场景空镜，无文字、无角色"}],"clues":[{"id":"c1","title":"1–20字线索名","content":"20–200字线索正文","sceneId":"s1","requiredSkill":"侦查","isSecret":false}],"npcs":[{"id":"n1","name":"1–20字姓名","persona":"性格与公开身份，20–150字","secret":"仅KP可见的动机与真相，20–200字"}],"keeperSecrets":"完整真相、时间线、至少两种结局和推进条件，200–1500字"}
+playerCount 仅提取原文明确写出的推荐调查员总数（不计 KP），固定人数写成「3人」，范围写成「3–4人」，缺失或无法确定时填空字符串。
 场景1–12个，线索1–30个，NPC0–12个，秘密HO0–12个。保留原材料中已有的秘密身份卡，编号从HO1起并保持唯一。无身份卡时填空数组，不虚构。investigatorRoles 只收录剧本另行指定的公开角色，按调查员席位顺序列出，空席填 null；没有额外公开身份时填空数组。秘密只写在各自 secretContent 中，不把秘密混入公开身份、开场或公开线索。sceneId须存在。requiredSkill仅能为空或：${SKILLS.join('、')}。isSecret必须为布尔值。`;
 const CARD_RULES = `你是轻量CoC调查员设计师。根据每位角色人设与本局公开身份一次生成全员卡，不复述角色外貌。每人选2–3项符合角色的特长（60–80），其余技能15–50。所有属性20–80整数。只输出JSON数组，不输出解释或代码围栏，必须完整覆盖给定角色名。严格按此完整示例：
 [{"name":"材料中的角色名，逐字照填","attributes":{"STR":50,"CON":50,"DEX":50,"INT":60,"POW":50,"APP":50,"SIZ":50,"EDU":60},"skills":{"侦查":65,"图书馆":65,"聆听":40,"话术":30,"说服":40,"心理学":30,"格斗":30,"闪避":25,"急救":30,"神秘学":20,"锁匠":20,"潜行":30}}]
 attributes和skills字段及所有子字段不可缺失，数值为整数；不输出HP/SAN，由规则引擎计算。`;
-const INVESTIGATOR_RULES = `你一个人扮演群聊中所有列在 actors 里的 AI 调查员。<group_info> 按名字提供成员资料，参考每人的本局身份、性格和口吻。把对话续成一次真正的多人交流，按发生顺序逐人输出。每条是一个人的发言，可以紧接上一句接话、插话、连说或暂时沉默。每位至多两条，总计最多八条。禁止代玩家、守秘人和已退场角色发言。只依据已经公开的情报推理，不替守秘人宣布行动结果，不凭空编造秘密身份或私下情报。
-只输出 JSON 数组，不要输出解释或代码围栏。speaker 必须逐字使用 actors 中的名字。示例姓名仅用于说明格式。严格按以下字段填写：
-[{"speaker":"星见雅","dialogue":"10–100字的角色台词，不含表情标记","emotion":"正常","action":"0–60字可观察的动作，纯对话可留空"},{"speaker":"丽娜","dialogue":"10–100字，承接前一位成员的台词","emotion":"惊讶","action":"0–60字行动意图，不写行动已经成功","check":{"skill":"侦查","reason":"1–80字，说明正在尝试什么以及风险","difficulty":"regular","dice":"d20","mode":"normal"}}]
-每条必须填写 emotion，从 expressionNames 中原样选一个，平静时选正常。只有存在实质风险且结果不确定时才填 check，填后立即结束数组，等待守秘人裁定。其余发言省略 check。技能仅限 ${CHECK_SKILLS.join('、')}。难度仅限 regular、hard、extreme。默认 d20，理智检定默认 d100。mode 默认 normal，只有 d20 可以使用 advantage 或 disadvantage。`;
-const KEEPER_RULES = `你是轻量跑团守秘人，按下方角色性格与口吻主持。完整模组和秘密仅供规划，叙事只公开调查员当前可以观察的信息。每轮80–250字，给出可行动的现场；不得一次剧透真相，不代替玩家行动。掷骰、状态变化、线索发放、切场景和密信必须调用对应工具，不能仅在正文声称执行；工具失败不能声称成功。只有结果不确定且有实际后果才需要检定，开虚掩的门、取得已给出的物品等确定性行动直接裁定。检定难度regular普通、hard困难、extreme极难。检定成功后根据模组给出线索与后果，失败也允许付出代价推进。已退场角色不能行动。遇到全员退场，提示引入替补或推进结局。遇到战斗调用trigger_encounter，再按检定与状态工具裁决。结束条件满足时提出结团，由玩家确认，不写主世界记忆。
-只在玩家本人采取需要检定的行动时，单独调用 request_check，填写具体原因、技能和难度。引擎自动投骰，工具返回真实骰值后再裁定后果。普通技能检定优先D20，有明确情境优势或劣势时用D20的advantage或disadvantage，模组或玩家明确要求百分骰时用D100。伤害、随机表等只需要点数时用 roll_dice，按用途选骰型和数量。
+const INVESTIGATOR_INTRO = `你一个人扮演群聊中所有列在 actors 里的 AI 调查员。<group_info> 按名字提供成员资料，参考每人的本局身份、性格和口吻。把对话续成一次真正的多人交流，按发生顺序逐人输出。每条是一个人的发言，可以紧接上一句接话、插话、连说或暂时沉默。每位至多两条，总计最多八条。禁止代玩家、守秘人和已退场角色发言。只依据已经公开的情报推理，不替守秘人宣布行动结果，不凭空编造秘密身份或私下情报。
+illustrations 是守秘人已登记的可观察情境，按回合与场景理解并回应，无需等待图片或复述画面描述。
+如果 checkReactionActor 有值，本轮只由这个名字对应的调查员发出一条台词。根据公开日志中的 KP 裁定，立即用本人的口吻与表情回应；暗骰只依据 KP 公开描述。action 填空字符串，省略 check、suggestedSkill 和 useItemId，suggestions 填空数组。
+严格按同一 JSON 结构返回检定回应，例如 {"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"丽娜","dialogue":"原来只是风吹过门缝……我刚才还以为屋里有人。","emotion":"惊讶","action":""}]}。
+只输出 JSON 对象，不要输出解释或代码围栏。speaker 必须逐字使用 actors 中的名字。示例姓名仅用于说明格式。严格按以下字段填写：`;
+const INVESTIGATOR_RULES = `${INVESTIGATOR_INTRO}
+{"playerExpression":"正常","suggestions":["问队友刚才看到了什么","沿着墙壁慢慢查看","先在原地听一听"],"lines":[{"speaker":"星见雅","dialogue":"[玩家:惊讶]那盏灯怎么又亮了？","emotion":"正常","action":"0–60字可观察的动作，纯对话可留空"},{"speaker":"丽娜","dialogue":"我从包里掏出撬棍来试试。","emotion":"惊讶","action":"用撬棍试着撬开卡住的门","useItemId":"逐字复制本人的 inventory 或 partyItems 中有可用次数的道具 id","check":{"skill":"锁匠","reason":"1–80字，说明正在尝试什么以及风险","difficulty":"regular","dice":"d20","mode":"normal"}}]}
+playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 中原样选一个，无原话或无法判断时填正常。suggestions 给出三条不同的、每条不超过30字、可以直接填入操作栏的下一步方向，只依据已公开情报；playerMode 为 keeper 时给主持动作，为 investigator 时给调查动作。不替玩家执行、不预判成败，遇到待裁定检定时 suggestions 填空数组。
+每条必须填写 emotion，从 expressionNames 中原样选一个，平静时选正常。dialogue 为10–100字角色台词，每句可加[表情名]改变发言者表情；有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 中原样选，此标记仅供演出，禁止代玩家说话或行动。有合适道具时可填写 useItemId，由引擎在同条 check 前使用道具。只用发言者持有或全队共享的可用道具，每条至多一件。使用工具时可配合对应技能；未使用道具时省略 useItemId。不要预写道具效果或剧情裁定。只有存在实质风险且结果不确定时才填 check，填后立即结束数组，等待守秘人裁定。其余发言省略 check。技能仅限 ${CHECK_SKILLS.join('、')}。难度仅限 regular、hard、extreme。默认 d20，理智检定默认 d100。mode 默认 normal，只有 d20 可以使用 advantage 或 disadvantage。`;
+const DECLARATION_RULES = `${INVESTIGATOR_INTRO}
+{"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"星见雅","dialogue":"你们也听到门里的声音了吗？","emotion":"惊讶","action":""},{"speaker":"丽娜","dialogue":"我想听清他们在说什么。","emotion":"正常","action":"把耳朵贴近门缝，听里面的谈话","suggestedSkill":"聆听"}]}
+playerExpression 依据 playerSpeech 选择 expressionNames 中的玩家表情，无原话或不确定填正常。每条 emotion 从 expressionNames 中选择；dialogue 为10–100字本人台词，可用[表情名]或[玩家:表情名]标记可见反应。suggestions 填空数组。
+checkReactionActor 无值时，结合眼前情境，让一位调查员用自己的话提出具体尝试，把意图写入 action（1–60字）。队友可以先接话；纯对话、点头、看向队友等表演动作的 action 填空字符串。第一项具体尝试必须是最后一条，停在行动意图，等真人守秘人描述后果。现场已有裁定时承接结果，避免重复声明同一尝试。
+可以附上 suggestedSkill 供守秘人参考，只能从 ${CHECK_SKILLS.join('、')} 中选一项；无合适技能时省略。若要使用道具，可附上 useItemId，值必须逐字取自本人 inventory 或 partyItems 的可用道具 id。不得自定检定、难度、骰型、成败或道具效果。`;
+const KEEPER_RULES = `你是本局跑团的守秘人。同条消息含「主持人口吻」时，让主持叙事自然带出该角色的用词、句式和说话节奏，随场景适度收放。角色资料用于主持表达。场景、人物和行动后果由剧本、现场与规则决定。
+完整模组和秘密仅供规划，叙事只公开调查员当前可以观察的信息。每轮80–250字，给出可行动的现场；不得一次剧透真相，不代替玩家行动。掷骰、状态变化、线索发放、切场景和密信必须调用对应工具，不能仅在正文声称执行；工具失败不能声称成功。只有结果不确定且有实际后果才需要检定，开虚掩的门、取得已给出的物品等确定性行动直接裁定。检定难度regular普通、hard困难、extreme极难。检定成功后根据模组给出线索与后果，失败也允许付出代价推进。已退场角色不能行动。遇到全员退场，提示引入替补或推进结局。遇到战斗调用trigger_encounter，再按检定与状态工具裁决。结束条件满足时提出结团，由玩家确认，不写主世界记忆。
+只在玩家本人采取需要检定的行动时，单独调用 request_check，填写具体原因、技能和难度。引擎完成掷骰并判定成败。以 request_check 回执或 checkToResolve 的 outcome 为准，结合 reason 描述行动后果，不重新计算成败或为同一行动重掷。普通技能检定优先D20，有明确情境优势或劣势时用D20的advantage或disadvantage，模组或玩家明确要求百分骰时用D100。伤害、随机表等只需要点数时用 roll_dice，按用途选骰型和数量。
 玩家抵达新场景时，先调用 switch_scene，再处理该场景的检定、线索与叙事。公开线索用 all 发给全员，私密线索只给接触它的调查员，公开叙事不复述密信内容。已经公开的线索和玩家密信中已经交付的物品视为已取得，不重复问玩家是否有它。
 按 <group_info> 里的名字指代调查员。assignedHandouts 将姓名映射到 scenario.handouts 的 HO，只供主持推演。AI 调查员共用公共视角。保持其公开身份，公开叙事、线索和检定理由不得提前透露秘密；只有特定质询、证据对质或被心理学检定看穿时，才公开已经揭示的部分。无持有人的 HO 未入场，按模组的替代路径推进。
-AI 调查员自行决定行动和提出检定。玩家在原地等待或请队友观察时，玩家本人没有进行观察，不可调用 request_check。请把实际行动留给队友的发言。若有 checkToResolve，先按现有骰值和理由裁定队友检定的结果，不重复投骰。
+AI 调查员自行决定行动和提出检定。玩家在原地等待或请队友观察时，玩家本人没有进行观察，不可调用 request_check。请把实际行动留给队友的发言。若有 checkToResolve，先叙述这次队友检定的后果。
+imagesEnabled 为 true 时，在值得单独展示的时刻主动调用 generate_image，例如新场景、角色同框、道具使用后的状态、奇遇或遭遇。可以补足已发生的可观察细节，也可以借工具引入你有权主持的环境事件。description 会成为共用的跑团事实，只写现场能看到的事，避免泄露隐藏真相、替调查员行动或在画面里暗改 HP、SAN、道具等规则状态。画面里有已登记角色时，用 imageCast 提供的准确显示名写明各自位置、动作和状态，并在 characters 列出这些名字。无人物背景用 scene，其他画面用 moment。illustrations 保存已确立的画面事实，后续沿用，不把原始画面描述作为公开正文复述。工具受理后图片在后台生成，继续主持，不宣称图片已生成。
+搜刮成功、幸运检定通过或出现大成功、大失败时，可结合现场调用 give_item 发放一件实用道具、情节物证或搞笑杂物。大失败的杂物不能抹去失败的后果。使用 itemsToResolve 中登记的拿出道具事件裁定现场反应，必要时按模组规则解锁动作；道具效果已由引擎登记，不重复扣次数，不代玩家补写尚未尝试的行动。
 有 scenario.rules 时，以 partyItems 为道具账本，以 progress.actions 为已经完成的剧情动作。发放道具对应的公开线索时调用 reveal_clue，规则引擎会登记道具。玩家明确执行规则列出的动作时，调用 resolve_scenario_action，由引擎验证场景、前置条件、检定和道具，结算规则内的代价并返回是否达成结局。按工具结果叙事，不提前宣告成功、消耗道具或重复扣减。一次玩家行动最多提出一次技能检定，同一调查员的HP/SAN变化合并成一次工具调用。
 只在引擎返回 outcome 后为有规则的剧本调用 propose_ending，结尾必须符合该结果。无结构化规则的剧本按模组条件提议结团。调用 propose_ending 后简短告知玩家可以确认结团。
-工具调用结束后，最终公开正文必须以一个方括号表情开头，例如「[惊讶]车窗外，那盏红灯又亮了。」。表情从本轮 expressionNames 中原样选一个，平静叙述用[正常]，标记后直接接叙事正文。`;
+工具调用结束后严格输出下例 JSON 对象，不要输出解释、代码围栏或 JSON 以外的文字：
+{"playerExpression":"正常","narration":"[惊讶][玩家:惊讶]车窗外，那盏红灯又亮了。\\n[正常]站台没有人影。","suggestions":["观察红灯的闪烁规律","问队友是否见过红灯","留在原地听站台的动静"]}
+narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。`;
 
 function dialogueCue(dialogue, emotion, slots, { leadingTag = false, preferredSlot } = {}) {
   const byName = new Map(slots.map(slot => [slot.name, slot.id]));
   byName.set('正常', NORMAL_SLOT);
-  let inlineSlot;
+  let inlineSlot, playerExpressionSlot;
   const cleaned = text(dialogue, 6000).replace(/\[([^\]\r\n]+)\]|【([^】\r\n]+)】/g, (marker, ascii, fullWidth, offset) => {
-    const slot = byName.get((ascii ?? fullWidth).trim());
+    const label = (ascii ?? fullWidth).trim();
+    const playerLabel = /^玩家[:：]\s*(.+)$/u.exec(label)?.[1];
+    if (playerLabel && byName.has(playerLabel)) {
+      playerExpressionSlot ??= byName.get(playerLabel);
+      return '';
+    }
+    const slot = byName.get(label);
     if (slot) { inlineSlot ??= slot; return ''; }
     return leadingTag && offset === 0 ? '' : marker;
   }).trim();
   const chosen = slots.some(slot => slot.id === preferredSlot) ? preferredSlot : undefined;
-  return { dialogue: cleaned, expressionSlot: byName.get(text(emotion, 80).trim()) || inlineSlot || chosen || NORMAL_SLOT };
+  return { dialogue: cleaned, expressionSlot: inlineSlot || byName.get(text(emotion, 80).trim()) || chosen || NORMAL_SLOT,
+    playerExpressionSlot, tagged: Boolean(inlineSlot) };
+}
+
+function dialogueFrames(dialogue, emotion, slots, leadingTag = false) {
+  let expression = dialogueCue('', emotion, slots).expressionSlot;
+  let reaction;
+  return text(dialogue, 6000).trim().split(/\r?\n+|(?<=[。！？!?…])(?=[^。！？!?…”’」』）])|(?<=[。！？!?…][”’」』）])/u).flatMap(sentence => {
+    const cue = dialogueCue(sentence, '', slots, { leadingTag, preferredSlot: expression });
+    expression = cue.expressionSlot;
+    reaction = cue.playerExpressionSlot || reaction;
+    if (!cue.dialogue) return [];
+    const frame = { dialogue: cue.dialogue, expressionSlot: expression, playerExpressionSlot: reaction };
+    reaction = undefined;
+    return [frame];
+  });
+}
+
+function actionSuggestions(value) {
+  return Array.isArray(value) ? [...new Set(value.map(item => text(item, 30).trim()).filter(Boolean))].slice(0, 3) : [];
 }
 
 function playerCardProfile(player) {
@@ -265,9 +340,21 @@ function playerCardProfile(player) {
 const publicPlayer = ({ name, avatar }) => ({ name, avatar });
 const tool = (name, description, properties, required = Object.keys(properties)) => ({ type: 'function', function: { name, description, parameters: { type: 'object', properties, required, additionalProperties: false } } });
 const str = { type: 'string' }, num = { type: 'integer', minimum: -100, maximum: 100 };
+const itemDefinition = {
+  name: str, type: { type: 'string', enum: ITEM_TYPES }, desc: str,
+  effect: { type: 'object', additionalProperties: false, properties: {
+    hpDelta: num, sanDelta: num, skillBonus: { type: 'object', additionalProperties: false, required: ['skill', 'bonus'], properties: {
+      skill: { type: 'string', enum: CHECK_SKILLS }, bonus: { type: 'integer', minimum: 1, maximum: 99 },
+    } },
+  } },
+  uses: { type: 'integer', description: '-1 表示无限或被动物品，其余填写 1–99。' },
+};
+const RANDOM_ITEM_RULES = `你为跑团守秘人生成一件当前场景里能发现的实物。场景与最近掷骰为动态素材；没有极端结果时选择普通实物，大成功可以给实用道具，大失败可以给搞笑杂物，且不更改检定结果。只使用公开场景信息，禁止预告隐藏真相或绕过剧本的必需线索。严格只输出一个 JSON 对象，字段与下列完整示例一致，不输出解释或代码围栏：
+{"name":"陈旧的急救绷带","type":"consumable","desc":"纸套沾着灰，封口仍完整。","uses":1,"effect":{"hpDelta":2}}
+name 使用1–40字具体物品名，desc 用1–100字写可观察的细节。type 只能是 consumable、tool、key、gag。uses 填1–99，反复可用或被动持有填-1。consumable 的 effect 填 hpDelta 和/或 sanDelta 的非零整数，各在-100到100内。tool 的 effect 例如 {"skillBonus":{"skill":"锁匠","bonus":15}}，bonus 是1–99的整数，技能仅限 ${CHECK_SKILLS.join('、')}。key 和 gag 的 effect 严格填 {}。`;
 const investigatorName = { type: 'string', description: '<group_info> 中的调查员姓名，逐字填写。' };
 export const KP_TOOLS = [
-  tool('request_check', '自动掷骰并返回玩家本人的技能检定结果。队友的行动由队友提出检定。请单独调用。', {
+  tool('request_check', '自动掷骰并返回玩家本人的检定结论 outcome。按引擎结论叙述后果。队友的行动由队友提出检定。请单独调用。', {
     skill: { type: 'string', enum: CHECK_SKILLS }, difficulty: { type: 'string', enum: Object.keys(DC) }, reason: str,
     dice: { type: 'string', enum: CHECK_DICE }, mode: { type: 'string', enum: D20_MODES },
   }, ['skill', 'difficulty', 'reason']),
@@ -278,14 +365,22 @@ export const KP_TOOLS = [
   tool('reveal_clue', '发放真实线索，all公开或指定角色私有。', { clueId: str, targetCharOrAll: { type: 'string', description: '公开发放填 all，私下发放填 <group_info> 中的调查员姓名。' } }),
   tool('switch_scene', '进入模组指定场景。先切幕，再处理新场景的动作和线索。', { sceneId: str }),
   tool('send_secret_handout', '仅给指定调查员发送密信。', { targetChar: investigatorName, content: str }),
-  tool('trigger_encounter', '触发遭遇战并异步生成事件特写。', { description: str }),
+  tool('give_item', '在合理的搜刮或检定结果后发放实物。消耗品用 hpDelta/sanDelta，工具用 skillBonus，关键物品与杂物的 effect 填空对象。', {
+    targetChar: { type: 'string', description: '<group_info> 里的调查员姓名，或全队共享填 party。' }, ...itemDefinition,
+  }),
+  tool('trigger_encounter', '触发遭遇战并登记可观察的事件。需要配图时另行调用 generate_image。', { description: str }),
+  tool('generate_image', '登记可观察的情境并异步生成图片。环境空镜用 scene，人物或剧情画面用 moment。', {
+    kind: { type: 'string', enum: ['scene', 'moment'] },
+    description: { type: 'string', description: '1–1200 字，写清地点、刚发生或现在引入的事件、入镜角色全名及各自的动作状态。仅写公开事实。' },
+    characters: { type: 'array', maxItems: 30, items: str, description: '实际入镜的已知角色显示名，和 description 一致。无已知角色时留空数组。' },
+  }),
   tool('resolve_scenario_action', '执行剧本中已定义的关键动作，验证前置条件并登记道具、代价和结局。', { actionId: str }),
   tool('propose_ending', '达到结局条件后，提交80–250字的公开结尾，等待玩家确认。', { ending: str }),
 ];
 
 export default function registerGamePlugin(ctx) {
   const { router, db, llm, bridgeTools, imageService } = ctx;
-  const busy = new Set(), mediaJobs = new Set(), scenarioDrafts = new Map(); let closed = false;
+  const busy = new Set(), mediaJobs = new Map(), scenarioDrafts = new Map(), revisions = new WeakMap(); let closed = false;
   function selectedScenario({ scenarioId, draftId }) {
     if (draftId !== undefined) {
       const draft = scenarioDrafts.get(draftId);
@@ -319,27 +414,63 @@ export default function registerGamePlugin(ctx) {
       s.version = 3;
     }
     initProgress(s);
+    s.partyInventory = migrateInventory(s.partyInventory, PARTY_ID);
+    for (const card of s.investigators) card.inventory = migrateInventory(card.inventory, card.id);
+    if (s.playbackBase && !s.playbackBase.partyInventory) {
+      s.playbackBase.partyInventory = scenarioInventory(s.playbackBase.partyItems || []);
+      for (const card of s.playbackBase.investigators) card.inventory = migrateInventory(card.inventory, card.id);
+    }
+    revisions.set(s, row.revision);
+    s.presented ??= s.publicLog.length;
+    if (s.pendingBatch) {
+      s.playbackBase ||= structuredClone(board(s));
+      restoreBatch(s);
+    }
+    if (s.mode === 'keeper' && s.pendingCheck && !s.declaration) {
+      const check = s.pendingCheck;
+      const log = s.publicLog.findLast(line => line.kind === 'dialogue' && line.actorId === check.targetChar && line.round === s.round);
+      if (log) {
+        s.declaration = { logId: log.id, actorId: log.actorId, reason: check.reason || log.action || log.dialogue, suggestedSkill: check.skill };
+        s.pendingCheck = null;
+      }
+    }
     return s;
   }
   const persist = state => {
     if (closed) fail('游戏已经关闭', 409);
     const current = db.load(state.sessionId); if (!current) fail('存档已删除', 404);
     const completed = new Map((current.state.imageJobs || []).filter(j => j.status !== 'running').map(j => [j.id, j]));
-    state.imageJobs = state.imageJobs.map(j => j.status === 'running' && completed.has(j.id) ? completed.get(j.id) : j);
-    db.write(state.sessionId, state.title, state, current.revision);
+    state.imageJobs = state.imageJobs.map(job => {
+      const newer = completed.get(job.id);
+      return job.status === 'running' && newer && newer.attempt === job.attempt ? newer : job;
+    });
+    // A click may advance the durable cursor while the model is awaiting its next reply.
+    state.presented = Math.max(state.presented, current.state.presented ?? 0);
+    if (!state.turn && state.presented === state.publicLog.length) delete state.playbackBase;
+    const saved = db.write(state.sessionId, state.title, state, current.revision);
+    revisions.set(state, saved?.revision);
+    if (state.turn && state.publicLog.length > current.state.publicLog.length) {
+      ctx.events?.emit('turn-progress', { sessionId: state.sessionId });
+    }
   };
   function saveWithEffects(s, effects) {
     persist(s);
     for (const effect of effects.splice(0)) effect();
   }
-  const addLog = (s, speaker, dialogue, action = '', kind = 'dialogue', actorId, expressionSlot) => s.publicLog.push({ id: randomUUID(), round: s.round, sceneId: s.sceneId,
-    speaker: actorId ? investigatorNames(s.investigators).get(actorId) || speaker : speaker, dialogue: text(dialogue, 6000), action: text(action, 1000), kind,
-    ...(actorId ? { actorId, expressionSlot: expressionSlot || NORMAL_SLOT } : {}),
-  });
+  function addLog(s, speaker, dialogue, action = '', kind = 'dialogue', actorId, expressionSlot, playerExpressionSlot) {
+    const log = { id: randomUUID(), round: s.round, sceneId: s.sceneId,
+      speaker: actorId ? investigatorNames(s.investigators).get(actorId) || speaker : speaker, dialogue: text(dialogue, 6000), action: text(action, 1000), kind,
+      ...(actorId ? { actorId, expressionSlot: expressionSlot || NORMAL_SLOT } : {}),
+      ...(playerExpressionSlot ? { playerExpressionSlot } : {}),
+    };
+    s.publicLog.push(log);
+    return log;
+  }
   const character = (s, id) => { const c = s.investigators.find(i => i.id === String(id)); if (!c) fail('调查员不存在'); return c; };
   const scene = s => s.scenario.scenes.find(x => x.id === s.sceneId);
   const working = s => { if (s.ended) fail('本局已经结团'); };
-  const betweenTurns = s => { if (s.turn) fail('请先续跑当前回合', 409); };
+  const playbackDone = s => { if (s.presented < s.publicLog.length) fail('请先看完当前回合', 409); };
+  const betweenTurns = s => { if (s.turn) fail('请先续跑当前回合', 409); playbackDone(s); };
   function initProgress(s) {
     const rules = s.scenario.rules;
     if (!rules || s.progress) return;
@@ -352,7 +483,42 @@ export default function registerGamePlugin(ctx) {
     if (held.includes(id) || spent.includes(id)) return;
     held.push(id);
     const item = s.scenario.rules.items.find(item => item.id === id);
-    addLog(s, '道具', `获得「${item.label}」。`, '', 'item');
+    addLog(s, '道具', itemGrantText(item.label), '', 'item').itemGrant = { id, uses: -1 };
+  }
+  function giveItem(s, ownerId, fields) {
+    const owner = ownerId === PARTY_ID ? null : character(s, ownerId);
+    if (owner?.outOfAction) fail('已退场的调查员不能接收道具');
+    const item = { id: randomUUID(), ...itemData(fields), ownerId: owner?.id || PARTY_ID };
+    (owner ? owner.inventory : s.partyInventory).push(item);
+    addLog(s, '道具', itemGrantText(item.name, owner?.name || '队伍'), '', 'item').itemGrant = { id: item.id, uses: item.uses };
+    return item;
+  }
+  function useItem(s, actor, itemId) {
+    if (actor.outOfAction) fail('已退场的调查员不能使用道具');
+    const item = actor.inventory.find(candidate => candidate.id === itemId) || partyInventory(s).find(candidate => candidate.id === itemId);
+    if (!item) fail('该调查员没有这件道具', 404);
+    if (item.uses === 0) fail('这件道具已耗尽', 409);
+    let use = `${actor.name}拿出了「${item.name}」`, effect = {};
+    if (item.type === 'consumable') {
+      effect = changeStats(actor, item.effect.hpDelta || 0, item.effect.sanDelta || 0);
+      const changes = [['HP', effect.hpDelta], ['SAN', effect.sanDelta]].filter(([, delta]) => delta)
+        .map(([label, delta]) => `${label} ${signed(delta)}`);
+      use = `${actor.name}使用了「${item.name}」，${changes.join(' / ') || 'HP 和 SAN 未变化'}`;
+      if (effect.outOfAction) use += '（退场）';
+    } else if (item.type === 'tool') {
+      const { skill, bonus } = item.effect.skillBonus;
+      const buffs = actor.skillBuffs ||= {};
+      if (buffs[skill]) fail(`${skill}检定已有待使用的道具加值`, 409);
+      buffs[skill] = { bonus, itemName: item.name };
+      effect = { skillBonus: { skill, bonus } };
+      use = `${actor.name}备好了「${item.name}」，下次${skill}检定技能值 +${bonus}`;
+    } else if (s.mode === 'investigator') {
+      (s.itemsToResolve ||= []).push({ name: item.name, desc: item.desc, itemId: item.id, actorId: actor.id });
+    }
+    if (item.uses > 0) item.uses--;
+    const log = addLog(s, '道具', `${use}。`, '', 'item');
+    if (effect.sanDelta !== undefined) log.sanDelta = effect.sanDelta;
+    return { itemId, uses: item.uses, effect };
   }
   function actionBlock(s, action, automatic = false) {
     if (s.sceneId !== action.sceneId) return '该动作不在当前场景';
@@ -395,71 +561,200 @@ export default function registerGamePlugin(ctx) {
     if (!clock || s.outcome || s.sceneId !== clock.sceneId || startScene !== clock.sceneId) return;
     if (--s.progress.clockRemaining === 0) resolveAction(s, clock.actionId, true);
   }
-  function view(s) {
+  function board(s) {
     const keeper = s.mode === 'keeper';
     const own = s.investigators.find(c => c.player);
-    return { sessionId: s.sessionId, title: s.title, mode: s.mode, player: publicPlayer(s.player), scene: { id: scene(s).id, name: scene(s).name, publicDesc: scene(s).publicDesc },
-      investigators: s.investigators.map(({ persona, shortPrompt, hoId, handout, ...c }) => ({ ...c, inventory: keeper || c.player ? c.inventory : [],
-        ...((keeper || c.player) && hoId && handout ? { hoId, handout } : {}) })), publicLog: s.publicLog,
-      hasSecretHO: !!s.scenario.handouts?.length || s.investigators.some(c => c.hoId),
-      summaries: s.summaries, round: s.round, pendingBatch: s.pendingBatch, pendingCheck: s.pendingCheck, awaitingRuling: !!s.checkToResolve,
+    return {
+      investigators: s.investigators.map(({ persona, shortPrompt, hoId, handout, inventory, skillBuffs, ...c }) => ({ ...c, inventory: keeper || c.player ? inventory : [],
+        ...((keeper || c.player) && skillBuffs ? { skillBuffs } : {}),
+        ...((keeper || c.player) && hoId && handout ? { hoId, handout } : {}) })),
       clues: s.scenario.clues.filter(c => s.revealed.includes(c.id) || (own && (s.privateClues[own.id] || []).includes(c.id)))
         .map(c => ({ ...c, isSecret: !s.revealed.includes(c.id) })),
       handouts: keeper ? s.handouts : own ? { [own.id]: s.handouts[own.id] || '' } : {},
-      imageJobs: s.imageJobs, ended: s.ended, proposedEnding: s.proposedEnding || s.outcome?.epilogue || '', memoryWritten: !!s.memoryWritten,
-      partyItems: partyItems(s), outcome: s.outcome || null, rulesEnabled: !!s.progress, abandoned: !!s.abandoned,
-      clockRemaining: s.sceneId === s.scenario.rules?.clock?.sceneId ? s.progress.clockRemaining : null,
-      pendingTurn: s.turn ? { id: s.turn.id, autoRollId: s.turn.autoRollId || null } : null, lastTurnId: s.lastTurnId || null,
-      ...(keeper ? { scenario: s.scenario, kpSecrets: s.kpSecrets,
+      partyItems: partyItems(s),
+      partyInventory: partyInventory(s),
+      clockRemaining: s.sceneId === s.scenario.rules?.clock?.sceneId ? s.progress?.clockRemaining : null,
+    };
+  }
+  function playbackBoard(s) {
+    const base = s.playbackBase;
+    const grants = new Map(), legacyGrants = new Map();
+    for (const [index, log] of s.publicLog.entries()) {
+      if (log.kind !== 'item' || log.speaker !== '道具') continue;
+      if (log.itemGrant) {
+        grants.set(log.itemGrant.id, { index, uses: log.itemGrant.uses });
+      } else {
+        if (!legacyGrants.has(log.dialogue)) legacyGrants.set(log.dialogue, []);
+        legacyGrants.get(log.dialogue).push(index);
+      }
+    }
+
+    const ownerNames = ['队伍', ...s.investigators.map(card => card.name || '队伍')];
+    const scenarioLabels = (s.scenario.rules?.items || []).map(item => item.label);
+    function legacyGrantText(name, owner) {
+      // Older logs cannot distinguish actors with the same name or scenario items with the same label.
+      const labels = owner === undefined ? scenarioLabels : ownerNames;
+      const label = owner ?? name;
+      if (labels.indexOf(label) === labels.lastIndexOf(label)) return itemGrantText(name, owner);
+    }
+    function revealedGrants(initial, current, legacyText) {
+      const initialIds = new Set(initial.map(item => item.id));
+      const revealed = [];
+      // Match repeated legacy grants newest first, including ones still queued for playback.
+      for (let i = current.length - 1; i >= 0; i--) {
+        const item = current[i];
+        if (initialIds.has(item.id)) continue;
+        const grant = grants.get(item.id);
+        const index = grant?.index ?? legacyGrants.get(legacyText(item))?.pop();
+        if (index !== undefined && index < s.presented) revealed.push({ ...item, uses: grant?.uses ?? item.uses });
+      }
+      return revealed.reverse();
+    }
+
+    const scenarioGrants = partyItems(s).map(item => ({ ...item, status: 'held' }));
+    const scenarioIds = new Set(scenarioGrants.map(item => item.id));
+    const shared = revealedGrants(base.partyInventory, [...scenarioInventory(scenarioGrants), ...s.partyInventory],
+      item => legacyGrantText(item.name, scenarioIds.has(item.id) ? undefined : '队伍'));
+    const revealedSharedIds = new Set(shared.map(item => item.id));
+    const inventories = new Map(s.investigators.map(card => [card.id, card.inventory]));
+    return {
+      ...base,
+      partyInventory: [...base.partyInventory, ...shared],
+      partyItems: [...(base.partyItems || []), ...scenarioGrants.filter(item => revealedSharedIds.has(item.id))],
+      investigators: base.investigators.map(card => {
+        if (s.mode !== 'keeper' && !card.player) return card;
+        const current = inventories.get(card.id) || [];
+        const additions = revealedGrants(card.inventory, current, item => legacyGrantText(item.name, card.name || '队伍'));
+        return additions.length ? { ...card, inventory: [...card.inventory, ...additions] } : card;
+      }),
+    };
+  }
+  function checkPlaybackReady(s) {
+    const next = s.publicLog[s.presented];
+    if (s.mode !== 'investigator' || !next) return false;
+    if (next.kind === 'check' || next.roll?.kind === 'check') return true;
+    // Play the roll's consequences through the first line of KP narration.
+    for (let i = s.presented - 1; i >= 0; i--) {
+      const previous = s.publicLog[i];
+      if (previous.round !== next.round || previous.kind === 'dialogue') return false;
+      if (previous.roll?.kind === 'check') {
+        return next.kind !== 'dialogue' || next.actorId === String(s.keeper?.id);
+      }
+    }
+    return false;
+  }
+  function view(s) {
+    const keeper = s.mode === 'keeper';
+    const records = s.publicLog.slice(0, s.presented);
+    const publicLog = records.map(log => {
+      if (log.itemGrant) {
+        const { itemGrant, ...visible } = log;
+        return visible;
+      }
+      if (keeper || (!log.imageJobId && log.kind !== 'illustration')) return log;
+      const { description, ...visible } = log;
+      return visible;
+    });
+    const playbackRemaining = s.publicLog.length - s.presented;
+    const settled = !s.turn && !playbackRemaining;
+    const visibleScene = s.scenario.scenes.find(item => item.id === publicLog.at(-1)?.sceneId) || scene(s);
+    const visibleScenes = new Set(publicLog.map(log => log.sceneId));
+    const visibleLogIds = new Set(publicLog.map(log => log.id));
+    return { sessionId: s.sessionId, revision: revisions.get(s), title: s.title, mode: s.mode, player: publicPlayer(s.player),
+      scene: { id: visibleScene.id, name: visibleScene.name, publicDesc: visibleScene.publicDesc },
+      ...(!settled && s.playbackBase ? playbackBoard(s) : board(s)), publicLog, playbackRemaining,
+      checkPlaybackReady: checkPlaybackReady(s),
+      reactionReady: s.publicLog[s.presented]?.checkReaction === true,
+      hasSecretHO: !!s.scenario.handouts?.length || s.investigators.some(c => c.hoId),
+      round: publicLog.at(-1)?.round ?? s.round, pendingCheck: settled ? s.pendingCheck : null, awaitingRuling: settled && !!s.checkToResolve,
+      awaitingItem: settled && Boolean(s.itemsToResolve?.length),
+      imagesEnabled: s.imagesEnabled,
+      imageJobs: s.imageJobs.filter(job => job.logId ? visibleLogIds.has(job.logId) : settled || (job.kind === 'scene' && visibleScenes.has(job.sceneId)))
+        .map(({ id, sceneId, kind, status, url, error, logId }) => ({ id, sceneId, kind, status, url, error, logId, retryable: !!logId || kind === 'scene' })),
+      ended: s.ended, proposedEnding: settled ? s.proposedEnding || s.outcome?.epilogue || '' : '', memoryWritten: !!s.memoryWritten,
+      outcome: settled ? s.outcome || null : null, rulesEnabled: !!s.progress, abandoned: !!s.abandoned,
+      suggestions: settled && !s.pendingCheck && !s.itemsToResolve?.length && !s.ended ? s.suggestions || [] : [],
+      pendingTurn: s.turn ? { id: s.turn.id } : null, lastTurnId: s.lastTurnId || null,
+      ...(keeper ? { scenario: s.scenario, kpSecrets: s.kpSecrets, declaration: settled && !s.ended && !s.outcome ? s.declaration || null : null,
         actions: (s.scenario.rules?.actions || []).filter(action => action.sceneId === s.sceneId && action.id !== s.scenario.rules.clock?.actionId)
-          .map(action => ({ id: action.id, label: action.label, available: !s.ended && !s.turn && !s.pendingCheck && !s.outcome && !s.progress.actions.includes(action.id) && !actionBlock(s, action) })),
+          .map(action => ({ id: action.id, label: action.label, available: settled && !s.ended && !s.pendingCheck && !s.outcome && !s.progress.actions.includes(action.id) && !actionBlock(s, action) })),
       } : { keeperId: s.keeper?.id }),
     };
   }
-  function queueMedia(s, reason, effects) {
+  function illustrate(s, { kind, description, characters }, effects, sourceLog) {
+    if (!s.imagesEnabled) fail('本局未开启 KP 生图');
+    const limit = sourceLog ? 3000 : 1200;
+    if (typeof description !== 'string' || !description.trim() || description.length > limit) fail(`请输入 1–${limit} 字的画面描述`);
+    description = description.trim();
+    if (!['scene', 'moment'].includes(kind)) fail('请选择场景背景或剧情画面');
+    if (characters !== undefined && (!Array.isArray(characters) || characters.length > 30 || new Set(characters).size !== characters.length ||
+      characters.some(name => typeof name !== 'string' || !name.trim() || !description.includes(name)))) fail('入镜角色须使用画面描述里的完整姓名');
+    if (kind === 'scene' && characters?.length) fail('有人物入镜时请选择剧情画面');
+    const id = randomUUID();
+    const log = sourceLog || addLog(s, '画面记录', '', '', 'illustration');
+    Object.assign(log, { description, imageJobId: id });
+    const job = { id, logId: log.id, sceneId: s.sceneId, kind, status: 'running', attempt: 1, characters };
+    s.imageJobs.push(job);
+    queueMedia(s, job, effects);
+    return { queued: true, eventId: log.id };
+  }
+  function queueBackdrop(s, effects, mood = '') {
     if (!s.imagesEnabled || closed) return;
-    const id = randomUUID(), entry = { id, sceneId: s.sceneId, kind: reason === 'scene' ? 'scene' : 'event', status: 'running' };
-    s.imageJobs.push(entry);
+    const job = { id: randomUUID(), logId: s.publicLog.at(-1)?.id, sceneId: s.sceneId,
+      kind: 'scene', status: 'running', attempt: 1, mood };
+    s.imageJobs.push(job);
+    queueMedia(s, job, effects);
+  }
+  function queueMedia(s, job, effects) {
+    const { id, logId, attempt, characters, mood } = job;
     const sessionId = s.sessionId;
-    const prompt = `${s.scenario.meta.stylePrompt}, ${scene(s).imagePrompt}, ${reason === 'scene' ? 'environment establishing shot, no people' : `dramatic object closeup, ${reason}`}, no text`;
+    const setting = s.scenario.scenes.find(item => item.id === job.sceneId);
+    const description = s.publicLog.find(log => log.id === logId)?.description;
     effects.push(() => {
-      mediaJobs.add(id);
-      imageService.generate({ sessionId, prompt, outputScope: 'game', width: 1024, height: 576 }).then(result => settle({ status: 'done', url: result.url }), error => { console.warn('[trpg media]', error.message); return settle({ status: 'failed', error: '图片生成失败，请检查生图服务后重试' }); }).catch(error => console.warn('[trpg media]', error.message)).finally(() => mediaJobs.delete(id));
+      mediaJobs.set(id, attempt);
+      Promise.resolve().then(() => description ? imageService.generateScene({ sessionId, description, characters, playerName: s.player.name,
+        style: s.scenario.meta.stylePrompt, background: job.kind === 'scene' }) :
+        imageService.generate({ sessionId, prompt: [s.scenario.meta.stylePrompt, setting.imagePrompt || setting.publicDesc, mood,
+          'wide environment establishing shot, no people, no text'].filter(Boolean).join(', ') }))
+        .then(result => settle({ status: 'done', url: result.url }), error => {
+          console.warn('[trpg media]', error.message);
+          settle({ status: 'failed', error: '图片生成失败，可重试' });
+        }).catch(error => console.warn('[trpg media]', error.message)).finally(() => {
+          if (mediaJobs.get(id) === attempt) mediaJobs.delete(id);
+        });
     });
     function settle(result) {
       if (closed || !db.load(sessionId)) return;
       // Other turns may have been committed during rendering; always merge into
       // the latest persisted state instead of overwriting with the old snapshot.
       const current = load(sessionId), job = current.imageJobs.find(j => j.id === id);
-      if (!job) return;
-      Object.assign(job, result); persist(current); ctx.events?.emit('media', { sessionId, ...job });
+      if (!job || job.attempt !== attempt) return;
+      Object.assign(job, result); persist(current); ctx.events?.emit('media', { sessionId, id, status: result.status });
     }
   }
-  function commitBatch(s, batchId, count, discard = false) {
+  function restoreBatch(s) {
     const batch = s.pendingBatch;
-    if (!batch) { if (s.lastBatch?.id === batchId && s.lastBatch.count === count) return; fail('发言队列已变化，请重新读取', 409); }
-    if (batch.id !== batchId || !integer(count, batch.acked, batch.lines.length)) fail('发言截断点无效', 409);
-    const firstCheck = batch.lines.findIndex(line => line.check);
-    if (firstCheck >= 0 && count > firstCheck + 1) fail('不能越过检定断点', 409);
-    for (const line of batch.lines.slice(batch.acked, count)) {
-      addLog(s, character(s, line.speaker).name, line.dialogue, line.action, 'dialogue', line.speaker, line.expressionSlot);
-      if (line.check) s.pendingCheck = { id: randomUUID(), targetChar: line.speaker, ...line.check };
+    for (const { speaker, dialogue, action, check, expressionSlot } of batch.lines.slice(batch.acked)) {
+      const actor = character(s, speaker);
+      s.publicLog.push({ id: `${batch.id}-${s.publicLog.length}`, round: s.round, sceneId: s.sceneId,
+        speaker: actor.name, actorId: speaker, expressionSlot, dialogue, action, kind: 'dialogue' });
+      if (check) {
+        s.pendingCheck = { id: batch.id, targetChar: speaker, ...check };
+        break;
+      }
     }
-    batch.acked = count;
-    if (discard || s.pendingCheck || count === batch.lines.length) { s.lastBatch = { id: batch.id, count }; s.pendingBatch = null; }
+    delete s.pendingBatch;
   }
-  function recordRoll(s, result, secret, effects) {
+  function recordRoll(s, result, secret) {
     if (secret) s.kpSecrets.darkRolls.push(result);
     else {
       const notation = result.kind === 'pool' && result.rolls.length > 1 ? `${result.rolls.length}D${result.sides}` : `D${result.sides}`;
-      const labels = { critical: '大成功', extreme: '极难成功', hard: '困难成功', regular: '通过', failure: '失败', fumble: '大失败' };
-      const outcome = !result.success && !['failure', 'fumble'].includes(result.rank) ? '未达难度' : labels[result.rank];
+      const outcome = !result.success && !['failure', 'fumble'].includes(result.rank) ? '未达难度' : CHECK_RANK_LABELS[result.rank];
       const description = result.kind === 'pool' ? String(result.total) : `${result.total ?? result.value}/${result.target} · ${outcome}`;
       addLog(s, '骰子', `${result.name} · ${notation} · ${result.skillName} · ${description}`, '', 'dice');
       const log = s.publicLog.at(-1);
       result.logId = log.id;
       log.roll = result;
-      if (s.mode === 'investigator') effects.push(() => ctx.events?.emit('dice', { sessionId: s.sessionId, roll: result }));
     }
     return result;
   }
@@ -467,10 +762,15 @@ export default function registerGamePlugin(ctx) {
     const c = character(s, targetChar); if (c.outOfAction) fail('已退场调查员不能检定');
     const { skill, difficulty, dice, mode, reason } = checkDetails(check, false);
     const sides = dice === 'd20' ? 20 : 100;
-    const rating = skill === '理智' ? c.san : c.skills[skill];
+    const base = skill === '理智' ? c.san : skill === '幸运' ? c.attributes.POW : c.skills[skill];
+    const buff = c.skillBuffs?.[skill];
+    const rating = Math.min(99, base + (buff?.bonus || 0));
     const rolled = sides === 20 ? rollD20(rating, difficulty, mode) : rollD100(rating, difficulty);
-    const result = recordRoll(s, { kind: 'check', targetChar: c.id, name: c.name, skillName: skill, sides, mode, reason, ...rolled }, secret, effects);
-    if (['critical', 'fumble'].includes(result.rank)) queueMedia(s, `${result.rank}, ominous dice on the table`, effects);
+    if (buff) delete c.skillBuffs[skill];
+    const result = recordRoll(s, { kind: 'check', targetChar: c.id, name: c.name, skillName: skill, sides, mode, reason,
+      ...rolled, ...(buff ? { itemBonus: { itemName: buff.itemName, bonus: rating - base } } : {}) }, secret);
+    if (result.rank === 'critical') queueBackdrop(s, effects, 'a sudden break in the gloom, striking highlights');
+    if (result.rank === 'fumble') queueBackdrop(s, effects, 'oppressive atmosphere, ominous shadows and sharp contrast');
     return result;
   }
   function rollPending(s, secret, effects) {
@@ -483,7 +783,7 @@ export default function registerGamePlugin(ctx) {
     }
     return result;
   }
-  function rollPool(s, { sides, count = 1, reason, secret }, effects) {
+  function rollPool(s, { sides, count = 1, reason, secret }) {
     const skillName = text(reason, 200).trim();
     if (!DICE_SIDES.includes(sides) || !integer(count, 1, 6) || !skillName) fail('请选择有效骰型、1–6 颗骰子并说明用途');
     if (s.turn?.poolRoll) {
@@ -493,24 +793,28 @@ export default function registerGamePlugin(ctx) {
     const rolls = Array.from({ length: count }, () => randomInt(1, sides + 1));
     const total = rolls.reduce((sum, value) => sum + value, 0);
     const result = recordRoll(s, { kind: 'pool', name: s.mode === 'keeper' ? s.player.name : (s.keeper.display_name || s.keeper.name || 'KP'),
-      skillName, sides, rolls, value: total, total }, secret === true && s.mode === 'keeper', effects);
+      skillName, sides, rolls, value: total, total }, secret === true && s.mode === 'keeper');
     if (s.turn) s.turn.poolRoll = result;
     return result;
   }
-  function adjustStats(s, c, hpDelta, sanDelta, reason) {
+  const signed = delta => delta >= 0 ? `+${delta}` : String(delta);
+  function changeStats(c, hpDelta, sanDelta) {
     const { hp, san } = c;
     normalizeStats(Object.assign(c, { hp: hp + hpDelta, san: san + sanDelta }));
-    hpDelta = c.hp - hp;
-    sanDelta = c.san - san;
-    const signed = delta => delta >= 0 ? `+${delta}` : String(delta);
-    addLog(s, '裁决', `${c.name} HP ${signed(hpDelta)} / SAN ${signed(sanDelta)}：${reason}${c.outOfAction ? '（退场，可引入替补或推进结局）' : ''}`, '', 'stat');
-    return { hp: c.hp, san: c.san, hpDelta, sanDelta, outOfAction: c.outOfAction };
+    return { hp: c.hp, san: c.san, hpDelta: c.hp - hp, sanDelta: c.san - san, outOfAction: c.outOfAction };
+  }
+  function adjustStats(s, c, hpDelta, sanDelta, reason) {
+    const result = changeStats(c, hpDelta, sanDelta);
+    const log = addLog(s, '裁决', `${c.name} HP ${signed(result.hpDelta)} / SAN ${signed(result.sanDelta)}：${reason}${c.outOfAction ? '（退场，可引入替补或推进结局）' : ''}`, '', 'stat');
+    log.sanDelta = result.sanDelta;
+    return result;
   }
   function apply(s, name, args, effects) {
     working(s);
     switch (name) {
       case 'request_and_roll_dice': return roll(s, args.targetChar, { dice: 'd100', ...args }, args.secret === true && s.mode === 'keeper', effects);
-      case 'roll_dice': return rollPool(s, args, effects);
+      case 'roll_dice': return rollPool(s, args);
+      case 'give_item': return giveItem(s, args.targetChar, args);
       case 'update_investigator_stat': {
         const c = character(s, args.targetChar);
         if (!integer(args.hpDelta, -100, 100) || !integer(args.sanDelta, -100, 100) || !text(args.reason).trim()) fail('状态变化需要整数增减值与原因');
@@ -556,10 +860,11 @@ export default function registerGamePlugin(ctx) {
           events: excerpt(logs.filter(log => !['clue', 'stat'].includes(log.kind))),
           statChanges: excerpt(logs.filter(log => log.kind === 'stat')),
         });
-        s.sceneId = next.id; addLog(s, 'KP', next.publicDesc, '', 'scene'); queueMedia(s, 'scene', effects);
+        s.sceneId = next.id; addLog(s, 'KP', next.publicDesc, '', 'scene'); queueBackdrop(s, effects);
         return { sceneId: next.id, name: next.name, publicDesc: next.publicDesc };
       }
-      case 'trigger_encounter': { const description = text(args.description, 1000); if (!description) fail('遭遇描述不能为空'); addLog(s, '遭遇', description, '', 'encounter'); queueMedia(s, description, effects); return { started: true }; }
+      case 'trigger_encounter': { const description = text(args.description, 1000); if (!description) fail('遭遇描述不能为空'); addLog(s, '遭遇', description, '', 'encounter'); return { started: true }; }
+      case 'generate_image': return illustrate(s, args, effects);
       case 'resolve_scenario_action': return resolveAction(s, args.actionId);
       case 'propose_ending': {
         if (s.mode !== 'investigator') fail('玩家守秘人可以直接结团');
@@ -615,34 +920,88 @@ export default function registerGamePlugin(ctx) {
       }
     }));
   }
+  function updatePlayerExpression(s, expression, slots) {
+    const log = s.publicLog.find(item => item.id === s.turn.playerSpeechId);
+    if (!log) return;
+    log.expressionSlot = dialogueCue('', expression, slots).expressionSlot;
+    delete s.turn.playerSpeechId;
+  }
+  const playerSpeech = s => s.publicLog.find(log => log.id === s.turn.playerSpeechId)?.dialogue;
   async function generateBatch(s, names, slots, signal) {
-    const actors = s.investigators.filter(c => !c.player && !c.outOfAction);
+    const { checkReactionActorId } = s.turn;
+    const actors = s.investigators.filter(c => !c.player && !c.outOfAction && (!checkReactionActorId || c.id === checkReactionActorId));
     if (!actors.length) return;
     const byName = new Map(actors.map(card => [names.get(card.id), card]));
     const audience = 'investigators';
-    const raw = await llm.complete({ rules: INVESTIGATOR_RULES,
+    const humanKeeper = s.mode === 'keeper';
+    const raw = await llm.complete({ rules: humanKeeper ? DECLARATION_RULES : INVESTIGATOR_RULES,
       personas: [investigatorRoster(s, names)],
       stableData: JSON.stringify({ scenario: { title: s.scenario.meta.title, era: s.scenario.meta.era } }),
       publicHistory: s.publicLog, timeline: promptTimeline(s, audience),
-      data: JSON.stringify({ ...investigatorContext(s, false, names), actors: [...byName.keys()], expressionNames: slots.map(slot => slot.name) }),
-      task: '继续队伍的对话和行动，按约定输出有序 JSON 数组。', scope: `${s.sessionId}:${audience}` }, { signal });
+      data: JSON.stringify({ ...investigatorContext(s, false, names), actors: [...byName.keys()], expressionNames: slots.map(slot => slot.name),
+        playerMode: s.mode, playerSpeech: playerSpeech(s), checkReactionActor: names.get(checkReactionActorId) }),
+      task: checkReactionActorId ? '让指定调查员回应刚公布的检定裁定，按约定返回 JSON。' : '继续队伍的对话和行动，按约定返回 JSON。',
+      scope: `${s.sessionId}:${audience}` }, { signal });
     const output = json(raw);
-    if (!Array.isArray(output) || output.length > 8) fail('调查员发言格式不合法', 502);
+    const responseLines = output?.lines;
+    if (!Array.isArray(responseLines) || responseLines.length > 8) fail('调查员发言格式不合法', 502);
+    if (checkReactionActorId) {
+      const line = responseLines[0];
+      const frames = dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots);
+      if (responseLines.length !== 1 || typeof line?.speaker !== 'string' || line.speaker.trim() !== names.get(checkReactionActorId) || !frames.length) {
+        fail('调查员的检定回应格式不合法，请续跑本轮', 502);
+      }
+      const actor = actors[0];
+      frames.forEach((cue, i) => {
+        const log = addLog(s, actor.name, cue.dialogue, '', 'dialogue', actor.id, cue.expressionSlot, cue.playerExpressionSlot);
+        if (i === 0) log.checkReaction = true;
+      });
+      return;
+    }
     const lines = [];
-    for (const l of output) {
+    for (const l of responseLines) {
       const actor = byName.get(typeof l?.speaker === 'string' ? l.speaker.trim() : '');
-      const cue = dialogueCue(text(l?.dialogue, 600), l?.emotion, slots);
+      const dialogue = text(l?.dialogue, 600);
+      const frames = dialogueFrames(dialogue, l?.emotion, slots);
       const action = text(l?.action, 300).trim();
-      if (!actor || (!cue.dialogue && !action)) fail('调查员发言角色或检定不合法', 502);
+      const useItemId = l?.useItemId;
+      if (!actor || (!frames.length && !action && !useItemId) || (useItemId != null && !validId(useItemId))) fail('调查员发言、检定或道具编号不合法', 502);
       if (lines.filter(line => line.speaker === actor.id).length >= 2) continue;
       let check;
-      if (l.check != null) {
-        try { check = checkDetails({ ...l.check, reason: l.check.reason || action || cue.dialogue }); } catch { fail('调查员检定格式不合法，请续跑本轮', 502); }
+      if (!humanKeeper && l.check != null) {
+        try { check = checkDetails({ ...l.check, reason: l.check.reason || action || frames.map(frame => frame.dialogue).join('') }); } catch { fail('调查员检定格式不合法，请续跑本轮', 502); }
       }
-      lines.push({ speaker: actor.id, ...cue, action, ...(check ? { check } : {}) });
-      if (check) break;
+      let intent = '';
+      if (humanKeeper) {
+        intent = action || (l.check || useItemId ? frames.map(frame => frame.dialogue).join('') : '');
+        if (useItemId && !intent) fail('调查员使用道具时需要先声明行动，请续跑本轮', 502);
+      }
+      const suggestedSkill = l.suggestedSkill || l.check?.skill;
+      lines.push({ speaker: actor.id, frames, action, check, intent, suggestedSkill, emotion: l.emotion, useItemId });
+      if (check || intent) break;
     }
-    if (lines.length) s.pendingBatch = { id: randomUUID(), lines, acked: 0 };
+    updatePlayerExpression(s, output.playerExpression, slots);
+    const suggestions = actionSuggestions(output.suggestions);
+    if (suggestions.length) s.suggestions = suggestions;
+    for (const { speaker, frames, action, check, intent, suggestedSkill, emotion, useItemId } of lines) {
+      const actor = character(s, speaker);
+      if (actor.outOfAction) continue;
+      if (useItemId && !humanKeeper) {
+        try { useItem(s, actor, useItemId); }
+        catch (error) {
+          if (!error.gameMessage) throw error;
+          addLog(s, '道具', `${actor.name}未能使用道具：${error.gameMessage}。`, '', 'item');
+          continue;
+        }
+      }
+      if (!frames.length && action) frames.push(dialogueCue('', emotion, slots));
+      frames.forEach((cue, i) => addLog(s, actor.name, cue.dialogue, i === frames.length - 1 ? action : '', 'dialogue', speaker, cue.expressionSlot, cue.playerExpressionSlot));
+      if (intent) {
+        s.declaration = { logId: s.publicLog.at(-1).id, actorId: speaker, reason: intent,
+          ...(CHECK_SKILLS.includes(suggestedSkill) ? { suggestedSkill } : {}), ...(useItemId ? { useItemId } : {}) };
+      }
+      if (check && !actor.outOfAction) s.pendingCheck = { id: randomUUID(), targetChar: speaker, ...check };
+    }
   }
   const route = (method, url, handler, { lock = true, disconnect = false } = {}) => router[method](url, async (req, res) => {
     const id = req.body?.sessionId || req.query?.sessionId;
@@ -676,13 +1035,6 @@ export default function registerGamePlugin(ctx) {
     scenarios: ctx.scenarios().map(s => scenarioPreview(s)),
   }), { lock: false });
   route('get', '/cast', async () => ctx.castAssets(), { lock: false });
-  route('post', '/preview-handout', async body => {
-    if (body.mode !== 'keeper') fail('只有玩家 KP 可以预览秘密 HO', 403);
-    const scenario = selectedScenario(body);
-    const handout = scenario?.handouts?.find(card => card.id === body.hoId);
-    if (!handout) fail('秘密 HO 不存在', 404);
-    return handout;
-  }, { lock: false });
   route('post', '/scenario-draft', async body => {
     if (body.mode !== 'keeper') fail('只有玩家 KP 可以编辑含秘密的剧本', 403);
     if (!body.draftId) fail('剧本草稿不存在', 404);
@@ -713,26 +1065,26 @@ export default function registerGamePlugin(ctx) {
     }
     if (!isKeeper && (!integer(body.keeperId, 1, 2147483647) || body.characterIds.includes(body.keeperId))) fail('请指定一位未加入调查员阵容的守秘人');
     const scenario = validateScenario(body.scenario || selectedScenario(body));
-    const actorIds = body.characterIds.map(String);
-    if (!isKeeper) actorIds.unshift(PLAYER_ID);
-    const assignments = assignHandouts(scenario.handouts, actorIds, body.mode, body.hoAssignments);
+    const seats = body.characterIds.length + (isKeeper ? 0 : 1);
+    const assignments = dealHandouts(scenario.handouts, seats);
     const player = ctx.playerProfile();
     const profiles = await Promise.all(body.characterIds.map(characterId => bridgeTools.call('get_character_profile', { characterId })));
     const keeper = isKeeper ? null : await bridgeTools.call('get_character_profile', { characterId: body.keeperId });
-    const identities = actorIds.map((id, i) => publicIdentity(scenario.investigatorRoles?.[i], assignments.get(id)));
-    const investigators = await makeCards(isKeeper ? profiles : [playerCardProfile(player), ...profiles], identities);
-    for (const c of investigators) {
-      const handout = assignments.get(c.id);
-      if (handout) Object.assign(c, { hoId: handout.id, handout });
+    const lineup = isKeeper ? profiles : [playerCardProfile(player), ...profiles];
+    const identities = lineup.map((_, i) => publicIdentity(scenario.investigatorRoles?.[i], assignments[i]));
+    const investigators = await makeCards(lineup, identities);
+    for (const [i, handout] of assignments.entries()) {
+      Object.assign(investigators[i], { hoId: handout.id, handout });
     }
     const sessionId = randomUUID(), first = scenario.scenes[0];
     const state = { version: 3, sessionId, title: scenario.meta.title, scenario, keeper, player: publicPlayer(player), mode: body.mode, investigators, sceneId: first.id, publicLog: [],
-      kpSecrets: { truth: scenario.keeperSecrets, darkRolls: [] }, handouts: {}, privateClues: {}, revealed: [], summaries: [], round: 0, pendingBatch: null, pendingCheck: null, imageJobs: [], imagesEnabled: body.imagesEnabled === true, ended: false };
+      kpSecrets: { truth: scenario.keeperSecrets, darkRolls: [] }, partyInventory: [], handouts: {}, privateClues: {}, revealed: [], summaries: [], round: 0, pendingCheck: null, imageJobs: [], imagesEnabled: body.imagesEnabled === true, ended: false };
     initProgress(state);
     addLog(state, 'KP', first.publicDesc, '', 'scene');
+    state.presented = state.publicLog.length;
     const effects = [];
-    queueMedia(state, 'scene', effects);
-    db.write(sessionId, state.title, state);
+    queueBackdrop(state, effects);
+    revisions.set(state, db.write(sessionId, state.title, state)?.revision);
     for (const effect of effects) effect();
     return view(state);
   }, { lock: false });
@@ -742,14 +1094,15 @@ export default function registerGamePlugin(ctx) {
     if (dirty && !busy.has(q.sessionId)) persist(s);
     return view(s);
   }, { lock: false });
-  route('post', '/ack', async body => {
-    const s = load(body.sessionId); working(s);
-    commitBatch(s, body.batchId, body.count, body.discard === true);
-    const effects = [];
-    const roll = s.mode === 'investigator' && s.pendingCheck && s.pendingCheck.targetChar !== PLAYER_ID ? rollPending(s, false, effects) : null;
-    saveWithEffects(s, effects);
-    return { ...view(s), ...(roll ? { roll } : {}) };
-  });
+  route('post', '/advance', async body => {
+    const s = load(body.sessionId);
+    if (!integer(body.after, 0, s.presented)) fail('播放位置已变化，请重新读取', 409);
+    if (body.after === s.presented && s.presented < s.publicLog.length) {
+      s.presented++;
+      persist(s);
+    }
+    return view(s);
+  }, { lock: false });
   route('post', '/turn', async (body, _query, signal) => {
     const s = load(body.sessionId);
     const requestedId = body.turnId;
@@ -759,62 +1112,104 @@ export default function registerGamePlugin(ctx) {
     const slots = ctx.expressionSlots();
     if (s.turn) {
       if (requestedId !== s.turn.id) fail('请先续跑当前回合', 409);
-      if (s.mode === 'investigator' && s.pendingCheck?.targetChar === PLAYER_ID) {
+      s.playbackBase ||= structuredClone(board(s));
+      if (s.mode === 'investigator' && s.pendingCheck) {
         const effects = [];
-        s.turn.autoRollId = rollPending(s, false, effects).logId;
+        rollPending(s, false, effects);
         saveWithEffects(s, effects);
-        return view(s);
-      }
-      if (s.turn.autoRollId) {
-        delete s.turn.autoRollId;
-        persist(s);
       }
     } else {
       if (body.resume === true) fail('该回合已不存在，请重新读取卷宗', 409);
       if (s.outcome) fail('结局条件已达成，请确认结团');
-      const input = dialogueCue(text(body.message, 3000), '', slots, { preferredSlot: body.expressionSlot });
-      if (s.checkToResolve && input.dialogue) fail('请先裁定队友的检定', 409);
+      playbackDone(s);
+      if (s.declaration) fail('请先裁定调查员刚提出的行动', 409);
+      const input = dialogueCue(text(body.message, 3000), '', slots);
+      const legacyAutoCheck = s.mode === 'investigator' && s.pendingCheck;
+      if ((s.checkToResolve || legacyAutoCheck || s.itemsToResolve?.length) && input.dialogue) fail('请先完成当前裁定', 409);
       if (input.dialogue && s.investigators.some(c => c.player && c.outOfAction)) fail('你已退场，可以继续旁观调查');
-      if (s.pendingBatch) commitBatch(s, body.batchId, body.count, true);
-      if (s.pendingCheck) fail('请先完成当前检定');
-      const rulingOnly = !!s.checkToResolve && !input.dialogue;
+      if (s.pendingCheck && !legacyAutoCheck) fail('请先完成当前检定');
+      s.playbackBase = structuredClone(board(s));
+      const effects = [];
+      if (legacyAutoCheck) rollPending(s, false, effects);
+      const rulingOnly = Boolean(s.checkToResolve || s.itemsToResolve?.length);
+      const wantsIllustration = !rulingOnly && s.mode === 'keeper' && s.imagesEnabled && body.illustrate === true;
       if (!rulingOnly) s.round++;
       delete s.proposedEnding;
+      delete s.suggestions;
+      let playerSpeechId;
       if (input.dialogue) {
         const speaker = s.mode === 'keeper' ? text(body.speaker, 100).trim() || s.player.name : s.player.name;
-        addLog(s, speaker, input.dialogue, '', 'dialogue', PLAYER_ID, input.expressionSlot);
+        const log = addLog(s, speaker, input.dialogue, '', 'dialogue', PLAYER_ID, input.expressionSlot);
+        if (wantsIllustration) illustrate(s, { kind: 'moment', description: log.dialogue }, effects, log);
+        s.presented = s.publicLog.length;
+        if (!input.tagged) playerSpeechId = log.id;
       }
       const id = requestedId ?? randomUUID();
-      s.turn = { id, phase: s.mode === 'investigator' ? 'keeper' : 'investigators',
-        startScene: s.sceneId, rulingOnly, stats: [], scenarioCostActors: [], agent: {} };
+      s.turn = { id, protocol: 2, playerSpeechId, phase: s.mode === 'investigator' ? 'keeper' : 'investigators',
+        startScene: s.sceneId, rulingOnly, stats: [], scenarioCostActors: [], agent: {},
+        ...(wantsIllustration && !input.dialogue ? { illustrateAction: true } : {}) };
       (s.turnIds ||= []).push(id);
       s.lastTurnId = id;
-      persist(s);
+      saveWithEffects(s, effects);
     }
-    const { rulingOnly } = s.turn;
     await restoreShortPrompts(s.investigators);
     signal.throwIfAborted();
     const names = investigatorNames(s.investigators);
-    if (s.turn.phase === 'keeper') {
+    while (s.turn) {
+      if (s.turn.phase === 'keeper') await runKeeper();
+      if (!s.turn.rulingOnly && !s.turn.clockTicked) {
+        tickClock(s, s.turn.startScene);
+        s.turn.clockTicked = true;
+        persist(s);
+      }
+      const firstReply = s.publicLog.length;
+      if (!s.outcome && !s.proposedEnding && (!s.turn.rulingOnly || s.turn.checkReactionActorId)) await generateBatch(s, names, slots, signal);
+      signal.throwIfAborted();
+      const effects = [];
+      if (s.turn.illustrateAction && s.publicLog.length > firstReply) {
+        const log = s.publicLog.at(-1);
+        const material = [log.dialogue, log.action].filter(Boolean).join('\n');
+        illustrate(s, { kind: 'moment', description: `${scene(s).name}\n${log.speaker}：${material}` }, effects, log);
+      }
+      if (s.mode === 'investigator' && (s.pendingCheck || s.itemsToResolve?.length)) {
+        // The check and the next KP prompt are committed before any frame is played.
+        s.turn = { id: s.turn.id, protocol: 2, phase: 'keeper', rulingOnly: true, stats: [], scenarioCostActors: [], agent: {} };
+        if (s.pendingCheck) rollPending(s, false, effects);
+        saveWithEffects(s, effects);
+      } else {
+        delete s.turn;
+        saveWithEffects(s, effects);
+      }
+    }
+    return view(s);
+
+    async function runKeeper() {
+      const { rulingOnly } = s.turn;
       const effects = [];
       const idsByName = new Map([...names].map(([id, name]) => [name, id]));
       const { meta, scenes, clues, npcs, handouts, keeperSecrets, rules } = s.scenario;
-      const content = await llm.agent({ rules: KEEPER_RULES, personas: [s.keeper.base_prompt || s.keeper.short_prompt || '',
-        investigatorRoster(s, names)],
+      const keeperName = s.keeper.display_name || s.keeper.name || 'KP';
+      const keeperPersona = s.keeper.base_prompt || s.keeper.short_prompt;
+      const content = await llm.agent({ rules: KEEPER_RULES,
+        taskPersona: keeperPersona ? `## 主持人口吻\n${keeperName}\n\n${keeperPersona}` : '',
+        personas: [investigatorRoster(s, names)],
         stableData: JSON.stringify({ scenario: { meta: { title: meta.title, era: meta.era },
           scenes: scenes.map(({ id, name, publicDesc, hiddenNotes }) => ({ id, name, publicDesc, hiddenNotes })), clues, npcs, handouts, keeperSecrets, rules },
           assignedHandouts: Object.fromEntries(s.investigators.filter(c => c.hoId && c.handout).map(c => [names.get(c.id), c.hoId])) }),
         publicHistory: s.publicLog, timeline: promptTimeline(s, 'keeper'),
         data: JSON.stringify({ ...investigatorContext(s, true, names), progress: s.progress,
+          imagesEnabled: s.imagesEnabled,
+          ...(s.imagesEnabled ? { imageCast: [...new Set([s.player.name, s.keeper.display_name || s.keeper.name, ...s.investigators.map(card => card.name)].filter(Boolean))] } : {}),
           handouts: Object.fromEntries([...names].filter(([id]) => s.handouts[id]).map(([id, name]) => [name, s.handouts[id]])),
           checkToResolve: promptRoll(s.checkToResolve, names),
+          itemsToResolve: s.itemsToResolve?.map(({ actorId, ...item }) => ({ ...item, actor: names.get(actorId) })), playerSpeech: playerSpeech(s),
           expressionNames: slots.map(slot => slot.name) }),
-        task: rulingOnly ? '裁定 checkToResolve 中的检定，按约定以表情标记开头，只给公开叙事。' : '根据玩家行动主持下一段，按约定以表情标记开头，只给公开叙事。', scope: `${s.sessionId}:keeper` }, KP_TOOLS, (name, args, calls) => {
-          if (s.proposedEnding) fail('结尾已备好，等待玩家确认');
-          if (s.outcome && name !== 'propose_ending') fail('结局条件已达成，请提交结尾');
+        task: rulingOnly ? '裁定当前已登记的检定或道具行动，按约定返回。' : '根据玩家行动主持下一段，按约定返回公开叙事和行动建议。', scope: `${s.sessionId}:keeper` }, KP_TOOLS, (name, args, calls) => {
+          if (s.proposedEnding && name !== 'generate_image') fail('结尾已备好，等待玩家确认');
+          if (s.outcome && !['propose_ending', 'generate_image'].includes(name)) fail('结局条件已达成，请提交结尾');
           if (calls.length > 1 && calls.some(call => ['request_check', 'roll_dice'].includes(call.function.name))) fail('请单独调用掷骰工具，收到点数后再裁定');
           if (name === 'request_check' || name === 'request_and_roll_dice') {
-            if (rulingOnly) fail('请使用已有队友骰值裁定');
+            if (rulingOnly) fail('请根据已登记的检定或道具行动裁定');
             const details = checkDetails(name === 'request_and_roll_dice' ? { ...args, dice: 'd100', reason: '判定本轮行动能否完成' } : args);
             if (s.turn.dice) {
               const prior = s.turn.dice;
@@ -825,37 +1220,75 @@ export default function registerGamePlugin(ctx) {
             const diceLabel = details.dice.toUpperCase();
             addLog(s, 'KP', `${details.reason} · ${details.skill} · ${DIFFICULTIES[details.difficulty]} · ${diceLabel}`, '', 'check');
             s.turn.dice = roll(s, PLAYER_ID, details, false, effects);
-            s.turn.autoRollId = s.turn.dice.logId;
-            return;
+            return promptRoll(s.turn.dice, names);
           }
-          const firstPoolRoll = name === 'roll_dice' && !s.turn.poolRoll;
           const engineArgs = { ...args };
           for (const key of ['targetChar', 'targetCharOrAll']) {
             const id = idsByName.get(engineArgs[key]);
             if (id) engineArgs[key] = id;
           }
           const result = apply(s, name, engineArgs, effects);
-          if (firstPoolRoll) {
-            s.turn.autoRollId = result.logId;
-            return;
-          }
           return name === 'roll_dice' ? promptRoll(result, names) : result;
         }, { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), signal });
       signal.throwIfAborted();
-      if (content === null) return view(s);
-      const cue = dialogueCue(content.trim(), '', slots, { leadingTag: true });
-      if (cue.dialogue && !s.proposedEnding) addLog(s, s.keeper.display_name || s.keeper.name || 'KP', cue.dialogue, '', 'dialogue', String(s.keeper.id), cue.expressionSlot);
+      const raw = (content || '').trim();
+      const response = s.turn.protocol === 2 || /^[{`]/.test(raw) ? json(raw) : { narration: raw };
+      if (typeof response?.narration !== 'string') fail('守秘人的叙事格式不合法，请续跑本轮', 502);
+      updatePlayerExpression(s, response.playerExpression, slots);
+      const suggestions = actionSuggestions(response.suggestions);
+      if (suggestions.length) s.suggestions = suggestions;
+      if (!s.proposedEnding) {
+        for (const cue of dialogueFrames(response.narration, '', slots, true)) {
+          addLog(s, keeperName, cue.dialogue, '', 'dialogue', String(s.keeper.id), cue.expressionSlot, cue.playerExpressionSlot);
+        }
+      }
+      if (s.checkToResolve && s.checkToResolve.targetChar !== PLAYER_ID) s.turn.checkReactionActorId = s.checkToResolve.targetChar;
       delete s.checkToResolve;
+      delete s.itemsToResolve;
       delete s.turn.agent;
       s.turn.phase = 'investigators';
       persist(s);
     }
-    if (!rulingOnly) tickClock(s, s.turn.startScene);
-    if (!s.outcome && !s.proposedEnding && !rulingOnly) await generateBatch(s, names, slots, signal);
-    signal.throwIfAborted();
-    delete s.turn;
-    persist(s); return view(s);
   }, { disconnect: true });
+  function currentDeclaration(s, logId) {
+    if (s.mode !== 'keeper') fail('仅玩家 KP 可以裁定调查员行动', 403);
+    if (!logId || s.declaration?.logId !== logId) fail('这条行动已不再等待裁定', 409);
+    return s.declaration;
+  }
+  function applyDeclaredItem(s, declaration) {
+    if (!declaration.useItemId) return;
+    const actor = character(s, declaration.actorId);
+    try { useItem(s, actor, declaration.useItemId); }
+    catch (error) {
+      if (!error.gameMessage) throw error;
+      addLog(s, '道具', `${actor.name}未能使用道具：${error.gameMessage}。`, '', 'item');
+    }
+    delete declaration.useItemId;
+  }
+  route('post', '/describe-action', async body => {
+    const s = load(body.sessionId);
+    if (receipt(s, body, 'describe-action')) return view(s);
+    working(s); betweenTurns(s);
+    if (s.outcome) fail('结局条件已达成，请确认结团');
+    const declaration = currentDeclaration(s, body.logId);
+    const result = text(body.description, 3000).trim();
+    if (!result) fail('请填写行动结果');
+    applyDeclaredItem(s, declaration);
+    addLog(s, s.player.name, result, '', 'dialogue', PLAYER_ID);
+    s.publicLog.at(-1).actionLogId = declaration.logId;
+    delete s.declaration;
+    s.presented = s.publicLog.length;
+    if (declaration.roll && !character(s, declaration.actorId).outOfAction) {
+      const id = randomUUID();
+      s.playbackBase = structuredClone(board(s));
+      s.turn = { id, protocol: 2, phase: 'investigators', rulingOnly: true, checkReactionActorId: declaration.actorId };
+      (s.turnIds ||= []).push(id);
+      s.lastTurnId = id;
+    }
+    recordReceipt(s, body, 'describe-action', null);
+    persist(s);
+    return view(s);
+  });
   route('post', '/roll', async body => {
     const s = load(body.sessionId);
     const cached = receipt(s, body, 'roll');
@@ -864,11 +1297,21 @@ export default function registerGamePlugin(ctx) {
     if (s.mode !== 'keeper' && !s.pendingCheck) fail('角色守秘人会自动掷骰');
     betweenTurns(s);
     if (s.outcome) fail('结局条件已达成，请确认结团');
-    if (s.pendingBatch) fail('请先暂停发言');
     if (body.checkId !== undefined && body.checkId !== s.pendingCheck?.id) fail('待执行检定已经变化', 409);
     const effects = [];
     const secret = s.mode === 'keeper' && body.secret === true;
-    const result = s.pendingCheck ? rollPending(s, secret, effects) : roll(s, body.targetChar, body, secret, effects);
+    let result;
+    if (body.actionLogId !== undefined) {
+      const declaration = currentDeclaration(s, body.actionLogId);
+      if (declaration.roll) fail('这条行动已经完成检定，请描述结果', 409);
+      applyDeclaredItem(s, declaration);
+      result = roll(s, declaration.actorId, { ...body, reason: declaration.reason }, secret, effects);
+      result.actionLogId = declaration.logId;
+      declaration.roll = result;
+    } else {
+      result = s.pendingCheck ? rollPending(s, secret, effects) : roll(s, body.targetChar, body, secret, effects);
+    }
+    s.presented = s.publicLog.length;
     recordReceipt(s, body, 'roll', result);
     saveWithEffects(s, effects);
     return { ...view(s), roll: result };
@@ -879,41 +1322,110 @@ export default function registerGamePlugin(ctx) {
     if (cached) return { ...view(s), result: cached.result };
     working(s); betweenTurns(s);
     if (s.outcome) fail('结局条件已达成，请确认结团');
-    if (s.pendingBatch || s.pendingCheck) fail('请先暂停发言并处理检定');
+    if (s.pendingCheck) fail('请先处理检定');
     const effects = [];
     const result = apply(s, body.tool, body.args || {}, effects);
+    s.presented = s.publicLog.length;
     recordReceipt(s, body, 'control', result);
     saveWithEffects(s, effects);
+    return { ...view(s), result };
+  });
+  route('post', '/give-item', async (body, _query, signal) => {
+    const s = load(body.sessionId);
+    if (s.mode !== 'keeper') fail('只有玩家 KP 可以在控制台发放道具', 403);
+    const cached = receipt(s, body, 'give-item');
+    if (cached) return { ...view(s), result: cached.result };
+    working(s); betweenTurns(s);
+    if (s.outcome) fail('结局条件已达成，请确认结团');
+    const target = body.targetChar;
+    let fields = body;
+    if (body.random === true) {
+      if (target !== PARTY_ID && character(s, target).outOfAction) fail('已退场的调查员不能接收道具');
+      const currentScene = scene(s);
+      const recent = s.publicLog.findLast(log => log.sceneId === currentScene.id && ['critical', 'fumble'].includes(log.roll?.rank) &&
+        (target === PARTY_ID || String(target) === log.roll.targetChar))?.roll;
+      const raw = await llm.complete({ rules: RANDOM_ITEM_RULES,
+        data: JSON.stringify({ era: s.scenario.meta.era, scene: { name: currentScene.name, publicDesc: currentScene.publicDesc },
+          roll: recent && { rank: recent.rank, skill: recent.skillName, reason: recent.reason } }),
+        task: '生成一件当前场景中可获得的道具。', scope: `${s.sessionId}:scene-item` }, { signal });
+      signal.throwIfAborted();
+      fields = json(raw);
+      if (!fields || typeof fields !== 'object' || Array.isArray(fields)) fail('随机道具格式有误，请重试', 502);
+    }
+    const result = giveItem(s, target, fields);
+    s.presented = s.publicLog.length;
+    recordReceipt(s, body, 'give-item', result);
+    persist(s);
+    return { ...view(s), result };
+  }, { disconnect: true });
+  route('post', '/use-item', async body => {
+    const s = load(body.sessionId);
+    if (s.mode === 'investigator' && body.targetChar !== undefined && body.targetChar !== PLAYER_ID) fail('只能为自己的调查员使用道具', 403);
+    const cached = receipt(s, body, 'use-item');
+    if (cached) return { ...view(s), result: cached.result };
+    working(s); betweenTurns(s);
+    if (s.outcome) fail('结局条件已达成，请确认结团');
+    if (s.itemsToResolve?.length) fail('请先完成当前道具裁定', 409);
+    if (!validId(body.itemId)) fail('道具编号无效');
+    const target = s.mode === 'investigator' ? PLAYER_ID : body.targetChar;
+    const result = useItem(s, character(s, target), body.itemId);
+    s.presented = s.publicLog.length;
+    recordReceipt(s, body, 'use-item', result);
+    persist(s);
     return { ...view(s), result };
   });
   route('post', '/replacement', async body => {
     const s = load(body.sessionId); working(s); betweenTurns(s);
     if (!s.investigators.some(c => c.outOfAction)) fail('当前没有退场调查员');
     if (!integer(body.characterId, 1, 2147483647) || s.keeper?.id === body.characterId || s.investigators.some(c => c.id === String(body.characterId))) fail('请选择尚未入场的角色');
-    const handout = s.scenario.handouts?.find(ho => !s.investigators.some(c => c.hoId === ho.id));
+    const available = (s.scenario.handouts || []).filter(ho => !s.investigators.some(c => c.hoId === ho.id));
+    const [handout] = dealHandouts(available, 1);
     const [card] = await makeCards([await bridgeTools.call('get_character_profile', { characterId: body.characterId })],
       [publicIdentity(s.scenario.investigatorRoles?.[s.investigators.length], handout)]);
     if (handout) Object.assign(card, { hoId: handout.id, handout });
-    s.investigators.push(card); addLog(s, 'KP', `替补调查员「${card.name}」加入了调查。`); persist(s); return view(s);
+    s.investigators.push(card); addLog(s, 'KP', `替补调查员「${card.name}」加入了调查。`);
+    s.presented = s.publicLog.length;
+    persist(s); return view(s);
   });
   route('post', '/retry-image', async body => {
-    const s = load(body.sessionId); working(s); betweenTurns(s);
-    if (s.imageJobs.some(j => j.status === 'running')) fail('图片仍在生成中');
-    s.imagesEnabled = true;
+    const s = load(body.sessionId); working(s);
+    const job = s.imageJobs.find(item => item.id === body.jobId);
+    if (!job || (job.logId ? !s.publicLog.slice(0, s.presented).some(log => log.id === job.logId) : job.kind !== 'scene')) fail('没有可重试的图片', 404);
+    if (job.status !== 'failed') fail('这张图无需重试', 409);
+    job.status = 'running';
+    job.attempt = (job.attempt || 0) + 1;
+    delete job.error;
     const effects = [];
-    queueMedia(s, 'scene', effects);
+    queueMedia(s, job, effects);
     saveWithEffects(s, effects);
     return view(s);
+  });
+  route('post', '/illustrate', async body => {
+    const s = load(body.sessionId);
+    if (s.mode !== 'keeper') fail('只有玩家 KP 可以登记新画面', 403);
+    const cached = receipt(s, body, 'illustrate');
+    if (cached) return { ...view(s), result: cached.result };
+    working(s); betweenTurns(s);
+    const effects = [];
+    const result = illustrate(s, body, effects);
+    s.presented = s.publicLog.length;
+    recordReceipt(s, body, 'illustrate', result);
+    saveWithEffects(s, effects);
+    return { ...view(s), result };
   });
   route('post', '/finish', async body => {
     const s = load(body.sessionId);
     if (!s.ended) {
+      playbackDone(s);
       if (s.scenario.rules && !s.outcome && body.abandon !== true) fail('尚未达成剧本结局条件，可继续调查或提前收团', 409);
       s.abandoned = !!s.scenario.rules && !s.outcome;
       delete s.turn;
-      s.pendingBatch = null; s.pendingCheck = null; s.ended = true;
+      s.pendingCheck = null; s.ended = true;
+      delete s.declaration;
       delete s.checkToResolve;
+      delete s.itemsToResolve;
       addLog(s, '落幕', text(body.ending, 1000).trim() || s.proposedEnding || s.outcome?.epilogue || (s.abandoned ? '调查提前收束，谜题留待后来人。' : '调查到此告一段落。桌上的骰子终于安静下来。'), '', 'ending');
+      s.presented = s.publicLog.length;
       delete s.proposedEnding;
       persist(s);
     }

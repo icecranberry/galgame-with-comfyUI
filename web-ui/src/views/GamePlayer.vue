@@ -11,12 +11,13 @@ import { useRoute, useRouter } from 'vue-router'
 import GameAction from '../games/components/GameAction.vue'
 import '../games/styles/game-ui.css'
 import { gameRequest } from '../api/games.js'
+import { createClientRequestId } from '../utils/clientRequestId.js'
 const route = useRoute(), router = useRouter(), frame = ref(null), game = ref(null), error = ref('')
 const openGameStandings = inject('openGameStandings')
 const base = `/${encodeURIComponent(route.params.gameId)}`, abort = new AbortController()
 const devQuery = import.meta.hot ? '?dev=1' : ''
 const frameRevision = ref(0)
-let channel = crypto.randomUUID()
+let channel = createClientRequestId()
 const seen = new Set(); let inFlight = 0
 let events
 let eventRetry, manifestRequest = 0, pendingFrameReload = false
@@ -28,6 +29,8 @@ const exit = () => {
   exitTimer = setTimeout(() => router.push('/games'), window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300)
 }
 const request = (path, options) => gameRequest(base + path, { ...options, signal: abort.signal })
+const isOfficialTrpg = () => game.value?.id === 'trpg-simulator' && game.value.source === 'official'
+const trpgAudioKey = 'linshe.trpg.audio'
 async function dispatch(method, args) {
   const id = () => { if (!/^[\w-]{1,80}$/.test(args.sessionId)) throw new Error('无效存档编号'); return encodeURIComponent(args.sessionId) }
   switch (method) {
@@ -39,6 +42,25 @@ async function dispatch(method, args) {
     case 'save.load': return request(`/sessions/${id()}`)
     case 'save.write': return request(`/sessions/${id()}`, { method: 'POST', body: args })
     case 'save.delete': return request(`/sessions/${id()}`, { method: 'DELETE' })
+    case 'trpg.audio.load': {
+      if (!isOfficialTrpg() || typeof args.file !== 'string' || !/^(?:bgm\/(?:explore|tense)\.mp3|ambience\/rain\.ogg|sfx\/[a-z0-9_]+\.ogg)$/.test(args.file)) {
+        throw new Error('音频资源不可用')
+      }
+      const response = await fetch(`/game-assets/trpg-simulator/web/assets/audio/${args.file}`, { signal: abort.signal })
+      if (!response.ok) throw new Error('音频资源不可用')
+      return response.arrayBuffer()
+    }
+    case 'trpg.audio.preferences': {
+      if (!isOfficialTrpg()) throw new Error('音频设置不可用')
+      const { settings } = args
+      if (settings === undefined) return JSON.parse(localStorage.getItem(trpgAudioKey))
+      const { music, effects, muted } = settings
+      if (![music, effects].every(value => Number.isFinite(value) && value >= 0 && value <= 1) || typeof muted !== 'boolean') {
+        throw new Error('音频设置无效')
+      }
+      localStorage.setItem(trpgAudioKey, JSON.stringify({ music, effects, muted }))
+      return { ok: true }
+    }
     case 'exit': exit(); return { ok: true }
     case 'standings': {
       const { subject } = args
@@ -67,9 +89,13 @@ async function dispatch(method, args) {
 async function receive(event) {
   if (event.source !== frame.value?.contentWindow || event.origin !== 'null') return
   const data = event.data
-  if (data?.type === 'linshe:game:ready') { channel = crypto.randomUUID(); seen.clear(); frame.value.contentWindow.postMessage({ type: 'linshe:host:init', channel }, '*'); return }
+  if (data?.type === 'linshe:game:ready') { channel = createClientRequestId(); seen.clear(); frame.value.contentWindow.postMessage({ type: 'linshe:host:init', channel }, '*'); return }
   if (data?.type !== 'linshe:rpc' || data.channel !== channel || !Number.isSafeInteger(data.id) || seen.has(data.id)) return
-  const target = event.source, requestChannel = channel, reply = result => target.postMessage({ type: 'linshe:rpc:result', channel: requestChannel, id: data.id, ...result }, '*')
+  const target = event.source, requestChannel = channel, reply = result => {
+    if (target !== frame.value?.contentWindow || channel !== requestChannel) return
+    const transfer = result.result instanceof ArrayBuffer ? [result.result] : []
+    target.postMessage({ type: 'linshe:rpc:result', channel: requestChannel, id: data.id, ...result }, '*', transfer)
+  }
   if (inFlight >= 16 || JSON.stringify(data).length > 5 * 1024 * 1024) { reply({ error: '游戏请求过多或数据过大' }); return }
   seen.add(data.id); if (seen.size > 10000) seen.delete(seen.values().next().value)
   inFlight++

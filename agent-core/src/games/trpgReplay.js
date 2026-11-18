@@ -1,16 +1,22 @@
 import { promptTokens, textTokens } from './trpgPromptBudget.js';
 
-export const GAME_REPLAY_RULE = '只执行最新 user 的任务，历史工具调用已处理，勿重复执行。历史回复中的行动提案以公开日志确认的结果为准。公开日志按出现顺序累积。<public_archive> 是较早公开日志的摘录。<round_state> 是按时间追加的状态更新。actorStates 按姓名和状态字段逐项更新，其余同名顶层字段整体替换。null 清空对应值，未出现的字段沿用。';
+export const GAME_REPLAY_RULE = '只执行最新 user 的任务。公开日志按出现顺序累积，以其中登记的叙事和检定结果为准，已经结算的行动无需重做。<public_archive> 是较早公开日志的摘录。<round_state> 是按时间追加的状态更新。actorStates 按姓名和状态字段逐项更新，illustrations 按事件编号合并，其余同名顶层字段整体替换。null 清空对应值，未出现的字段沿用。';
 const ARCHIVE_TOKENS = 1200;
+const LOG_BLOCK_OVERHEAD = promptTokens([{ role: 'user', content: '<public_log>\n\n</public_log>' }]) - promptTokens([]);
 
 function changedFields(before, after) {
   return Object.fromEntries([...new Set([...Object.keys(before), ...Object.keys(after)])].flatMap(key =>
     JSON.stringify(before[key]) === JSON.stringify(after[key]) ? [] : [[key, after[key] ?? null]]));
 }
 
-function publicLine({ speaker, kind, dialogue, action }) {
+function publicLine({ id, speaker, kind, dialogue, action }) {
+  if (kind === 'illustration') return `${speaker}：${id}`;
   const label = kind === 'scene' ? `${speaker}（场景）` : speaker;
   return `${label}：${dialogue || ''}${action ? `〔${action}〕` : ''}`.replace(/\r?\n/g, '\n  ');
+}
+
+function logRole({ kind, actorId }) {
+  return kind === 'dialogue' && actorId && actorId !== 'player' ? 'assistant' : 'user';
 }
 
 export function appendReplay(previous, records, fields, task) {
@@ -28,10 +34,11 @@ export function appendReplay(previous, records, fields, task) {
     if (Object.keys(patch).length) changes.actorStates = patch;
     else delete changes.actorStates;
   }
+  if (changes.illustrations && before.illustrations) changes.illustrations = changedFields(before.illustrations, changes.illustrations);
   const end = records.length;
   const segments = prior?.segments || [];
   return {
-    compact: true, start: prior?.start || 0, end, lastLogId: records[end - 1]?.id ?? null, fields,
+    compact: true, speakerRoles: true, start: prior?.start || 0, end, lastLogId: records[end - 1]?.id ?? null, fields,
     archive: prior?.archive || [],
     segments: [...segments, { end, changes, userTail: `</dynamic_context>\n${task}` }],
   };
@@ -53,9 +60,28 @@ export function turnHead(segment, records, start, archive, compact) {
 export function replayTurns(replay, records) {
   let start = replay.start;
   return replay.segments.flatMap((segment, index) => {
-    const content = turnHead(segment, records, start, index === 0 ? replay.archive : [], replay.compact) + segment.userTail;
+    const messages = [];
+    let logStart = start;
+    let archive = index === 0 ? replay.archive : [];
+    // An older in-flight checkpoint still uses its original user-only format.
+    if (replay.speakerRoles) {
+      for (let cursor = start; cursor < segment.end;) {
+        if (logRole(records[cursor]) !== 'assistant') {
+          cursor++;
+          continue;
+        }
+        const blocks = segmentBlocks({ end: cursor, changes: {} }, records, logStart, archive, replay.compact);
+        if (blocks.length) messages.push({ role: 'user', content: blocks.join('\n\n') });
+        archive = [];
+        let end = cursor + 1;
+        while (end < segment.end && logRole(records[end]) === 'assistant') end++;
+        messages.push({ role: 'assistant', content: records.slice(cursor, end).map(publicLine).join('\n') });
+        logStart = cursor = end;
+      }
+    }
+    const content = turnHead(segment, records, logStart, archive, replay.compact) + segment.userTail;
     start = segment.end;
-    return [{ role: 'user', content }, ...(segment.responses || [])];
+    return [...messages, { role: 'user', content }];
   });
 }
 
@@ -76,6 +102,7 @@ function archivedExcerpts(records, end, compact) {
   let dialogue = ARCHIVE_TOKENS - facts;
   for (let i = end - 1; i >= 0 && Math.max(facts, dialogue) >= 48; i--) {
     const { round, sceneId, kind, speaker, dialogue: say, action } = records[i];
+    if (kind === 'illustration') continue;
     const excerpt = [say, action].filter(Boolean).join(' ').slice(0, 160);
     const row = compact ? { kind, speaker, dialogue: excerpt } : { round, sceneId, kind, speaker, excerpt };
     const tokens = textTokens((compact ? publicLine(row) : JSON.stringify(row)) + '\n');
@@ -100,12 +127,16 @@ export function fitNativeReplay(replay, records, prefix, continuation, tools, in
 }
 
 function fitMessages(replay, records, assemble, tools, inputLimit) {
+  // Legacy saves kept completed provider messages here. The active checkpoint is separate.
+  if (replay.segments.some(segment => Object.hasOwn(segment, 'responses'))) {
+    replay = { ...replay, segments: replay.segments.map(({ responses, ...segment }) => segment) };
+  }
   const current = assemble(replay);
   if (promptTokens(current, tools) <= Math.floor(inputLimit * 0.9)) return { replay, messages: current };
 
   const baseline = { ...replay, start: replay.end, archive: [], segments: [{ ...replay.segments.at(-1), end: replay.end, changes: replay.fields }] };
   if (replay.compact) {
-    // Retire duplicated snapshots and completed tool messages before cutting the dialogue transcript.
+    // Consolidate state snapshots before cutting the dialogue transcript.
     const transcript = { ...baseline, start: replay.start, archive: replay.archive };
     const transcriptMessages = assemble(transcript);
     if (promptTokens(transcriptMessages, tools) <= Math.floor(inputLimit * 0.9)) return { replay: transcript, messages: transcriptMessages };
@@ -114,8 +145,15 @@ function fitMessages(replay, records, assemble, tools, inputLimit) {
   const retain = Math.max(0, Math.min(Math.floor(inputLimit * 0.75) - fixed, inputLimit - fixed) - ARCHIVE_TOKENS - 32);
   let start = replay.end;
   let used = 0;
+  let nextRole;
   while (start > replay.start) {
-    used += textTokens((replay.compact ? publicLine(records[start - 1]) : JSON.stringify(records[start - 1])) + '\n');
+    const row = records[start - 1];
+    if (replay.speakerRoles) {
+      const role = logRole(row);
+      if (role !== nextRole) used += LOG_BLOCK_OVERHEAD;
+      nextRole = role;
+    }
+    used += textTokens((replay.compact ? publicLine(row) : JSON.stringify(row)) + '\n');
     if (used > retain) break;
     start--;
   }

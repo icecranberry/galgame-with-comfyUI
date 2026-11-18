@@ -1,47 +1,72 @@
 import { ConvexPolyhedron, Vec3 } from 'cannon-es';
 import {
-  CanvasTexture, Float32BufferAttribute, IcosahedronGeometry, MeshPhysicalMaterial, Quaternion,
+  BoxGeometry, CanvasTexture, DodecahedronGeometry, Float32BufferAttribute, IcosahedronGeometry,
+  MeshPhysicalMaterial, OctahedronGeometry, TetrahedronGeometry,
   RepeatWrapping, SRGBColorSpace, Vector3
 } from 'three';
 
 const columns = 5;
-const rows = 2;
 const cell = 160;
 const up = new Vector3(0, 0, 1);
-const triangleUVs = [[0.5, 0.91], [0.035, 0.105], [0.965, 0.105]];
 
-export function createHull(radius) {
-  const geometry = new IcosahedronGeometry(radius, 0);
+export function createHull(radius, sides) {
+  const shapes = { 4: TetrahedronGeometry, 8: OctahedronGeometry, 10: IcosahedronGeometry, 12: DodecahedronGeometry, 20: IcosahedronGeometry };
+  const Shape = shapes[sides];
+  const edge = radius * 2 / Math.sqrt(3);
+  const mesh = Shape ? new Shape(radius, 0) : new BoxGeometry(edge, edge, edge);
+  const geometry = mesh.index ? mesh.toNonIndexed() : mesh;
+  if (geometry !== mesh) mesh.dispose();
   const { position, normal } = geometry.attributes;
-  const vertices = [], triangles = [], faces = [], uvs = [];
-  const vertexIndices = new Map();
+  const vertices = [], triangles = [], faces = [];
+  const vertexIndices = new Map(), triangleFaces = [];
   for (let i = 0; i < position.count; i += 3) {
-    const corners = [0, 1, 2].map(offset => new Vector3().fromBufferAttribute(position, i + offset));
-    triangles.push(corners.map(corner => {
-      const key = corner.toArray().join(',');
+    const indices = [0, 1, 2].map(offset => {
+      const corner = new Vector3().fromBufferAttribute(position, i + offset);
+      const key = corner.toArray().map(value => Math.round(value * 1e5)).join(',');
       if (!vertexIndices.has(key)) {
         vertexIndices.set(key, vertices.length);
         vertices.push(corner);
       }
       return vertexIndices.get(key);
-    }));
-    const edgeCenter = corners[1].clone().lerp(corners[2], 0.5);
-    faces.push({ normal: new Vector3().fromBufferAttribute(normal, i).normalize(), heading: corners[0].clone().sub(edgeCenter).normalize() });
+    });
+    const direction = new Vector3().fromBufferAttribute(normal, i).normalize();
+    let face = faces.find(candidate => candidate.normal.dot(direction) > .99999);
+    if (!face) {
+      face = { normal: direction, indices: new Set() };
+      faces.push(face);
+    }
+    indices.forEach(index => face.indices.add(index));
+    triangles.push(indices);
+    triangleFaces.push(face);
   }
 
-  // One digit per pair of opposite faces gives each digit two congruent faces.
-  let digit = 0;
-  for (const face of faces) {
-    if (face.digit !== undefined) continue;
-    const opposite = faces.find(other => other.normal.dot(face.normal) < -0.99999);
-    face.digit = opposite.digit = digit++;
+  let pairedDigit = 0;
+  let labelDiameter = Infinity;
+  for (const [index, face] of faces.entries()) {
+    if (face.digit === undefined) {
+      if (sides === 3 || sides === 10) {
+        const opposite = faces.find(other => other.normal.dot(face.normal) < -.99999);
+        face.digit = opposite.digit = pairedDigit++;
+      } else face.digit = index;
+    }
+    const corners = [...face.indices].map(index => vertices[index]);
+    const center = corners.reduce((sum, corner) => sum.add(corner), new Vector3()).divideScalar(corners.length);
+    const heading = corners[0].clone().sub(center).normalize();
+    if (corners.length === 4) heading.applyAxisAngle(face.normal, Math.PI / 4);
+    const across = heading.clone().cross(face.normal).normalize();
+    const offsets = corners.map(corner => {
+      const delta = corner.clone().sub(center);
+      return [delta.dot(across), delta.dot(heading)];
+    });
+    const span = Math.max(...offsets.flat().map(Math.abs));
+    const uvScale = .44 / span;
+    face.uv = new Map([...face.indices].map((corner, i) => [corner, offsets[i].map(value => .5 + value * uvScale)]));
+    // Keep the ink inside the face's inscribed circle, with room for texture filtering.
+    const inradius = corners[0].distanceTo(center) * Math.cos(Math.PI / corners.length);
+    labelDiameter = Math.min(labelDiameter, 2 * inradius * uvScale * cell * .9);
   }
-  for (const face of faces) {
-    const col = face.digit % columns, row = Math.floor(face.digit / columns);
-    for (const [u, v] of triangleUVs) uvs.push((col + u) / columns, 1 - (row + 1 - v) / rows);
-  }
-  geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
-  return { geometry, vertices, triangles, faces };
+
+  return { geometry, vertices, triangles, triangleFaces, faces, labelDiameter };
 }
 
 export function createCollider(hull) {
@@ -72,11 +97,12 @@ export function createRoughnessMap() {
   ctx.putImageData(grain, 0, 0);
   const texture = new CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = RepeatWrapping;
-  texture.repeat.set(columns, rows);
+  texture.repeat.set(columns, 2);
   return texture;
 }
 
-export function createMaterial(tens, roughnessMap) {
+export function createMaterial({ sides, tens, percentile }, roughnessMap, labelDiameter) {
+  const rows = Math.ceil(sides / columns);
   const createCanvas = () => {
     const canvas = document.createElement('canvas');
     canvas.width = columns * cell;
@@ -90,7 +116,7 @@ export function createMaterial(tens, roughnessMap) {
   height.fillStyle = '#ffffff';
   height.fillRect(0, 0, engraving.width, engraving.height);
 
-  for (let digit = 0; digit < 10; digit++) {
+  for (let digit = 0; digit < sides; digit++) {
     const left = (digit % columns) * cell, top = Math.floor(digit / columns) * cell;
     const tone = colors.createLinearGradient(left, top, left + cell, top + cell);
     tone.addColorStop(0, 'rgba(45, 24, 9, .20)');
@@ -101,16 +127,28 @@ export function createMaterial(tens, roughnessMap) {
   }
 
   for (const ctx of [colors, height]) {
-    ctx.font = `700 ${tens ? 59 : 69}px Georgia, serif`;
+    ctx.font = `700 ${tens || sides > 10 ? 57 : 66}px Georgia, serif`;
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = ctx === height ? '#000000' : tens ? '#f2e3c2' : '#161310';
-    for (let digit = 0; digit < 10; digit++) {
-      const x = (digit % columns + 0.5) * cell;
-      const y = (Math.floor(digit / columns) + 0.625) * cell;
-      const label = tens ? `${digit}0` : String(digit);
-      ctx.fillText(label, x, y, cell * 0.5);
-      if (!tens && (digit === 6 || digit === 9)) ctx.fillRect(x - 10, y + 29, 20, 3);
+  }
+  for (let digit = 0; digit < sides; digit++) {
+    const x = (digit % columns + 0.5) * cell;
+    const y = (Math.floor(digit / columns) + 0.5) * cell;
+    const label = tens ? `${digit}0` : String(percentile ? digit : digit + 1);
+    const { actualBoundingBoxLeft: left, actualBoundingBoxRight: right,
+      actualBoundingBoxAscent: ascent, actualBoundingBoxDescent: descent } = colors.measureText(label);
+    const marked = label === '6' || label === '9';
+    const bottom = descent + (marked ? 9 : 0);
+    const scale = Math.min(1, labelDiameter / Math.hypot(left + right, ascent + bottom));
+    const baseline = (ascent - bottom) / 2;
+    for (const ctx of [colors, height]) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.fillText(label, (left - right) / 2, baseline);
+      if (marked) ctx.fillRect(-10, baseline + descent + 6, 20, 3);
+      ctx.restore();
     }
   }
   const map = new CanvasTexture(surface);
@@ -127,14 +165,23 @@ export function readTopDigit(hull, rotation) {
   return hull.faces.reduce((top, face) => face.normal.dot(localUp) > top.normal.dot(localUp) ? face : top).digit;
 }
 
-export function alignDigit(hull, rotation, digit) {
-  const candidates = hull.faces.filter(face => face.digit === digit).map(face => {
-    const normal = face.normal.clone().applyQuaternion(rotation);
-    const result = new Quaternion().setFromUnitVectors(normal, up).multiply(rotation);
-    // Turn the print toward the screen's top edge after lifting the face.
-    const heading = face.heading.clone().applyQuaternion(result);
-    const yaw = new Quaternion().setFromAxisAngle(up, Math.atan2(heading.x, heading.y));
-    return result.premultiply(yaw).normalize();
+export function mapLandingDigit(hull, sides, rotation, target) {
+  const natural = readTopDigit(hull, rotation);
+  // Swap both groups before playback so paired faces keep the same digit count.
+  for (const face of hull.faces) {
+    if (face.digit === natural) face.digit = target;
+    else if (face.digit === target) face.digit = natural;
+  }
+
+  const rows = Math.ceil(sides / columns);
+  const uvs = [];
+  hull.triangles.forEach((triangle, index) => {
+    const face = hull.triangleFaces[index];
+    const col = face.digit % columns, row = Math.floor(face.digit / columns);
+    for (const corner of triangle) {
+      const [u, v] = face.uv.get(corner);
+      uvs.push((col + u) / columns, 1 - (row + 1 - v) / rows);
+    }
   });
-  return candidates.reduce((nearest, candidate) => rotation.angleTo(candidate) < rotation.angleTo(nearest) ? candidate : nearest);
+  hull.geometry.setAttribute('uv', new Float32BufferAttribute(uvs, 2));
 }

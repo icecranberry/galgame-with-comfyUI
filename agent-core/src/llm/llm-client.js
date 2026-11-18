@@ -29,7 +29,7 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
     signal?.throwIfAborted();
     requestBudget?.validate(params, messages);
     console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
-    console.log(JSON.stringify(compressLogMessages(messages, !!requestBudget), null, 2));
+    console.log(JSON.stringify(compressLogMessages(params.messages), null, 2));
     console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, tool_choice=${params.tool_choice ?? 'none'}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
     if (!forceThinking) {
       const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
@@ -417,9 +417,8 @@ export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = co
 }
 
 // 日志打印前压缩超大内容：ANIMA3 模板与视觉消息里的图片 base64（几 MB）都不进控制台
-function compressLogMessages(messages, summarize = false) {
+function compressLogMessages(messages) {
   return messages.map(m => {
-    if (summarize) return { role: m.role, characters: m.content?.length || 0, toolCalls: m.tool_calls?.length || 0 };
     if (Array.isArray(m.content)) {
       return {
         ...m,
@@ -480,7 +479,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   let canFallbackThinking = forcedMode === 'enabled' && fallbackToConfiguredThinking;
 
   // 日志打印时压缩 ANIMA3 模板内容，避免刷屏
-  const logMsgs = compressLogMessages(messages, !!requestBudget);
+  const logMsgs = compressLogMessages(messages);
   // 先缓存请求日志，等响应返回后一起输出，避免并行调用时控制台输出串行
   const requestLog =
     `\n══════════ [${providerLabel()} → ${label}] ══════════\n` +

@@ -5,12 +5,10 @@ import {
   Quaternion, ShadowMaterial, SpotLight, Vector3
 } from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { landRoll } from './landing.js';
-import { createCollider, createHull, createMaterial, createRoughnessMap, readTopDigit } from './percentile-dice.js';
+import { createCollider, createHull, createMaterial, createRoughnessMap, mapLandingDigit, readTopDigit } from './percentile-dice.js';
 
 const fps = 60;
 const finishLimit = fps * 3.5;
-const landingFrames = Math.round(fps * 0.42);
 
 function addReflectionStrips(room) {
   const strips = [
@@ -28,13 +26,13 @@ function addReflectionStrips(room) {
 }
 
 class GoldDiceBox extends DiceBox {
-  constructor(container, callbacks) {
+  constructor(container, diceCount, callbacks) {
     const size = Math.min(container.clientWidth, container.clientHeight);
     super(container, {
       ...callbacks, framerate: 1 / fps, gravity_multiplier: size * 0.49, theme_texture: 'none'
     });
     this.size = size;
-    this.radius = size * 0.104 + 6;
+    this.radius = size * 0.14 / Math.sqrt(diceCount) + 5;
   }
 
   // Keep a single tray geometry for the recording. CSS fits the canvas on resize.
@@ -84,69 +82,61 @@ class GoldDiceBox extends DiceBox {
     this.roughness = createRoughnessMap();
   }
 
-  spawnPercentileDie(i) {
+  spawnDie(spec, index, count) {
     const { containerWidth: width, containerHeight: height } = this.display;
     const { radius, size } = this;
-    const die = new Mesh(this.hull.geometry, createMaterial(i === 0, this.roughness));
+    const hull = createHull(radius, spec.sides);
+    const die = new Mesh(hull.geometry, createMaterial(spec, this.roughness, hull.labelDiameter));
     const body = new Body({
-      mass: 350, shape: createCollider(this.hull), material: this.dice_body_material,
+      mass: 350, shape: createCollider(hull), material: this.dice_body_material,
       linearDamping: 0.56, angularDamping: 0.64, sleepSpeedLimit: size * 0.09, sleepTimeLimit: 0.5
     });
-    body.position.set(-width * 0.36 + i * 2.05 * radius, height * 0.34 + i * 0.45 * radius, size * 0.39 + i * 0.45 * radius);
-    body.velocity.set(width * 0.51 + (i ? -2.1 : 2.1) * radius, -height * 0.55, -size * 0.1);
-    body.angularVelocity.set(10 + Math.random() * 6, -8 + Math.random() * 6, (i ? -1 : 1) * 5);
+    const columns = Math.ceil(Math.sqrt(count));
+    body.position.set(-width * 0.26 + (index % columns) * 2.25 * radius, height * 0.28 - Math.floor(index / columns) * 2.25 * radius, size * 0.39);
+    body.velocity.set(width * 0.48 + (index % 2 ? -1.6 : 1.6) * radius, -height * 0.52, -size * 0.10);
+    body.angularVelocity.set(10 + Math.random() * 6, -8 + Math.random() * 6, (index % 2 ? -1 : 1) * 5);
     body.quaternion.copy(new Quaternion().random());
     die.body = body;
     die.castShadow = true;
     this.diceList.push(die);
     this.world.addBody(body);
     this.scene.add(die);
+    return hull;
   }
 
-  roll(value) {
-    const digits = [Math.floor(value / 10) % 10, value % 10];
-    this.hull = createHull(this.radius);
-    this.spawnPercentileDie(0);
-    this.spawnPercentileDie(1);
+  roll(dice, onImpact) {
+    const hulls = dice.map((spec, index) => this.spawnDie(spec, index, dice.length));
     const frames = [];
-    // Keep the physical throw and blend the requested faces into its moving tail.
+    const impacts = [];
+    let strongest = 0;
+    const captureImpact = ({ contact }) => {
+      strongest = Math.max(strongest, Math.abs(contact.getImpactVelocityAlongNormal()) / this.size);
+    };
+    if (onImpact) for (const { body } of this.diceList) body.addEventListener('collide', captureImpact);
     for (let step = 0; step <= finishLimit; step++) {
       frames.push(this.diceList.map(({ body }) => ({
         position: new Vector3().copy(body.position),
         rotation: new Quaternion().copy(body.quaternion).normalize()
       })));
-      if (this.diceList.every(({ body }) => body.sleepState === Body.SLEEPING)) {
-        this.replay(landRoll(this.hull, frames, digits, landingFrames), () => this.completeRoll(value));
-        return;
-      }
+      if (this.diceList.every(({ body }) => body.sleepState === Body.SLEEPING)) break;
+      strongest = 0;
       this.world.step(this.framerate);
+      if (strongest > 0) impacts.push({ frame: step + 1, speed: strongest });
     }
-    throw new Error('Percentile dice did not settle');
-  }
-
-  completeRoll(value) {
-    const rolls = this.diceList.map((die, i) => {
-      const digit = readTopDigit(this.hull, die.quaternion);
-      const label = i === 0 ? `${digit}0` : String(digit);
-      const type = i === 0 ? 'd100' : 'd10';
-      return {
-        id: i, sides: 20, type, value: Number(label), label, reason: 'forced',
-        position: { x: die.position.x, y: die.position.y, z: die.position.z },
-        screenPosition: this.getScreenPosition(die.position), scale: die.scale.x
-      };
+    if (onImpact) for (const { body } of this.diceList) body.removeEventListener('collide', captureImpact);
+    const settled = frames.at(-1);
+    dice.forEach(({ sides, face }, index) => mapLandingDigit(hulls[index], sides, settled[index].rotation, face));
+    this.replay(frames, impacts, onImpact, () => {
+      if (dice.some(({ face }, index) => readTopDigit(hulls[index], this.diceList[index].quaternion) !== face)) {
+        throw new Error('Dice faces did not match the server');
+      }
+      this.onRollComplete();
     });
-    const total = rolls.reduce((sum, die) => sum + die.value, 0) || 100;
-    if (total !== value) throw new Error('Percentile faces did not match the server');
-    const results = {
-      notation: '1d100', modifier: 0, total,
-      sets: rolls.map(roll => ({ type: roll.type, sides: roll.sides, num: 1, rolls: [roll], total: roll.value }))
-    };
-    this.onRollComplete(results);
-    document.dispatchEvent(new CustomEvent('rollComplete', { detail: results }));
   }
 
-  replay(frames, complete) {
+  replay(frames, impacts, onImpact, complete) {
     const last = frames.length - 1;
+    let impactIndex = 0;
     let start;
     const draw = now => {
       try {
@@ -158,6 +148,13 @@ class GoldDiceBox extends DiceBox {
           die.quaternion.slerpQuaternions(frames[a][i].rotation, frames[b][i].rotation, frame - a);
         });
         this.renderer.render(this.scene, this.camera);
+        // Physics runs ahead of the animation. Play contacts as the matching frames are drawn.
+        let strongest = 0;
+        while (impacts[impactIndex]?.frame <= frame) {
+          const impact = impacts[impactIndex++];
+          if (frame - impact.frame <= 3) strongest = Math.max(strongest, impact.speed);
+        }
+        if (strongest > 0) onImpact(strongest);
         if (frame < last) this.frame = requestAnimationFrame(draw);
         else complete();
       } catch (error) {
@@ -170,12 +167,12 @@ class GoldDiceBox extends DiceBox {
   dispose() {
     cancelAnimationFrame(this.frame);
     for (const die of this.diceList) {
+      die.geometry.dispose();
       die.material.map.dispose();
       die.material.bumpMap.dispose();
       die.material.dispose();
       this.world.removeBody(die.body);
     }
-    this.hull?.geometry.dispose();
     this.desk?.geometry.dispose();
     this.desk?.material.dispose();
     this.roughness?.dispose();
@@ -187,8 +184,15 @@ class GoldDiceBox extends DiceBox {
   }
 }
 
-function play(container, value, signal, onRollComplete) {
-  if (signal.aborted || !Number.isInteger(value) || value < 1 || value > 100) return false;
+function play(container, roll, signal, onRollComplete, onImpact) {
+  const sides = roll.sides || 100;
+  const values = roll.rolls?.length ? roll.rolls : [roll.value];
+  if (signal.aborted || ![3, 4, 6, 8, 10, 12, 20, 100].includes(sides) ||
+      values.length > 6 || values.some(value => !Number.isInteger(value) || value < 1 || value > sides)) return false;
+  const dice = values.flatMap(value => sides === 100 ? [
+    { sides: 10, tens: true, percentile: true, face: Math.floor(value / 10) % 10 },
+    { sides: 10, percentile: true, face: value % 10 },
+  ] : [{ sides, face: value - 1 }]);
   return new Promise(resolve => {
     let box;
     const stop = () => {
@@ -202,15 +206,15 @@ function play(container, value, signal, onRollComplete) {
       resolve(true);
     };
     const fail = error => {
-      console.debug('D100 WebGL fallback:', error.message);
+      console.debug('TRPG dice:', error.message);
       stop();
     };
     signal.addEventListener('abort', stop, { once: true });
-    box = new GoldDiceBox(container, { onRollComplete: complete, onFailure: fail });
+    box = new GoldDiceBox(container, dice.length, { onRollComplete: complete, onFailure: fail });
     box.initialize().then(() => {
       if (signal.aborted) return;
       box.renderer.domElement.addEventListener('webglcontextlost', stop, { once: true });
-      box.roll(value);
+      box.roll(dice, onImpact);
     }).catch(fail);
   });
 }
