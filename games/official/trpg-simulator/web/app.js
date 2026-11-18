@@ -1,24 +1,47 @@
-/* Independent, dependency-free game frontend. All durable state lives in SDK saves. */
+/* Independent game frontend. All durable state lives in SDK saves. */
 (() => {
   const sdk = window.LinSheGameSDK, root = document.getElementById('app'), dialog = document.getElementById('drawer');
   let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, busy = false, playing = false, generation = 0, ackFlight, stopping;
-  let mode = 'keeper', scenarioId = '', keeperId = null, importedScenario, imagesEnabled = false, draft = '', npcSpeaker = '';
+  let mode = 'keeper', scenarioId = '', keeperId = null, importedScenario, imagesEnabled = true, draft = '', npcSpeaker = '';
   let castAssets, playerExpression = 'normal', turnPreview;
   const lineups = { keeper: [], investigator: [] };
   const partyLimits = { keeper: 4, investigator: 5 };
   const customScenarioId = 'custom';
   const view = window.TrpgPresentation;
-  let activeTab = 'narrative', diceAnimating = false, diceVersion = 0, secretRoll = null;
+  let activeTab = 'narrative', diceAnimating = false, secretRoll = null;
   const fields = {}, recentRolls = [], knownLogs = new Set(), scrollPositions = {};
+  const diceQueue = [], pendingRolls = new Set(), seenRolls = new Set();
+  const pendingOperations = new Map();
+  let submittedTurn;
+  let autoRuling = false, controlDice = 'd20', controlMode = 'normal';
   let uiSessionId, lastBackground = '';
   let controlChar = '', controlSkill = '侦查', controlDifficulty = 'regular', clueId = '', sceneId = '', replacementId = '';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=& -]+$/.test(value || '') ? value : '';
   const button = (action, label, kind = '', extra = '') => `<button type="button" data-action="${action}" class="${kind}" ${extra}>${label}</button>`;
   const post = (url, body) => sdk.ext.request(url, { method: 'POST', body: JSON.stringify({ ...(state ? { sessionId: state.sessionId } : {}), ...body }) });
+  const readState = sessionId => sdk.ext.request(`/state?sessionId=${encodeURIComponent(sessionId)}`);
+  const newOperationId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+  async function retryablePost(url, body) {
+    const key = JSON.stringify([state.sessionId, url, body]);
+    const operationId = pendingOperations.get(key) || newOperationId();
+    pendingOperations.set(key, operationId);
+    const result = await post(url, { ...body, operationId });
+    pendingOperations.delete(key);
+    return result;
+  }
   const name = id => state?.investigators.find(c => c.id === id)?.name || '调查员';
   function notice(message, error = false) { const el = document.getElementById('notice'); el.textContent = message; el.className = error ? 'visible error' : 'visible'; clearTimeout(notice.timer); notice.timer = setTimeout(() => { el.className = ''; }, 6000); }
-  async function work(fn) { if (busy) return; busy = true; refreshBusy(); try { await fn(); } catch (error) { notice(error.message, true); } finally { busy = false; refreshBusy(); } }
+  async function work(fn) { if (busy) return; busy = true; refreshBusy(); try { await fn(); } catch (error) { notice(error.message, true); } finally { busy = false; refreshBusy(); advanceRuling(); } }
+  function advanceRuling() {
+    if (!autoRuling || !state || busy || playing || diceAnimating || dialog.open || stopping) return;
+    autoRuling = false;
+    if (state.pendingCheck) {
+      if (state.mode === 'investigator') work(state.pendingTurn ? turn : () => dice(false));
+      return;
+    }
+    if (state.pendingTurn || state.awaitingRuling) work(turn);
+  }
   function refreshBusy() { document.querySelectorAll('[data-network]').forEach(el => { el.dataset.blocked ??= String(el.disabled); el.disabled = busy || el.dataset.blocked === 'true'; }); document.body.classList.toggle('is-busy', busy); const status = document.getElementById('working'); if (status) status.textContent = busy ? '正在整理线索…' : ''; }
   function modal(title, content, wide = false) {
     dialog.classList.remove('closing'); dialog.classList.toggle('wide', wide); dialog.classList.toggle('lobby-drawer', !state);
@@ -26,7 +49,7 @@
     wireChoices();
     if (!dialog.open) dialog.showModal();
   }
-  function closeModal() { if (!dialog.open || dialog.classList.contains('closing')) return; dialog.classList.add('closing'); setTimeout(() => { dialog.close(); dialog.classList.remove('closing'); if (state?.pendingBatch && !playing && !busy) play().catch(error => notice(error.message, true)); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300); }
+  function closeModal() { if (!dialog.open || dialog.classList.contains('closing')) return; dialog.classList.add('closing'); setTimeout(() => { dialog.close(); dialog.classList.remove('closing'); if (state?.pendingBatch && !playing && !busy) play().catch(error => notice(error.message, true)); advanceRuling(); }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300); }
   dialog.addEventListener('cancel', e => { e.preventDefault(); closeModal(); });
   dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) closeModal(); } });
   function wireChoices() { document.querySelectorAll('[data-picker]').forEach(group => { group.value = group.dataset.value; }); }
@@ -104,17 +127,17 @@
     modal('规则说明', `<dl class="lobby-rules">
       <div><dt>守秘人（KP）</dt><dd>描述现场、扮演 NPC、分发线索并裁定检定。受邀邻舍作为 AI 调查员行动。</dd></div>
       <div><dt>调查员（PL）</dt><dd>你以酒馆设置中的玩家身份调查。选择一位邻舍担任守秘人，也可邀请邻舍当 AI 队友。</dd></div>
-      <div><dt>D100 检定</dt><dd>骰值不高于目标值即通过。普通、困难、极难分别以技能值、其一半和五分之一为目标。掷出 1 为大成功，96–100 为大失败。</dd></div>
+      <div><dt>技能检定</dt><dd>通常掷 D20，点数加技能修正后需达到目标值 10／14／18。优势取两骰高值，劣势取低值。D100 按百分比判定，点数不高于目标值即通过。</dd></div>
       <div><dt>生命与理智</dt><dd>生命（HP）或理智（SAN）归零时角色退场。仍可引入替补或继续推进结局。</dd></div>
     </dl>`);
   }
-  const ui = () => ({ tab: activeTab, characters, castAssets, playerExpression, catalog, controlChar, controlSkill, controlDifficulty, clueId, sceneId, replacementId, fields, secretRoll, rolls: recentRolls, draft, npcSpeaker, playing });
+  const ui = () => ({ tab: activeTab, characters, castAssets, playerExpression, catalog, controlChar, controlSkill, controlDifficulty, controlDice, controlMode, clueId, sceneId, replacementId, fields, secretRoll, rolls: recentRolls, pendingRolls, draft, npcSpeaker, playing });
   function logs(list) { return view.logs(state, list); }
   function render() {
     if (!state) { lobby(); return; }
     const entering = uiSessionId !== state.sessionId;
     const previousTab = document.querySelector('[role=tab][aria-selected=true]')?.dataset.tab;
-    if (entering) { lastBackground = ''; playerExpression = 'normal'; activeTab = 'narrative'; uiSessionId = state.sessionId; controlChar = ''; sceneId = state.scene.id; knownLogs.clear(); recentRolls.length = 0; secretRoll = null; }
+    if (entering) { lastBackground = ''; playerExpression = 'normal'; activeTab = 'narrative'; uiSessionId = state.sessionId; controlChar = ''; sceneId = state.scene.id; knownLogs.clear(); seenRolls.clear(); recentRolls.length = 0; secretRoll = null; }
     if (state.mode !== 'keeper' && activeTab === 'keeper') activeTab = 'narrative';
     const focus = document.activeElement?.id, pos = document.activeElement?.selectionStart;
     const oldTranscript = document.getElementById('transcript');
@@ -160,17 +183,27 @@
       view.updateCast(root.querySelector('.stage-cast'), state, ui(), spoken);
       transcript.scrollTop = transcript.scrollHeight;
       ackFlight = post('/ack', { batchId: batch.id, count: batch.acked + 1 });
-      try { state = await ackFlight; } finally { ackFlight = null; }
+      try {
+        state = await ackFlight;
+        if (state.awaitingRuling) autoRuling = true;
+        if (state.roll) showDice(state.roll);
+      } finally { ackFlight = null; }
       if (generation !== epoch) break;
-      render(); if (state.pendingCheck) break;
+      render(); if (state.pendingCheck || !state.pendingBatch) break;
       await new Promise(resolve => setTimeout(resolve, 1300));
     }
     if (generation === epoch) { playing = false; render(); }
+    advanceRuling();
   }
   async function turn() {
-    await stopQueue();
+    const { pendingTurn, sessionId } = state;
+    if (!pendingTurn) await stopQueue();
     const retired = state.investigators.some(c => c.player && c.outOfAction);
-    const message = retired ? '' : draft.trim();
+    const request = pendingTurn ? { turnId: pendingTurn.id, resume: true } : submittedTurn || {
+      turnId: newOperationId(), message: retired || state.awaitingRuling ? '' : draft.trim(), speaker: npcSpeaker, expressionSlot: playerExpression,
+    };
+    if (!pendingTurn) submittedTurn = request;
+    const { message } = request;
     if (message) {
       const signature = state.mode === 'keeper' ? npcSpeaker.trim() : '';
       turnPreview = { actorId: 'player', speaker: signature || state.player.name,
@@ -178,36 +211,77 @@
       view.updateCast(root.querySelector('.stage-cast'), state, ui(), turnPreview);
     }
     try {
-      state = await post('/turn', { message, speaker: npcSpeaker, expressionSlot: playerExpression });
-      draft = '';
+      state = await post('/turn', request);
+      if (state.pendingTurn?.autoRollId) autoRuling = true;
+      for (const log of state.publicLog.filter(log => log.roll && !knownLogs.has(log.id))) showDice(log.roll);
+      submittedTurn = undefined;
+      if (message && draft.trim() === message) draft = '';
+    } catch (error) {
+      const current = await readState(sessionId).catch(() => null);
+      if (current) {
+        state = current;
+        submittedTurn = undefined;
+        if (message && draft.trim() === message && (current.pendingTurn?.id === request.turnId || current.lastTurnId === request.turnId)) draft = '';
+      }
+      if (state.pendingTurn) activeTab = 'narrative';
+      throw error;
     } finally {
       turnPreview = null;
       render();
     }
     if (state.pendingBatch) setTimeout(() => { play().catch(error => { playing = false; notice(error.message, true); render(); }); }, 0);
   }
-  async function control(tool, args) { await stopQueue(); state = await post('/control', { tool, args }); render(); }
-  function readControl() { controlChar = document.getElementById('target')?.value || controlChar; controlSkill = document.getElementById('skill')?.value || controlSkill; controlDifficulty = document.getElementById('difficulty')?.value || controlDifficulty; clueId = document.getElementById('clue')?.value || clueId; sceneId = document.getElementById('scene')?.value || sceneId; replacementId = document.getElementById('replacement')?.value || replacementId; }
+  async function control(tool, args) {
+    await stopQueue();
+    state = await retryablePost('/control', { tool, args });
+    if (tool === 'roll_dice') showDice(state.result, args.secret);
+    render();
+  }
+  function readControl() { controlChar = document.getElementById('target')?.value || controlChar; controlSkill = document.getElementById('skill')?.value || controlSkill; controlDifficulty = document.getElementById('difficulty')?.value || controlDifficulty; controlDice = document.getElementById('check-dice')?.value || controlDice; controlMode = document.getElementById('check-mode')?.value || controlMode; clueId = document.getElementById('clue')?.value || clueId; sceneId = document.getElementById('scene')?.value || sceneId; replacementId = document.getElementById('replacement')?.value || replacementId; }
   async function dice(manual) {
     const secret = document.getElementById('secret-roll')?.checked;
-    await stopQueue(); const result = await post('/roll', manual ? { targetChar: controlChar, skill: controlSkill, difficulty: controlDifficulty, secret } : {});
-    const roll = result.roll; delete result.roll; state = result; render();
+    await stopQueue();
+    const checkId = state.pendingCheck?.id;
+    const result = await retryablePost('/roll', manual ? { targetChar: controlChar, skill: controlSkill, difficulty: controlDifficulty, dice: controlDice, mode: controlDice === 'd20' ? controlMode : 'normal', secret, checkId } : { checkId });
+    const roll = result.roll; delete result.roll; state = result;
+    if (state.mode === 'investigator') autoRuling = true;
     showDice(roll, secret);
   }
   function showDice(roll, secret = false) {
-    const version = ++diceVersion;
-    if (secret) { secretRoll = roll; activeTab = 'keeper'; }
-    else { activeTab = 'narrative'; if (!recentRolls.some(r => view.rollKey(r) === view.rollKey(roll))) recentRolls.push(roll); }
-    diceAnimating = true; render();
-    view.animateDice(roll, secret).finally(() => {
-      if (version !== diceVersion) return;
+    if (roll.logId && seenRolls.has(roll.logId)) { render(); return; }
+    if (roll.logId) seenRolls.add(roll.logId);
+    pendingRolls.add(view.rollKey(roll));
+    diceQueue.push({ roll, secret });
+    if (!diceAnimating) drainDice().catch(error => notice(error.message, true));
+  }
+  async function drainDice() {
+    diceAnimating = true;
+    root.inert = true;
+    try {
+      while (diceQueue.length) {
+        const { roll, secret } = diceQueue.shift();
+        const key = view.rollKey(roll);
+        activeTab = secret ? 'keeper' : 'narrative';
+        render();
+        try { await view.animateDice(roll, secret); } catch (error) { console.warn('Dice animation failed', error); }
+        pendingRolls.delete(key);
+        if (secret) secretRoll = roll;
+        else if (!state.publicLog.some(log => log.id === roll.logId)) recentRolls.push(roll);
+        render();
+        const card = [...root.querySelectorAll('[data-roll-key]')].findLast(el => el.dataset.rollKey === key && el.getClientRects().length);
+        card?.classList.add('just-landed');
+        card?.scrollIntoView({ block: 'nearest' });
+      }
+    } finally {
+      root.inert = false;
       diceAnimating = false;
       if (state?.pendingBatch && !playing && !busy) play().catch(error => notice(error.message, true));
-    });
+      advanceRuling();
+    }
   }
-  async function reloadLobby() { saves = await sdk.save.list(); state = null; uiSessionId = null; draft = ''; lobby(); }
+  async function reloadLobby() { saves = await sdk.save.list(); state = null; uiSessionId = null; submittedTurn = undefined; autoRuling = false; draft = ''; lobby(); }
   document.addEventListener('input', e => {
-    if (['stat-reason', 'handout', 'encounter'].includes(e.target.id)) fields[e.target.id] = e.target.value;
+    if (['stat-reason', 'handout', 'encounter', 'pool-count', 'pool-reason'].includes(e.target.id)) fields[e.target.id] = e.target.value;
     if (e.target.id === 'message') { draft = e.target.value; if (playing || state?.pendingBatch) stopQueue().catch(error => notice(error.message, true)); }
     if (e.target.id === 'npc-speaker') npcSpeaker = e.target.value;
     if (e.target.id === 'scenario-draft') document.getElementById('scenario-edit-error').textContent = '';
@@ -233,7 +307,7 @@
     if (e.target.id === 'message' && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); work(async () => { await turn(); }); } });
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-action]'); if (!el || el.disabled) return; const action = el.dataset.action; readControl();
-    if (action === 'choice') { const group = el.closest('[data-picker]'); group.dataset.value = el.dataset.value; group.value = el.dataset.value; group.querySelectorAll('button').forEach(item => { const chosen = item === el; item.classList.toggle('selected', chosen); item.setAttribute('aria-pressed', String(chosen)); }); readControl(); return; }
+    if (action === 'choice') { const group = el.closest('[data-picker]'); group.dataset.value = el.dataset.value; group.value = el.dataset.value; group.querySelectorAll('button').forEach(item => { const chosen = item === el; item.classList.toggle('selected', chosen); item.setAttribute('aria-pressed', String(chosen)); }); readControl(); if (group.id === 'check-dice') { render(); root.querySelector('#check-dice .selected')?.focus({ preventScroll: true }); } return; }
     if (action === 'tab') { activeTab = el.dataset.tab; render(); document.getElementById('tab-' + activeTab)?.focus({preventScroll:true}); return; }
     if (action === 'evidence') { const clue = state.clues.find(c => c.id === el.dataset.id); if (clue) modal(clue.title, `<article class="evidence-detail"><span class="evidence-label">${clue.isSecret ? '私密证物' : '公开证物'}</span><p>${view.highlight(clue)}</p></article>`); return; }
     if (action === 'close') { closeModal(); return; }
@@ -263,7 +337,11 @@
     if (action === 'apply-scenario') { applyScenario(); return; }
     if (action === 'history') { modal('日志回溯', `<div class="history-log">${logs(state.publicLog)}</div>`, true); return; }
     if (action === 'images') { modal('场景印相', `${state.imageJobs.length ? state.imageJobs.map(j => `<article class="image-proof">${j.url ? `<img src="${esc(image(j.url))}" alt="游戏场景图">${button('promote', '收藏到邻舍相册', '', `data-url="${esc(j.url)}" data-network`)}` : `<p class="field-note">${j.status === 'running' ? '正在显影…' : esc(j.error || '显影中断')}</p>`}</article>`).join('') : '<p class="empty-copy">尚未拍下场景。生成图片会使用当前生图服务。</p>'}<div class="dialog-footer">${button('retry-image', '拍下当前场景', '', 'data-network')}</div>`); return; }
-    if (action === 'finish-dialog') { modal('让这场调查落幕', `<label for="ending">这一局的结尾</label><textarea id="ending" rows="4" maxlength="1000" placeholder="留下最后一句话…">${state.ended ? esc(state.publicLog.at(-1)?.dialogue) : ''}</textarea><label class="checkbox-label"><input id="write-memory" type="checkbox" ${state.memoryWritten ? 'checked disabled' : ''}>作为“桌游／剧本杀回忆”写入角色长期记忆</label><div class="dialog-footer">${button('finish', state.ended ? '保存回忆' : '封存这份卷宗', 'primary', 'data-network')}</div>`); return; }
+    if (action === 'finish-dialog') {
+      const abandon = state.rulesEnabled && !state.outcome && !state.ended;
+      modal(state.outcome?.label || (abandon ? '提前收团' : '让这场调查落幕'), `<label for="ending">这一局的结尾</label><textarea id="ending" rows="4" maxlength="1000" placeholder="留下最后一句话…">${esc(state.ended ? state.publicLog.at(-1)?.dialogue : state.proposedEnding)}</textarea><label class="checkbox-label"><input id="write-memory" type="checkbox" ${state.memoryWritten ? 'checked disabled' : ''}>作为“桌游／剧本杀回忆”写入角色长期记忆</label><div class="dialog-footer">${button('finish', state.ended ? '保存回忆' : abandon ? '确认提前收团' : '封存这份卷宗', 'primary', `data-network data-abandon="${abandon}"`)}</div>`);
+      return;
+    }
     if (action === 'delete-save') { modal('删除存档', '<p class="empty-copy">这份存档与对应游戏图片将一并删除。</p><div class="dialog-footer">' + button('confirm-delete', '删除存档', 'danger', `data-id="${esc(el.dataset.id)}" data-network`) + '</div>'); return; }
     if (action === 'pause') { stopQueue().then(render).catch(error => notice(error.message, true)); return; }
     if (action === 'next' && state.pendingBatch) { play().catch(error => { playing = false; notice(error.message, true); render(); }); return; }
@@ -276,7 +354,15 @@
             scenario: scenarioId === customScenarioId ? importedScenario : undefined, keeperId, imagesEnabled });
           draft = ''; render(); break;
         }
-        case 'load': state = await sdk.ext.request(`/state?sessionId=${encodeURIComponent(el.dataset.id)}`); render(); break;
+        case 'load': {
+          state = await readState(el.dataset.id);
+          const autoRollId = state.pendingTurn?.autoRollId;
+          autoRuling = !!autoRollId || (state.awaitingRuling && !state.pendingTurn) || (state.mode === 'investigator' && !!state.pendingCheck);
+          render();
+          const savedRoll = autoRollId && state.publicLog.find(log => log.id === autoRollId)?.roll;
+          if (savedRoll) showDice(savedRoll);
+          break;
+        }
         case 'manage-standings': await sdk.ui.openStandings(el.dataset.subject === 'player' ? 'player' : Number(el.dataset.subject)); break;
         case 'exit-game': await sdk.ui.exit(); break;
         case 'confirm-delete': await sdk.save.delete(el.dataset.id); closeModal(); await reloadLobby(); break;
@@ -285,7 +371,9 @@
         case 'send': if (draft.trim()) await turn(); break;
         case 'roll': await dice(false); break;
         case 'manual-roll': await dice(true); break;
+        case 'pool-roll': await control('roll_dice', { sides: Number(el.dataset.sides), count: Number(fields['pool-count'] || 1), reason: fields['pool-reason']?.trim() || '随机掷骰', secret: !!fields['secret-roll'] }); break;
         case 'switch-scene': await control('switch_scene', { sceneId }); break;
+        case 'scenario-action': await control('resolve_scenario_action', { actionId: el.dataset.id }); break;
         case 'stat': { const i = Number(el.dataset.stat); await control('update_investigator_stat', { targetChar: controlChar, hpDelta: i < 2 ? (i === 0 ? -1 : 1) : 0, sanDelta: i >= 2 ? (i === 2 ? -1 : 1) : 0, reason: document.getElementById('stat-reason').value }); break; }
         case 'reveal-all': case 'reveal-private': await control('reveal_clue', { clueId, targetCharOrAll: action === 'reveal-all' ? 'all' : controlChar }); break;
         case 'handout': await control('send_secret_handout', { targetChar: controlChar, content: document.getElementById('handout').value }); notice('密信已送达'); break;
@@ -293,7 +381,7 @@
         case 'replacement': await stopQueue(); state = await post('/replacement', { characterId: Number(replacementId) }); render(); break;
         case 'retry-image': state = await post('/retry-image', {}); closeModal(); render(); break;
         case 'promote': await sdk.image.promote(state.sessionId, el.dataset.url.split('/').at(-1)); notice('已收藏到邻舍相册'); break;
-        case 'finish': await stopQueue(); state = await post('/finish', { ending: document.getElementById('ending').value, writeMemory: document.getElementById('write-memory').checked }); closeModal(); render(); break;
+        case 'finish': await stopQueue(); state = await post('/finish', { ending: document.getElementById('ending').value, writeMemory: document.getElementById('write-memory').checked, abandon: el.dataset.abandon === 'true' }); closeModal(); render(); break;
       }
     });
   });

@@ -1,0 +1,13 @@
+{
+  "name": "trpg-dice-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "cannon-es": "0.20.0",
+    "esbuild": "0.25.12",
+    "three": "0.176.0"
+  }
+}

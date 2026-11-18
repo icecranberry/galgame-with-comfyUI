@@ -18,5 +18,22 @@
     { "id": "return", "title": "被遮住的返程键", "content": "验票机下方的黄铜键被胶带盖住，按键上刻着反向箭头；揭下胶带即可按下。", "sceneId": "platform", "requiredSkill": "侦查", "isSecret": false }
   ],
   "npcs": [{ "id": "conductor", "name": "小周", "persona": "年轻乘务员，紧张却认真，反复核对乘客人数。", "secret": "二十年前事故中最后一名没能逃生的乘务员；想把新乘客送回现实。" }],
+  "rules": {
+    "items": [
+      { "id": "old-ticket", "label": "盖过章的旧票", "clueId": "ticket" },
+      { "id": "conductor-cap", "label": "小周的乘务员帽" }
+    ],
+    "actions": [
+      { "id": "use-return-button", "label": "投票并按返程键", "sceneId": "platform", "clues": ["return"], "consume": ["old-ticket"], "grant": ["conductor-cap"], "description": "旧票被验票机识别，返程键亮起。循环终止，小周将帽子留给了你们。" },
+      { "id": "pull-brake", "label": "拉下应急闸", "sceneId": "platform", "hpCost": 2, "sanCost": 2, "description": "紧急制动让车厢剧震，驾驶室的门暂时打开。" },
+      { "id": "reverse-train", "label": "进驾驶室倒车", "sceneId": "platform", "requiresActions": ["pull-brake"], "description": "列车逆着进站的方向驶出隧道，离开了循环。" },
+      { "id": "stay-in-fog", "label": "留在雾中，不再回头", "sceneId": "platform", "sanCost": 3, "description": "列车灯光消失在雾里，站台的时间开始倒转。" }
+    ],
+    "endings": [
+      { "id": "returned", "label": "返程", "requiresActions": ["use-return-button"], "epilogue": "列车穿过最后一盏红灯，在现实的站台停稳。小周没有跟来，温热的帽子留在你们手里。" },
+      { "id": "reversed", "label": "逆向脱离", "requiresActions": ["reverse-train"], "epilogue": "列车倒出隧道，所有人回到了现实。你们记得试着把车倒回来，却再也想不起那个年轻乘务员的脸。" },
+      { "id": "past-platform", "label": "二十年前的天亮", "requiresActions": ["stay-in-fog"], "epilogue": "雾散时，站台终于有了秒针的声响。日历上的日期停在二十年前，太阳从出站口外升起。" }
+    ]
+  },
   "keeperSecrets": "列车进入二十年前事故的残留时段，广播中的低语诱人下车成为新乘客，小周的灵魂努力送人返程。旧票就在开局纸杯下，不应卡在检定之后；失败可由乘务员送来。三幕依次调查车厢、理解事故、决定返程方式。私密电话线索只给接听者，但核心返程方法可由公开时刻表和乘务员得知。结局：旧票投入验票机再按返程，所有人回归现实并带走小周的帽子；破闸倒车，代价是HP/SAN损失与记忆消退；留在月台，在二十年前醒来。避免强制战斗，容许调查员自创合理方案，目标15–30分钟。"
 }

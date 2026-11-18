@@ -59,8 +59,9 @@ function savePermission(id) {
 }
 router.get('/:gameId/sessions', run((req, res) => { savePermission(req.params.gameId); res.json(manager.repo.sessions(req.params.gameId)); }));
 router.get('/:gameId/sessions/:sessionId', run((req, res) => {
-  savePermission(req.params.gameId);
-  const session = manager.repo.session(req.params.gameId, req.params.sessionId);
+  const game = savePermission(req.params.gameId);
+  if (game.source === 'official' && game.id === 'trpg-simulator') throw bad('请通过跑团状态接口读取卷宗', 403);
+  const session = manager.repo.session(game.id, req.params.sessionId);
   if (!session) throw bad('存档不存在', 404);
   res.json(session);
 }));
@@ -87,7 +88,7 @@ router.use((error, req, res, next) => {
   const status = error.status || 500;
   if (status >= 500) console.error(`[games] ${req.method} ${req.path}:`, error.message);
   // Provider errors can echo credentials; preserve the host's 5xx boundary.
-  res.status(status).json({ error: status < 500 ? error.message : '游戏服务执行失败，请查看邻舍运行日志后重试' });
+  res.status(status).json({ error: status < 500 ? error.message : error.gameMessage || '游戏服务执行失败，请查看邻舍运行日志后重试' });
 });
 return router;
 }

@@ -4,6 +4,8 @@
   const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=& -]+$/.test(value || '') ? value : '';
   const colors = ['#b2424b', '#3266a5', '#a36d20', '#477b66', '#795391', '#a85535'];
   const ranks = { critical: '大成功', extreme: '极难成功', hard: '困难成功', regular: '普通成功', failure: '失败', fumble: '大失败' };
+  const difficultyLabels = { regular: '普通', hard: '困难', extreme: '极难' };
+  const modeLabels = { normal: '单骰', advantage: '优势', disadvantage: '劣势' };
   const button = (action, label, cls = '', attributes = '') => `<button type="button" data-action="${action}" class="${cls}" ${attributes}>${label}</button>`;
   function avatar(c) {
     const src = image(c.avatar || c.avatar_path || c.standing || c.standing_url);
@@ -12,17 +14,23 @@
   function choices(id, items, chosen, label) {
     return `<div id="${id}" class="pill-group" role="group" aria-label="${esc(label)}" data-picker data-value="${esc(chosen)}">${items.map(item => button('choice', esc(item.label), `pill ${String(item.value) === String(chosen) ? 'selected' : ''}`, `data-value="${esc(item.value)}" aria-pressed="${String(item.value) === String(chosen)}"`)).join('')}</div>`;
   }
-  const rollKey = roll => `${roll.name}|${roll.skillName}|${roll.value}|${roll.target}`;
+  const rollKey = roll => roll.logId || `${roll.name}|${roll.skillName}|${roll.value}|${roll.target}`;
   function parseRoll(log) {
+    if (log.roll) return log.roll;
     const match = /^(.*?) · (.*?) (\d{1,3})\/(\d{1,3}) · (.+)$/.exec(log.dialogue || '');
     if (!match) return null;
     const rank = Object.keys(ranks).find(k => ranks[k] === match[5] || k === match[5]) || 'failure';
     return { name: match[1], skillName: match[2], value: Number(match[3]), target: Number(match[4]), rank, success: rank === 'critical' || (Number(match[3]) <= Number(match[4]) && !['failure', 'fumble'].includes(rank)) };
   }
-  const resultLabel = roll => !roll.success && !['failure', 'fumble'].includes(roll.rank) ? '未达难度' : ranks[roll.rank];
+  const diceNotation = roll => `${roll.kind === 'pool' && roll.rolls.length > 1 ? roll.rolls.length : ''}D${roll.sides || 100}`;
+  const resultLabel = roll => roll.kind === 'pool' ? '合计' : !roll.success && !['failure', 'fumble'].includes(roll.rank) ? '未达难度' : ranks[roll.rank];
   function rollCard(roll, secret = false) {
-    const tone = ['critical', 'extreme'].includes(roll.rank) ? 'exceptional' : roll.success ? 'passed' : 'failed';
-    return `<article class="roll-card ${tone}" data-roll-key="${esc(rollKey(roll))}"><div class="roll-card-copy"><span class="roll-overline">${secret ? '暗骰 · 仅守秘人可见' : esc(roll.name) + ' · D100'}</span><h3>${esc(roll.skillName)}</h3><p>目标 ${roll.target} <span>${roll.success ? '检定通过' : '检定未通过'}</span></p></div><div class="roll-card-score"><strong>${String(roll.value).padStart(2, '0')}</strong><span>${resultLabel(roll)}</span></div></article>`;
+    const pool = roll.kind === 'pool';
+    const tone = pool ? '' : !roll.success ? 'failed' : ['critical', 'extreme'].includes(roll.rank) ? 'exceptional' : 'passed';
+    const d20Details = roll.sides === 20 && !pool
+      ? `${roll.rolls.join('／')}${roll.mode !== 'normal' ? `（${modeLabels[roll.mode]}取 ${roll.value}）` : ''} ${roll.modifier >= 0 ? '+' : '−'} ${Math.abs(roll.modifier)} · ` : '';
+    const detail = pool ? roll.rolls.join(' + ') : `${d20Details}目标 ${roll.target} <span>${roll.success ? '检定通过' : '检定未通过'}</span>`;
+    return `<article class="roll-card ${tone}" data-roll-key="${esc(rollKey(roll))}"><div class="roll-card-copy"><span class="roll-overline">${secret ? '暗骰 · ' : esc(roll.name) + ' · '}${diceNotation(roll)}</span><h3>${esc(roll.skillName)}</h3><p>${detail}</p></div><div class="roll-card-score"><strong>${roll.total ?? roll.value}</strong><span>${resultLabel(roll)}</span></div></article>`;
   }
   function logs(state, list) {
     return list.map((log, index) => {
@@ -116,9 +124,13 @@
     }
   }
   function consoleMarkup(state, ui) {
+    const actions = state.actions || [];
+    const diceBlocked = state.pendingCheck || state.pendingTurn || state.outcome || state.ended ? 'disabled' : '';
     return `<section class="keeper-console"><div class="panel-heading"><span class="eyebrow">BEHIND THE STORY</span><h2>守秘人手记</h2></div><details class="keeper-truth"><summary>翻阅模组真相</summary><p class="secret-copy">${esc(state.scenario.keeperSecrets)}</p><p class="secret-copy">${esc(state.scenario.scenes.find(s => s.id === state.scene.id)?.hiddenNotes)}</p></details>
+      ${actions.length ? `<section class="control-section"><h3>本幕关键动作</h3><div class="pill-group">${actions.map(action => button('scenario-action', esc(action.label), 'pill', `data-id="${esc(action.id)}" data-network ${action.available ? '' : 'disabled'}`)).join('')}</div></section>` : ''}
       <section class="control-section"><h3>转场</h3>${choices('scene', state.scenario.scenes.map(s => ({ value: s.id, label: s.name })), ui.sceneId, '选择场景')}${button('switch-scene', '进入这个场景 ↗', 'quiet-action', 'data-network')}</section>
-      <section class="control-section"><h3>点名调查员</h3>${choices('target', state.investigators.map(c => ({ value: c.id, label: `${c.name}${c.outOfAction ? ' · 退场' : ''}` })), ui.controlChar, '选择调查员')}<h3>技能</h3>${choices('skill', ui.catalog.skills.map(s => ({ value: s, label: s })), ui.controlSkill, '选择技能')}<h3>难度</h3>${choices('difficulty', [{ value: 'regular', label: '普通' }, { value: 'hard', label: '困难' }, { value: 'extreme', label: '极难' }], ui.controlDifficulty, '检定难度')}<div class="control-row">${button('manual-roll', '投掷 D100', 'ink-action', 'data-network')}<label class="checkbox-label"><input id="secret-roll" type="checkbox" ${ui.fields['secret-roll'] ? 'checked' : ''}>暗骰</label></div>${ui.secretRoll ? rollCard(ui.secretRoll, true) : ''}</section>
+      <section class="control-section"><h3>点名调查员</h3>${choices('target', state.investigators.map(c => ({ value: c.id, label: `${c.name}${c.outOfAction ? ' · 退场' : ''}` })), ui.controlChar, '选择调查员')}<h3>技能</h3>${choices('skill', ui.catalog.skills.map(s => ({ value: s, label: s })), ui.controlSkill, '选择技能')}<h3>难度</h3>${choices('difficulty', Object.entries(difficultyLabels).map(([value, label]) => ({ value, label })), ui.controlDifficulty, '检定难度')}<h3>骰型</h3>${choices('check-dice', [{ value: 'd20', label: 'D20' }, { value: 'd100', label: 'D100' }], ui.controlDice, '检定骰型')}${ui.controlDice === 'd20' ? `<h3>掷骰方式</h3>${choices('check-mode', Object.entries(modeLabels).map(([value, label]) => ({ value, label })), ui.controlMode, 'D20 掷骰方式')}` : ''}<div class="control-row">${button('manual-roll', `掷 ${ui.controlDice.toUpperCase()}`, 'ink-action', `data-network ${diceBlocked}`)}<label class="checkbox-label"><input id="secret-roll" type="checkbox" ${ui.fields['secret-roll'] ? 'checked' : ''}>暗骰</label></div>${ui.secretRoll ? rollCard(ui.secretRoll, true) : ''}</section>
+      <section class="control-section"><h3>随机掷骰</h3><div class="control-row"><label for="pool-count">颗数</label><input id="pool-count" type="number" min="1" max="6" value="${esc(ui.fields['pool-count'] ?? 1)}"><label class="sr-only" for="pool-reason">掷骰用途</label><input id="pool-reason" maxlength="200" placeholder="用途，如伤害或随机事件" value="${esc(ui.fields['pool-reason'])}"></div><div class="pill-group">${(ui.catalog.diceSides || []).map(sides => button('pool-roll', `D${sides}`, 'pill', `data-sides="${sides}" data-network ${diceBlocked}`)).join('')}</div></section>
       <section class="control-section"><h3>身体与理智</h3><div class="stat-controls">${['HP −1', 'HP +1', 'SAN −1', 'SAN +1'].map((label, i) => button('stat', label, i < 2 ? 'stat-hp' : 'stat-san', `data-stat="${i}" data-network`)).join('')}</div><label class="sr-only" for="stat-reason">裁决原因</label><input id="stat-reason" placeholder="这次变化的原因…" value="${esc(ui.fields['stat-reason'])}"></section>
       <section class="control-section"><h3>交付线索</h3>${choices('clue', state.scenario.clues.map(c => ({ value: c.id, label: c.title })), ui.clueId, '选择线索')}<div class="control-row">${button('reveal-all', '交给全员', '', 'data-network')}${button('reveal-private', '只给此人', '', 'data-network')}</div></section>
       <section class="control-section"><h3>悄悄递一张纸条</h3><label class="sr-only" for="handout">密信内容</label><textarea id="handout" rows="3" maxlength="3000" placeholder="只有选中的调查员会读到…">${esc(ui.fields.handout)}</textarea>${button('handout', '传递密信 →', 'quiet-action', 'data-network')}</section>
@@ -131,7 +143,9 @@
     return content;
   }
   function clues(state) {
-    return `<section class="evidence-collection"><div class="panel-heading"><span class="eyebrow">THINGS LEFT BEHIND</span><h2>线索背包 <small>${state.clues.length}</small></h2></div>${state.clues.length ? state.clues.map((c, i) => `<button class="evidence-card ${c.isSecret ? 'is-private' : ''}" data-action="evidence" data-id="${esc(c.id)}"><span class="evidence-label">证物 ${String(i + 1).padStart(2, '0')}<span>${c.isSecret ? '私密' : '公开'}</span></span><h3>${esc(c.title)}</h3><p>${highlight(c)}</p><span class="evidence-bottom">${esc(c.requiredSkill || '现场发现')}<span aria-hidden="true">↗</span></span></button>`).join('') : '<p class="empty-copy">还没有留下可以拼合的碎片。</p>'}${Object.entries(state.handouts).filter(([, text]) => text).map(([id, content]) => `<article class="handout-note"><span class="eyebrow">PRIVATE NOTE</span><h3>交给 ${esc(state.investigators.find(c => c.id === id)?.name || '调查员')}</h3><p>${esc(content)}</p></article>`).join('')}</section>`;
+    const items = state.partyItems || [];
+    const pocket = items.length ? `<section class="handout-note"><h3>队伍道具</h3><p>${items.map(item => `${esc(item.label)} · ${item.status === 'spent' ? '已使用' : '持有中'}`).join('<br>')}</p></section>` : '';
+    return `<section class="evidence-collection"><div class="panel-heading"><span class="eyebrow">THINGS LEFT BEHIND</span><h2>线索背包 <small>${state.clues.length}</small></h2></div>${pocket}${state.clues.length ? state.clues.map((c, i) => `<button class="evidence-card ${c.isSecret ? 'is-private' : ''}" data-action="evidence" data-id="${esc(c.id)}"><span class="evidence-label">证物 ${String(i + 1).padStart(2, '0')}<span>${c.isSecret ? '私密' : '公开'}</span></span><h3>${esc(c.title)}</h3><p>${highlight(c)}</p><span class="evidence-bottom">${esc(c.requiredSkill || '现场发现')}<span aria-hidden="true">↗</span></span></button>`).join('') : '<p class="empty-copy">还没有留下可以拼合的碎片。</p>'}${Object.entries(state.handouts).filter(([, text]) => text).map(([id, content]) => `<article class="handout-note"><span class="eyebrow">PRIVATE NOTE</span><h3>交给 ${esc(state.investigators.find(c => c.id === id)?.name || '调查员')}</h3><p>${esc(content)}</p></article>`).join('')}</section>`;
   }
   function cards(state) {
     return `<section class="character-records"><div class="panel-heading"><span class="eyebrow">THE PEOPLE AT THIS TABLE</span><h2>调查员档案</h2></div>${state.investigators.map(c => `<article class="character-sheet"><header>${avatar(c)}<div><h3>${esc(c.name)}</h3><span>${c.outOfAction ? '已退场' : c.player ? '由你扮演' : '正在调查'}</span></div></header><div class="attribute-grid">${Object.entries(c.attributes).map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('')}</div><dl class="skill-list">${Object.entries(c.skills).map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')}</dl><p>HP ${c.hp}/${c.maxHp} &nbsp; SAN ${c.san}/${c.maxSan} &nbsp; MP ${c.mp}</p><p>随身物品 · ${esc(c.inventory.join('、') || '暂无记录')}</p></article>`).join('')}</section>`;
@@ -142,11 +156,12 @@
     const availableExpressions = ui.castAssets.slots.filter(slot => ui.castAssets.player.expressions[slot.id]);
     const chooseExpression = availableExpressions.some(slot => slot.id !== 'normal') && !own?.outOfAction;
     const eligible = ui.characters.filter(c => c.id !== state.keeperId && !state.investigators.some(i => i.id === String(c.id)));
-    return `<footer class="composer" ${ui.tab !== 'narrative' && !state.pendingCheck ? 'hidden' : ''}>
-      ${state.pendingCheck ? `<div class="check-request"><div><span>${esc(state.investigators.find(c => c.id === state.pendingCheck.targetChar)?.name)} · 请求检定</span><strong>${esc(state.pendingCheck.skill)}</strong><small>${esc(state.pendingCheck.reason)}</small></div>${button('roll', '掷 D100 ↗', 'primary', 'data-network')}</div>` : ''}
-      ${replacement && eligible.length ? `<details class="replacement"><summary>有人退场 · 引入替补</summary>${choices('replacement', eligible.map(c => ({ value: c.id, label: characterName(c) })), ui.replacementId, '选择替补')}${button('replacement', '邀请加入', 'quiet-action', 'data-network')}</details>` : ''}
+    return `<footer class="composer" ${ui.tab !== 'narrative' && !state.pendingCheck && !state.pendingTurn && !state.outcome ? 'hidden' : ''}>
+      ${Number.isInteger(state.clockRemaining) && state.clockRemaining > 0 && !state.outcome ? `<p class="archive-note">倒计时剩余 ${state.clockRemaining} 回合</p>` : ''}
+      ${state.pendingCheck ? `<div class="check-request"><div><span>${esc(state.investigators.find(c => c.id === state.pendingCheck.targetChar)?.name)} · 请求检定</span><strong>${esc(state.pendingCheck.skill)} · ${esc(difficultyLabels[state.pendingCheck.difficulty] || difficultyLabels.regular)}${state.pendingCheck.mode && state.pendingCheck.mode !== 'normal' ? ` · ${esc(modeLabels[state.pendingCheck.mode])}` : ''}</strong><small>${esc(state.pendingCheck.reason)}</small></div>${state.mode === 'keeper' ? button('roll', `掷 ${(state.pendingCheck.dice || 'd100').toUpperCase()}`, 'primary', 'data-network') : ''}</div>` : ''}
+      ${replacement && !state.pendingTurn && !state.outcome && eligible.length ? `<details class="replacement"><summary>有人退场 · 引入替补</summary>${choices('replacement', eligible.map(c => ({ value: c.id, label: characterName(c) })), ui.replacementId, '选择替补')}${button('replacement', '邀请加入', 'quiet-action', 'data-network')}</details>` : ''}
       ${state.ended ? '<p class="archive-note">本局已落幕。留下的线索与故事，仍可随时翻阅。</p>' : `
-        ${own?.outOfAction ? '<p class="archive-note">你已退场，可以继续旁观调查。</p>' : `
+        ${state.pendingCheck || state.pendingTurn || state.awaitingRuling || state.outcome ? '' : own?.outOfAction ? '<p class="archive-note">你已退场，可以继续旁观调查。</p>' : `
           ${state.mode === 'keeper' || chooseExpression ? `<div class="compose-tools">
             ${state.mode === 'keeper' ? `<label class="sr-only" for="npc-speaker">发言身份</label><input id="npc-speaker" placeholder="你的发言署名（可选）" value="${esc(ui.npcSpeaker)}">` : ''}
             ${chooseExpression ? `<label class="compose-emotion" for="player-expression"><span>我的表情</span><select id="player-expression" data-network>
@@ -157,15 +172,15 @@
           <div class="compose-line"><label class="sr-only" for="message">发言与行动</label><textarea id="message" rows="2" maxlength="3000" placeholder="${state.mode === 'keeper' ? '描述此刻，或以 NPC 身份开口…' : '你打算做什么？'}">${esc(ui.draft)}</textarea>${button('send', '发送', 'send-button', 'data-network')}</div>
         `}
         <div class="compose-actions">${state.pendingBatch || ui.playing ? button('pause', '暂停 / 抢麦', 'quiet-action') : '<span id="working" role="status"></span>'}
-          ${button('next', state.pendingBatch ? '继续播放 →' : state.mode === 'keeper' ? '让调查员行动 →' : '继续调查 →', 'primary', `data-network ${state.pendingCheck ? 'disabled' : ''}`)}
+          ${state.pendingCheck ? '' : state.pendingTurn ? button('next', '续跑本轮 →', 'primary', 'data-network') : state.proposedEnding ? button('finish-dialog', '确认结团 →', 'primary', 'data-network') : button('next', state.pendingBatch ? '继续播放 →' : state.awaitingRuling ? '裁定检定 →' : state.mode === 'keeper' ? '让调查员行动 →' : '继续调查 →', 'primary', 'data-network')}
         </div>`}
       </footer>`;
   }
   function table(state, ui) {
     const background = state.imageJobs.filter(j => j.status === 'done' && j.kind === 'scene' && j.sceneId === state.scene.id).at(-1);
     const tabs = [{ id: 'narrative', label: '叙事流' }, ...(state.mode === 'keeper' ? [{ id: 'keeper', label: 'KP 控制台' }] : []), { id: 'clues', label: '线索背包' }, { id: 'cards', label: '角色卡' }];
-    const rendered = logs(state, state.publicLog);
-    const extraRolls = ui.rolls.filter(roll => !state.publicLog.some(log => log.kind === 'dice' && parseRoll(log) && rollKey(parseRoll(log)) === rollKey(roll)));
+    const rendered = logs(state, state.publicLog.filter(log => !ui.pendingRolls.has(log.id)));
+    const extraRolls = ui.rolls.filter(roll => !state.publicLog.some(log => log.id === roll.logId));
     return `<main class="table narrative-table ${ui.entering ? 'is-entering' : ''}"><section class="visual-stage" aria-label="场景与人物">${ui.previousBackground ? `<div class="stage-backdrop has-image" style="--scene:url('${image(ui.previousBackground)}')"></div>` : ''}<div class="stage-backdrop ${background ? 'has-image' : ''} ${ui.backgroundChanged ? 'is-new-background' : ''}" ${background ? `style="--scene:url('${image(background.url)}')"` : ''}></div><div class="stage-grain" aria-hidden="true"></div><div class="stage-vignette" aria-hidden="true"></div>${button('exit-game', '← 游戏馆', 'stage-link stage-exit')}<header class="stage-navigation"><span class="mode-badge">${state.mode === 'keeper' ? '守秘人视角' : '调查员视角'}<i></i>第 ${state.round + 1} 轮</span><div>${button('lobby', '收起卷宗', 'stage-link')}${button('finish-dialog', state.ended ? '结团回忆' : '结团', 'stage-link', 'data-network')}</div></header><section class="hud" aria-label="调查员状态">${hud(state)}</section><div class="stage-cast"><div class="stage-line" hidden><strong></strong><p></p></div></div><div class="stage-caption"><span class="eyebrow">${esc(state.title)}</span><h2>${esc(state.scene.name)}</h2><span class="stage-caption-rule"></span></div>${state.ended ? '<span class="ended-stamp">本局落幕</span>' : ''}</section><aside class="narrative-column"><header class="story-heading"><span class="eyebrow">${esc(state.title)}</span><h1>${esc(state.scene.name)}</h1><div class="story-heading-rule"><span></span><i>✦</i><span></span></div></header><nav class="story-tabs" role="tablist" aria-label="调查桌">${tabs.map(tab => button('tab', tab.label, ui.tab === tab.id ? 'is-active' : '', `data-tab="${tab.id}" id="tab-${tab.id}" role="tab" aria-selected="${ui.tab === tab.id}" aria-controls="panel-${tab.id}" tabindex="${ui.tab === tab.id ? 0 : -1}"`)).join('')}</nav><div class="story-scroll" id="story-scroll"><section id="panel-narrative" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-narrative" ${ui.tab === 'narrative' ? '' : 'hidden'}><div class="transcript" id="transcript" aria-label="本幕叙事">${rendered}${extraRolls.map(roll => rollCard(roll)).join('')}</div></section>${state.mode === 'keeper' ? `<section id="panel-keeper" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-keeper" ${ui.tab === 'keeper' ? '' : 'hidden'}>${consoleMarkup(state, ui)}</section>` : ''}<section id="panel-clues" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-clues" ${ui.tab === 'clues' ? '' : 'hidden'}>${clues(state)}</section><section id="panel-cards" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-cards" ${ui.tab === 'cards' ? '' : 'hidden'}>${cards(state)}</section></div><div class="story-utilities">${button('lobby', '卷宗目录', 'quiet-action')}${button('history', '往日记录', 'quiet-action')}${button('images', '场景印相', 'quiet-action')}</div>${composer(state, ui)}</aside></main>`;
   }
   const lobbyIcons = {
@@ -325,30 +340,77 @@
       </div>
     </main>`;
   }
-  let finishDice;
+  const diceScript = new URL('./vendor/dice-3d.js', document.currentScript.src);
+  let diceModule;
+  function loadDice3D() {
+    diceModule ??= new Promise(resolve => {
+      const script = document.createElement('script');
+      script.src = diceScript;
+      const finish = (api) => { script.remove(); resolve(api); };
+      script.onload = () => finish(window.TrpgDice3D);
+      script.onerror = () => finish(null);
+      document.head.append(script);
+    });
+    return diceModule;
+  }
+
   async function animateDice(roll, secret) {
-    finishDice?.();
-    const layer = document.createElement('div'); layer.className = 'dice-overlay'; layer.setAttribute('role', 'status'); layer.setAttribute('aria-label', `${roll.name}，${roll.skillName}，D100检定`);
-    layer.innerHTML = `<div class="dice-float"><span class="dice-caption">${esc(secret ? '暗骰 · 仅守秘人可见' : roll.name)}<br>${esc(roll.skillName)}</span><div class="dice-value">00</div><span class="dice-outcome">${resultLabel(roll)}</span><button type="button" class="dice-skip" aria-label="收起骰子">跳过动画</button></div>`;
+    const layer = document.createElement('div');
+    layer.className = 'dice-overlay';
+    layer.innerHTML = `<div class="dice-canvas" aria-hidden="true"></div><div class="dice-caption">${diceNotation(roll)} · ${esc(secret ? '暗骰' : roll.skillName)}</div><div class="dice-value" aria-hidden="true" hidden>00</div><div class="dice-badge" role="status"></div><button type="button" class="dice-skip">跳过动画</button>`;
     document.body.append(layer);
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let tick, done = false, release;
-    const interrupted = new Promise(resolve => { release = resolve; });
-    const finishCurrent = () => { if (done) return; done = true; clearInterval(tick); release(); };
-    finishDice = finishCurrent;
-    layer.querySelector('.dice-skip').onclick = finishDice;
-    const digits = layer.querySelector('.dice-value'), values = [41, 8, 67, 24, 92, 13, 56, 3]; let index = 0;
-    if (!reduced) tick = setInterval(() => { digits.textContent = String(values[index++ % values.length]).padStart(2, '0'); }, 65);
-    await Promise.race([new Promise(resolve => setTimeout(resolve, reduced ? 0 : 720)), interrupted]); clearInterval(tick);
-    digits.textContent = String(roll.value).padStart(2, '0'); layer.classList.add('is-revealed');
-    await Promise.race([new Promise(resolve => setTimeout(resolve, reduced || done ? 0 : 1000)), interrupted]);
-    const target = [...document.querySelectorAll('[data-roll-key]')].find(el => el.dataset.rollKey === rollKey(roll) && el.getClientRects().length);
-    if (target && !reduced && !done) {
-      const box = layer.querySelector('.dice-float'), start = box.getBoundingClientRect(), end = target.getBoundingClientRect();
-      const flight = box.animate([{ transform: 'translate(0,0) scale(1)', opacity: 1 }, { transform: `translate(${end.x + end.width / 2 - start.x - start.width / 2}px,${end.y + end.height / 2 - start.y - start.height / 2}px) scale(.25)`, opacity: 0 }], { duration: 500, easing: 'cubic-bezier(.2,.7,.2,1)', fill: 'forwards' });
-      layer.classList.add('is-landing'); await Promise.race([flight.finished.catch(() => {}), interrupted]); target.classList.add('just-landed');
+    const skip = new AbortController(), stage = new AbortController();
+    const skipped = new Promise(resolve => skip.signal.addEventListener('abort', resolve, { once: true }));
+    const stageStopped = new Promise(resolve => stage.signal.addEventListener('abort', () => resolve(false), { once: true }));
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const skipButton = layer.querySelector('.dice-skip');
+    const digits = layer.querySelector('.dice-value');
+    const reveal = () => {
+      if (skip.signal.aborted) return;
+      digits.hidden = true;
+      layer.querySelector('.dice-caption').hidden = true;
+      layer.querySelector('.dice-badge').innerHTML = rollCard(roll, secret);
+    };
+    layer.addEventListener('click', () => skip.abort());
+    layer.addEventListener('keydown', event => { if (event.key === 'Escape') skip.abort(); });
+    skip.signal.addEventListener('abort', () => stage.abort(), { once: true });
+    skipButton.focus({ preventScroll: true });
+    let deadline;
+    try {
+      let played = false;
+      if (!reduced && (roll.sides || 100) === 100 && (roll.kind !== 'pool' || roll.rolls.length === 1)) {
+        deadline = setTimeout(() => stage.abort(), 4800);
+        const play = loadDice3D().then(api => !stage.signal.aborted && api?.play(layer.querySelector('.dice-canvas'), roll.value, stage.signal, reveal));
+        played = await Promise.race([play.catch(() => false), stageStopped]);
+        clearTimeout(deadline);
+      }
+      if (!played && !skip.signal.aborted) {
+        stage.abort();
+        if (!reduced) {
+          digits.hidden = false;
+          const count = roll.rolls?.length || 1, sides = roll.sides || 100;
+          const update = () => {
+            const values = Array.from({ length: count }, () => 1 + Math.floor(Math.random() * sides));
+            digits.textContent = roll.kind === 'pool' ? values.reduce((sum, value) => sum + value, 0) : roll.mode === 'disadvantage' ? Math.min(...values) : Math.max(...values);
+          };
+          update();
+          const tick = setInterval(update, 65);
+          await Promise.race([sleep(720), skipped]);
+          clearInterval(tick);
+        }
+        reveal();
+      }
+      if (!skip.signal.aborted) await Promise.race([sleep(1050), skipped]);
+      if (!reduced) {
+        layer.classList.add('is-closing');
+        await sleep(300);
+      }
+    } finally {
+      clearTimeout(deadline);
+      stage.abort();
+      layer.remove();
     }
-    layer.remove(); if (finishDice === finishCurrent) finishDice = null;
   }
   document.addEventListener('error', event => { const el = event.target; if (el instanceof HTMLImageElement && el.hasAttribute('data-portrait-fallback') && !el.src.endsWith('/portrait-placeholder.svg')) el.src = './portrait-placeholder.svg'; }, true);
   window.TrpgPresentation = { avatar, choices, logs, table, updateCast, lobby, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, rollCard, rollKey, animateDice, highlight };
