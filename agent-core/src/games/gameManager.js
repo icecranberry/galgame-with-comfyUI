@@ -48,6 +48,23 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
     return { ...manifest, source: row.source, repoUrl: row.repo_url, enabled: !!row.enabled, compatible: compatible(manifest),
       entryUrl: `/game-assets/${row.id}/${manifest.entry}`, coverUrl: manifest.cover ? `/game-assets/${row.id}/${manifest.cover}` : null };
   }
+  const hasDataDirectory = id => fs.existsSync(inside(mediaDir, id));
+  const occupied = id => repo.claims(id).filter(row =>
+    row.source === 'official' || row.installed || row.has_sessions || hasDataDirectory(row.id));
+
+  function communityInstallStatus(id, { source, repoUrl, zipFingerprint }) {
+    const owners = occupied(id);
+    if (owners.some(row => row.source === 'official') || fs.existsSync(inside(officialDir, id))) return 'official';
+    if (!owners.length) return hasDataDirectory(id) ? 'conflict' : 'available';
+    const [owner] = owners;
+    if (owners.length > 1 || owner.id !== id || owner.source !== source) return 'conflict';
+    const sameSource = source === 'github'
+      ? repoUrl && owner.repo_url?.toLowerCase() === repoUrl.toLowerCase()
+      : zipFingerprint && owner.zip_fingerprint === zipFingerprint;
+    if (!sameSource) return 'conflict';
+    return owner.installed ? 'installed' : 'available';
+  }
+
   function scan() {
     const errors = [];
     for (const [root, source] of [[officialDir, 'official'], [communityDir, 'zip']]) {
@@ -60,7 +77,14 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
           const dir = inside(root, item.name), manifest = readManifest(dir, { allowMissingNsfw: Boolean(old?.installed) });
           if (manifest.id !== item.name) throw bad('目录名与游戏编号不一致');
           if (source !== 'official' && old?.source === 'official') throw bad('社区包不能覆盖官方游戏');
-          repo.register(manifest, source === 'official' ? source : old?.source || source, dir, old?.repo_url);
+          const official = source === 'official';
+          const conflict = occupied(manifest.id).some(row =>
+            row.id !== manifest.id || (row.source === 'official') !== official || (!official && !row.installed));
+          if (conflict || (!old && hasDataDirectory(manifest.id))) throw bad('游戏 ID 冲突，无法确认本地目录与保留数据的来源一致', 409);
+          // An existing install may be rescanned in place. A newly found folder
+          // cannot claim the origin of a previously uninstalled package.
+          const current = old?.installed ? old : null;
+          repo.register(manifest, official ? source : current?.source || source, dir, current?.repo_url, current?.zip_fingerprint);
         } catch (error) { errors.push(`${item.name}: ${error.message}`); }
       }
     }
@@ -150,6 +174,7 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
   async function uninstall(id, clearData = true) {
     const row = get(id, { disabled: true });
     if (row.source === 'official') throw bad('官方游戏随主程序更新，可停用但不能卸载');
+    if (changing.has(id)) throw bad('游戏正在进行其他操作，请稍后重试', 409);
     changing.add(id);
     try {
       await unload(id);
@@ -161,9 +186,11 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
       if (clearData) removeManaged(mediaDir, id);
     } finally { changing.delete(id); }
   }
-  return { repo, scan, get, readManifest, compatible, publicGame, context, load, unload, uninstall, changing, events, officialDir, communityDir,
+  return { repo, scan, get, readManifest, compatible, publicGame, communityInstallStatus, context, load, unload, uninstall, changing, events, officialDir, communityDir,
     async enable(id, enabled) {
-      get(id, { disabled: true }); changing.add(id);
+      get(id, { disabled: true });
+      if (changing.has(id)) throw bad('游戏正在进行其他操作，请稍后重试', 409);
+      changing.add(id);
       try { if (!enabled) await unload(id); db.prepare('UPDATE installed_games SET enabled=? WHERE id=?').run(enabled ? 1 : 0, id); return publicGame(repo.game(id)); }
       finally { changing.delete(id); }
     },

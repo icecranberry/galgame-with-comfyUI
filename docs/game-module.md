@@ -6,7 +6,7 @@
 
 - 官方包：`games/official/<id>/`，随仓库发布；无需额外安装依赖或构建游戏前端。
 - 社区包：`agent-core/data/games_community/<id>/`。工坊和仓库链接通过 Git 拉取默认分支，本地 ZIP 可单独导入。工坊结果缓存 20 分钟，失败可回用旧缓存。
-- 存档：`installed_games`、`game_sessions`，与游戏包分离。更新保留存档；卸载可保留数据，再装同一 ID 时恢复。
+- 存档：`installed_games`、`game_sessions`，与游戏包分离。社区游戏在 ID 和来源均匹配时可以恢复保留的数据，见[开发指南](linshe_community_game_guide.md#保留数据更新)。
 - 图片：`agent-core/data/game/<id>/<sessionId>/`。只在游戏中展示，手动收藏后复制到主相册。删档与选择清数据的卸载会清理对应目录。
 - HTTP 代理、GitHub Token 和 Raw 镜像前缀可在游戏中心「连接设置」保存。Git 拉取使用工坊代理，Token 只发送到 GitHub API。
 

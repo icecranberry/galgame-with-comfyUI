@@ -15,7 +15,12 @@
         <GameAction v-for="item in tabs" :id="`game-tab-${item.value}`" :key="item.value" role="tab" variant="tab" :active="tab === item.value" :aria-selected="tab === item.value" aria-controls="game-shelf" :tabindex="tab === item.value ? 0 : -1" @click="tab = item.value"><GamePixelIcon :name="item.value === 'installed' ? 'cartridge' : 'globe'" />{{ item.label }}<span v-if="item.value === 'installed'" class="arcade-tab-count">{{ installed.length }}</span></GameAction>
       </nav>
       <div v-if="tab === 'community'" class="arcade-toolbar__actions">
-        <GameAction v-if="visibleGames.length" compact variant="quiet" aria-haspopup="dialog" @click="showGuide = true">开发游戏</GameAction>
+        <label class="arcade-check arcade-nsfw-filter">
+          <input v-model="showNsfw" type="checkbox" aria-controls="game-shelf">
+          <span class="arcade-check__box" aria-hidden="true"></span>
+          <span>显示 NSFW</span>
+        </label>
+        <GameAction v-if="community.length" compact variant="quiet" aria-haspopup="dialog" @click="showGuide = true">开发游戏</GameAction>
         <GameAction compact variant="quiet" :busy="loading" :disabled="!!busy" @click="discover(true)">刷新工坊 ↻</GameAction>
       </div>
     </div>
@@ -24,7 +29,7 @@
     <Transition name="arcade-content" mode="out-in">
       <section id="game-shelf" :key="tab" class="arcade-shelf" role="tabpanel" :aria-labelledby="`game-tab-${tab}`" :aria-busy="loading">
         <div v-if="loading && !visibleGames.length" class="arcade-loading" role="status"><span class="arcade-loading__light" aria-hidden="true"></span>正在打开{{ tab === 'community' ? '社区工坊' : '游戏馆' }}</div>
-        <article v-for="item in visibleGames" :key="item.repoUrl || item.id" class="arcade-cartridge">
+        <article v-for="item in visibleGames" :key="item.repoUrl || item.id" class="arcade-cartridge" :class="{ 'arcade-cartridge--revealed': tab === 'community' && item.nsfw === true }">
           <div class="cartridge-windowbar">
             <span><span class="cartridge-windowbar__light" aria-hidden="true"></span>{{ isOfficialTrpg(item) ? '01 / 官方首发' : item.source === 'official' ? '官方游戏' : '社区游戏' }}</span>
             <GameCardMenu v-if="tab === 'installed' && item.source !== 'official'" class="cartridge-windowbar__menu" :game="item" :disabled="!!busy" @uninstall="openRemove(item)" />
@@ -45,8 +50,8 @@
                 {{ !item.compatible ? '需要更新邻舍' : item.enabled ? '开始游戏' : '已停用' }}<GamePixelIcon name="arrow" />
               </GameAction>
               <template v-else>
-                <GameAction variant="primary" :disabled="!!busy || installedById.has(item.id)" :busy="busy === item.repoUrl" @click="install(item.repoUrl)">
-                  {{ installedById.has(item.id) ? '已安装' : '安装游戏' }}<GamePixelIcon v-if="!installedById.has(item.id)" name="arrow" />
+                <GameAction variant="primary" :disabled="!!busy || item.installStatus !== 'available'" :busy="busy === item.repoUrl" @click="install(item.repoUrl)">
+                  {{ item.installStatus === 'conflict' ? 'ID 冲突' : item.installStatus === 'installed' ? '已安装' : '安装游戏' }}<GamePixelIcon v-if="item.installStatus === 'available'" name="arrow" />
                 </GameAction>
                 <a :href="item.repoUrl" target="_blank" rel="noopener noreferrer">查看仓库 ↗</a>
               </template>
@@ -55,7 +60,7 @@
           </div>
           <div class="cartridge-art">
             <img v-if="isOfficialTrpg(item)" class="cartridge-art__pixel" :src="diceArtwork" alt="">
-            <img v-else-if="item.coverUrl || installedById.get(item.id)?.coverUrl" :src="item.coverUrl || installedById.get(item.id)?.coverUrl" alt="">
+            <img v-else-if="coverFor(item)" :src="coverFor(item)" alt="">
             <span v-else class="cartridge-art__initial" aria-hidden="true">{{ item.name.slice(0, 1) }}</span>
             <span v-if="isOfficialTrpg(item)" class="cartridge-art__stamp" aria-hidden="true">LET THE DICE DECIDE.</span>
             <span class="cartridge-art__corner" aria-hidden="true"></span>
@@ -63,12 +68,15 @@
         </article>
         <div v-if="!loading && !visibleGames.length" class="arcade-empty">
           <GamePixelIcon name="cartridge" class="arcade-empty__icon" />
-          <h2>{{ tab === 'community' ? '下一款游戏，还在下一款。' : '第一盒游戏，就从这里开始。' }}</h2>
-          <p>{{ tab === 'community' ? '暂未发现社区作品，也可以通过仓库链接或 ZIP 安装。' : '通过 GitHub 仓库或 ZIP 游戏包，把新的玩法装进来。' }}</p>
-          <div class="arcade-empty__actions">
-            <GameAction :disabled="!!busy" @click="openImport">安装游戏<GamePixelIcon name="plus" /></GameAction>
-            <GameAction v-if="tab === 'community'" aria-haspopup="dialog" @click="showGuide = true">开发游戏</GameAction>
-          </div>
+          <h2 v-if="tab === 'community' && community.length">已隐藏 NSFW 游戏</h2>
+          <template v-else>
+            <h2>{{ tab === 'community' ? '下一款游戏，还在下一款。' : '第一盒游戏，就从这里开始。' }}</h2>
+            <p>{{ tab === 'community' ? '暂未发现社区作品，也可以通过仓库链接或 ZIP 安装。' : '通过 GitHub 仓库或 ZIP 游戏包，把新的玩法装进来。' }}</p>
+            <div class="arcade-empty__actions">
+              <GameAction :disabled="!!busy" @click="openImport">安装游戏<GamePixelIcon name="plus" /></GameAction>
+              <GameAction v-if="tab === 'community'" aria-haspopup="dialog" @click="showGuide = true">开发游戏</GameAction>
+            </div>
+          </template>
         </div>
       </section>
     </Transition>
@@ -135,13 +143,18 @@ const router = useRouter(), tab = ref('installed'), installed = ref([]), communi
 const showImport = ref(false), showSettings = ref(false), repoUrl = ref(''), fileInput = ref(null), toRemove = ref(null), removeOpen = ref(false), clearData = ref(true)
 const zipForPassword = ref(null), zipPassword = ref(''), zipPasswordInput = ref(null)
 const showGuide = ref(false)
+const showNsfw = ref(false)
 const token = ref(''), hasToken = ref(false), mirrorPrefix = ref(''), settingsError = ref(''), importError = ref(''), removeError = ref('')
 const proxyUrl = ref(''), savedProxyUrl = ref(''), proxyMode = ref(''), settingsLoading = ref(false)
 const settingsBusy = computed(() => !!busy.value || settingsLoading.value)
 let discoveryRequest = 0
 const tabs = [{ label: '我的游戏', value: 'installed' }, { label: '社区工坊', value: 'community' }]
-const visibleGames = computed(() => tab.value === 'installed' ? installed.value : community.value)
+const visibleGames = computed(() => {
+  if (tab.value === 'installed') return installed.value
+  return showNsfw.value ? community.value : community.value.filter(game => game.nsfw !== true)
+})
 const installedById = computed(() => new Map(installed.value.map(game => [game.id, game])))
+const coverFor = item => item.coverUrl || (item.installStatus === 'installed' ? installedById.value.get(item.id)?.coverUrl : null)
 const isOfficialTrpg = game => game.source === 'official' && game.id === 'trpg-simulator'
 const reload = async () => { installed.value = await gameRequest() }
 const openGame = game => router.push(`/games/${game.id}`)
@@ -172,7 +185,11 @@ async function retryCatalog() { if (tab.value === 'community') return discover(t
 async function mutate(key, action, target = error) {
   if (busy.value) return
   busy.value = key; target.value = ''
-  try { await action(); await reload() } catch (e) { target.value = e.message } finally { busy.value = '' }
+  try {
+    await action()
+    await reload()
+    if (tab.value === 'community') await discover()
+  } catch (e) { target.value = e.message } finally { busy.value = '' }
 }
 function finishInstall(game) {
   const index = installed.value.findIndex(item => item.id === game.id)
@@ -340,12 +357,21 @@ onMounted(async () => { loading.value = true; try { await reload() } catch (e) {
 .arcade-check input:checked+.arcade-check__box:after { content:'✓';font-size:18px;color:var(--game-cream);font-weight:800; }
 .arcade-check input:focus-visible+.arcade-check__box { outline:2px solid var(--game-focus);outline-offset:4px; }
 .arcade-check:has(input:disabled) { opacity:.5;cursor:not-allowed; }
+.arcade-nsfw-filter { gap:8px;padding-inline:6px;font-size:13px;white-space:nowrap; }
+.arcade-nsfw-filter .arcade-check__box { width:20px;height:20px; }
+.arcade-nsfw-filter input:checked+.arcade-check__box::after { font-size:15px;line-height:1; }
+.arcade-cartridge--revealed { animation:arcade-reveal .3s ease-out; }
 .arcade-content-enter-active,.arcade-content-leave-active { transition:opacity .3s,transform .3s; }
 .arcade-content-enter-from,.arcade-content-leave-to { opacity:0;transform:translateY(8px); }
+@keyframes arcade-reveal { from { opacity:0;transform:translateY(8px); } }
 @keyframes arcade-pulse { 50% { opacity:.35; } }
+@media(max-width:600px) {
+  .arcade-toolbar__actions { gap:4px; }
+  .arcade-toolbar__actions .game-action--quiet { padding-inline:8px; }
+}
 @media(min-width:1600px) { .arcade-room { width:min(1280px,calc(100% - 120px)); }.arcade-topbar { padding-inline:max(40px,calc((100% - 1280px)/2)); }.cartridge-copy { padding:38px 42px; }.cartridge-art { min-height:330px; } }
 @media(max-width:900px) { .arcade-room { width:calc(100% - 48px); }.arcade-topbar { padding:16px 24px; }.arcade-topbar__actions { gap:6px; }.cartridge-copy { padding:26px; }.cartridge-title strong { font-size:44px; }.cartridge-copy__bottom { gap:14px; }.cartridge-art { min-height:300px; }.arcade-import-strip__copy { flex-direction:column;gap:2px; } }
 @media(max-width:600px) { .arcade-backdrop__art { width:240px;opacity:.1; }.arcade-backdrop__art--left { left:-170px;top:90px; }.arcade-backdrop__art--right { right:-170px;top:400px; }.arcade-topbar { padding:12px 16px;gap:10px;flex-wrap:wrap; }.arcade-brand { gap:10px; }.arcade-brand strong { font-size:24px; }.arcade-brand__symbol { width:36px;height:33px;font-size:21px; }.arcade-topbar__actions { margin-left:auto;gap:6px; }.arcade-topbar__actions .game-action--quiet { width:44px;padding-inline:0; }.arcade-topbar__actions .game-action--quiet span { display:none; }.arcade-room { width:calc(100% - 36px);padding-bottom:18px; }.arcade-toolbar { margin:16px 0 20px;gap:8px;flex-wrap:wrap; }.arcade-toolbar nav { gap:10px; }.arcade-tab-count { min-width:18px;height:18px;font-size:11px; }.arcade-cartridge { grid-template-columns:minmax(0,1fr); }.cartridge-windowbar { padding:10px 15px;font-size:10px; }.cartridge-copy { padding:23px 23px 25px; }.cartridge-number { font-size:10px;letter-spacing:0; }.cartridge-title { margin-top:12px; }.cartridge-title>span { font-size:23px; }.cartridge-title strong { font-size:45px; }.cartridge-copy p { font-size:13px;line-height:1.85;margin:13px 0 22px; }.cartridge-copy__bottom { gap:16px; }.cartridge-copy__bottom>span { font-size:10px; }.cartridge-art { min-height:0;height:170px;border-left:0;border-top:2px solid var(--game-line); }.cartridge-art img { object-fit:contain; }.cartridge-art__stamp { bottom:7px;font-size:8px;letter-spacing:1.5px; }.arcade-import-strip { margin-top:22px;padding:16px;gap:12px; }.arcade-import-strip__icon { font-size:25px; }.arcade-import-strip__copy { font-size:14px; }.arcade-import-strip__copy>span { display:none; }.arcade-footer { padding-top:22px;font-size:10px;justify-content:center; }.arcade-footer__pixels { display:none !important; }.arcade-notice { font-size:13px;padding:12px;gap:12px; }.arcade-empty { padding:28px 15px; }.arcade-empty h2 { font-size:20px; }.arcade-input { font-size:16px; } }
 @media(max-width:360px) { .arcade-topbar { padding-inline:12px; }.arcade-brand { gap:7px; }.arcade-brand strong { font-size:21px; }.arcade-brand__symbol { width:30px;height:30px;font-size:18px; }.arcade-topbar__actions { gap:4px; }.arcade-room { width:calc(100% - 28px); }.cartridge-copy { padding:20px; }.cartridge-title strong { font-size:40px; }.arcade-import-strip { padding:13px;gap:10px; }.arcade-import-strip__icon { display:none; } }
-@media(prefers-reduced-motion:reduce) { .arcade-loading__light { animation:none; }.arcade-content-enter-active,.arcade-content-leave-active,.arcade-input,.arcade-check__box { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .arcade-loading__light,.arcade-cartridge--revealed { animation:none; }.arcade-content-enter-active,.arcade-content-leave-active,.arcade-input,.arcade-check__box { transition:none; } }
 </style>

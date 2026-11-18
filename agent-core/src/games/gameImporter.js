@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import {
   ZipReader, Uint8ArrayReader, ERR_INVALID_PASSWORD,
@@ -13,6 +13,16 @@ const ZIP_LIMIT = 50 * 1024 * 1024;
 const zipPasswordError = message => Object.assign(bad(message), { gameCode: 'ZIP_PASSWORD' });
 const zipCryptoDataErrors = new Set([ERR_INVALID_CRC32, ERR_INVALID_COMPRESSED_DATA, ERR_INVALID_UNCOMPRESSED_SIZE]);
 const githubRequestError = message => Object.assign(bad(message, 502), { gameMessage: message });
+const identityConflict = () => Object.assign(bad('游戏 ID 冲突：这个 ID 已用于另一来源的游戏，或保留数据的来源无法确认', 409), { gameCode: 'GAME_ID_CONFLICT' });
+
+function fingerprintGameFiles(files) {
+  const hash = createHash('sha256');
+  for (const name of Object.keys(files).sort()) {
+    const data = files[name];
+    hash.update(JSON.stringify([name, data.length])).update(data);
+  }
+  return hash.digest('hex');
+}
 
 async function unzipProtected(buffer, directory, password) {
   if (!password) throw zipPasswordError('请输入 ZIP 密码');
@@ -141,7 +151,7 @@ export function createGameImporter(manager, {
     for await (const chunk of response.body) { bytes += chunk.length; if (bytes > limit) throw bad('远端文件超过大小限制'); chunks.push(chunk); }
     return Buffer.concat(chunks);
   }
-  async function discover(refresh = false) {
+  async function discoverCatalog(refresh) {
     if (!refresh && cached && now() - cached.fetchedAt < 20 * 60 * 1000) return { ...cached, cached: true };
     if (pending) return pending;
     const previous = cached;
@@ -156,7 +166,7 @@ export function createGameImporter(manager, {
             try {
               const repo = parseGitHubRepo(item.full_name);
               const manifest = validateManifest(JSON.parse(await request(mirror(`https://raw.githubusercontent.com/${repo.fullName}/${encodeURIComponent(item.default_branch)}/game.json`), 128 * 1024)));
-              items.push({ ...manifest, repoUrl: `https://github.com/${repo.fullName}`, fullName: repo.fullName, branch: item.default_branch, stars: item.stargazers_count, updatedAt: item.updated_at });
+              items.push({ ...manifest, source: 'github', repoUrl: `https://github.com/${repo.fullName}`, fullName: repo.fullName, branch: item.default_branch, stars: item.stargazers_count, updatedAt: item.updated_at });
             } catch { /* Repositories without a valid root manifest are not games. */ }
           }
         }));
@@ -169,6 +179,14 @@ export function createGameImporter(manager, {
     pending = load;
     return load;
   }
+  async function discover(refresh = false) {
+    const catalog = await discoverCatalog(refresh);
+    const items = catalog.items.map(item => {
+      const status = manager.communityInstallStatus(item.id, { source: 'github', repoUrl: item.repoUrl });
+      return { ...item, installStatus: status === 'official' ? 'conflict' : status };
+    });
+    return { ...catalog, items };
+  }
   async function installPackage(loadPackage, { source, repoUrl = null, replace = false }) {
     if (installing) throw bad('已有游戏正在安装，请稍后重试', 409);
     installing = true;
@@ -177,9 +195,12 @@ export function createGameImporter(manager, {
     let destination, movedOld = false, movedNew = false, markedId;
     try {
       const { manifest, files } = await loadPackage(stage);
-      const old = manager.repo.game(manifest.id);
-      if (old?.source === 'official' || fs.existsSync(inside(manager.officialDir, manifest.id))) throw bad('不能覆盖官方游戏');
-      if (old?.installed && !replace) throw bad('游戏已安装，请使用更新操作', 409);
+      const zipFingerprint = source === 'zip' ? fingerprintGameFiles(files) : null;
+      const status = manager.communityInstallStatus(manifest.id, { source, repoUrl, zipFingerprint });
+      if (status === 'official') throw bad('不能覆盖官方游戏');
+      if (status === 'conflict') throw identityConflict();
+      if (status === 'installed' && !replace) throw bad('游戏已安装，请使用更新操作', 409);
+      if (manager.changing.has(manifest.id)) throw bad('游戏正在进行其他操作，请稍后重试', 409);
       if (!manager.compatible(manifest)) throw bad(`此游戏需要邻舍 ${manifest.minAppVersion} 或更高版本`);
       destination = inside(root, manifest.id);
       fs.mkdirSync(stage, { recursive: true });
@@ -189,7 +210,7 @@ export function createGameImporter(manager, {
       await manager.unload(manifest.id);
       if (fs.existsSync(destination)) { fs.renameSync(destination, backup); movedOld = true; }
       fs.renameSync(stage, destination); movedNew = true;
-      manager.repo.register(manifest, source, destination, repoUrl);
+      manager.repo.register(manifest, source, destination, repoUrl, zipFingerprint);
       return manager.publicGame(manager.repo.game(manifest.id));
     } catch (error) {
       if (movedNew) removeManaged(root, path.basename(destination));

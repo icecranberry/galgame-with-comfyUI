@@ -27,17 +27,22 @@ export function createGameRepository(db) {
     return session(gameId, id);
   }
   return { db, game, session, write,
+    claims: id => db.prepare(`SELECT id, source, repo_url, zip_fingerprint, installed,
+      EXISTS (SELECT 1 FROM game_sessions WHERE game_id=installed_games.id) AS has_sessions
+      FROM installed_games WHERE id = ? COLLATE NOCASE`).all(validId(id)),
     list: () => db.prepare('SELECT * FROM installed_games WHERE installed=1 ORDER BY source=\'official\' DESC,name').all(),
     sessions: gameId => db.prepare(`SELECT session_id AS sessionId,title,created_at AS createdAt,updated_at AS updatedAt,revision,
       json_extract(state_json,'$.ended') AS ended,
       CASE WHEN json_type(state_json,'$.round') = 'integer' THEN json_extract(state_json,'$.round') END AS round
       FROM game_sessions WHERE game_id=? ORDER BY updated_at DESC`).all(validId(gameId)).map(row => ({ ...row, ended: row.ended === 1 })),
     deleteSession: (gameId, id) => db.prepare('DELETE FROM game_sessions WHERE game_id=? AND session_id=?').run(validId(gameId), validId(id)),
-    register(manifest, source, installPath, repoUrl = null) {
+    register(manifest, source, installPath, repoUrl = null, zipFingerprint = null) {
       const now = Date.now();
-      db.prepare(`INSERT INTO installed_games(id,source,name,version,author,repo_url,install_path,manifest_json,installed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET source=excluded.source,name=excluded.name,version=excluded.version,author=excluded.author,repo_url=excluded.repo_url,install_path=excluded.install_path,manifest_json=excluded.manifest_json,updated_at=excluded.updated_at,installed=1`)
-        .run(manifest.id, source, manifest.name, manifest.version, manifest.author, repoUrl, installPath, JSON.stringify(manifest), now, now);
+      db.prepare(`INSERT INTO installed_games(id,source,name,version,author,repo_url,zip_fingerprint,install_path,manifest_json,installed_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET source=excluded.source,name=excluded.name,version=excluded.version,author=excluded.author,
+          repo_url=excluded.repo_url,zip_fingerprint=excluded.zip_fingerprint,install_path=excluded.install_path,
+          manifest_json=excluded.manifest_json,updated_at=excluded.updated_at,installed=1`)
+        .run(manifest.id, source, manifest.name, manifest.version, manifest.author, repoUrl, zipFingerprint, installPath, JSON.stringify(manifest), now, now);
     },
   };
 }
