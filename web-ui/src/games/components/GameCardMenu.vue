@@ -48,7 +48,7 @@ onMounted(() => { document.addEventListener('pointerdown', onOutside); document.
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', onOutside); document.removeEventListener('focusin', onOutside) })
 </script>
 <style scoped>
-.game-card-menu { position:absolute;top:14px;right:14px;z-index:5; }
+.game-card-menu { position:relative;z-index:5; }
 .game-card-menu__items { position:absolute;top:calc(100% + 6px);right:0;width:152px;padding:7px;display:grid;gap:4px;background:var(--game-bg);border:var(--game-control-border,1px) solid var(--game-line);box-shadow:var(--game-control-shadow,5px 5px 0 #090f0d88);transform-origin:top right; }
 .game-card-menu-enter-active,.game-card-menu-leave-active { transition:opacity .3s,transform .3s; }
 .game-card-menu-enter-from,.game-card-menu-leave-to { opacity:0;transform:translateY(-6px); }

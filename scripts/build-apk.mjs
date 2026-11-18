@@ -18,6 +18,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import https from "node:https";
 import http from "node:http";
+import { downloadGithubFile, isGithubDownload } from "./lib/github-download.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -59,6 +60,7 @@ function ensureDir(dir) {
 }
 
 function downloadFile(url, dest, timeoutSec = 600) {
+  if (isGithubDownload(url)) return downloadGithubFile(url, dest, timeoutSec);
   return new Promise((resolvePromise) => {
     const proto = url.startsWith("https") ? https : http;
     const req = proto.get(url, { timeout: timeoutSec * 1000 }, (res) => {

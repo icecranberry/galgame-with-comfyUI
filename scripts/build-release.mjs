@@ -13,6 +13,7 @@
  */
 
 import { spawn, execSync } from "node:child_process";
+import { downloadGithubFile, isGithubDownload } from "./lib/github-download.mjs";
 import { existsSync, mkdirSync, rmSync, createWriteStream } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,6 +120,7 @@ function ensureDir(dir) {
  * 下载文件，失败返回 false
  */
 function downloadFile(url, dest, timeoutSec = 300) {
+  if (isGithubDownload(url)) return downloadGithubFile(url, dest, timeoutSec);
   return new Promise((resolvePromise) => {
     const proto = url.startsWith("https") ? https : http;
     const req = proto.get(url, { timeout: timeoutSec * 1000 }, (res) => {
@@ -670,7 +672,7 @@ async function main() {
     // robocopy 排除目录
     const robocopyExclude = [".git", "node_modules", "release", "__pycache__", ".cache"];
     // 运行时临时快照（如 agent-core/townstate.tmp.json）不属于发布内容，别带进用户包里
-    const robocopyExcludeFiles = ["*.tmp.json"];
+    const robocopyExcludeFiles = ["*.tmp.json", "github-proxy*.json", "github-proxy*.json.*.tmp"];
     const rcOk = await robocopy(ROOT, RELEASE_DIR, robocopyExclude, robocopyExcludeFiles);
     if (!rcOk) { fail("文件复制失败!"); process.exit(1); }
   } else {

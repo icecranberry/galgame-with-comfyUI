@@ -1,19 +1,22 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getDb } from '../db/index.js';
 import { getSetting, setSetting } from '../db/settings.js';
 import { createGameManager } from './gameManager.js';
 import { createGameImporter } from './gameImporter.js';
+import { githubTransport, normalizeGithubProxy } from '../services/githubTransport.js';
 import { promoteGameMedia } from './gameMedia.js';
-import { MEDIA_DIR, inside, removeManaged, regularFile, bad } from './gamePaths.js';
+import { MEDIA_DIR, inside, removeManaged, regularFile, validId, bad } from './gamePaths.js';
 
+const devBootId = process.env.LINSHE_GAME_DEV === '1' ? randomUUID() : null;
 let manager, importer;
 export function initGames() {
   if (!manager) {
     manager = createGameManager(getDb());
-    importer = createGameImporter(manager, { settings: {
+    importer = createGameImporter(manager, { fetchImpl: githubTransport.fetch, settings: {
       get: () => { try { return JSON.parse(getSetting('games_github') || '{}'); } catch { return {}; } },
       set: value => setSetting('games_github', JSON.stringify(value)),
     } });
@@ -22,27 +25,47 @@ export function initGames() {
   return manager;
 }
 export async function closeGames() { if (manager) await manager.close(); }
-export function createGameRoutes({ getManager = initGames, getImporter = () => importer } = {}) {
+export function createGameRoutes({ getManager = initGames, getImporter = () => importer, github = githubTransport } = {}) {
 let manager, importerInstance;
 const run = fn => (req, res, next) => { Promise.resolve().then(() => { manager = getManager(); importerInstance = getImporter(); return fn(req, res, next); }).catch(next); };
 const router = express.Router();
 router.get('/', run((_req, res) => res.json(manager.repo.list().map(manager.publicGame))));
 router.get('/community/discover', run(async (req, res) => res.json(await importerInstance.discover(req.query.refresh === '1'))));
-router.get('/settings', run((_req, res) => res.json(importerInstance.publicSettings())));
-router.put('/settings', run((req, res) => res.json(importerInstance.saveSettings(req.body || {}))));
+router.get('/settings', run(async (_req, res) => res.json({
+  ...importerInstance.publicSettings(),
+  ...await github.resolveSettings(),
+})));
+router.put('/settings', run(async (req, res) => {
+  const input = req.body || {};
+  const proxyUrl = input.proxyUrl === undefined ? undefined : normalizeGithubProxy(input.proxyUrl);
+  const settings = importerInstance.saveSettings(input);
+  if (proxyUrl !== undefined) github.setProxy(proxyUrl);
+  res.json({ ...settings, ...await github.resolveSettings() });
+}));
 router.post('/import/github', run(async (req, res) => res.status(201).json(await importerInstance.installGitHub(req.body?.url, req.body?.replace === true))));
-router.post('/import/zip', express.raw({ type: ['application/zip', 'application/octet-stream', 'application/x-zip-compressed'], limit: '50mb' }), run(async (req, res) => res.status(201).json(await importerInstance.installZip(req.body, { replace: req.query.replace === '1' }))));
+router.post('/import/zip', express.raw({ type: ['application/zip', 'application/octet-stream', 'application/x-zip-compressed'], limit: '50mb' }), run(async (req, res) => {
+  let password;
+  try { password = decodeURIComponent(req.get('X-Game-Zip-Password') || ''); }
+  catch { throw bad('ZIP 密码格式无效'); }
+  res.status(201).json(await importerInstance.installZip(req.body, { replace: req.query.replace === '1', password }));
+}));
 router.get('/:gameId/events', run((req, res) => {
   const id = req.params.gameId;
-  manager.get(id);
+  const devPreview = req.query.dev === '1' && devBootId;
+  if (devPreview) validId(id);
+  else manager.get(id);
   res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.flushHeaders(); res.write(':connected\n\n');
+  if (devPreview) res.write(`retry: 750\nevent: game-host-ready\ndata: ${devBootId}\n\n`);
   const send = event => { if (event.gameId === id) res.write(`data: ${JSON.stringify({ type: event.type, data: event.data })}\n\n`); };
   manager.events.on('update', send);
   const timer = setInterval(() => res.write(':keepalive\n\n'), 25000); timer.unref();
   req.on('close', () => { clearInterval(timer); manager.events.off('update', send); });
 }));
-router.get('/:gameId', run((req, res) => res.json(manager.publicGame(manager.get(req.params.gameId, { disabled: true })))));
+router.get('/:gameId', run((req, res) => {
+  const game = manager.publicGame(manager.get(req.params.gameId, { disabled: true }));
+  res.json(req.query.dev === '1' ? { ...game, devBootId } : game);
+}));
 router.patch('/:gameId', run(async (req, res) => {
   if (typeof req.body?.enabled !== 'boolean') throw bad('enabled 必须为布尔值');
   res.json(await manager.enable(req.params.gameId, req.body.enabled));
@@ -88,7 +111,7 @@ router.use((error, req, res, next) => {
   const status = error.status || 500;
   if (status >= 500) console.error(`[games] ${req.method} ${req.path}:`, error.message);
   // Provider errors can echo credentials; preserve the host's 5xx boundary.
-  res.status(status).json({ error: status < 500 ? error.message : error.gameMessage || '游戏服务执行失败，请查看邻舍运行日志后重试' });
+  res.status(status).json({ error: status < 500 ? error.message : error.gameMessage || '游戏服务执行失败，请查看邻舍运行日志后重试', code: error.gameCode });
 });
 return router;
 }
@@ -96,6 +119,9 @@ export default createGameRoutes();
 
 export function mountGameAssets(app, getManager = initGames) {
   const run = fn => (req, res, next) => Promise.resolve().then(() => fn(req, res, getManager())).catch(next);
+  app.get('/docs/linshe_community_game_guide.md', (_req, res) => {
+    res.type('text/plain; charset=utf-8').sendFile(fileURLToPath(new URL('../../../docs/linshe_community_game_guide.md', import.meta.url)));
+  });
   app.get('/game-sdk.js', (_req, res) => res.type('application/javascript').sendFile(fileURLToPath(new URL('./linshe-game-sdk.js', import.meta.url))));
   app.get('/game-assets/:gameId/*', run((req, res, manager) => {
     const game = manager.get(req.params.gameId);

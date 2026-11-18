@@ -46,6 +46,8 @@ android-shell/app/src/main/res/drawable-nodpi/ic_launcher_image.*
 
 MaiBot/
 MaiBot-Container/
+/AstrBot/
+/Cortico/
 output/
 
 # 本地会话产物与分发二进制

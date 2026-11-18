@@ -1,12 +1,30 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { watchGameFiles } from '../scripts/lib/gameDevWatch.mjs'
+
+function gameDevReload() {
+  let stopWatching
+  return {
+    name: 'linshe-game-reload',
+    apply: 'serve',
+    configureServer(server) {
+      stopWatching = watchGameFiles(changes => {
+        // A backend change will refresh open games once the new process is ready.
+        if (changes.some(change => change.backend)) return
+        for (const { gameId, official } of changes) server.ws.send('linshe:game-reload', { gameId, official })
+      })
+    },
+    closeBundle() { stopWatching?.() },
+  }
+}
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), gameDevReload()],
   server: {
     host: '0.0.0.0',
     port: 5173,
     proxy: {
+      '^/docs/linshe_community_game_guide\\.md$': { target: 'http://localhost:3099', changeOrigin: true },
       '/game-assets': { target: 'http://localhost:3099', changeOrigin: true },
       '/game-media': { target: 'http://localhost:3099', changeOrigin: true },
       '/game-sdk.js': { target: 'http://localhost:3099', changeOrigin: true },
@@ -16,6 +34,13 @@ export default defineConfig({
         // SSE 长连接在生图期间可能长时间无数据，禁用代理层超时
         timeout: 0,
         proxyTimeout: 0,
+        configure(proxy) {
+          proxy.on('proxyRes', (upstream, req, res) => {
+            if (!/^\/api\/games\/[^/]+\/events(?:\?|$)/.test(req.url)) return
+            // End the SSE response when a dev restart cuts off the upstream socket.
+            upstream.once('aborted', () => { if (!res.writableEnded) res.end() })
+          })
+        },
       },
       '/images': {
         target: 'http://localhost:3099',

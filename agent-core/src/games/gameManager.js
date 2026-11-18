@@ -15,10 +15,10 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
   const repo = createGameRepository(db), plugins = new Map(), loading = new Map(), changing = new Set(), events = new EventEmitter();
   events.setMaxListeners(100);
   const appVersion = (() => { try { return fs.readFileSync(path.join(ROOT_DIR, 'VERSION'), 'utf8').trim(); } catch { return '0.0.0'; } })();
-  function readManifest(dir) {
+  function readManifest(dir, options) {
     const file = regularFile(dir, 'game.json');
     if (fs.statSync(file).size > 128 * 1024) throw bad('game.json 过大');
-    const manifest = validateManifest(JSON.parse(fs.readFileSync(file, 'utf8')));
+    const manifest = validateManifest(JSON.parse(fs.readFileSync(file, 'utf8')), options);
     regularFile(dir, manifest.entry);
     if (manifest.serverEntry) {
       const code = fs.readFileSync(regularFile(dir, manifest.serverEntry), 'utf8');
@@ -56,9 +56,9 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
         if (!item.isDirectory() || item.name.startsWith('.')) continue;
         try {
           validId(item.name);
-          const dir = inside(root, item.name), manifest = readManifest(dir);
+          const old = repo.game(item.name);
+          const dir = inside(root, item.name), manifest = readManifest(dir, { allowMissingNsfw: Boolean(old?.installed) });
           if (manifest.id !== item.name) throw bad('目录名与游戏编号不一致');
-          const old = repo.game(manifest.id);
           if (source !== 'official' && old?.source === 'official') throw bad('社区包不能覆盖官方游戏');
           repo.register(manifest, source === 'official' ? source : old?.source || source, dir, old?.repo_url);
         } catch (error) { errors.push(`${item.name}: ${error.message}`); }

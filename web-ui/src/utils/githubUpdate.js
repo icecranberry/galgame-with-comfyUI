@@ -1,16 +1,10 @@
 /**
- * githubUpdate.js — 「有更新噢」标签的数据源（浏览器直连 GitHub API）
- *
- * 为什么在前端而不是后端：agent-core 的 Node 进程常常连不上 github（用户机器
- * 没给 Node 走代理），而浏览器用的是用户自己的代理 / 系统设置，通常能通。
- * api.github.com 对公开仓库回 Access-Control-Allow-Origin: *，页面里直接请求即可。
- *
- * 本地版本从哪来：后端读仓库根目录的 VERSION 给出（GET /api/version，只读本地文件、
- * 不碰网络）—— 只有查 GitHub 需要绕过 Node，本地装的是哪版不需要，所以也不在前端写死。
+ * githubUpdate.js — 「有更新噢」标签的数据源。
+ * 本地版本由 GET /api/version 提供，远端版本通过 /api/github 使用工坊的 GitHub 代理。
  *
  * 两个接口：
- *   GET /git/refs/tags    → 全部 tag 引用（附注 tag 的 object.sha 指向 tag 对象本身）
- *   GET /git/tags/{sha}   → 单个附注 tag 的注释正文（tag message）
+ *   GET /api/github/tags        → 全部 tag 引用（附注 tag 的 object.sha 指向 tag 对象本身）
+ *   GET /api/github/tags/{sha}  → 单个附注 tag 的注释正文（tag message）
  * 弹层只展示「tag 版本号 + 该 tag 的注释」，不列提交内容。注释只能逐个 tag 取，
  * 所以只对「比本地版本新」的那几个 tag 发请求，并用 MAX_ANNOTATIONS 封顶。
  *
@@ -21,8 +15,8 @@
 
 const REPO = 'icecranberry/galgame-with-comfyUI'
 const REPO_URL = `https://github.com/${REPO}`
-const API_BASE = `https://api.github.com/repos/${REPO}`
-const REQUEST_TIMEOUT_MS = 8000
+const API_BASE = '/api/github'
+const REQUEST_TIMEOUT_MS = 18000
 const CACHE_TTL_MS = 30 * 60 * 1000
 // 缓存键带版本号：payload 结构变了、或要丢弃旧的一份坏结果时把它 +1
 const CACHE_KEY = 'linshe:update-check:v2'
@@ -100,12 +94,10 @@ export function tagAnnotation(message) {
   return text.length > MAX_ANNOTATION_CHARS ? `${text.slice(0, MAX_ANNOTATION_CHARS)}…` : text
 }
 
-// 浏览器 fetch：不能也不该设 User-Agent（浏览器禁止脚本改这个头，设了也会被忽略）
 async function fetchJson(url) {
   let res
   try {
     res = await fetch(url, {
-      headers: { Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
@@ -113,11 +105,8 @@ async function fetchJson(url) {
     throw new Error(`连不上 GitHub：${err.message}`, { cause: err })
   }
   if (!res.ok) {
-    // 403 / 429 基本只有一种原因：未认证接口 60 次/小时的额度用完了
-    const hint = res.status === 403 || res.status === 429
-      ? 'GitHub 接口限流了，歇一会儿再刷新'
-      : `GitHub 接口返回 ${res.status}`
-    throw new Error(hint)
+    const result = await res.json().catch(() => ({}))
+    throw new Error(result.error || `GitHub 接口返回 ${res.status}`)
   }
   return res.json()
 }
@@ -135,7 +124,7 @@ async function fillAnnotations(tags) {
   await Promise.all(limited.map(async item => {
     if (!item.annotated || !item.sha) return
     try {
-      const detail = await fetchJson(`${API_BASE}/git/tags/${item.sha}`)
+      const detail = await fetchJson(`${API_BASE}/tags/${encodeURIComponent(item.sha)}`)
       item.annotation = tagAnnotation(detail?.message)
     } catch (err) {
       errors.push(err.message)
@@ -213,7 +202,7 @@ export async function checkForUpdate({ force = false, currentVersion } = {}) {
   const cached = readCache()
   if (!force && cached && cached.key === current && Date.now() - cached.at < CACHE_TTL_MS) return cached.data
 
-  const rawRefs = await fetchJson(`${API_BASE}/git/refs/tags`)
+  const rawRefs = await fetchJson(`${API_BASE}/tags`)
   const tags = (Array.isArray(rawRefs) ? rawRefs : []).map(parseTagRef).filter(Boolean)
 
   const latest = pickLatestTag(tags)

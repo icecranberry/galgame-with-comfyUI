@@ -1,13 +1,14 @@
 """
 Git 管理器 —— 封装 git CLI 调用，所有耗时操作通过 QProcess 异步执行。
 """
+import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 from PySide6.QtCore import QObject, Signal, QProcess
 
 from .process_env import ensure_system_env
@@ -23,6 +24,8 @@ _TLS_NO_REVOKE_ARGS = ["-c", "http.schannelCheckRevoke=false"]
 # --prune --prune-tags 清理远程已删除的旧 tag，避免用户切到废弃版本。
 _FETCH_ARGS = ["fetch", "--update-shallow", "--prune", "--prune-tags",
                "origin", "--tags"]
+_PROXY_ENV_KEYS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                   "http_proxy", "https_proxy", "all_proxy", "no_proxy")
 
 
 def _cached(ttl: float = _CACHE_TTL):
@@ -44,28 +47,39 @@ def _cached(ttl: float = _CACHE_TTL):
     return deco
 
 
-def _is_proxy_connection_error(stderr_lines: list[str]) -> str | None:
-    """检测是否为本地代理连接失败。
-
-    返回错误类型字符串用于日志提示，非代理错误返回 None。
-
-    典型 stderr:
-      fatal: unable to access 'https://github.com/.../': Failed to connect
-      to github.com port 443 via 127.0.0.1 after 210sms: Could not connect to server
-    """
+def _is_proxy_connection_error(stderr_lines: list[str]) -> bool:
+    """自动代理的传输失败可以在本次操作中降级为直连。"""
     joined = " ".join(stderr_lines).lower()
+    return any(message in joined for message in (
+        "failed to connect", "could not connect", "could not resolve proxy",
+        "connection timed out", "connection was reset", "connect tunnel failed",
+        "proxy connect aborted", "empty reply from server",
+    ))
 
-    # 确认是本地代理地址
-    is_local_proxy = ("127.0.0.1" in joined or "localhost" in joined or "::1" in joined)
-    if not is_local_proxy:
-        return None
 
-    if "connection timed out" in joined:
-        return "timeout"   # 代理端口可达但上游超时 → 节点可能故障
-    # connection refused / could not connect 都说明端口无人监听
-    if "connection refused" in joined or "could not connect to server" in joined:
-        return "refused"   # 代理客户端未运行
+def _is_github_remote(url: str | None) -> bool:
+    try:
+        parsed = urlsplit(url or "")
+        return parsed.scheme in ("http", "https") and parsed.hostname in ("github.com", "www.github.com")
+    except ValueError:
+        return False
+
+
+def _read_github_proxy(project_path: str) -> tuple[str, str] | None:
+    for mode, filename in (("manual", "github-proxy.json"), ("auto", "github-proxy-auto.json")):
+        try:
+            path = os.path.join(project_path, "agent-core", "data", filename)
+            with open(path, encoding="utf-8") as file:
+                url = json.load(file).get("proxyUrl")
+            if isinstance(url, str) and (url or mode == "manual"):
+                return mode, url
+        except (OSError, ValueError, AttributeError):
+            continue
     return None
+
+
+def _git_proxy_args(url: str) -> list[str]:
+    return ["-c", f"http.proxy={url}", "-c", f"remote.origin.proxy={url}"]
 
 
 def _is_schannel_revocation_error(stderr_lines: list[str]) -> bool:
@@ -103,51 +117,6 @@ def _find_ca_bundle(git_exe: str) -> str:
     return ""
 
 
-def _probe_github_reachable(timeout: float = 2.5) -> bool:
-    """快速探测 github.com:443 是否可达（TCP 握手测试）。"""
-    try:
-        sock = socket.create_connection(("github.com", 443), timeout=timeout)
-        sock.close()
-        return True
-    except Exception:
-        return False
-
-
-# 常见本地代理端口（按优先级排序）
-_PROXY_PORTS = [7890, 7891, 10809, 10808, 7892, 8080, 8888]
-
-
-def _find_local_proxy(timeout: float = 1.2) -> int | None:
-    """探测本地常见代理端口，返回第一个可 TCP 连通的端口号。"""
-    for port in _PROXY_PORTS:
-        try:
-            sock = socket.create_connection(("127.0.0.1", port), timeout=timeout)
-            sock.close()
-            return port
-        except Exception:
-            continue
-    return None
-
-
-def _set_git_global_proxy(git_exe: str, port: int) -> bool:
-    """使用指定 git 可执行文件设置全局 http.proxy 和 https.proxy。"""
-    proxy_url = f"http://127.0.0.1:{port}"
-    try:
-        subprocess.run(
-            [git_exe, "config", "--global", "http.proxy", proxy_url],
-            capture_output=True, text=True, timeout=10,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        subprocess.run(
-            [git_exe, "config", "--global", "https.proxy", proxy_url],
-            capture_output=True, text=True, timeout=10,
-            creationflags=_CREATE_NO_WINDOW,
-        )
-        return True
-    except Exception:
-        return False
-
-
 class GitManager(QObject):
     """Git 操作：fetch、tags、checkout、检测更新。"""
 
@@ -160,13 +129,15 @@ class GitManager(QObject):
         self._project_path = project_path
         self._repo_url = repo_url
         self._proc: QProcess | None = None
+        self._proxy_probe: QProcess | None = None
         self._pending_op = ""
         self._fetch_gen = 0          # fetch 代际：递增以忽略被 kill 的 stale callback
         self._finished_fetch_gen = 0 # 当前完成的 fetch 代际
         self._git_cache: dict[str, dict] = {}  # key → {value, ts}
         self._stderr_lines: list[str] = []     # 累积当前操作的 stderr
         self._proxy_retried = False     # 当前网络操作是否已尝试过绕过代理重试
-        self._auto_proxy_tried = False  # 当前网络操作是否已尝试过自动探测本地代理
+        self._auto_proxy_tried = False
+        self._using_auto_proxy = False
         self._ssl_backend_retried = False  # 当前网络操作是否已尝试过切换 OpenSSL 后端
 
     @property
@@ -329,22 +300,33 @@ class GitManager(QObject):
 
     @_cached(ttl=5.0)  # ls-remote 走网络，缓存稍长
     def get_latest_remote_tag(self) -> str | None:
-        """获取远程最新 tag（需要先 fetch）。
-
-        先使用系统代理设置尝试；若检测到本地代理连接失败则自动直连重试；
-        最后再尝试切换 OpenSSL 后端（规避 Windows 吊销检查故障）。
-        """
-        for attempt in (0, 1, 2):
-            bypass = (attempt >= 1)
-            use_openssl = (attempt == 2)
+        """获取远程最新 tag，和异步 fetch 使用相同的 GitHub 代理。"""
+        github = _is_github_remote(self.get_remote_url())
+        mode, proxy_url = ("", None)
+        env = os.environ.copy()
+        if github:
+            saved = _read_github_proxy(self._project_path)
+            if saved is None and not self._auto_proxy_tried:
+                command = self._proxy_probe_command()
+                if command:
+                    try:
+                        subprocess.run(command, capture_output=True, timeout=6, creationflags=_CREATE_NO_WINDOW)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+                saved = _read_github_proxy(self._project_path)
+            mode, proxy_url = saved or ("direct", "")
+            for key in _PROXY_ENV_KEYS:
+                env.pop(key, None)
+        use_openssl = False
+        for _ in range(3):
             cmd = [self._resolve_git()] + _TLS_NO_REVOKE_ARGS
             if use_openssl:
                 cmd += ["-c", "http.sslBackend=openssl"]
                 ca_bundle = _find_ca_bundle(self._resolve_git())
                 if ca_bundle:
                     cmd += ["-c", f"http.sslCAInfo={ca_bundle}"]
-            if bypass:
-                cmd += ["-c", "http.proxy=", "-c", "https.proxy="]
+            if proxy_url is not None:
+                cmd += _git_proxy_args(proxy_url)
             cmd += ["ls-remote", "--tags", "--sort=-creatordate", "origin"]
 
             try:
@@ -353,6 +335,7 @@ class GitManager(QObject):
                     cwd=self._project_path,
                     capture_output=True,
                     text=True,
+                    env=env,
                     timeout=15,
                     creationflags=_CREATE_NO_WINDOW,
                 )
@@ -363,17 +346,18 @@ class GitManager(QObject):
                             return m.group(1)
                     return None  # 命令成功但无 tag，无需重试
 
-                # 失败：检查是否需要绕过代理重试
-                # text=True 时 stderr 已是 str，不能再调用 .decode()
-                if not bypass and _is_proxy_connection_error(
-                    result.stderr.splitlines()
-                ) is not None:
-                    continue  # 重试直连
-                return None  # 非代理错误，不再重试
-            except Exception:
-                if not bypass:
-                    continue  # 超时等异常也尝试直连
+                errors = result.stderr.splitlines()
+            except subprocess.TimeoutExpired:
+                errors = ["connection timed out"]
+            except (OSError, UnicodeError):
                 return None
+            if not use_openssl and _is_schannel_revocation_error(errors):
+                use_openssl = True
+                continue
+            if mode == "auto" and proxy_url and _is_proxy_connection_error(errors):
+                proxy_url = ""
+                continue
+            return None
         return None
 
     def has_updates(self) -> bool | None:
@@ -404,12 +388,7 @@ class GitManager(QObject):
         git_exe = self._resolve_git()
         if not os.path.isfile(git_exe):
             return "没有找到 Git，请重新安装启动器后再试"
-        # 2. DNS 是否能解析 github.com
-        try:
-            socket.getaddrinfo("github.com", 443)
-        except socket.gaierror:
-            return "域名解析失败，请检查网络连接或开启 VPN 后重试"
-        # 3. 磁盘空间是否足够
+        # GitHub 的 DNS 可通过代理解析，预检只检查本地条件。
         try:
             usage = shutil.disk_usage(self._project_path)
             if usage.free < 300 * 1024 * 1024:
@@ -479,6 +458,14 @@ class GitManager(QObject):
 
     def cancel(self):
         """取消当前操作。"""
+        if self._proxy_probe is not None:
+            probe, self._proxy_probe = self._proxy_probe, None
+            probe.finished.connect(probe.deleteLater)
+            probe.kill()
+            operation, self._pending_op = self._pending_op, ""
+            self._init_repo_steps = []
+            self.operation_done.emit(operation, False, "操作已取消")
+            return
         if self._proc and self._proc.state() != QProcess.NotRunning:
             self._proc.kill()
         self._init_repo_steps = []
@@ -487,13 +474,51 @@ class GitManager(QObject):
     # Internal
     # ------------------------------------------------------------------
 
-    def _run_git(self, args: list[str], bypass_proxy: bool = False,
-                 ssl_backend: str = ""):
+    def _proxy_probe_command(self) -> list[str] | None:
+        from .service_runner import find_bundled_node
+        node = find_bundled_node(self._project_path) or shutil.which("node")
+        script = os.path.join(self._project_path, "scripts", "github-proxy.mjs")
+        return [node, script] if node and os.path.isfile(script) else None
+
+    def _start_proxy_probe(self, args: list[str], ssl_backend: str) -> bool:
+        command = self._proxy_probe_command()
+        if not command:
+            return False
+        probe = QProcess(self)
+        self._proxy_probe = probe
+
+        def resume():
+            if self._proxy_probe is not probe:
+                return
+            self._proxy_probe = None
+            probe.deleteLater()
+            self._run_git(args, ssl_backend=ssl_backend)
+
+        probe.finished.connect(lambda *_: resume())
+        probe.errorOccurred.connect(lambda error: resume() if error == QProcess.FailedToStart else None)
+        self.output.emit("[proxy] 正在探测本机 GitHub 代理...")
+        probe.start(command[0], command[1:])
+        return True
+
+    def _run_git(self, args: list[str], ssl_backend: str = ""):
+        proxy_url = None
+        self._using_auto_proxy = False
+        if args[0] == "fetch" and _is_github_remote(self.get_remote_url()):
+            saved = _read_github_proxy(self._project_path)
+            if saved is None and not self._auto_proxy_tried:
+                self._auto_proxy_tried = True
+                if self._start_proxy_probe(args, ssl_backend):
+                    return
+            mode, proxy_url = saved or ("direct", "")
+            if self._proxy_retried:
+                proxy_url = ""
+            self._using_auto_proxy = mode == "auto" and bool(proxy_url)
         if self._proc is not None:
             self._proc.kill()
             self._proc.deleteLater()
 
         self._stderr_lines.clear()
+        self._current_git_args = args
         args = _TLS_NO_REVOKE_ARGS + args
         if ssl_backend:
             # 切换 TLS 后端（如 openssl）；显式指定 CA 包，兼容便携版 Git
@@ -517,14 +542,10 @@ class GitManager(QObject):
         # 禁止 git 弹出交互式认证窗口（否则 QProcess 无法处理会导致挂死）
         env.insert("GIT_TERMINAL_PROMPT", "0")
 
-        if bypass_proxy:
-            # 绕过代理：清除环境变量中的代理配置 + git -c 覆盖全局 http.proxy
-            for proxy_key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
-                               "http_proxy", "https_proxy", "all_proxy",
-                               "NO_PROXY", "no_proxy"):
+        if proxy_url is not None:
+            for proxy_key in _PROXY_ENV_KEYS:
                 env.remove(proxy_key)
-            args = ["-c", "http.proxy=", "-c", "https.proxy="] + args
-        # 默认不清理代理：让 git 继承系统环境变量和全局 git config 中的代理设置
+            args = _git_proxy_args(proxy_url) + args
 
         self._proc.setProcessEnvironment(env)
 
@@ -577,99 +598,21 @@ class GitManager(QObject):
             # 全部完成
             self._init_repo_steps = []
 
-        # ---- schannel 证书吊销检查失败 → 自动切换 OpenSSL 后端重试 ----
-        # 注意：必须放在代理重试之前，schannel 错误同样含 "unable to access"，
-        # 否则会被下方的直连阻断逻辑误判并触发无意义的代理探测。
-        # TCP/代理链路是通的（错误发生在 TLS 握手阶段），换后端即可修复。
-        if (not ok and not self._ssl_backend_retried
+        # TLS 错误沿用当前代理，先重试 OpenSSL。
+        if (not ok and exit_status == QProcess.NormalExit and self._current_git_args[0] == "fetch"
+                and not self._ssl_backend_retried
                 and _is_schannel_revocation_error(self._stderr_lines)):
             self._ssl_backend_retried = True
             self.output.emit("[tls] 检测到 Windows 证书吊销检查失败，自动切换 OpenSSL 后端重试...")
-            if self._pending_op == "fetch":
-                self._run_git(_FETCH_ARGS, ssl_backend="openssl")
-            elif self._pending_op == "init_repo":
-                steps = getattr(self, '_init_repo_steps', [])
-                idx = getattr(self, '_init_repo_step_idx', 0)
-                if steps and idx < len(steps):
-                    self._run_git(steps[idx][0], ssl_backend="openssl")
-                else:
-                    self._run_git(["fetch", "origin", "--tags"], ssl_backend="openssl")
+            self._run_git(self._current_git_args, ssl_backend="openssl")
             return
-        # ----------------------------------------------------
 
-        # ---- 代理连接失败 → 探测直连可行性 → 自动重试或提示 ----
-        if not ok and not self._proxy_retried:
-            proxy_err = _is_proxy_connection_error(self._stderr_lines)
-            if proxy_err is not None:
-                self._proxy_retried = True
-
-                if proxy_err == "refused":
-                    self.output.emit("[proxy] 代理客户端未运行，已自动切换直连重试...")
-                else:
-                    self.output.emit("[proxy] 代理节点连接超时，已自动切换直连重试...")
-
-                # 快速探测直连是否可行
-                if _probe_github_reachable():
-                    self.output.emit("[proxy] 直连 github.com 正常，继续下载...")
-                    if self._pending_op == "fetch":
-                        self._run_git(_FETCH_ARGS, bypass_proxy=True)
-                    elif self._pending_op == "init_repo":
-                        steps = getattr(self, '_init_repo_steps', [])
-                        if steps:
-                            self._run_git(steps[-1][0], bypass_proxy=True)
-                        else:
-                            self._run_git(_FETCH_ARGS, bypass_proxy=True)
-                    return
-                else:
-                    self.output.emit("[proxy] 直连 github.com 也不通，请开启 VPN 后重试")
-                    self.operation_done.emit(
-                        self._pending_op, False,
-                        "代理用不了，直连也不通 — 请检查网络或开启 VPN"
-                    )
-                    self._pending_op = ""
-                    return
-        # ----------------------------------------------------
-
-        # ---- 直连被阻断 → 自动探测本地代理端口 ----
-        if not ok and not self._proxy_retried and not self._auto_proxy_tried:
-            stderr_check = " ".join(self._stderr_lines).lower()
-            is_direct_block = (
-                "connection was reset" in stderr_check or
-                "unable to access" in stderr_check or
-                "could not resolve host" in stderr_check or
-                ("connection timed out" in stderr_check and
-                 "127.0.0.1" not in stderr_check and
-                 "localhost" not in stderr_check)
-            )
-            if is_direct_block:
-                self._auto_proxy_tried = True
-                self.output.emit("[proxy] 检测到直连 GitHub 被阻断，正在自动搜索本地代理...")
-                proxy_port = _find_local_proxy()
-                if proxy_port:
-                    self.output.emit(
-                        f"[proxy] 发现本地代理端口 {proxy_port}，自动配置 git 代理..."
-                    )
-                    git_exe = self._resolve_git()
-                    if _set_git_global_proxy(git_exe, proxy_port):
-                        self.output.emit(
-                            f"[proxy] git 代理已自动设为 http://127.0.0.1:{proxy_port}，重试中..."
-                        )
-                        if self._pending_op == "fetch":
-                            self._run_git(_FETCH_ARGS)
-                        elif self._pending_op == "init_repo":
-                            steps = getattr(self, "_init_repo_steps", [])
-                            if steps and self._init_repo_step_idx < len(steps):
-                                self._run_git(steps[self._init_repo_step_idx][0])
-                            else:
-                                self._run_git(["fetch", "origin", "--tags"])
-                        return
-                    else:
-                        self.output.emit("[proxy] 代理配置写入失败，继续...")
-                else:
-                    self.output.emit(
-                        "[proxy] 未找到本地代理，请手动开启 VPN 或在启动器设置中配置代理后重试"
-                    )
-        # ----------------------------------------------------
+        if (not ok and exit_status == QProcess.NormalExit and self._using_auto_proxy
+                and _is_proxy_connection_error(self._stderr_lines)):
+            self._proxy_retried = True
+            self.output.emit("[proxy] 自动代理不可用，本次改用直连...")
+            self._run_git(self._current_git_args, ssl_backend="openssl" if self._ssl_backend_retried else "")
+            return
 
         if ok:
             msg = "操作成功"

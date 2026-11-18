@@ -6,11 +6,12 @@
   "type": "module",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon --watch src --watch app.js -e js,json app.js",
+    "dev": "node dev-nodemon.mjs",
     "test": "node --test \"test/*.test.js\" \"src/services/*.test.js\""
   },
   "dependencies": {
     "@napi-rs/canvas": "1.1.1",
+    "@zip.js/zip.js": "^2.25.0",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

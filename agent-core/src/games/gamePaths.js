@@ -7,6 +7,7 @@ export const OFFICIAL_DIR = path.join(ROOT_DIR, 'games', 'official');
 export const DATA_DIR = path.join(ROOT_DIR, 'agent-core', 'data');
 export const COMMUNITY_DIR = path.join(DATA_DIR, 'games_community');
 export const MEDIA_DIR = path.join(DATA_DIR, 'game');
+export const GAME_ENTRY_LIMIT = 5000, GAME_FILE_LIMIT = 20 * 1024 * 1024, GAME_CONTENT_LIMIT = 100 * 1024 * 1024;
 export const bad = (message, status = 400) => Object.assign(new Error(message), { status });
 export function validId(value) {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(value) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(value)) throw bad('无效的游戏或存档编号');
@@ -34,10 +35,13 @@ export function removeManaged(root, id) {
   fs.rmSync(target, { recursive: true, force: true });
 }
 export const PERMISSIONS = ['bridge:read', 'llm:chat', 'image:generate', 'save:rw'];
-export function validateManifest(value) {
+export function validateManifest(value, { allowMissingNsfw = false } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw bad('game.json 必须是 JSON 对象');
   validId(value.id);
   for (const key of ['name', 'version', 'entry']) if (typeof value[key] !== 'string' || !value[key].trim() || value[key].length > 300) throw bad(`game.json 缺少有效的 ${key}`);
+  if (typeof value.nsfw !== 'boolean' && !(allowMissingNsfw && value.nsfw === undefined)) {
+    throw bad('game.json 必须用布尔值 nsfw 声明是否为 NSFW');
+  }
   if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(value.version)) throw bad('游戏版本必须采用 x.y.z 格式');
   for (const key of ['entry', 'cover', 'serverEntry']) if (value[key]) inside('/game', value[key]);
   if (!value.entry.endsWith('.html')) throw bad('entry 必须指向 HTML 文件');

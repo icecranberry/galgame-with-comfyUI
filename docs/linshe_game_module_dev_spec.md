@@ -92,6 +92,7 @@ galgame-with-comfyUI/
   "description": "支持玩家扮演 KP 或调查员的轻量化 CoC 跑团模拟器",
   "cover": "web/cover.png",
   "entry": "web/index.html",
+  "nsfw": false,
   "serverEntry": "server/index.mjs",
   "minAppVersion": "3.5.0",
   "permissions": [
@@ -116,26 +117,26 @@ galgame-with-comfyUI/
 2. **并发拉取并校验 `game.json`**：
    * 拿到命中仓库的 `full_name` 与 `default_branch` 后，并发请求 Raw 静态文件（不消耗 GitHub API 60 次/小时的限流额度）：
      `https://raw.githubusercontent.com/<owner>/<repo>/<branch>/game.json`
-   * 自动过滤掉没有 `game.json` 或缺少必填字段（`id`、`name`、`version`、`entry`）的无效仓库，将合法仓库的 `stargazers_count`、`updated_at`、`html_url`、`default_branch` 与 `game.json` 合并返回前端。
+   * 自动过滤掉没有 `game.json` 或缺少必填字段（`id`、`name`、`version`、`entry`、布尔值 `nsfw`）的无效仓库，将合法仓库的 `stargazers_count`、`updated_at`、`html_url`、`default_branch` 与 `game.json` 合并返回前端。
 3. **防限流与网络稳定性保障**：
    * **本地 TTL 缓存（15~30 分钟）**：将抓取结果缓存在内存或 SQLite 中，切换页面优先读缓存；仅当用户主动点击「刷新」或缓存过期时重新请求 GitHub，避免触发未登录 Search API 的 10 次/分钟限流。
-   * **可选 Token 与加速前缀**：在「设置」中预留可选的 `GitHub Token`（用于放宽限流至 30 次/分钟）及可选的 `GitHub Raw/Archive 镜像前缀`（兼容国内网络环境）。
+   * **连接设置**：可设置 GitHub Token、用于读取清单的 Raw 镜像前缀，以及工坊请求和 Git 拉取共用的 HTTP 代理。
 
 ### 3.2 本地《邻舍.EXE》载入端
 
 在 `web-ui` 的「游戏中心 -> 社区工坊」提供三种载入方式：
 
-1. **社区列表一键安装**：展示上述抓取并校验通过的社区游戏卡片；用户点击「安装」时，后端拼接 `https://github.com/<owner>/<repo>/archive/refs/heads/<branch>.zip` 下载压缩包并安装。
+1. **社区列表一键安装**：展示已校验清单的社区游戏卡片。点击「安装」后，后端浅克隆仓库默认分支，并读取该分支跟踪的文件进行安装。
 
-2. **指定 GitHub 仓库导入**：用户直接粘贴任意 GitHub 仓库 URL（`owner/repo` 或完整链接），按上述同样逻辑拉取并校验 `game.json`。
+2. **指定 GitHub 仓库导入**：用户粘贴公开仓库的 `owner/repo` 或主页链接，走同一个 Git 拉取和清单校验流程。
 
 3. **本地 `.zip` 导入**：用户拖拽或选择本地 `.zip` 文件上传。
 
-**解压与安全校验要点**：
+**安装校验要点**
 
-* 解压时剥离 GitHub Archive 自带的外层 `<repo>-<branch>/` 目录，确保 `game.json` 位于安装目录根层级。
+* Git 临时仓库只用于读取已提交的文件。`game.json` 位于默认分支根目录，Git 元数据不进入安装目录。
 
-* 对 Zip 内每个 Entry 做 `path.resolve` 路径归一化检查，严禁写入目标安装目录之外（防止 Zip-Slip 路径穿越）。
+* ZIP 可带一层外层目录。两种入口都校验文件路径、数量、大小和清单后再安装。
 
 * 导入后立即校验 `game.json` 字段完整性，不合法则回滚删除临时目录并返回明确报错。
 
@@ -343,7 +344,7 @@ galgame-with-comfyUI/
 
 1. **Stage 1（后端底座）**：实现 `installed_games` / `game_sessions` SQLite 表、`gameManager.js`（扫描、校验、插件加载与错误隔离）、`gameBridge.js`（复用神说只读工具并过滤密钥），以及生图服务的 `outputScope: 'game'` 落盘改造。
 
-2. **Stage 2（导入与前端宿主）**：实现 `gameImporter.js`（GitHub Topic `linshe-game` 直连抓取与 TTL 缓存、GitHub Archive 下载、Zip 安全解压）、`GameCenter.vue`、`GamePlayer.vue` 与 `LinSheGameSDK`。
+2. **Stage 2（导入与前端宿主）**：实现 `gameImporter.js`（GitHub Topic `linshe-game` 抓取与 TTL 缓存、GitHub 默认分支浅克隆、本地 ZIP 导入）、`GameCenter.vue`、`GamePlayer.vue` 与 `LinSheGameSDK`。
 
 3. **Stage 3（跑团后端插件）**：编写 `games/official/trpg-simulator/server/index.mjs`（D100 规则引擎、三层上下文、分段批处理、KP Agent Tools、外部剧本解析器、幕间摘要、异步生图触发）。
 

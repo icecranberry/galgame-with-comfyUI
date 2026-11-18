@@ -24,6 +24,12 @@
   --game-dim: #746b82;
   --game-error: #a83c54;
   --game-lilac: #eae1f5;
+  --game-nsfw-ribbon-deep: #39204e;
+  --game-nsfw-ribbon: #674082;
+  --game-nsfw-ribbon-highlight: #7b548f;
+  --game-nsfw-ribbon-gold: #f3d2a0;
+  --game-nsfw-ribbon-trim: #bd8b63;
+  --game-nsfw-ribbon-ink: #fff1d7;
   --game-mint: #dcefe1;
   --game-control-bg: #fffef9;
   --game-control-border: 2px;

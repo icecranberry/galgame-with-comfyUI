@@ -16,6 +16,7 @@ import { healthCheck as vectorHealth } from './src/services/vectorClient.js';
 import chatRoutes from './src/routes/chat.js';
 import godSaysRoutes from './src/routes/godSays.js';
 import gameRoutes, { initGames, mountGameAssets, closeGames } from './src/games/gameRoutes.js';
+import githubUpdateRoutes from './src/routes/githubUpdates.js';
 import logRoutes from './src/routes/logs.js';
 import { startGodSays, stopGodSays } from './src/services/godSays/runtime.js';
 import ttsRoutes from './src/routes/tts.js';
@@ -140,6 +141,7 @@ app.use('/api', wrapRouterAsync(expressionStandingRoutes));
 app.use('/api', wrapRouterAsync(chatRoutes));           // /api/characters/:id/chat, /api/characters/:id/messages
 app.use('/api/god-says', wrapRouterAsync(godSaysRoutes));
 app.use('/api/games', gameRoutes);
+app.use('/api/github', githubUpdateRoutes);
 mountGameAssets(app);
 app.use('/api/logs', wrapRouterAsync(logRoutes));
 app.use('/api/tts', wrapRouterAsync(ttsRoutes));
@@ -176,7 +178,7 @@ app.use('/api/maibot', wrapRouterAsync(maibotBridgeRoutes));
 
 // 应用自身版本号（仓库根目录 VERSION，不带 v 前缀）
 // 前端「有更新噢」拿它当本地版本去比 GitHub 上的 tag —— 这一步只读本地文件、不碰网络，
-// 所以放后端；查 GitHub 那一步是浏览器直连，见 web-ui/src/utils/githubUpdate.js
+// 远端版本由 /api/github 读取，和工坊共用 GitHub 代理。
 app.get('/api/version', (req, res) => {
   let version = '';
   try {

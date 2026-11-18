@@ -46,7 +46,7 @@ export function createLocalSpeechModelManager({ inspect = inspectLocalModels, la
     const active = installation;
     try {
       const child = launch('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'setup.ps1'), '-ModelVersion', model],
-        { windowsHide: true, cwd: root, env: { ...env, TTS_LOCAL_MODEL: model, TTS_COMFYUI_URL: env.TTS_COMFYUI_URL || comfyUrl() }, stdio: ['ignore', 'pipe', 'pipe'] });
+        { windowsHide: true, cwd: root, env: { ...env, TTS_LOCAL_MODEL: model, TTS_COMFYUI_URL: env.TTS_COMFYUI_URL || comfyUrl(), LINSHE_TTS_NODE: process.execPath }, stdio: ['ignore', 'pipe', 'pipe'] });
       const append = chunk => { if (installation === active) installation.log = (installation.log + String(chunk)).slice(-12000); };
       child.stdout?.on('data', append); child.stderr?.on('data', append);
       child.once('error', error => { if (installation === active) { installation.status = 'failed'; installation.error = `安装启动失败：${error.message}`; } });

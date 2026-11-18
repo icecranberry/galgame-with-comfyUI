@@ -22,11 +22,27 @@ $env:UV_HTTP_TIMEOUT = '120'
 $env:HF_HUB_OFFLINE = '0'
 $env:TRANSFORMERS_OFFLINE = '0'
 
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$githubHelper = Join-Path $projectRoot 'scripts\github-proxy.mjs'
+$githubNode = $env:LINSHE_TTS_NODE
+if (-not $githubNode) { $githubNode = Join-Path $projectRoot 'runtime\nodejs\node.exe' }
+if (-not (Test-Path -LiteralPath $githubNode)) {
+    $githubNode = (Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+}
+
 function Expand-TtsDownload([string]$Url, [string]$Name) {
     $archive = Join-Path $downloads ($Name + '.zip')
     $stage = Join-Path $downloads ($Name + '-' + [guid]::NewGuid().ToString('N'))
     for ($attempt = 1; $attempt -le 3; $attempt++) {
-        try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $archive; break }
+        try {
+            if (([uri]$Url).Host -eq 'github.com' -and $githubNode -and (Test-Path -LiteralPath $githubHelper)) {
+                & $githubNode $githubHelper --download $Url $archive 600
+                if ($LASTEXITCODE -ne 0) { throw 'GitHub download failed. Check the workshop connection settings.' }
+            } else {
+                Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $archive
+            }
+            break
+        }
         catch { if ($attempt -eq 3) { throw }; Start-Sleep -Seconds (2 * $attempt) }
     }
     Expand-Archive -LiteralPath $archive -DestinationPath $stage

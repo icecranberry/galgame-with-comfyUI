@@ -1,6 +1,6 @@
 <template>
   <main class="game-theme game-player" :class="{ 'is-leaving': leaving }">
-    <iframe v-if="game && !error" ref="frame" :src="game.entryUrl" :title="game.name" sandbox="allow-scripts" referrerpolicy="same-origin" />
+    <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" sandbox="allow-scripts" referrerpolicy="same-origin" />
     <div v-if="error || game?.source !== 'official' || game?.id !== 'trpg-simulator'" class="game-exit"><GameAction variant="quiet" compact @click="exit">← 游戏馆</GameAction></div>
     <div v-if="error" class="game-error" role="alert">{{ error }}</div>
   </main>
@@ -14,9 +14,12 @@ import { gameRequest } from '../api/games.js'
 const route = useRoute(), router = useRouter(), frame = ref(null), game = ref(null), error = ref('')
 const openGameStandings = inject('openGameStandings')
 const base = `/${encodeURIComponent(route.params.gameId)}`, abort = new AbortController()
+const devQuery = import.meta.hot ? '?dev=1' : ''
+const frameRevision = ref(0)
 let channel = crypto.randomUUID()
 const seen = new Set(); let inFlight = 0
 let events
+let eventRetry, manifestRequest = 0, pendingFrameReload = false
 const leaving = ref(false)
 let exitTimer
 const exit = () => {
@@ -72,16 +75,60 @@ async function receive(event) {
   inFlight++
   try { reply({ result: await dispatch(data.method, data.args || {}) }) } catch (error) { reply({ error: error.message }) } finally { inFlight-- }
 }
+async function loadGame() {
+  const revision = ++manifestRequest
+  try {
+    const next = await request(devQuery)
+    if (revision !== manifestRequest || abort.signal.aborted) return
+    if (!next.enabled || !next.compatible) throw new Error('游戏已停用或版本不兼容')
+    game.value = next
+    error.value = ''
+    pendingFrameReload = false
+    frameRevision.value++
+  } catch (e) {
+    if (revision === manifestRequest && !abort.signal.aborted) error.value = e.message
+  }
+}
+
+function refreshGameFrame({ gameId, official }) {
+  if (leaving.value || error.value || game.value?.id !== gameId || (game.value.source === 'official') !== official) return
+  if (game.value.devBootId && events?.readyState !== EventSource.OPEN) pendingFrameReload = true
+  else frameRevision.value++
+}
+
+function connectGameEvents() {
+  const stream = new EventSource(`/api/games${base}/events${devQuery}`)
+  events = stream
+  stream.onmessage = event => { try { frame.value?.contentWindow?.postMessage({ type: 'linshe:event', channel, ...JSON.parse(event.data), rpcType: 'event' }, '*') } catch { /* Ignore an incomplete server event. */ } }
+  if (!devQuery) return
+  stream.addEventListener('game-host-ready', event => {
+    if (leaving.value) return
+    if (game.value?.devBootId !== event.data || error.value) void loadGame()
+    else if (pendingFrameReload) {
+      pendingFrameReload = false
+      frameRevision.value++
+    }
+  })
+  stream.onerror = () => {
+    // A proxy can return 502 between processes, which permanently closes this EventSource.
+    if (stream.readyState === EventSource.CLOSED) eventRetry = setTimeout(connectGameEvents, 750)
+  }
+}
+
 onMounted(async () => {
   window.addEventListener('message', receive)
-  try {
-    game.value = await gameRequest(base, { signal: abort.signal }); if (!game.value.enabled || !game.value.compatible) throw new Error('游戏已停用或版本不兼容')
-    events = new EventSource(`/api/games${base}/events`)
-    events.onmessage = event => { try { frame.value?.contentWindow?.postMessage({ type: 'linshe:event', channel, ...JSON.parse(event.data) , rpcType: 'event' }, '*') } catch { /* Ignore an incomplete server event. */ } }
-  }
-  catch (e) { error.value = e.message }
+  import.meta.hot?.on('linshe:game-reload', refreshGameFrame)
+  await loadGame()
+  if (!abort.signal.aborted && (!error.value || devQuery)) connectGameEvents()
 })
-onBeforeUnmount(() => { window.removeEventListener('message', receive); abort.abort(); events?.close(); clearTimeout(exitTimer) })
+onBeforeUnmount(() => {
+  window.removeEventListener('message', receive)
+  import.meta.hot?.off('linshe:game-reload', refreshGameFrame)
+  abort.abort()
+  events?.close()
+  clearTimeout(eventRetry)
+  clearTimeout(exitTimer)
+})
 </script>
 <style scoped>
 .game-player { position: fixed; inset: 0; width: 100vw; height: 100dvh; background: var(--game-bg); animation: game-in .3s ease; transition: opacity .3s ease; }

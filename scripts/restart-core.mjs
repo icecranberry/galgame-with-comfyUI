@@ -5,7 +5,7 @@
  *
  * 流程:
  *   1. 清理 agent-core 残留进程（优雅退出 + 全量清扫 agent-core 相关进程，不碰 vite / vector-service）
- *   2. 重新拉起 agent-core (node --watch)
+ *   2. 用开发模式重新拉起 agent-core
  *   3. 等待服务就绪
  */
 
@@ -75,7 +75,7 @@ async function main() {
   // 2. 拉起 agent-core
   console.log(`\n  [2/3] 启动 agent-core (:3099)...`);
   const cwd = resolve(ROOT, "agent-core");
-  const child = spawn("node", ["--watch", "app.js"], {
+  const child = spawn("node", ["dev-nodemon.mjs"], {
     cwd,
     stdio: "pipe",
     windowsHide: true,

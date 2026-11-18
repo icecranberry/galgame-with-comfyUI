@@ -6,9 +6,8 @@ import { checkForUpdate, getSeenVersion, markUpdateSeen, shouldNotify } from '..
 /**
  * 版本更新状态：系统设置页「有更新噢」标签与侧边栏设置项红点共用同一份数据。
  *
- * 分两步：本地版本问后端（GET /api/version，读仓库根目录 VERSION，只读本地文件），
- * 远端 tag 由浏览器直连 GitHub 拉（不是后端 Node 转发）—— 后端的 Node 进程常常
- * 连不上 github，浏览器走的是用户自己的代理 / 系统设置，通常能通。
+ * 本地版本由 GET /api/version 提供，远端 tag 通过 /api/github 查询，
+ * 共用工坊的 GitHub 代理。
  * 一次会话只查一次（utils 里另有 30 分钟缓存）；失败静默 —— 离线、代理不通时
  * 不该反复弹错，只是不显示标签而已。
  *
