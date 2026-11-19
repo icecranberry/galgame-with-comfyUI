@@ -4,6 +4,15 @@ import { estimateTokens } from '../services/lorebook/engine.js';
 import { appendReplay, fitNativeReplay, fitReplay, GAME_REPLAY_RULE } from './trpgReplay.js';
 import { assertPromptFits, promptTokens, trpgPromptBudget } from './trpgPromptBudget.js';
 
+const JSON_OBJECT = { type: 'json_object' };
+
+function jsonModeRejected(error) {
+  if (![400, 422, 501].includes(Number(error?.status ?? error?.response?.status))) return false;
+  const detail = [error.message, error.param, error.code, error.error?.message, error.error?.param, error.error?.code].join(' ');
+  // Vertex only exposes the sanitized status, so retry INVALID_ARGUMENT once with the original format.
+  return /response[ _]?format|response[ _]?mime[ _]?type|json[ _]?object|json mode|application\/json|Vertex AI 请求失败：HTTP 400 \(INVALID_ARGUMENT\)/i.test(detail);
+}
+
 export function createGameServices(gameId, repo, assertPermission) {
   const controller = new AbortController();
   const active = () => {
@@ -66,12 +75,25 @@ export function createGameServices(gameId, repo, assertPermission) {
     active(); assertPermission('llm:chat');
     if (!Array.isArray(messages) || !messages.length || messages.some(m => !['system', 'user', 'assistant', 'tool'].includes(m.role) || typeof m.content !== 'string') ||
       (!budget && (messages.length > 100 || JSON.stringify(messages).length > 180000))) throw bad('LLM 消息格式或长度不合法');
-    const { chatSync } = await import('../services/lorebook/runtime.js');
-    return chatSync(messages, { temperature: Math.max(0, Math.min(2, Number(options.temperature) || 0.7)), label: `游戏:${gameId}`,
+    const { prepareLorebook } = await import('../services/lorebook/runtime.js');
+    const requestOptions = { temperature: Math.max(0, Math.min(2, Number(options.temperature) || 0.7)), label: `游戏:${gameId}`,
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(240000), ...(signal ? [signal] : [])]), retries: 0,
-      ...(options.responseFormat === 'json' ? { response_format: { type: 'json_object' } } : {}),
-      ...(budget ? { requestBudget: budget, freeEggFailover: false } : {}),
-      lorebook: options.lorebook ?? false });
+      ...(options.responseFormat === 'json' ? { response_format: JSON_OBJECT } : {}),
+      ...(budget ? { requestBudget: budget, freeEggFailover: false } : {}) };
+    const lorebook = options.lorebook ?? false;
+    const prepared = await prepareLorebook(messages, lorebook === false ? false : (lorebook || {}));
+    const { chatSync } = await import('../llm/llm-client.js');
+    let result;
+    try { result = await chatSync(prepared.messages, requestOptions); }
+    catch (error) {
+      if (gameId !== 'trpg-simulator' || !requestOptions.response_format || !jsonModeRejected(error)) throw error;
+      requestOptions.signal.throwIfAborted();
+      console.warn(`[游戏:${gameId}] 接口拒绝 JSON 模式，按普通格式重试`);
+      delete requestOptions.response_format;
+      result = await chatSync(prepared.messages, requestOptions);
+    }
+    prepared.commit();
+    return result;
   }
   const llm = {
     chat(messages, options = {}, { signal } = {}) {
@@ -118,7 +140,7 @@ export function createGameServices(gameId, repo, assertPermission) {
       }
       return llm.chat(built.messages, { lorebook: built.lorebook, responseFormat }, { signal });
     },
-    async agent(input, tools, execute, { checkpoint, save, signal } = {}) {
+    async agent(input, tools, execute, { checkpoint, save, signal, responseFormat } = {}) {
       active(); assertPermission('llm:chat');
       const { chatAgentStream } = await import('../llm/llm-client.js');
       const budget = useReplay(input) ? await trpgPromptBudget() : null;
@@ -145,6 +167,7 @@ export function createGameServices(gameId, repo, assertPermission) {
         if (checkpoint.messages) checkpoint.messages = [...base, ...continuation];
         save();
       };
+      let format = responseFormat === 'json' ? JSON_OBJECT : undefined;
       while (true) {
         signal?.throwIfAborted();
         const assistantIndex = continuation.findLastIndex(message => message.role === 'assistant');
@@ -172,7 +195,6 @@ export function createGameServices(gameId, repo, assertPermission) {
         }
         const toolSteps = continuation.filter(message => message.role === 'assistant').length;
         if (!checkpoint && toolSteps >= 6) throw bad('KP 工具调用超过本轮上限，已执行的裁决已保存', 502);
-        let message;
         const requestTools = !checkpoint || toolSteps < 10 ? tools : [];
         let messages;
         if (checkpoint?.promptTail) {
@@ -190,8 +212,23 @@ export function createGameServices(gameId, repo, assertPermission) {
           messages = [...base, ...continuation];
         }
         const requestSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(240000), ...(signal ? [signal] : [])]);
-        for await (const event of chatAgentStream(messages, { tools: requestTools, forceThinking: false,
-          label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget })) if (event.type === 'assistant_end') message = event.message;
+        const ask = async () => {
+          let reply;
+          for await (const event of chatAgentStream(messages, { tools: requestTools, forceThinking: false,
+            label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget, response_format: format })) {
+            if (event.type === 'assistant_end') reply = event.message;
+          }
+          return reply;
+        };
+        let message;
+        try { message = await ask(); }
+        catch (error) {
+          if (!format || !jsonModeRejected(error)) throw error;
+          requestSignal.throwIfAborted();
+          console.warn(`[游戏:${gameId}:KP] 接口拒绝 JSON 模式，本轮沿用普通格式`);
+          format = undefined;
+          message = await ask();
+        }
         if (!message) throw bad('KP 未返回完整回复', 502);
         if (!message.tool_calls?.length) {
           prepared?.commit();

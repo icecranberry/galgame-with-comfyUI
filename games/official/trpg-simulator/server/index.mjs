@@ -21,6 +21,36 @@ const integer = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 const validId = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value);
 function json(raw) { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); } catch { fail('模型没有返回有效 JSON，请重试', 502); } }
 
+function parseKeeperReply(raw) {
+  // Pair structural braces while skipping braces and escaped quotes inside JSON strings.
+  const tokens = /[{}"]/g;
+  const quotedString = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
+  const starts = [];
+  let response;
+  for (let match; (match = tokens.exec(raw));) {
+    const [token] = match;
+    if (token === '{') {
+      starts.push(match.index);
+      continue;
+    }
+    if (!starts.length) continue;
+    if (token === '"') {
+      quotedString.lastIndex = match.index;
+      if (quotedString.test(raw)) tokens.lastIndex = quotedString.lastIndex;
+      continue;
+    }
+    const start = starts.pop();
+    let candidate;
+    try { candidate = JSON.parse(raw.slice(start, tokens.lastIndex)); } catch { continue; }
+    if (typeof candidate.narration !== 'string' || !candidate.narration.trim() ||
+        typeof candidate.playerExpression !== 'string' || !Array.isArray(candidate.suggestions) ||
+        candidate.suggestions.some(suggestion => typeof suggestion !== 'string')) continue;
+    if (response) fail('守秘人返回了多个有效叙事对象，请续跑本轮', 502);
+    response = candidate;
+  }
+  return response;
+}
+
 export function rollD100(skill, difficulty = 'regular', value = randomInt(1, 101)) {
   if (!integer(skill, 1, 99) || !integer(value, 1, 100) || !['regular', 'hard', 'extreme'].includes(difficulty)) fail('检定技能、难度或骰值无效');
   const target = difficulty === 'extreme' ? Math.floor(skill / 5) : difficulty === 'hard' ? Math.floor(skill / 2) : skill;
@@ -347,8 +377,8 @@ function validateCreatedScenario(value) {
   if (scenario.handouts.length && !integer(scenario.handouts.length, 3, 4)) fail('隐匿 HO 剧本须有 3–4 张 HO');
   return scenario;
 }
-const CARD_RULES = `你是轻量CoC调查员设计师。根据每位角色人设与本局公开身份一次生成全员卡，不复述角色外貌。每人选2–3项符合角色的特长（60–80），其余技能15–50。所有属性20–80整数。只输出JSON数组，不输出解释或代码围栏，必须完整覆盖给定角色名。严格按此完整示例：
-[{"name":"材料中的角色名，逐字照填","attributes":{"STR":50,"CON":50,"DEX":50,"INT":60,"POW":50,"APP":50,"SIZ":50,"EDU":60},"skills":{"侦查":65,"图书馆":65,"聆听":40,"话术":30,"说服":40,"心理学":30,"格斗":30,"闪避":25,"急救":30,"神秘学":20,"锁匠":20,"潜行":30}}]
+const CARD_RULES = `你是轻量CoC调查员设计师。根据每位角色人设与本局公开身份一次生成全员卡，不复述角色外貌。每人选2–3项符合角色的特长（60–80），其余技能15–50。所有属性20–80整数。只输出一个 JSON 对象，不输出解释或代码围栏。cards 数组按名单每人填写一张卡，必须完整覆盖给定角色名。严格按此完整示例：
+{"cards":[{"name":"材料中的角色名，逐字照填","attributes":{"STR":50,"CON":50,"DEX":50,"INT":60,"POW":50,"APP":50,"SIZ":50,"EDU":60},"skills":{"侦查":65,"图书馆":65,"聆听":40,"话术":30,"说服":40,"心理学":30,"格斗":30,"闪避":25,"急救":30,"神秘学":20,"锁匠":20,"潜行":30}}]}
 attributes和skills字段及所有子字段不可缺失，数值为整数；不输出HP/SAN，由规则引擎计算。`;
 const INVESTIGATOR_INTRO = `你一个人扮演群聊中所有列在 actors 里的 AI 调查员。<group_info> 按名字提供成员资料，参考每人的本局身份、性格和口吻。把对话续成一次真正的多人交流，按发生顺序逐人输出。每条是一个人的发言，可以紧接上一句接话、插话、连说或暂时沉默。每位至多两条，总计最多八条。禁止代玩家、守秘人和已退场角色发言。只依据已经公开的情报推理，不替守秘人宣布行动结果，不凭空编造秘密身份或私下情报。
 illustrations 是守秘人已登记的可观察情境，按回合与场景理解并回应，无需等待图片或复述画面描述。
@@ -975,9 +1005,10 @@ export default function registerGamePlugin(ctx) {
     const names = investigatorNames(profiles.map(p => ({ id: p.id, name: p.display_name || p.name })));
     const request = { rules: CARD_RULES, personas: profiles.map(p => `### ${names.get(String(p.id))}\n${p.short_prompt || (p.id === PLAYER_ID ? p.base_prompt : '') || ''}`),
       data: JSON.stringify(profiles.map((p, i) => ({ name: names.get(String(p.id)), identity: identities[i] || undefined }))),
-      task: '一次生成名单内全部调查员卡，严格输出完整JSON数组。', scope: 'cards' };
+      task: '一次生成名单内全部调查员卡，返回包含 cards 的 JSON 对象。', scope: 'cards' };
     function readCards(raw) {
-      const cards = json(raw);
+      const output = json(raw);
+      const cards = Array.isArray(output) ? output : output?.cards;
       if (!Array.isArray(cards) || cards.length !== profiles.length) fail('调查员卡数量不符，请重新开团', 502);
       return profiles.map(profile => {
         const card = cards.find(c => typeof c?.name === 'string' && c.name.trim() === names.get(String(profile.id)));
@@ -985,12 +1016,12 @@ export default function registerGamePlugin(ctx) {
         return card;
       });
     }
-    let raw = await llm.complete(request);
+    const ask = task => llm.complete({ ...request, task }, { responseFormat: 'json' });
     let cards;
+    const raw = await ask(request.task);
     try { cards = readCards(raw); } catch (error) {
       if (!error.gameMessage) throw error;
-      raw = await llm.complete({ ...request, task: '为名单逐一出卡。检查姓名、卡片数量、每项属性和技能，返回严格的完整 JSON 数组。' });
-      cards = readCards(raw);
+      cards = readCards(await ask('为名单逐一出卡。检查姓名、卡片数量、每项属性和技能，返回包含完整 cards 数组的 JSON 对象。'));
     }
     return profiles.map((p, index) => {
       const card = cards[index];
@@ -1034,7 +1065,7 @@ export default function registerGamePlugin(ctx) {
       data: JSON.stringify({ ...investigatorContext(s, false, names), actors: [...byName.keys()], expressionNames: slots.map(slot => slot.name),
         playerMode: s.mode, playerSpeech: playerSpeech(s), checkReactionActor: names.get(checkReactionActorId) }),
       task: checkReactionActorId ? '让指定调查员回应刚公布的检定裁定，按约定返回 JSON。' : '继续队伍的对话和行动，按约定返回 JSON。',
-      scope: `${s.sessionId}:${audience}` }, { signal });
+      scope: `${s.sessionId}:${audience}` }, { responseFormat: 'json', signal });
     const output = json(raw);
     const responseLines = output?.lines;
     if (!Array.isArray(responseLines) || responseLines.length > 8) fail('调查员发言格式不合法', 502);
@@ -1379,10 +1410,11 @@ export default function registerGamePlugin(ctx) {
           }
           const result = apply(s, name, engineArgs, effects);
           return name === 'roll_dice' ? promptRoll(result, names) : result;
-        }, { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), signal });
+        }, { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), responseFormat: 'json', signal });
       signal.throwIfAborted();
       const raw = (content || '').trim();
-      const response = s.turn.protocol === 2 || /^[{`]/.test(raw) ? json(raw) : { narration: raw };
+      let response = parseKeeperReply(raw);
+      if (!response && s.turn.protocol !== 2) response = /^[{`]/.test(raw) ? json(raw) : { narration: raw };
       if (typeof response?.narration !== 'string') fail('守秘人的叙事格式不合法，请续跑本轮', 502);
       updatePlayerExpression(s, response.playerExpression, slots);
       const suggestions = actionSuggestions(response.suggestions);
@@ -1497,7 +1529,7 @@ export default function registerGamePlugin(ctx) {
       const raw = await llm.complete({ rules: RANDOM_ITEM_RULES,
         data: JSON.stringify({ era: s.scenario.meta.era, scene: { name: currentScene.name, publicDesc: currentScene.publicDesc },
           roll: recent && { rank: recent.rank, skill: recent.skillName, reason: recent.reason } }),
-        task: '生成一件当前场景中可获得的道具。', scope: `${s.sessionId}:scene-item` }, { signal });
+        task: '生成一件当前场景中可获得的道具。', scope: `${s.sessionId}:scene-item` }, { responseFormat: 'json', signal });
       signal.throwIfAborted();
       fields = json(raw);
       if (!fields || typeof fields !== 'object' || Array.isArray(fields)) fail('随机道具格式有误，请重试', 502);
