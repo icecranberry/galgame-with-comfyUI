@@ -70,7 +70,8 @@ router.patch('/:gameId', run(async (req, res) => {
   if (typeof req.body?.enabled !== 'boolean') throw bad('enabled 必须为布尔值');
   res.json(await manager.enable(req.params.gameId, req.body.enabled));
 }));
-router.delete('/:gameId', run(async (req, res) => { await manager.uninstall(req.params.gameId, req.query.clearData !== '0'); res.json({ ok: true }); }));
+router.post('/:gameId/update', run(async (req, res) => res.json(await importerInstance.updateGitHub(req.params.gameId))));
+router.delete('/:gameId', run(async (req, res) => { await manager.uninstall(req.params.gameId, req.query.clearData === '1'); res.json({ ok: true }); }));
 router.post('/:gameId/sdk/bridge', run(async (req, res) => res.json(await manager.context(req.params.gameId).bridgeTools.call(req.body?.toolName, req.body?.args))));
 router.post('/:gameId/sdk/llm', run(async (req, res) => res.json({ content: await manager.context(req.params.gameId).llm.chat(req.body?.messages, req.body?.options) })));
 router.post('/:gameId/sdk/image', run(async (req, res) => res.json(await manager.context(req.params.gameId).imageService.generate(req.body))));

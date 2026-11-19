@@ -25,6 +25,7 @@
       </div>
     </div>
     <div v-if="error" class="arcade-notice" role="alert"><span>{{ error }}</span><GameAction variant="quiet" compact :disabled="!!busy || loading" @click="retryCatalog">重试</GameAction></div>
+    <div v-if="tab === 'installed' && updateFeedback" class="arcade-notice" :class="{ 'arcade-notice--success': !updateFeedback.error }" :role="updateFeedback.error ? 'alert' : 'status'">{{ updateFeedback.message }}</div>
 
     <Transition name="arcade-content" mode="out-in">
       <section id="game-shelf" :key="tab" class="arcade-shelf" role="tabpanel" :aria-labelledby="`game-tab-${tab}`" :aria-busy="loading">
@@ -32,7 +33,7 @@
         <article v-for="item in visibleGames" :key="item.repoUrl || item.id" class="arcade-cartridge" :class="{ 'arcade-cartridge--revealed': tab === 'community' && item.nsfw === true }">
           <div class="cartridge-windowbar">
             <span><span class="cartridge-windowbar__light" aria-hidden="true"></span>{{ isOfficialTrpg(item) ? '01 / 官方首发' : item.source === 'official' ? '官方游戏' : '社区游戏' }}</span>
-            <GameCardMenu v-if="tab === 'installed' && item.source !== 'official'" class="cartridge-windowbar__menu" :game="item" :disabled="!!busy" @uninstall="openRemove(item)" />
+            <GameCardMenu v-if="tab === 'installed' && item.source !== 'official'" class="cartridge-windowbar__menu" :game="item" :disabled="!!busy" @update="updateGame(item)" @uninstall="openRemove(item)" />
             <span v-else-if="item.stars !== undefined" class="cartridge-stars">☆ {{ item.stars }}</span>
             <span v-else class="cartridge-windowbar__pixels" aria-hidden="true"><i></i><i></i><i></i></span>
           </div>
@@ -46,8 +47,9 @@
             <p v-if="isOfficialTrpg(item)"><span>关掉小镇的灯，和熟悉的人围坐一桌。</span><span>今晚你是守秘人，还是入局的调查员？</span></p>
             <p v-else-if="item.description">{{ item.description }}</p>
             <div class="cartridge-copy__bottom">
-              <GameAction v-if="tab === 'installed'" variant="primary" :disabled="!item.enabled || !item.compatible || !!busy" @click="openGame(item)">
-                {{ !item.compatible ? '需要更新邻舍' : item.enabled ? '开始游戏' : '已停用' }}<GamePixelIcon name="arrow" />
+              <GameAction v-if="tab === 'installed'" variant="primary" :busy="busy === `update:${item.id}`" :disabled="!item.enabled || !item.compatible || !!busy" @click="openGame(item)">
+                <template v-if="busy === `update:${item.id}`">正在更新…</template>
+                <template v-else>{{ !item.compatible ? '需要更新邻舍' : item.enabled ? '开始游戏' : '已停用' }}<GamePixelIcon name="arrow" /></template>
               </GameAction>
               <template v-else>
                 <GameAction variant="primary" :disabled="!!busy || item.installStatus !== 'available'" :busy="busy === item.repoUrl" @click="install(item.repoUrl)">
@@ -140,7 +142,8 @@ import '../games/styles/game-ui.css'
 import { gameRequest } from '../api/games.js'
 
 const router = useRouter(), tab = ref('installed'), installed = ref([]), community = ref([]), loading = ref(false), busy = ref(''), error = ref('')
-const showImport = ref(false), showSettings = ref(false), repoUrl = ref(''), fileInput = ref(null), toRemove = ref(null), removeOpen = ref(false), clearData = ref(true)
+const updateFeedback = ref(null)
+const showImport = ref(false), showSettings = ref(false), repoUrl = ref(''), fileInput = ref(null), toRemove = ref(null), removeOpen = ref(false), clearData = ref(false)
 const zipForPassword = ref(null), zipPassword = ref(''), zipPasswordInput = ref(null)
 const showGuide = ref(false)
 const showNsfw = ref(false)
@@ -159,7 +162,13 @@ const isOfficialTrpg = game => game.source === 'official' && game.id === 'trpg-s
 const reload = async () => { installed.value = await gameRequest() }
 const openGame = game => router.push(`/games/${game.id}`)
 const openImport = () => { if (!busy.value) { importError.value = ''; showImport.value = true } }
-const openRemove = item => { if (busy.value || item.source === 'official') return; toRemove.value = item; removeError.value = ''; removeOpen.value = true }
+function openRemove(item) {
+  if (busy.value || item.source === 'official') return
+  toRemove.value = item
+  clearData.value = false
+  removeError.value = ''
+  removeOpen.value = true
+}
 async function moveTabFocus(event) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
@@ -191,15 +200,32 @@ async function mutate(key, action, target = error) {
     if (tab.value === 'community') await discover()
   } catch (e) { target.value = e.message } finally { busy.value = '' }
 }
-function finishInstall(game) {
+function upsertInstalled(game) {
   const index = installed.value.findIndex(item => item.id === game.id)
   if (index < 0) installed.value.push(game)
   else installed.value[index] = game
+}
+function finishInstall(game) {
+  upsertInstalled(game)
   showImport.value = false
 }
-const install = (url, replace = false) => mutate(url, async () => {
-  finishInstall(await gameRequest('/import/github', { method: 'POST', body: { url, replace } }))
+const install = url => mutate(url, async () => {
+  finishInstall(await gameRequest('/import/github', { method: 'POST', body: { url } }))
 }, showImport.value ? importError : error)
+async function updateGame(game) {
+  if (busy.value || game.source !== 'github' || !game.repoUrl) return
+  busy.value = `update:${game.id}`
+  updateFeedback.value = null
+  try {
+    const updated = await gameRequest(`/${encodeURIComponent(game.id)}/update`, { method: 'POST' })
+    upsertInstalled(updated)
+    updateFeedback.value = { message: `《${updated.name}》已更新 · v${updated.version}` }
+  } catch (e) {
+    updateFeedback.value = { error: true, message: `更新《${game.name}》失败。${e.message}` }
+  } finally {
+    busy.value = ''
+  }
+}
 function resetZipPassword() {
   zipForPassword.value = null
   zipPassword.value = ''
@@ -225,7 +251,15 @@ async function uploadZip(file, password = '') {
 }
 function chooseZip(event) { const file = event.target.files?.[0]; event.target.value = ''; void uploadZip(file) }
 function dropZip(event) { if (busy.value || !event.dataTransfer.files?.length) return; showImport.value = true; importError.value = ''; void uploadZip(event.dataTransfer.files[0]) }
-const uninstall = () => { if (!toRemove.value || toRemove.value.source === 'official') return; return mutate(toRemove.value.id, async () => { await gameRequest(`/${toRemove.value.id}?clearData=${clearData.value ? '1' : '0'}`, { method: 'DELETE' }); removeOpen.value = false }, removeError) }
+function uninstall() {
+  const game = toRemove.value
+  if (!game || game.source === 'official') return
+  const query = clearData.value ? '?clearData=1' : ''
+  return mutate(game.id, async () => {
+    await gameRequest(`/${encodeURIComponent(game.id)}${query}`, { method: 'DELETE' })
+    removeOpen.value = false
+  }, removeError)
+}
 function readProxySetting(settings) {
   proxyUrl.value = savedProxyUrl.value = settings.proxyUrl || ''
   proxyMode.value = settings.proxyMode || ''
@@ -326,6 +360,7 @@ onMounted(async () => { loading.value = true; try { await reload() } catch (e) {
 .arcade-footer__pixels { font:700 10px/1.8 ui-monospace,'Courier New',monospace;letter-spacing:1px; }
 .arcade-footer .arcade-footer__pixels>svg { color:#b49acb;width:9px;height:9px; }
 .arcade-notice { margin-bottom:22px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#fbece4;border:2px solid #c29a82;color:#804d38;line-height:1.7;font-size:14px;overflow-wrap:anywhere; }
+.arcade-notice--success { background:var(--game-mint);border-color:var(--game-line);color:var(--game-cream); }
 .arcade-loading { min-height:260px;display:flex;align-items:center;justify-content:center;gap:16px;flex-direction:column;padding:30px;line-height:1.7;text-align:center;color:var(--game-dim);font-size:14px; }
 .arcade-loading__light { width:14px;height:14px;background:#b5a0d4;box-shadow:20px 0 0 #e5c571,-20px 0 0 #9fc3a5;animation:arcade-pulse 1.2s steps(2,end) infinite; }
 .arcade-empty { padding:40px 20px 48px;display:grid;justify-items:center;gap:18px;text-align:center;border:2px dashed #d3c7df;background:#fffef9b3; }

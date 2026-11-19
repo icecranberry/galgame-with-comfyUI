@@ -187,7 +187,7 @@ export function createGameImporter(manager, {
     });
     return { ...catalog, items };
   }
-  async function installPackage(loadPackage, { source, repoUrl = null, replace = false }) {
+  async function installPackage(loadPackage, { source, repoUrl = null, replace = false, updateId }) {
     if (installing) throw bad('已有游戏正在安装，请稍后重试', 409);
     installing = true;
     const stagingId = `staging-${randomUUID()}`, backupId = `backup-${randomUUID()}`;
@@ -195,10 +195,12 @@ export function createGameImporter(manager, {
     let destination, movedOld = false, movedNew = false, markedId;
     try {
       const { manifest, files } = await loadPackage(stage);
+      if (updateId && manifest.id !== updateId) throw bad('仓库中的游戏 ID 已变更，无法保留数据更新', 409);
       const zipFingerprint = source === 'zip' ? fingerprintGameFiles(files) : null;
       const status = manager.communityInstallStatus(manifest.id, { source, repoUrl, zipFingerprint });
       if (status === 'official') throw bad('不能覆盖官方游戏');
       if (status === 'conflict') throw identityConflict();
+      if (updateId && status !== 'installed') throw bad('游戏已卸载，请重新安装', 409);
       if (status === 'installed' && !replace) throw bad('游戏已安装，请使用更新操作', 409);
       if (manager.changing.has(manifest.id)) throw bad('游戏正在进行其他操作，请稍后重试', 409);
       if (!manager.compatible(manifest)) throw bad(`此游戏需要邻舍 ${manifest.minAppVersion} 或更高版本`);
@@ -223,7 +225,12 @@ export function createGameImporter(manager, {
       if (movedOld) removeManaged(root, backupId);
     }
   }
-  return { discover, publicSettings,
+  async function installGitHub(input, replace = false, updateId) {
+    const repo = parseGitHubRepo(input);
+    const repoUrl = `https://github.com/${repo.fullName}`;
+    return installPackage(async stage => inspectPackageFiles(await loadGitHub(repoUrl, stage)), { source: 'github', repoUrl, replace, updateId });
+  }
+  return { discover, publicSettings, installGitHub,
     installZip(buffer, { replace = false, password } = {}) {
       return installPackage(() => inspectZip(buffer, password), { source: 'zip', replace });
     },
@@ -239,10 +246,10 @@ export function createGameImporter(manager, {
       cached = pending = null;
       return publicSettings();
     },
-    async installGitHub(input, replace = false) {
-      const repo = parseGitHubRepo(input);
-      const repoUrl = `https://github.com/${repo.fullName}`;
-      return installPackage(async stage => inspectPackageFiles(await loadGitHub(repoUrl, stage)), { source: 'github', repoUrl, replace });
+    updateGitHub(id) {
+      const game = manager.get(id, { disabled: true });
+      if (game.source !== 'github' || !game.repo_url) throw bad('仅支持从原仓库更新通过 GitHub 安装的游戏');
+      return installGitHub(game.repo_url, true, game.id);
     },
   };
 }

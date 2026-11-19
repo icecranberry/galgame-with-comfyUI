@@ -5,7 +5,8 @@
     </GameAction>
     <Transition name="game-card-menu">
       <div v-show="open" :id="menuId" ref="menu" class="game-card-menu__items" role="menu" :aria-label="`${game.name}的管理操作`" :inert="!open" @keydown="onMenuKeydown">
-        <GameAction role="menuitem" tabindex="-1" variant="danger" :disabled="disabled" @click="uninstall">卸载游戏</GameAction>
+        <GameAction v-if="game.source === 'github' && game.repoUrl" role="menuitem" tabindex="-1" :disabled="disabled" @click="select('update')">从仓库更新</GameAction>
+        <GameAction role="menuitem" tabindex="-1" variant="danger" :disabled="disabled" @click="select('uninstall')">卸载游戏</GameAction>
       </div>
     </Transition>
   </div>
@@ -15,7 +16,7 @@ import { ref, watch, nextTick, onMounted, onBeforeUnmount, useId } from 'vue'
 import GameAction from './GameAction.vue'
 
 const props = defineProps({ game: { type: Object, required: true }, disabled: Boolean })
-const emit = defineEmits(['uninstall'])
+const emit = defineEmits(['update', 'uninstall'])
 const open = ref(false), root = ref(null), trigger = ref(null), menu = ref(null), menuId = `game-menu-${useId()}`
 const items = () => [...(menu.value?.querySelectorAll('[role="menuitem"]:not(:disabled)') || [])]
 function close(restoreFocus = false) { open.value = false; if (restoreFocus) trigger.value?.$el.focus({ preventScroll: true }) }
@@ -25,9 +26,9 @@ async function show(last = false) {
   await nextTick()
   if (open.value) (last ? items().at(-1) : items()[0])?.focus({ preventScroll: true })
 }
-function uninstall() {
+function select(action) {
   if (props.disabled || props.game.source === 'official') return
-  close(true); emit('uninstall')
+  close(true); emit(action)
 }
 function onTriggerKeydown(event) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); void show(event.key === 'ArrowUp') }

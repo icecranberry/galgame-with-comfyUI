@@ -171,7 +171,7 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
     try { if (plugin?.lifecycle?.onUnload) await plugin.lifecycle.onUnload(); }
     finally { plugin?.dispose?.(); plugins.delete(id); }
   }
-  async function uninstall(id, clearData = true) {
+  async function uninstall(id, clearData = false) {
     const row = get(id, { disabled: true });
     if (row.source === 'official') throw bad('官方游戏随主程序更新，可停用但不能卸载');
     if (changing.has(id)) throw bad('游戏正在进行其他操作，请稍后重试', 409);
