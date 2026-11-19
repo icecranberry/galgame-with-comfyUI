@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300">
+  <defs>
+    <linearGradient id="coat" x2="1" y2="1"><stop stop-color="#a78364"/><stop offset="1" stop-color="#402c2b"/></linearGradient>
+    <linearGradient id="face" x2="1" y2="1"><stop stop-color="#f2c693"/><stop offset="1" stop-color="#ac6f60"/></linearGradient>
+    <linearGradient id="hair" x2="1" y2="1"><stop stop-color="#39272b"/><stop offset="1" stop-color="#17141a"/></linearGradient>
+  </defs>
+  <path d="M29 154C28 68 51 32 102 35c59-3 73 35 70 111l20 77-62 54-96-41Z" fill="url(#hair)" stroke="#1f181b" stroke-width="3"/>
+  <path d="m83 162-7 35-41 17C16 228 11 265 6 300h188c-4-40-8-68-29-83l-43-21-7-38Z" fill="url(#face)"/>
+  <path d="M82 188 38 204C15 217 9 247 4 300h190c-3-48-7-83-30-96l-43-14-20 29Z" fill="url(#coat)" stroke="#362624" stroke-width="3"/>
+  <path d="m80 188 20 28-22 84H59l-6-73Zm41 0-21 28 27 84h16l4-73Z" fill="#c8a37b" opacity=".68"/>
+  <path d="M62 85c4-28 74-38 78 7l4 40c-4 28-23 52-44 54-24-3-42-29-44-55Z" fill="url(#face)"/>
+  <path d="M49 126c6-44 35-36 66-65 5 25 24 38 37 51 4-52-22-74-57-74-31 0-62 33-46 88Z" fill="url(#hair)"/>
+  <path d="M49 124c-3 44-4 59-12 82 24-12 31-39 26-70m87-23c12 29 13 62 8 89-21-14-24-41-18-65" fill="#291f26"/>
+  <g stroke="#543a38" stroke-width="2" fill="none"><rect x="65" y="113" width="26" height="17" rx="6"/><rect x="107" y="113" width="26" height="17" rx="6"/><path d="M91 119q8-6 16 0m-8 4-4 15 6 2m-9 16q9 4 17-2"/></g>
+  <path d="M72 120q7-4 13 0m29 0q7-4 13 0" stroke="#42302d" stroke-width="2" fill="none"/>
+  <path d="m148 115 10 6m-11-2 10 7M22 259l22-17m115-1 19 27" stroke="#e3aa6e" stroke-width="2" opacity=".62"/>
+  <path d="M57 220q40 4 43 22 5-18 43-24l-5 46q-24 1-38 16-20-14-41-14Z" fill="#553a32" stroke="#3a2825" stroke-width="2"/>
+  <path d="M58 220q29 2 42 16 16-14 43-16v35q-28 1-43 17-16-12-41-15Z" fill="#dec19a"/>
+  <path d="M65 232l22 5m-22 3 22 5m26-7 24-5m-24 13 23-5" stroke="#9d7556" fill="none"/>
+</svg>

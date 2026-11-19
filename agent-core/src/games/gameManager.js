@@ -96,10 +96,12 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
       if (!get(id).manifest.permissions.includes(permission)) throw bad(`游戏没有声明 ${permission} 权限`, 403);
     };
     const host = services(id, repo, assertPermission);
+    const tavern = game.source === 'official' && id === 'midnight-tavern';
     const gameDataDir = inside(mediaDir, validId(id));
     fs.mkdirSync(gameDataDir, { recursive: true });
     return { gameId: id, gameDataDir, events: { emit: (type, data) => events.emit('update', { gameId: id, type, data }) },
-      bridgeTools: { definitions: bridge.definitions, call: (...args) => { assertPermission('bridge:read'); return bridge.call(...args); } },
+      bridgeTools: { definitions: (tavern && bridge.tavernDefinitions) || bridge.definitions,
+        call: (name, args) => { assertPermission('bridge:read'); return bridge.call(name, args, { tavern }); } },
       ...host,
       // A scoped repository instead of the application's unrestricted SQLite handle.
       db: { list: () => { assertPermission('save:rw'); return repo.sessions(id); }, load: sessionId => { assertPermission('save:rw'); return repo.session(id, sessionId); }, write: (...args) => { assertPermission('save:rw'); return repo.write(id, ...args); } },

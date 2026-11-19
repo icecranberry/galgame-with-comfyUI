@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d1311">
+  <title>邻舍深夜小酒馆</title>
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./mix.js"></script>
+  <script defer src="./view.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <main id="tavern" aria-label="邻舍深夜小酒馆">
+    <header class="topbar">
+      <div class="bar-status">
+        <button type="button" class="exit" data-action="exit" title="返回游戏馆" aria-label="返回游戏馆">←</button>
+        <div id="clock" class="clock">Night 1 · 23:40</div>
+        <div id="avatars" class="avatar-queue"></div>
+      </div>
+      <nav class="bar-nav" aria-label="酒馆图鉴">
+        <button type="button" data-action="drawer" data-id="menu" aria-label="招牌酒单"><span class="nav-icon" aria-hidden="true">♧</span><span class="nav-full">招牌酒单</span><span class="nav-short" aria-hidden="true">酒单</span></button>
+        <button type="button" data-action="drawer" data-id="wall" aria-label="纪念墙"><span class="nav-icon" aria-hidden="true">▧</span><span class="nav-full">纪念墙</span><span class="nav-short" aria-hidden="true">纪念</span></button>
+        <button type="button" data-action="drawer" data-id="people" aria-label="邻舍名录"><span class="nav-icon" aria-hidden="true">♙</span><span class="nav-full">邻舍名录</span><span class="nav-short" aria-hidden="true">名录</span></button>
+        <button type="button" data-action="drawer" data-id="saves" aria-label="存档与设置"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-full">存档与设置</span><span class="nav-short" aria-hidden="true">存档</span></button>
+      </nav>
+    </header>
+    <section id="stage" class="stage is-opening" aria-label="来客与吧台对话">
+      <div class="stage-room" aria-hidden="true">
+        <div class="window"><i></i></div>
+        <div class="shelves"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="light light-left"><i></i></div>
+        <div class="light light-right"><i></i></div>
+      </div>
+      <div id="seats" class="seats"></div>
+      <div class="counter" aria-hidden="true"></div>
+      <div id="dialogue" class="dialogue" aria-live="polite"></div>
+    </section>
+    <div class="workbench">
+      <section class="board" aria-labelledby="board-title">
+        <div class="work-heading"><h2 id="board-title">传闻与委托</h2><span id="note-count"></span></div>
+        <div id="board" class="board-body"></div>
+      </section>
+      <section id="workshop" class="workshop" aria-labelledby="mix-title">
+        <div class="work-heading"><h2 id="mix-title">调酒工坊</h2><div id="drinker"></div></div>
+        <div class="mix-body">
+          <div class="ingredients">
+            <div class="ingredient-line"><small>基酒</small><div id="bases" class="ingredients-grid bases"></div></div>
+            <div class="ingredient-line"><small>魔药</small><div id="potions" class="ingredients-grid potions"></div></div>
+            <div class="ingredient-line"><small>风味</small><div id="garnishes" class="ingredients-grid garnishes"></div></div>
+            <label class="custom"><span aria-hidden="true">✦</span><input id="custom" maxlength="40" placeholder="自定义加料（可选）" aria-label="自定义加料，最多二十字" autocomplete="off"></label>
+          </div>
+          <div class="mix-preview">
+            <div id="glass" class="glass-stage"></div>
+            <div id="meters" class="meters"></div>
+          </div>
+        </div>
+        <div class="pour-rail"><span id="mix-status"></span><button type="button" class="primary pour" data-action="pour">摇匀递出</button></div>
+      </section>
+    </div>
+  </main>
+  <dialog id="overlay" class="overlay"><section class="overlay-panel" id="overlay-panel" aria-labelledby="overlay-title"></section></dialog>
+  <div id="notice" class="notice" role="status"></div>
+</body>
+</html>

@@ -1,7 +1,7 @@
 <template>
   <main class="game-theme game-player" :class="{ 'is-leaving': leaving }">
     <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" sandbox="allow-scripts" referrerpolicy="same-origin" />
-    <div v-if="error || game?.source !== 'official' || game?.id !== 'trpg-simulator'" class="game-exit"><GameAction variant="quiet" compact @click="exit">← 游戏馆</GameAction></div>
+    <div v-if="error || game?.source !== 'official' || !['trpg-simulator', 'midnight-tavern'].includes(game?.id)" class="game-exit"><GameAction variant="quiet" compact @click="exit">← 游戏馆</GameAction></div>
     <div v-if="error" class="game-error" role="alert">{{ error }}</div>
   </main>
 </template>

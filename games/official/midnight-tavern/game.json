@@ -1,0 +1,14 @@
+{
+  "id": "midnight-tavern",
+  "name": "邻舍深夜小酒馆",
+  "version": "1.0.0",
+  "author": "icecranberry",
+  "description": "化身深夜吧台老板，听邻居吐露心事、拼凑流言委托，并用自由加料的属性特调改写他们的奇遇结局。",
+  "cover": "web/cover.png",
+  "entry": "web/index.html",
+  "nsfw": false,
+  "serverEntry": "server/index.mjs",
+  "minAppVersion": "3.5.0",
+  "permissions": ["bridge:read", "llm:chat", "image:generate", "save:rw"],
+  "tags": ["叙事", "调酒", "奇遇", "官方"]
+}
