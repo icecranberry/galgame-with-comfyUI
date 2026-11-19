@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { readRelationshipGraph } from '../src/db/relationshipGraphRepository.js';
 
-test('关系图聚合保持有向文本，过滤默认角色、孤悬边、空关系和空居室', () => {
+test('关系图包含默认助手并保留有向关系，过滤孤悬边、空关系和空居室', () => {
   const db = new Database(':memory:');
   try {
     db.exec(`CREATE TABLE characters(id INTEGER PRIMARY KEY,name TEXT,display_name TEXT,avatar_path TEXT,base_prompt TEXT);
@@ -17,14 +17,14 @@ test('关系图聚合保持有向文本，过滤默认角色、孤悬边、空�
       INSERT INTO character_relationships VALUES(1,1,2,'老板'),(2,2,1,'下属'),(3,1,4,'默认'),(4,1,99,'缺失'),(5,1,3,'  '),(6,1,1,'自己');
       INSERT INTO user_relationships VALUES(1,1,'邻居'),(2,4,'默认'),(3,99,'缺失'),(4,2,'');`);
     const graph = readRelationshipGraph(db);
-    assert.deepEqual(graph.nodes.map(node => node.id), [1, 2, 3]);
+    assert.deepEqual(graph.nodes.map(node => node.id), [1, 2, 3, 4]);
     assert.equal(graph.nodes[0].group_id, 1);
     assert.equal(graph.nodes[1].group_id, null);
     assert.ok(!('base_prompt' in graph.nodes[0]));
-    assert.deepEqual(graph.edges.map(edge => edge.relationship_text), ['老板', '下属']);
-    assert.deepEqual(graph.userEdges.map(edge => edge.relationship_text), ['邻居']);
+    assert.deepEqual(graph.edges.map(edge => edge.relationship_text), ['老板', '下属', '默认']);
+    assert.deepEqual(graph.userEdges.map(edge => edge.relationship_text), ['邻居', '默认']);
     assert.deepEqual(graph.groups, [{ id: 1, name: '居室' }]);
     db.prepare('DELETE FROM character_relationships WHERE id = 2').run();
-    assert.deepEqual(readRelationshipGraph(db).edges.map(edge => edge.relationship_text), ['老板']);
+    assert.deepEqual(readRelationshipGraph(db).edges.map(edge => edge.relationship_text), ['老板', '默认']);
   } finally { db.close(); }
 });

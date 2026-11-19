@@ -507,7 +507,7 @@
   function scenarioList({ scenarios, scenario }) {
     return scenarios.map((item, i) => {
       const active = item === scenario;
-      const tags = item.briefing?.tags?.join(' · ') || item.meta.era || '剧本';
+      const tags = [item.custom && '自定义', item.briefing?.tags?.join(' · ') || item.meta.era].filter(Boolean).join(' · ') || '剧本';
       return button('choose-scenario', `<span class="scenario-index">${sceneNumber(i)}</span>
         <span class="scenario-row-copy"><strong>${esc(item.meta.title)}</strong><small>${esc(tags)}</small></span>
         <span class="scenario-version">${esc(version(item))}</span>`,
@@ -535,7 +535,7 @@
     const metrics = [['clock', '预计时长', details.duration], ['layers', '场景数', `${scenes} 幕`], ['risk', '理智风险', details.risk]];
     const checklist = [['调查目标', details.objective], ['时代背景', meta.era], ['推荐人数', details.party]];
     return `<article class="briefing-document">
-      <div class="briefing-kicker"><span>模组 ${sceneNumber(scenarios.indexOf(scenario))}</span>${scenario.draftId && mode === 'keeper' ? button('edit-scenario', '编辑导入剧本', 'briefing-edit', 'data-network') : ''}</div>
+      <div class="briefing-kicker"><span>模组 ${sceneNumber(scenarios.indexOf(scenario))}</span>${scenario.custom && mode === 'keeper' ? button('edit-scenario', '编辑自定义剧本', 'briefing-edit', 'data-network') : ''}</div>
       <h1>${esc(meta.title)}</h1>
       ${opening ? `<p class="briefing-intro">${esc(opening)}</p>` : ''}
       <dl class="briefing-metrics">${metrics.map(([glyph, label, value]) => `<div>${icon(glyph)}<dt>${label}</dt><dd>${esc(value || '未标注')}</dd></div>`).join('')}</dl>
@@ -631,6 +631,44 @@
       ${icon('forward')}<span class="lobby-launch-pips"><span></span><span></span><span></span></span>
     </span>`, 'lobby-launch', `id="lobby-start" data-network ${canStart ? '' : 'disabled'}`);
   }
+  function creatorForm({ step, idea, assessment, answers, preview, title, progress }) {
+    const toolbar = (primary, secondary = '', back = '') => `<div class="creator-footer dialog-footer">${back}${secondary}${primary}</div>`;
+    const next = (action, label) => button(action, label, 'primary', 'data-network');
+    const back = target => button('creator-back', '上一步', 'quiet-action creator-back', `data-step="${target}" data-network`);
+    const heading = ['输入想法', '补充设定', '预览剧本'][step - 1];
+    let content;
+    if (step === 1) {
+      content = `<label class="sr-only" for="creator-idea">剧本想法</label>
+        <textarea id="creator-idea" rows="9" maxlength="12000" placeholder="例如：废弃游乐园里的时间循环。也可以贴上一份完整的故事大纲。" data-network>${esc(idea)}</textarea>
+        <p class="field-note creator-progress" role="status" ${progress ? '' : 'hidden'}>${esc(progress)}</p>
+        ${toolbar(next('creator-assess', '分析想法 / 下一步'))}`;
+    } else if (step === 2) {
+      const questions = assessment.questions.map((item, index) => `<section class="creator-question">
+        <label for="creator-answer-${index}">${esc(item.question)}</label>
+        <span class="creator-hint" id="creator-hint-${index}">留空则由 AI 自由发挥</span>
+        <div class="pill-group creator-chips" role="group" aria-label="灵感选项">${item.suggestions.map((suggestion, choice) =>
+          button('creator-chip', esc(suggestion), 'pill', `data-question="${index}" data-choice="${choice}" aria-pressed="${answers[index] === suggestion}" data-network`)).join('')}</div>
+        <textarea id="creator-answer-${index}" data-answer="${index}" rows="2" maxlength="2000" aria-describedby="creator-hint-${index}"
+          placeholder="${esc(item.placeholder)}" data-network>${esc(answers[index])}</textarea>
+      </section>`).join('');
+      content = `<p class="field-note creator-assessment">${esc(assessment.assessment)}</p>${questions}
+        ${toolbar(next('creator-generate', '生成剧本'), button('creator-skip', '跳过全部补充，直接生成', 'quiet-action', 'data-network'), back(1))}`;
+    } else if (!preview) {
+      content = `<p class="field-note creator-progress" role="status">${esc(progress || '可以重试生成，已填写的想法和答案会保留。')}</p>
+        ${progress ? '' : toolbar(next('creator-retry', '重试生成'), '', back(assessment?.readyToGenerate ? 1 : 2))}`;
+    } else {
+      const group = (label, entries) => entries.length ? `<section class="creator-preview"><h3>${label}</h3><ul>${entries.map(([name, description]) =>
+        `<li><strong>${esc(name)}</strong>${description ? `<p>${esc(description)}</p>` : ''}</li>`).join('')}</ul></section>` : '';
+      content = `<label for="creator-title">剧本标题</label><input id="creator-title" maxlength="200" value="${esc(title)}" data-network>
+        <p class="field-note creator-assessment">${esc(preview.meta.synopsis)}</p>
+        ${group('场景', preview.scenes.map(scene => [scene.name, scene.publicDesc]))}
+        ${group('NPC', preview.npcs.map(npc => [npc.name, npc.persona]))}
+        ${group('调查员身份', preview.investigatorRoles.map(role => [role.title, role.publicSummary]))}
+        ${group('隐匿 HO', preview.handouts.map(ho => [ho.title, ho.publicSummary]))}
+        ${toolbar(next('creator-save', '保存并选中'), '', back(assessment?.readyToGenerate ? 1 : 2))}`;
+    }
+    return `<div class="creator-form"><h3 class="creator-step" tabindex="-1">${heading}<span>${step} / 3</span></h3>${content}</div>`;
+  }
   function lobby(data) {
     return `<main class="lobby">
       <header class="lobby-nav">
@@ -648,8 +686,8 @@
               ${savedRuns(data.saves)}
             </section>
           </div>
-          <div class="index-footer">${button('import-scenario', `${icon('plus')} <span>导入外部剧本 <small>.md / .txt / .json</small></span>`, 'scenario-import', 'id="scenario-import" data-network')}
-            <input id="scenario-file" type="file" accept=".md,.txt,.json" hidden>
+          <div class="index-footer">${button('import-scenario', '导入外部剧本', 'scenario-import', 'id="scenario-import" title="支持 .md / .txt / .json" data-network')}
+            ${button('open-creator', `${icon('plus')} <span>创建剧本</span>`, 'scenario-import scenario-create', 'id="scenario-create" data-network')}
           </div>
         </section>
         <section class="lobby-pane briefing-pane" aria-label="模组简报" data-lobby-part="briefing">${briefing(data)}</section>
@@ -794,5 +832,5 @@
     }
   }
   document.addEventListener('error', event => { const el = event.target; if (el instanceof HTMLImageElement && el.hasAttribute('data-portrait-fallback') && !el.src.endsWith('/portrait-placeholder.svg')) el.src = './portrait-placeholder.svg'; }, true);
-  window.TrpgPresentation = { avatar, choices, logs, isKeeperLine, table, updateCast, lobby, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, checkForm, rollCard, rollKey, animateDice, highlight, itemPresets, imageCollection, mountAudioControls, keeperDialog, keeperActorPanel, actorStats, turnButton, playerTurnLabel };
+  window.TrpgPresentation = { avatar, choices, logs, isKeeperLine, table, updateCast, lobby, creatorForm, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, checkForm, rollCard, rollKey, animateDice, highlight, itemPresets, imageCollection, mountAudioControls, keeperDialog, keeperActorPanel, actorStats, turnButton, playerTurnLabel };
 })();

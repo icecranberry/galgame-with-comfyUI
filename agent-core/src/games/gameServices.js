@@ -106,17 +106,17 @@ export function createGameServices(gameId, repo, assertPermission) {
       ].filter(m => m.content);
       return { messages, lorebook: { scope: `game:${gameId}:${scope}`, personaTexts, staticTexts, cacheBoundary, history } };
     },
-    async complete(input, { signal } = {}) {
+    async complete(input, { signal, responseFormat } = {}) {
       const built = await llm.request(input);
       if (useReplay(input)) {
         active(); assertPermission('llm:chat');
         const budget = await trpgPromptBudget();
         const prepared = await prepareGamePrompt(input, built, budget);
-        const result = await chat(prepared.messages, { lorebook: false }, signal, budget);
+        const result = await chat(prepared.messages, { lorebook: false, responseFormat }, signal, budget);
         prepared.commit();
         return result;
       }
-      return llm.chat(built.messages, { lorebook: built.lorebook }, { signal });
+      return llm.chat(built.messages, { lorebook: built.lorebook, responseFormat }, { signal });
     },
     async agent(input, tools, execute, { checkpoint, save, signal } = {}) {
       active(); assertPermission('llm:chat');

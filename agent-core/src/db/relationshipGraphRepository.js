@@ -4,7 +4,6 @@ export function readRelationshipGraph(db) {
     SELECT c.id, c.display_name, c.avatar_path, m.room_id AS group_id
     FROM characters c
     LEFT JOIN cohabitation_members m ON m.character_id = c.id
-    WHERE c.name != 'default'
     ORDER BY c.id
   `).all();
   const ids = new Set(nodes.map(node => node.id));

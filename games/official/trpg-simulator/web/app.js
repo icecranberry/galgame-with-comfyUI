@@ -5,11 +5,12 @@
   const audio = new window.TrpgAudioManager(sdk?.trpgAudio);
   let closeAudioControls;
   let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, pendingAction = '', advanceFlight;
-  let mode = 'investigator', scenarioId = '', keeperId = null, importedScenario, draft = '', npcSpeaker = '';
+  let mode = 'investigator', scenarioId = '', keeperId = null, draft = '', npcSpeaker = '';
   let castAssets, castRequest = 0;
   const lineups = { keeper: [], investigator: [] };
   const partyLimits = { keeper: 4, investigator: 5 };
-  const customScenarioId = 'custom';
+  const freshCreator = () => ({ step: 1, idea: '', answers: [] });
+  let creator = freshCreator();
   const view = window.TrpgPresentation;
   const presetActions = {
     keeper: [
@@ -182,8 +183,7 @@
   }
   function wireChoices() { document.querySelectorAll('[data-picker]').forEach(group => { group.value = group.dataset.value; }); }
   function lobbyData() {
-    const scenarios = [...catalog.scenarios];
-    if (importedScenario) scenarios.push(importedScenario);
+    const { scenarios } = catalog;
     const scenario = scenarios.find(item => item.id === scenarioId);
     const selected = lineups[mode];
     const handoutCount = scenario?.handoutCount ?? 0;
@@ -263,12 +263,12 @@
     animateParty();
   }
   async function editScenario() {
-    if (mode !== 'keeper' || !importedScenario?.draftId) return;
-    const source = await post('/scenario-draft', { mode, draftId: importedScenario.draftId });
-    modal('编辑导入剧本', `<label for="scenario-draft">剧本 JSON</label>
+    if (mode !== 'keeper' || !lobbyData().scenario?.custom) return;
+    const source = await post('/scenario-draft', { mode, scenarioId });
+    modal('编辑自定义剧本', `<label for="scenario-draft">剧本 JSON</label>
       <textarea id="scenario-draft" rows="12" spellcheck="false">${esc(JSON.stringify(source, null, 2))}</textarea>
       <p id="scenario-edit-error" class="lobby-form-error" role="alert"></p>
-      <div class="dialog-footer">${button('apply-scenario', '应用修改', 'primary')}</div>`, true);
+      <div class="dialog-footer">${button('apply-scenario', '应用修改', 'primary', 'data-network')}</div>`, true);
   }
   async function applyScenario() {
     const field = document.getElementById('scenario-draft');
@@ -279,14 +279,126 @@
           !Array.isArray(edited.scenes) || !edited.scenes.length || typeof edited.scenes[0]?.publicDesc !== 'string') {
         throw new Error('请填写剧本标题和开场场景描述。');
       }
-      importedScenario = await post('/parse-scenario', { content: field.value, format: 'json', draft: true, edit: true, mode });
-      dialog.addEventListener('close', () => root.querySelector('[data-action="edit-scenario"]')?.focus({ preventScroll: true }), { once: true });
-      closeModal();
-      updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch');
+      selectCustomScenario(await post('/parse-scenario', { content: field.value, format: 'json', save: true, edit: true, mode, scenarioId }));
+      if (dialog.open && !dialog.classList.contains('closing') && dialog.contains(field)) {
+        dialog.addEventListener('close', () => root.querySelector('[data-action="edit-scenario"]')?.focus({ preventScroll: true }), { once: true });
+        closeModal();
+      }
     } catch (error) {
       errorLine.textContent = error instanceof SyntaxError ? 'JSON 格式有误，请检查后再应用。' : error.message;
       field.focus();
     }
+  }
+  function selectCustomScenario(scenario) {
+    const index = catalog.scenarios.findIndex(item => item.id === scenario.id);
+    if (index < 0) catalog.scenarios.push(scenario);
+    else catalog.scenarios[index] = scenario;
+    scenarioId = scenario.id;
+    updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch');
+    const area = root.querySelector('.index-scroll');
+    if (area.scrollHeight > area.clientHeight) {
+      area.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', container: 'nearest' });
+    }
+  }
+  function creatorVisible() {
+    return dialog.open && !dialog.classList.contains('closing') && Boolean(dialog.querySelector('.creator-step'));
+  }
+  function showCreator() {
+    modal('创建剧本', view.creatorForm(creator));
+    dialog.querySelector('.creator-step').focus({ preventScroll: true });
+  }
+  async function assessCreator() {
+    if (!creator.idea.trim()) {
+      dialog.querySelector('#creator-idea').focus();
+      throw new Error('请先输入一个剧本想法');
+    }
+    const status = dialog.querySelector('.creator-progress');
+    status.textContent = '正在分析你的想法…';
+    status.hidden = false;
+    try { creator.assessment = await post('/creator/assess', { idea: creator.idea }); }
+    finally { status.hidden = true; }
+    creator.answers = creator.assessment.questions.map(() => '');
+    creator.preview = null;
+    if (creator.assessment.readyToGenerate) return generateCreator(false);
+    creator.step = 2;
+    if (creatorVisible()) showCreator();
+  }
+  async function generateCreator(skip) {
+    if (skip !== undefined) creator.skip = skip;
+    const answers = creator.assessment.questions.map(({ question }, index) => ({ question, answer: creator.skip ? '' : creator.answers[index] }));
+    Object.assign(creator, { step: 3, preview: null, progress: '正在撰写场景、线索和结局…' });
+    if (creatorVisible()) showCreator();
+    try {
+      creator.preview = await post('/creator/generate', { idea: creator.idea, answers });
+      creator.title = creator.preview.meta.title;
+    } finally {
+      creator.progress = '';
+      if (creatorVisible()) showCreator();
+    }
+  }
+  function updateCreatorAnswer(field) {
+    const index = Number(field.dataset.answer);
+    creator.answers[index] = field.value;
+    field.closest('.creator-question').querySelectorAll('[data-choice]').forEach(chip => {
+      const suggestion = creator.assessment.questions[index].suggestions[Number(chip.dataset.choice)];
+      chip.setAttribute('aria-pressed', String(field.value === suggestion));
+    });
+  }
+  async function startSelectedScenario() {
+    const { selected, canStart, scenario } = lobbyData();
+    if (!canStart) return;
+    state = await post('/start', { mode, characterIds: selected, scenarioId: scenario.id, keeperId, imagesEnabled: true });
+    draft = '';
+    render();
+  }
+  function jumpToParty() {
+    const heading = document.getElementById('party-title');
+    heading.focus({ preventScroll: true });
+    heading.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  }
+  async function saveCreator() {
+    if (!creator.title.trim()) {
+      dialog.querySelector('#creator-title').focus();
+      throw new Error('请填写剧本标题');
+    }
+    const scenario = await post('/creator/save', { draftId: creator.preview.draftId, title: creator.title });
+    creator = freshCreator();
+    selectCustomScenario(scenario);
+    if (creatorVisible()) closeModal();
+    notice('剧本已保存并选中');
+  }
+  function showScenarioImport() {
+    modal('导入外部剧本', `<div class="creator-form scenario-import-form">
+      <label for="scenario-file">选择文件（.md / .txt / .json）</label>
+      <input id="scenario-file" type="file" accept=".md,.txt,.json" data-network>
+      <label for="scenario-source">剧本原文</label>
+      <textarea id="scenario-source" rows="8" maxlength="100000" placeholder="粘贴剧本原文，或从上方选择文件" data-network></textarea>
+      <p class="field-note creator-progress" role="status" hidden></p>
+      <div class="dialog-footer">${button('apply-import', '整理并导入', 'primary', 'data-network')}</div>
+    </div>`);
+  }
+  async function readScenarioFile(file, field) {
+    if (file.size > 512 * 1024 || !/\.(md|txt|json)$/i.test(file.name)) throw new Error('请选择不超过 512KB 的 md / txt / json 剧本');
+    const content = await file.text();
+    if (!content.trim() || content.length > 100000) throw new Error('请选择包含剧本原文且不超过 10 万字的文件');
+    field.value = content;
+    field.dataset.format = /\.json$/i.test(file.name) ? 'json' : 'text';
+  }
+  async function importScenario() {
+    const field = dialog.querySelector('#scenario-source');
+    if (!field.value.trim()) {
+      field.focus();
+      throw new Error('请先粘贴剧本原文或选择文件');
+    }
+    const status = dialog.querySelector('.creator-progress');
+    status.textContent = '正在整理剧本的场景与线索…';
+    status.hidden = false;
+    try {
+      const scenario = await post('/parse-scenario', { content: field.value, format: field.dataset.format, save: true });
+      selectCustomScenario(scenario);
+      if (dialog.contains(field)) closeModal();
+      notice('剧本已导入并选中');
+    } finally { status.hidden = true; }
   }
   function showRules() {
     modal('规则说明', `<dl class="lobby-rules">
@@ -624,6 +736,9 @@
     if (event.isTrusted && event.target.closest('button:not(:disabled)')) audio.unlock();
   }, true);
   document.addEventListener('input', e => {
+    if (e.target.id === 'creator-idea') creator.idea = e.target.value;
+    if (e.target.id === 'creator-title') creator.title = e.target.value;
+    if (e.target.matches('textarea[data-answer]')) updateCreatorAnswer(e.target);
     if (e.target.id === 'message') setDraft(e.target.value);
     if (e.target.id === 'npc-speaker') npcSpeaker = e.target.value;
     if (e.target.id === 'scenario-draft') document.getElementById('scenario-edit-error').textContent = '';
@@ -645,15 +760,14 @@
       return;
     }
     readControl();
-    if (e.target.id === 'scenario-file') work(async () => {
-      const file = e.target.files[0]; if (!file) return;
-      e.target.value = '';
-      if (file.size > 512 * 1024 || !/\.(md|txt|json)$/i.test(file.name)) throw new Error('请选择不超过 512KB 的 md / txt / json 剧本');
-      importedScenario = await post('/parse-scenario', { content: await file.text(), format: /\.json$/i.test(file.name) ? 'json' : 'text', draft: true, mode });
-      scenarioId = customScenarioId;
-      updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch');
-      notice('已导入并选中外部剧本');
-    });
+    if (e.target.id === 'scenario-file') {
+      const input = e.target, file = input.files[0]; if (!file) return;
+      const field = dialog.querySelector('#scenario-source');
+      work(async () => {
+        try { await readScenarioFile(file, field); }
+        catch (error) { input.value = ''; throw error; }
+      });
+    }
   });
   document.addEventListener('submit', e => {
     if (e.target.id !== 'give-item-form') return;
@@ -780,13 +894,28 @@
     if (action === 'random-party') { randomizeParty(); return; }
     if (action === 'pick' || action === 'pick-keeper') { assignParty(action, Number(el.dataset.id)); return; }
     if (action === 'rules') { showRules(); return; }
-    if (action === 'jump-party') {
-      const heading = document.getElementById('party-title');
-      heading.focus({ preventScroll: true });
-      heading.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+    if (action === 'jump-party') { jumpToParty(); return; }
+    if (action === 'import-scenario') { showScenarioImport(); return; }
+    if (action === 'apply-import') {
+      if (!dialog.classList.contains('closing')) work(importScenario);
       return;
     }
-    if (action === 'import-scenario') { document.getElementById('scenario-file').click(); return; }
+    if (action === 'open-creator') { showCreator(); return; }
+    if (el.closest('.creator-form') && !creatorVisible()) return;
+    if (action === 'creator-assess') { work(assessCreator); return; }
+    if (action === 'creator-back') { creator.step = Number(el.dataset.step); showCreator(); return; }
+    if (action === 'creator-generate' || action === 'creator-skip' || action === 'creator-retry') {
+      work(() => generateCreator(action === 'creator-retry' ? undefined : action === 'creator-skip'));
+      return;
+    }
+    if (action === 'creator-chip') {
+      const field = dialog.querySelector(`#creator-answer-${el.dataset.question}`);
+      const suggestion = creator.assessment.questions[Number(el.dataset.question)].suggestions[Number(el.dataset.choice)];
+      field.value = el.getAttribute('aria-pressed') === 'true' ? '' : suggestion;
+      updateCreatorAnswer(field);
+      return;
+    }
+    if (action === 'creator-save') { work(saveCreator); return; }
     if (action === 'edit-scenario') { work(editScenario); return; }
     if (action === 'apply-scenario') { work(applyScenario); return; }
     if (action === 'history') { modal('日志回溯', `<div class="history-log">${logs(state.publicLog)}</div>`, true); return; }
@@ -800,13 +929,7 @@
     if (action === 'send' && !draft.trim()) return;
     work(async () => {
       switch (action) {
-        case 'start': {
-          const { selected, canStart, scenario } = lobbyData();
-          if (!canStart) return;
-          state = await post('/start', { mode, characterIds: selected, scenarioId,
-            draftId: scenario.draftId, keeperId, imagesEnabled: true });
-          draft = ''; render(); break;
-        }
+        case 'start': await startSelectedScenario(); break;
         case 'load': {
           const [savedState] = await Promise.all([readState(el.dataset.id), refreshCastAssets()]);
           state = savedState;

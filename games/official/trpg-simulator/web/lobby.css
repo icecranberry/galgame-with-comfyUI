@@ -123,7 +123,7 @@ button.save-delete:hover { color: var(--table-coral); }
 .lobby-archive summary { cursor: pointer; padding: 8px 0; }
 .lobby-archive summary span { font-family: var(--lobby-mono); }
 .lobby-empty { margin: 13px 0; color: var(--lobby-muted); font: 13px/1.65 var(--sans); }
-.index-footer { padding: 14px var(--pane-pad) max(18px, env(safe-area-inset-bottom)); }
+.index-footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px var(--pane-pad) max(18px, env(safe-area-inset-bottom)); }
 button.scenario-import {
   display: flex;
   align-items: center;
@@ -139,7 +139,8 @@ button.scenario-import {
 }
 button.scenario-import:hover { border-color: var(--table-amber); background: #e5b56e12; }
 .scenario-import .lobby-icon { color: var(--table-amber); }
-.scenario-import small { display: inline-block; margin-inline-start: 4px; color: var(--lobby-muted); font: 11px var(--lobby-mono); }
+button.scenario-create { gap: 5px; border-style: solid; border-color: #e5b56e70; color: var(--table-amber); }
+.scenario-create .lobby-icon { width: 14px; height: 14px; }
 
 .briefing-pane { padding: clamp(28px, 4vw, 64px) var(--pane-pad) 32px; }
 .briefing-document { animation: enter-page .3s both; }
@@ -309,6 +310,32 @@ button.lobby-launch[aria-busy="true"] {
 .lobby-drawer #scenario-draft { max-height: 50dvh; background: #ffffff0a; color: var(--table-ivory); font: 13px/1.65 var(--lobby-mono); }
 .lobby-drawer #scenario-draft:focus { border-color: var(--table-amber); }
 .lobby-form-error { color: var(--table-coral); font: 13px/1.7 var(--sans); }
+.creator-step { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font: 600 17px/1.5 var(--sans); margin-bottom: 12px; }
+.creator-step span { color: var(--table-amber); font: 12px var(--lobby-mono); }
+.creator-form :is(textarea, input) { background: #ffffff0a; color: var(--table-ivory); border-color: var(--table-divider); }
+.creator-form :is(textarea, input):focus { border-color: var(--table-amber); }
+.creator-form textarea { display: block; }
+.creator-form #creator-idea { max-height: 52dvh; }
+.scenario-import-form input[type=file] { padding: 4px 8px; }
+.scenario-import-form input::file-selector-button { padding: 8px; margin-inline-end: 8px; border: 0; background: #ffffff14; color: var(--table-ivory); font: inherit; cursor: pointer; }
+.scenario-import-form textarea { max-height: 48dvh; }
+.creator-assessment, .creator-progress { color: var(--lobby-muted); }
+.creator-progress { min-height: 44px; display: flex; align-items: center; }
+.creator-question, .creator-preview { padding: 14px 0; border-top: 1px solid var(--table-divider); }
+.creator-question label { margin: 0; color: var(--table-ivory); font: 600 15px/1.5 var(--sans); }
+.creator-hint { color: var(--lobby-muted); font: 12px/1.6 var(--sans); }
+.creator-chips { margin: 9px 0; }
+.creator-chips button.pill { background: #ffffff0b; color: var(--table-ivory); border: 1px solid var(--table-divider); text-align: left; overflow-wrap: anywhere; }
+.creator-chips button.pill:hover, .creator-chips button.pill[aria-pressed="true"] { color: var(--table-amber); border-color: #e5b56e70; background: #e5b56e12; }
+.creator-preview h3 { color: var(--table-amber); font: 700 13px/1.5 var(--sans); }
+.creator-preview ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.creator-preview li { margin: 8px 0; overflow-wrap: anywhere; }
+.creator-preview p { margin-top: 3px; color: var(--lobby-muted); font: 13px/1.7 var(--sans); white-space: pre-wrap; }
+.lobby-drawer .drawer-body:has(.creator-footer) { padding-bottom: 0; }
+.creator-footer { position: sticky; bottom: 0; margin-top: 12px; padding: 10px 0 16px; background: var(--table-night); }
+.creator-footer .creator-back { margin-inline-end: auto; }
+.creator-footer button.quiet-action { color: var(--table-ivory); }
+.creator-footer button.quiet-action:hover { color: var(--table-amber); }
 body:has(.lobby) #notice { top: 52px; bottom: auto; }
 
 @media (max-width: 767px) {
