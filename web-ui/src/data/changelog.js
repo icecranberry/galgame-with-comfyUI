@@ -24,13 +24,24 @@
 //    手动改它没有意义（下次 tag 会被覆盖），想让用户重新看到弹窗，
 //    改文案就行了 —— 哪怕只是加一个标点。
 // ────────────────────────────────────────────────────────────────────────
-export const CHANGELOG_FLAG = 'ca96fccca065'
+export const CHANGELOG_FLAG = '6fa911f8276f'
 
 /** 弹窗标题 */
 export const CHANGELOG_TITLE = '更新说明'
 
 /** 更新条目：最新的放最前面 */
 export const CHANGELOG_ENTRIES = [
+  {
+    version: 'v4.5.0',
+    date: '2026-11-19',
+    title: '来做游戏吧！',
+    summary: '上线游戏模块，支持自定义游戏发布！',
+    items: [
+      '上线游戏模块！',
+      '自带的是跑团模拟器，等待跑团糕手体验优化',
+      '添加游戏市场，和dsh类似支持自己开发游戏模块并且发布到github被他人获取',
+    ],
+  },
   {
     version: 'v4.4.0',
     date: '2026-11-17',
