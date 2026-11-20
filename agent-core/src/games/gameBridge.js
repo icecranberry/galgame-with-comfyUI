@@ -2,7 +2,8 @@ import { GOD_MODULE_TOOLS, executeModuleTool } from '../services/godSays/moduleT
 import { validateToolArgs } from '../services/godSays/tools.js';
 import { createGodLocalApi, publicToolData } from '../services/godSays/localApi.js';
 import { config } from '../config.js';
-import { buildCharacterPersona } from '../services/characterPersona.js';
+import { buildCharacterAppearanceSection, buildCharacterPersona } from '../services/characterPersona.js';
+import { availableStandingImages, standingSlots } from '../services/expressionStandingAssets.js';
 import { bad } from './gamePaths.js';
 
 // Explicit names, never a method/prefix-based capability grant. Settings, vector
@@ -21,10 +22,12 @@ export function createGameBridge(db, api = createGodLocalApi({ port: () => confi
   ];
   const tavernReads = ['get_characters', 'get_character_profile', 'read_relationships', 'read_character_standings', 'list_character_memories'];
   const tavernDefinitions = [...definitions.filter(entry => tavernReads.includes(entry.function.name)),
+    extra('get_expression_sprites', '读取已有文件的表情立绘与对应情绪名称。', characterId, ['characterId']),
     extra('get_recent_character_moments', '读取指定角色最近三条已完成的朋友圈正文。', characterId, ['characterId']),
-    extra('get_character_image_persona', '读取用于游戏纪念照的完整角色人设与外观。', characterId, ['characterId']),
+    extra('get_character_image_persona', '读取游戏生图人设，或仅取角色的外观描述。',
+      { ...characterId, appearanceOnly: { type: 'boolean' } }, ['characterId']),
   ];
-  const profileTools = ['get_character_profile', 'get_recent_character_moments', 'get_character_image_persona'];
+  const profileTools = ['get_character_profile', 'get_recent_character_moments', 'get_character_image_persona', 'get_expression_sprites'];
   async function call(name, args = {}, { tavern = false } = {}) {
     if (!args || typeof args !== 'object' || Array.isArray(args)) throw bad('工具参数必须是对象');
     const canonical = aliases[name] || name;
@@ -33,6 +36,12 @@ export function createGameBridge(db, api = createGodLocalApi({ port: () => confi
     const definition = (tavern ? tavernDefinitions : definitions).find(d => d.function.name === canonical);
     if (!definition) throw bad('此工具不在游戏只读白名单中', 403);
     validateToolArgs(definition.function.parameters, converted);
+    if (canonical === 'get_expression_sprites') {
+      const slots = standingSlots(db);
+      const rows = db.prepare('SELECT slot_id,image_url FROM expression_standings WHERE character_id=?').all(args.characterId);
+      const images = availableStandingImages(rows, slots);
+      return slots.filter(slot => images[slot.id]).map(slot => ({ id: slot.id, name: slot.name, url: images[slot.id] }));
+    }
     if (canonical === 'get_characters') return publicToolData(db.prepare(`SELECT id,name,display_name,avatar_path,standing_url,
       substr(short_prompt,1,120) AS personaSummary FROM characters ORDER BY id`).all());
     if (canonical === 'get_recent_character_moments') return publicToolData(db.prepare(`SELECT substr(content,1,300) AS content,created_at
@@ -40,6 +49,9 @@ export function createGameBridge(db, api = createGodLocalApi({ port: () => confi
     if (canonical === 'get_character_profile' || canonical === 'get_character_image_persona') {
       const c = db.prepare('SELECT id,name,display_name,base_prompt,short_prompt,avatar_path,standing_url FROM characters WHERE id=?').get(args.characterId);
       if (!c) throw bad('角色不存在', 404);
+      if (canonical === 'get_character_image_persona' && args.appearanceOnly) {
+        return publicToolData(buildCharacterAppearanceSection(c, { outfits: null, includeHeading: false }));
+      }
       return publicToolData(canonical === 'get_character_profile' ? c : buildCharacterPersona(c, { variant: 'full', outfits: null }));
     }
     if (canonical === 'get_town_state') return (await api({ method: 'GET', path: '/api/town/state' })).data;

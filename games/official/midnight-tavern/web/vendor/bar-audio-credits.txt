@@ -1,0 +1,20 @@
+Midnight Tavern bar sound effects
+
+The following Freesound recordings are dedicated to the public domain under CC0 1.0.
+https://creativecommons.org/publicdomain/zero/1.0/
+The game uses trimmed mono excerpts with adjusted gain and fades.
+
+Ice — Ice moving in glass, by Rvgerxini
+https://freesound.org/people/Rvgerxini/sounds/464451/
+
+Stir — Water stirred in glass with metal spoon, by Tom_Kaszuba
+https://freesound.org/people/Tom_Kaszuba/sounds/657552/
+
+Pour — Pouring water into a glass, by astonedf
+https://freesound.org/people/astonedf/sounds/841426/
+
+Potion drop — Drips_PipetteDripFast_3_SFX, by hanasmusic
+https://freesound.org/people/hanasmusic/sounds/841481/
+
+Garnish — Glass Tap, by zembacraftworks
+https://freesound.org/people/zembacraftworks/sounds/427389/

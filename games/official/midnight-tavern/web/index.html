@@ -6,8 +6,12 @@
   <meta name="theme-color" content="#1d1311">
   <title>邻舍深夜小酒馆</title>
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./stage.css">
+  <script defer src="./vendor/cocktail-look.js"></script>
   <script defer src="./mix.js"></script>
   <script defer src="./view.js"></script>
+  <script defer src="./vendor/bar-audio.js"></script>
+  <script defer src="./station.js"></script>
   <script defer src="./app.js"></script>
 </head>
 <body>
@@ -27,38 +31,94 @@
     </header>
     <section id="stage" class="stage is-opening" aria-label="来客与吧台对话">
       <div class="stage-room" aria-hidden="true">
-        <div class="window"><i></i></div>
-        <div class="shelves"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-        <div class="light light-left"><i></i></div>
-        <div class="light light-right"><i></i></div>
+        <svg class="room-fallback" viewBox="0 0 1200 500" preserveAspectRatio="xMidYMid slice">
+          <defs>
+            <!-- Lower the opacity of nearly white pixels in host portraits. -->
+            <filter id="portrait-paper-soften" color-interpolation-filters="sRGB">
+              <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -2.55 -8.58 -.87 0 12.12" result="paper-alpha"/>
+              <feComposite in="SourceGraphic" in2="paper-alpha" operator="in"/>
+            </filter>
+            <linearGradient id="room-wood" x2="0" y2="1"><stop stop-color="#1e1516"/><stop offset=".7" stop-color="#493022"/><stop offset="1" stop-color="#201314"/></linearGradient>
+            <radialGradient id="room-light"><stop stop-color="#e4a76a" stop-opacity=".55"/><stop offset="1" stop-color="#cf8045" stop-opacity="0"/></radialGradient>
+          </defs>
+          <path fill="url(#room-wood)" d="M0 0h1200v500H0z"/>
+          <path fill="#1c242e" stroke="#362720" stroke-width="12" d="M82 361V166a89 89 0 0 1 178 0v195Z"/>
+          <path fill="none" stroke="#594135" stroke-width="6" d="M89 170h164M89 238h164m-80-151v269M865 218h287m-287 89h287"/>
+          <path fill="#c18e71" opacity=".65" d="M199 145a22 22 0 1 0 0 44 25 25 0 0 1 0-44Z"/>
+          <ellipse cx="354" cy="141" rx="200" ry="144" fill="url(#room-light)"/>
+          <ellipse cx="923" cy="152" rx="221" ry="151" fill="url(#room-light)"/>
+          <path fill="none" stroke="#b37c50" stroke-width="3" d="M354 0v84m569-84v99"/>
+          <path fill="#f4ba77" d="M316 116a38 32 0 0 1 76 0Zm568 15a39 32 0 0 1 78 0Z"/>
+        </svg>
+        <img class="stage-art stage-backdrop" src="./assets/props/bg-tavern-bar.png" alt="" draggable="false">
+        <img class="stage-art stage-cover" src="./cover.png" alt="" draggable="false">
       </div>
       <div id="seats" class="seats"></div>
       <div class="counter" aria-hidden="true"></div>
-      <div id="dialogue" class="dialogue" aria-live="polite"></div>
+      <figure id="cg-frame" class="cg-frame" aria-label="面对面醉酒特写"></figure>
+      <aside id="special-card" class="special-card"></aside>
+      <div id="focus-tools" class="focus-tools"></div>
+      <span id="capture" class="capture" role="status" hidden>神态捕捉中…</span>
+      <div class="stage-footer">
+        <div id="dialogue" class="dialogue" aria-live="polite"></div>
+        <nav id="stations" class="station-launchers" aria-label="吧台工作台">
+          <button type="button" data-action="station" data-id="board">📜 传闻委托板 <b id="note-badge">0/3</b></button>
+          <button type="button" data-action="station" data-id="mix">🍸 开始调酒</button>
+        </nav>
+      </div>
     </section>
-    <div class="workbench">
-      <section class="board" aria-labelledby="board-title">
-        <div class="work-heading"><h2 id="board-title">传闻与委托</h2><span id="note-count"></span></div>
-        <div id="board" class="board-body"></div>
-      </section>
-      <section id="workshop" class="workshop" aria-labelledby="mix-title">
-        <div class="work-heading"><h2 id="mix-title">调酒工坊</h2><div id="drinker"></div></div>
-        <div class="mix-body">
-          <div class="ingredients">
-            <div class="ingredient-line"><small>基酒</small><div id="bases" class="ingredients-grid bases"></div></div>
-            <div class="ingredient-line"><small>魔药</small><div id="potions" class="ingredients-grid potions"></div></div>
-            <div class="ingredient-line"><small>风味</small><div id="garnishes" class="ingredients-grid garnishes"></div></div>
-            <label class="custom"><span aria-hidden="true">✦</span><input id="custom" maxlength="40" placeholder="自定义加料（可选）" aria-label="自定义加料，最多二十字" autocomplete="off"></label>
-          </div>
-          <div class="mix-preview">
-            <div id="glass" class="glass-stage"></div>
-            <div id="meters" class="meters"></div>
-          </div>
-        </div>
-        <div class="pour-rail"><span id="mix-status"></span><button type="button" class="primary pour" data-action="pour">摇匀递出</button></div>
-      </section>
-    </div>
   </main>
+  <dialog id="station" aria-labelledby="station-title">
+    <header class="station-head"><h2 id="station-title">传闻委托板</h2><button type="button" data-action="station-close" aria-label="返回吧台">×</button></header>
+    <section id="commission-board" class="board">
+      <div class="work-heading"><h3>今夜传闻</h3><span id="note-count"></span></div>
+      <div id="board" class="board-body"></div>
+    </section>
+    <section id="workshop" class="workshop" hidden>
+      <div class="mix-picture">
+        <div id="scene-canvas"></div>
+        <div id="glass" class="glass-stage"><div id="glass-model" class="glass-model"></div>
+          <svg id="glass-effects" class="glass-effects" viewBox="0 0 200 180" aria-hidden="true"></svg><div id="glass-detail" class="glass-detail"></div></div>
+        <div id="meters" class="meters"></div>
+      </div>
+      <div class="mix-tray">
+        <nav id="mix-steps" class="mix-steps" aria-label="调酒步骤"></nav>
+        <h3 id="step-title" class="step-title"></h3>
+        <div class="step-content">
+          <div data-panel="0"><div id="bases" class="ingredients-grid bases" role="group" aria-label="基酒"></div>
+            <div class="ice-choices" role="group" aria-label="冰量"><span>冰量</span>
+              <button type="button" data-action="ice" data-id="0">去冰</button>
+              <button type="button" data-action="ice" data-id="2">少冰</button>
+              <button type="button" data-action="ice" data-id="5">多冰</button>
+            </div></div>
+          <div data-panel="1" hidden>
+            <svg class="potion-filter" width="0" height="0" aria-hidden="true"><defs>
+              <filter id="tint-elixir" color-interpolation-filters="sRGB">
+                <feColorMatrix in="SourceGraphic" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -5 5 0 0 -.06" result="liquid"/>
+                <feColorMatrix in="SourceGraphic" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 1 0" result="light"/>
+                <feFlood id="elixir-tint" flood-color="#76c8ae" result="pigment"/>
+                <feComposite in="light" in2="pigment" operator="arithmetic" k1="1"/>
+                <feComposite in2="liquid" operator="in"/>
+                <feComposite in2="SourceGraphic" operator="atop"/>
+              </filter>
+            </defs></svg>
+            <div id="potions" class="ingredients-grid potions" role="group" aria-label="魔药"></div>
+            <div id="potion-editor" hidden>
+              <label class="custom"><input id="potion-name" maxlength="40" placeholder="描述魔药，如「紫色疾风」" aria-label="自定义魔药名称或效果，最多二十字"></label>
+              <div class="potion-controls"><output id="potion-preview" aria-live="polite"></output>
+                <button type="button" data-action="blend-potion">鉴定魔药</button></div>
+            </div></div>
+          <div data-panel="2" hidden><div id="garnishes" class="ingredients-grid garnishes" role="group" aria-label="点睛风味"></div>
+            <label class="custom"><span aria-hidden="true">✦</span><input id="custom" maxlength="40" placeholder="自定义加料（可选）" aria-label="自定义加料，最多二十字" autocomplete="off"></label></div>
+          <div data-panel="3" hidden><div id="recipients" role="group" aria-label="接酒邻居"></div></div>
+        </div>
+        <div class="pour-rail"><span id="mix-status"></span><div>
+          <button type="button" data-action="stir">搅拌</button>
+          <button type="button" class="primary pour" data-action="step-next">下一步</button>
+          <button type="button" class="primary pour" data-action="pour" hidden>递酒</button></div></div>
+      </div>
+    </section>
+  </dialog>
   <dialog id="overlay" class="overlay"><section class="overlay-panel" id="overlay-panel" aria-labelledby="overlay-title"></section></dialog>
   <div id="notice" class="notice" role="status"></div>
 </body>

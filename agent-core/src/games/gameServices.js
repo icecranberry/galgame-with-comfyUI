@@ -245,9 +245,14 @@ export function createGameServices(gameId, repo, assertPermission) {
       active(); assertPermission('image:generate');
       if (!repo.session(gameId, options.sessionId)) throw bad('请先创建当前游戏的存档', 404);
       if (typeof options.prompt !== 'string' || !options.prompt.trim() || options.prompt.length > 12000) throw bad('图片提示词为空或过长');
+      const comfyOnly = options.requireComfyUI === true;
+      if (comfyOnly && (await import('../config.js')).config.comfyui.imageProvider !== 'comfyui') {
+        throw bad('当前未启用 ComfyUI', 409);
+      }
       const dimension = n => Math.round(Math.max(256, Math.min(2048, Number(n) || 1024)) / 8) * 8;
       const { generateImageRaw } = await import('../services/imageSkill.js');
       const result = await generateImageRaw(options.prompt, { outputScope: 'game', gameId, sessionId: options.sessionId,
+        ...(comfyOnly ? { imageProvider: 'comfyui' } : {}),
         width: dimension(options.width), height: dimension(options.height || 576), negativePrompt: String(options.negativePrompt || '').slice(0, 4000),
         alreadyPrepared: true, disableRAG: true, scene: 'events', promptScene: 'events' });
       if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);

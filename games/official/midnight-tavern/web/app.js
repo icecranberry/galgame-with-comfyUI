@@ -5,19 +5,65 @@
   const view = window.TavernView;
   const el = id => document.getElementById(id);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const narrow = window.matchMedia('(max-width: 650px)');
+  const station = window.TavernStation;
   const ui = { busy: '连接中…', error: '', target: '', reply: '', saves: [], sessionId: '', reportId: '' };
   let recipe = mix.empty();
+  const potionDrafts = new WeakMap();
+  function potionDraft() {
+    if (!potionDrafts.has(recipe)) potionDrafts.set(recipe, { open:false, text:'', result:null, pending:null, known:new Map() });
+    return potionDrafts.get(recipe);
+  }
+  function drawPotionEditor(draft) {
+    el('potion-editor').hidden=!draft.open;
+    const field=el('potion-name');
+    if(document.activeElement!==field && field.value!==draft.text) field.value=draft.text;
+    const result=draft.result, stat=result && mix.dose(result);
+    const color=result?.color || '#76c8ae';
+    el('elixir-tint').setAttribute('flood-color',color);
+    const preview=el('potion-preview');
+    preview.style.setProperty('--ink',color);
+    preview.textContent=stat ? stat.name+' · '+stat.label+' +1' : '';
+    const action=el('potion-editor').querySelector('button');
+    action.textContent=draft.pending?'鉴定中…':result?'滴入一滴':'鉴定魔药';
+    action.disabled=!draft.text.trim() || !!draft.pending || recipe.potions.length>=3 || station.locked;
+  }
+  function editPotionName() {
+    const field=el('potion-name'), draft=potionDraft();
+    const text=[...field.value].slice(0,20).join('');
+    if(field.value!==text) field.value=text;
+    if(draft.text!==text) {
+      draft.text=text;draft.result=draft.known.get(text.trim()) || null;draft.pending=null;
+      renderMix();
+    }
+  }
+  async function blendPotion() {
+    const draft=potionDraft(), name=draft.text.trim(), currentRecipe=recipe;
+    if (!name || draft.pending || recipe.potions.length>=3 || station.locked) return;
+    if (draft.result) {
+      await station.act(()=>selectIngredient('potion',draft.result),renderMix);
+      return;
+    }
+    const request=Symbol();
+    draft.pending=request;drawPotionEditor(draft);
+    let result;
+    try { result=await post('/potion/identify',{name}); } catch { /* Use the local tasting notes offline. */ }
+    if (currentRecipe!==recipe || draft.pending!==request) return;
+    const candidate={name,stat:result?.stat,color:result?.color};
+    draft.result=mix.dose(candidate)?candidate:mix.localPotion(name);
+    draft.known.set(name,draft.result);
+    draft.pending=null;
+    renderMix();
+  }
   let save;
   let writes = Promise.resolve();
-  let images = Promise.resolve();
+  let mediaTimer;
   let drawer = '';
   let closeTimer;
   let toastTimer;
   let returnFocus;
   let leaving = false;
   let drag;
-  let shaking = false;
+
   const runningImages = new Set();
   const nightStart = () => ({
     phase: 'OPENING', turn: 0, cursor: 0, guests: [], history: [], quickReplies: [],
@@ -80,25 +126,28 @@
     return serial(async () => {
       if (sessionId !== ui.sessionId) return;
       const latest = await sdk.save.load(sessionId);
+      if (sessionId !== ui.sessionId || leaving) return;
       if (latest.revision > save.revision && latest.state.editVersion === current().editVersion) {
         adopt(latest);
-        if (['menu', 'wall', 'report'].includes(drawer)) renderOverlay();
+        render();
       }
     });
   }
-  function generateDrink(drinkId, sessionId = ui.sessionId) {
-    const key = sessionId + '/' + drinkId;
+  function generateMedia(drinkId, kind, sessionId = ui.sessionId) {
+    const key = sessionId + '/' + kind + '/' + drinkId;
     if (runningImages.has(key)) return;
     runningImages.add(key);
-    images = images.then(async () => {
-      try { await post('/drink/generate-card', { drinkId }, sessionId); await syncMedia(sessionId); }
-      catch { if (sessionId === ui.sessionId && !leaving) notice('酒卡仍留在酒单，下次打开存档时会继续显影。'); }
-      finally { runningImages.delete(key); }
-    });
+    const path = kind === 'cg' ? '/char/generate-tipsy-cg' : '/drink/generate-card';
+    void post(path, { drinkId }, sessionId).then(() => syncMedia(sessionId))
+      .catch(() => { if (sessionId === ui.sessionId && !leaving) notice('暗房暂时离线，进度已保存在本局。'); })
+      .finally(() => runningImages.delete(key));
   }
   function resumeMedia() {
     const sessionId = ui.sessionId, state = current();
-    for (const drink of state.drinks) if (state.media[drink.id]?.status === 'pending') generateDrink(drink.id, sessionId);
+    for (const drink of state.drinks) {
+      if (state.media[drink.id]?.status === 'pending') generateMedia(drink.id, 'card', sessionId);
+      if (state.media['tipsy-' + drink.id]?.status === 'pending') generateMedia(drink.id, 'cg', sessionId);
+    }
     for (const item of state.reports) {
       if (state.media[item.questId]?.status === 'pending') {
         void post('/quest/resolve', { questId: item.questId }, sessionId).then(() => syncMedia(sessionId)).catch(() => {});
@@ -125,29 +174,108 @@
   function renderMix(state = current()) {
     const guest = state.guests.find(row => row.id === ui.target);
     const sending = state.quest?.status === 'assigned' && state.quest.charId === guest?.id;
-    setContent(el('drinker'), guest ? '<span class="recipient">' + (sending ? '为 ' : '递给 ') + view.esc(guest.name) + '</span>' : '');
-    const preview = view.ingredients(recipe);
+    setContent(el('recipients'), state.guests.map(person => view.button('recipient', view.avatar(person) + view.esc(person.name) +
+      (state.quest?.status === 'assigned' && state.quest.charId === person.id ? '<small>接单人</small>' : ''), {
+      id:person.id, disabled:!!ui.busy || state.quest?.status === 'away' && state.quest.charId === person.id,
+      attrs:'aria-pressed="' + (ui.target === person.id) + '"',
+    })).join(''));
+    const draft=potionDraft();
+    drawPotionEditor(draft);
+    const preview = view.ingredients(recipe,draft);
     for (const field of ['bases', 'potions', 'garnishes']) setContent(el(field), preview[field]);
-    setContent(el('glass'), view.glass(recipe, 'counter-cup') + view.chip(recipe));
+    if (el('workshop').dataset.renderer === 'fallback') setContent(el('glass-model'), view.glass(recipe, 'counter-cup', sending));
+    setContent(el('glass-detail'), view.chip(recipe));
+    el('glass').dataset.base = recipe.baseLiquor;
     setContent(el('meters'), view.meters(recipe));
     el('potions').dataset.drops = recipe.potions.length;
-    const pour = document.querySelector('[data-action="pour"]');
-    pour.disabled = !!ui.busy || !guest || !recipe.baseLiquor || !['CHATTING', 'CRAFTING'].includes(state.phase) ||
-      (state.quest?.status === 'away' && state.quest.charId === guest.id);
-    pour.textContent = sending ? '摇匀递出 · 送行' : '摇匀递出';
-    el('mix-status').textContent = !recipe.baseLiquor ? '选一种基酒' : !guest ? '点一位邻居递酒' : sending ? '给接单人带上一杯' : mix.base(recipe).name;
+    const canServe = !ui.busy && guest && recipe.baseLiquor && ['CHATTING','CRAFTING'].includes(state.phase) &&
+      !(state.quest?.status === 'away' && state.quest.charId === guest.id);
+    station.draw(recipe, guest, canServe, view, setContent);
+  }
+  function renderStageMedia(state) {
+    const drink = state.drinks.find(row => row.id === ui.tasting && row.night === state.night);
+    const media = drink && state.media['tipsy-' + drink.id];
+    const url = view.image(media?.url);
+    const stage = el('stage'), frame = el('cg-frame');
+    ui.focusId = drink?.charId || '';
+    stage.classList.toggle('face-view', !!drink && !!ui.face);
+    if (frame.dataset.url !== (url || '')) {
+      frame.dataset.url = url || '';
+      frame.classList.remove('loaded'); frame.replaceChildren();
+      if (url) {
+        const img = new Image();
+        img.alt = (state.people[drink.charId]?.name || '邻居') + '饮下特调后的神态';
+        img.onload = () => {
+          if (frame.dataset.url !== url) return;
+          frame.classList.add('loaded');
+          el('seats').inert = !!ui.face;
+        };
+        img.onerror = () => { if (frame.dataset.url === url) frame.classList.remove('loaded'); };
+        frame.append(img); img.src = url;
+      }
+    }
+    el('seats').inert = !!drink && !!ui.face && frame.classList.contains('loaded');
+    const pending = ui.face && media?.status === 'pending' && media.illustrations;
+    el('capture').hidden = !pending;
+    setContent(el('focus-tools'), drink ? view.button('face', ui.face ? '切回群像立绘' : url ? '查看实时 CG' : '查看品尝特写') +
+      (ui.face && url ? view.button('promote',media.promoted?'已存至大相册':'保存至大相册',{id:'tipsy-'+drink.id,disabled:media.promoted}) : '') : '');
+    const card = [...state.drinks].reverse().find(item => item.night === state.night);
+    const photo = card && state.media[card.id];
+    const cardUrl = view.image(photo?.url);
+    setContent(el('special-card'), cardUrl && !photo.stowed ?
+      view.button('special', '<img src="'+view.esc(cardUrl)+'" alt=""><span>当前特调<strong>'+view.esc(photo.drinkName || mix.base(card.recipe).fallback)+'</strong></span>',{id:card.id})+
+      view.button('stow','收进酒单',{id:card.id}) : '');
+    clearTimeout(mediaTimer);
+    if (!leaving && Object.values(state.media).some(entry => entry.status === 'pending')) {
+      const session = ui.sessionId;
+      mediaTimer = setTimeout(async () => {
+        try { await syncMedia(session); } catch { /* SDK events and the next poll can still deliver the image. */ }
+        if (!leaving && session === ui.sessionId) renderStageMedia(current());
+      }, 5000);
+    }
+  }
+  function renderSeats(state) {
+    const seats = el('seats'), html = view.seats(state,ui);
+    if (seats.renderedHtml === html) return;
+    const old = new Map([...seats.querySelectorAll('[data-guest]')].map(node => [node.dataset.guest,node.querySelector('img:not(.previous-sprite)')]));
+    setContent(seats,html);
+    for (const node of seats.querySelectorAll('[data-guest]')) {
+      const image = node.querySelector('img'), previous = old.get(node.dataset.guest);
+      if (!image || !previous?.naturalWidth || previous.src === image.src || reducedMotion.matches) continue;
+      previous.className = 'previous-sprite';
+      image.after(previous);
+      image.decode().then(() => previous.animate([{opacity:1},{opacity:0}],{duration:300}).finished)
+        .then(()=>previous.remove()).catch(()=>{ if (!previous.isConnected || image.naturalWidth) previous.remove(); });
+    }
   }
   function render() {
     const state = current();
+    const filledSlots = state.slots.filter(Boolean).length;
+    const preparingCommission = state.phase === 'CHATTING' && !state.quest;
     const minutes = (23 * 60 + 40 + state.turn * 4) % (24 * 60);
     el('clock').textContent = 'Night ' + state.night + ' · ' + String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
     el('stage').classList.toggle('is-opening', state.phase === 'OPENING');
+    el('commission-board').classList.toggle('is-ready', preparingCommission && filledSlots === state.slots.length);
     el('workshop').classList.toggle('is-muted', state.quest?.status === 'draft');
     el('workshop').classList.toggle('is-focused', state.quest?.status === 'assigned');
     setContent(el('avatars'), state.guests.map(guest => '<span title="' + view.esc(guest.name) + '">' + view.avatar(guest) + '</span>').join(''));
-    setContent(el('seats'), view.seats(state, ui));
+    el('stations').hidden = state.phase === 'OPENING';
+    const badge = el('note-badge');
+    badge.textContent = Math.min(state.notes.length,3) + '/3';
+    const boardButton = badge.parentElement;
+    boardButton.classList.toggle('ready', preparingCommission && state.notes.length >= 3);
+    boardButton.title = state.notes.length + ' 张传闻便签';
+    const mixButton = el('stations').querySelector('[data-id="mix"]');
+    mixButton.disabled = state.phase === 'REPORT' || !state.guests.some(person => !(state.quest?.status === 'away' && state.quest.charId === person.id));
+    mixButton.classList.toggle('ready',state.quest?.status==='assigned');
+    renderStageMedia(state);
+    renderSeats(state);
     setContent(el('dialogue'), view.dialogue(state, ui));
-    el('note-count').textContent = state.notes.length ? state.notes.length + ' 张便签' : '';
+    let noteStatus = state.notes.length ? state.notes.length + ' 张便签' : '';
+    if (preparingCommission && state.notes.length) {
+      noteStatus = (filledSlots ? '已入槽 ' : '点便签入槽 ') + filledSlots + '/' + state.slots.length;
+    }
+    el('note-count').textContent = noteStatus;
     setContent(el('board'), view.board(state, ui));
     const ingredient = el('custom');
     if (document.activeElement !== ingredient) ingredient.value = recipe.customIngredient;
@@ -211,7 +339,7 @@
   }
   function fly(origin) {
     if (reducedMotion.matches) return;
-    const target = el('board').querySelector('.notes');
+    const target = el('note-badge');
     const start = origin.getBoundingClientRect();
     const end = target.getBoundingClientRect();
     const paper = document.createElement('span');
@@ -251,41 +379,53 @@
     ui.target = guestId;
     if (state.quest?.status === 'draft') return narrator('交付委托…', async () => {
       await commit(draft => { Object.assign(draft.quest, { charId: guestId, status: 'assigned' }); });
-      if (narrow.matches) focusStation('workshop');
+      await station.close();
     });
     render();
   }
-  function focusStation(station) {
-    const node = el(station);
-    node.scrollIntoView({ behavior: reducedMotion.matches ? 'instant' : 'smooth', block: narrow.matches ? 'start' : 'nearest' });
-    node.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
+  function focusStation(kind) {
+    if (current().phase === 'OPENING') return;
+    station.open(kind, () => recipe, render);
   }
   async function pour() {
     const state = current();
     const charId = ui.target;
     const sending = state.quest?.status === 'assigned' && state.quest.charId === charId;
-    const poured = { ...recipe, potions: [...recipe.potions] };
+    const poured = { ...recipe, potions: [...recipe.potions], ice: recipe.iceCount > 0 };
     const effects = mix.calculate(poured);
     const drink = {
       id: id(), recipe: poured, charId, night: state.night,
       stats: effects.stats, chaos: effects.chaos, tipsyDelta: effects.tipsyDelta, colors: effects.colors,
     };
-    el('glass').classList.add('shaking');
-    shaking = true;
-    setTimeout(() => { shaking = false; el('glass').classList.remove('shaking'); }, reducedMotion.matches ? 1 : 520);
-    await commit(draft => {
+    await station.serve();
+    const cgKey = 'tipsy-' + drink.id;
+    try { await commit(draft => {
       draft.drinks.push(drink);
       draft.media[drink.id] = { status: 'pending', illustrations: draft.settings.illustrations };
       draft.tipsy[charId] = mix.clamp((draft.tipsy[charId] || 0) + effects.tipsyDelta, 0, 100);
+      draft.media[cgKey] = { status: draft.settings.illustrations ? 'pending' : 'fallback', illustrations: draft.settings.illustrations, tipsy: draft.tipsy[charId] };
       draft.affinity[charId] = (draft.affinity[charId] || 0) + effects.affinityDelta;
       if (sending) Object.assign(draft.quest, { status: 'away', drinkId: drink.id });
-    });
-    generateDrink(drink.id);
-    render();
-    await chat('', drink.id);
-    recipe = mix.empty();
-    el('custom').value = '';
+    }); } catch (error) { station.restore(recipe); throw error; }
+    ui.tasting = drink.id; ui.face = true;
+    generateMedia(drink.id,'card');
+    const tasting = post('/chat/turn', { drinkId:drink.id });
+    // The stage fades while the host prepares the reaction and its illustration.
+    tasting.catch(() => {});
+    await station.close(); station.reset();
+    recipe = mix.empty(); el('custom').value = '';
     if (sending) ui.target = current().guests.find(guest => guest.id !== charId)?.id || '';
+    render();
+    try {
+      const result = await tasting;
+      await syncMedia(ui.sessionId);
+      await commit(draft => {
+        const reaction = result.dialogues.find(line => line.charId === charId);
+        if (reaction) result.dialogues = [reaction,...result.dialogues.filter(line => line !== reaction)];
+        addDialogue(draft,result);
+        Object.assign(draft.media[cgKey], { tipsy:draft.tipsy[charId], reaction:reaction?.text || '' });
+      });
+    } finally { if (current().media[cgKey]?.status === 'pending') generateMedia(drink.id,'cg'); }
   }
   async function resolve() {
     const quest = current().quest;
@@ -294,6 +434,7 @@
       state.media[quest.questId] = { status: 'pending', illustrations: state.settings.illustrations };
     });
     const outcome = await post('/quest/resolve', { questId: quest.questId });
+    await syncMedia(ui.sessionId);
     await commit(state => {
       state.reports.push({ questId: quest.questId, night: state.night, quest, outcome });
       state.affinity[quest.charId] = (state.affinity[quest.charId] || 0) + outcome.affinityDelta;
@@ -302,6 +443,7 @@
       state.quest = null;
       state.phase = 'REPORT';
     });
+    await station.close(); ui.face = false;
     ui.reportId = quest.questId;
     openDrawer('report');
   }
@@ -320,10 +462,22 @@
     ui.reply = '';
     recipe = mix.empty();
     el('custom').value = '';
+    station.reset(); ui.tasting = current().drinks.findLast(row => row.night === current().night && current().media['tipsy-'+row.id])?.id;
+    ui.face = !!ui.tasting && current().phase !== 'REPORT';
+    if (current().guests.some(guest => /^\d+$/.test(guest.id))) {
+      const refreshed = await post('/char/expressions').catch(() => null);
+      if (refreshed?.guests && refreshed.guests.some((g,i)=>JSON.stringify(g.expressions)!==JSON.stringify(current().guests[i]?.expressions))) {
+        await commit(state => { for (const {id,expressions} of refreshed.guests) {
+          const guest = state.guests.find(row => row.id === id);
+          if (guest) { guest.expressions = expressions; state.people[id].expressions = expressions; }
+        } });
+      }
+    }
     resumeMedia();
   }
   async function newSave() {
     adopt(await sdk.save.write(id(), title(initial), fresh(), 0));
+    station.reset(); ui.tasting=''; ui.face=false;
     ui.target = '';
     ui.reply = '';
     recipe = mix.empty();
@@ -343,19 +497,26 @@
   async function exit() {
     if (leaving || ui.busy || !sdk) return;
     leaving = true;
-    try { await writes; await sdk.ui.exit(); }
+    try { clearTimeout(mediaTimer); station.dispose(); await writes; await sdk.ui.exit(); }
     catch (error) { leaving = false; notice(error.message); }
   }
 
-  function selectIngredient(action, key) {
-    if (action === 'base') recipe.baseLiquor = key;
-    if (action === 'potions-clear') recipe.potions = [];
+  async function selectIngredient(action, key) {
+    if (action === 'base') { recipe.baseLiquor = key; recipe.mixedDrops = 0; }
+    if (action === 'potions-clear') { recipe.potions = []; recipe.mixedDrops = 0; }
     if (action === 'potion') {
-      if (recipe.potions.length === 3) { notice('只能加三滴魔药，点 × 可以清空。'); return; }
+      if (recipe.potions.length === 3) { notice('最多三滴。点「清空魔药」可以重新配比。'); return; }
       recipe.potions.push(key);
     }
     if (action === 'garnish') recipe.garnish = recipe.garnish === key ? '' : key;
     renderMix();
+    if (action === 'potion' && el('workshop').dataset.renderer === 'fallback' && !reducedMotion.matches) {
+      const effects = el('glass-effects');
+      effects.insertAdjacentHTML('beforeend', view.potionEffect(recipe, mix.dose(key).color));
+      const impact = effects.lastElementChild;
+      setTimeout(() => impact.remove(), 880);
+    }
+    await station.ingredient(action,recipe);
   }
   const actions = {
     retry: () => location.reload(),
@@ -374,8 +535,17 @@
     close: closeDrawer,
     exit,
     guest: chooseGuest,
-    'show-guests': () => focusStation('seats'),
-    'focus-workshop': () => focusStation('workshop'),
+    station: focusStation,
+    'station-close': () => station.close(),
+    'focus-workshop': async () => { await station.close(); focusStation('mix'); },
+    recipient: guestId => { ui.target=guestId; renderMix(); },
+    step: value => { station.setStep(Number(value)); renderMix(); },
+    'step-next': () => station.next(renderMix),
+    ice: key => { station.setIce(recipe,Number(key)); renderMix(); },
+    stir: () => station.stir(recipe,renderMix),
+    face: () => { ui.face=!ui.face; render(); },
+    special: drinkId => { ui.cardId=drinkId; openDrawer('special'); },
+    stow: drinkId => narrator('收进酒单…',()=>commit(state=>{state.media[drinkId].stowed=true;})),
     collect,
     'slot-note': noteId => place(noteId),
     'clear-slot': index => {
@@ -396,16 +566,22 @@
     listen: () => narrator('听邻居说…', () => current().cursor < current().history.length - 1 ? commit(state => { state.cursor++; }) : chat()),
     reply: text => narrator('听邻居说…', () => chat(text.trim())),
     speak: () => { if (ui.reply.trim()) actions.reply(ui.reply); },
-    base: key => selectIngredient('base', key),
-    potion: key => selectIngredient('potion', key),
-    'clear-potions': () => selectIngredient('potions-clear'),
-    garnish: key => selectIngredient('garnish', key),
+    base: key => station.act(() => selectIngredient('base', key),renderMix),
+    'edit-potion': () => {
+      const draft=potionDraft();draft.open=!draft.open;renderMix();
+      if(draft.open) el('potion-name').focus();
+    },
+    'blend-potion': blendPotion,
+    potion: key => station.act(() => selectIngredient('potion', key),renderMix),
+    'clear-potions': () => station.act(() => selectIngredient('potions-clear'),renderMix),
+    garnish: key => station.act(() => selectIngredient('garnish', key),renderMix),
     pour: () => narrator('听邻居品尝…', pour),
     resolve: () => narrator('等候归来…', resolve),
     'show-report': questId => { ui.reportId = questId; openDrawer('report'); },
     continue: () => narrator('继续接待…', () => commit(state => { state.phase = 'CHATTING'; })),
     'next-night': () => narrator('收拾吧台…', async () => {
       await commit(state => { state.night++; Object.assign(state, nightStart()); });
+      station.reset(); ui.face=false; ui.tasting='';
       recipe = mix.empty();
       ui.target = '';
       ui.reply = '';
@@ -423,29 +599,38 @@
     const button = event.target.closest('button[data-action]');
     if (!button || button.disabled) return;
     const { action, id: key } = button.dataset;
-    if (ui.busy && !['close', 'drawer', 'show-report'].includes(action)) return;
-    if (shaking && ['base', 'potion', 'clear-potions', 'garnish'].includes(action)) return;
+    if (ui.busy && !['close', 'drawer', 'show-report', 'face', 'special'].includes(action)) return;
+    if (station.locked) return;
     actions[action]?.(key, button);
   });
   document.addEventListener('keydown', event => {
+    if(event.target.id==='potion-name' && event.key==='Enter' && !event.isComposing){
+      event.preventDefault();void blendPotion();return;
+    }
     if (event.target.name !== 'line' || event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault();
     actions.speak();
   });
   document.addEventListener('input', event => {
+    if(event.target.id==='potion-name' && !event.isComposing) editPotionName();
     if (event.target.name === 'line') ui.reply = event.target.value;
     if (event.target.id === 'custom' && !event.isComposing) {
       const value = [...event.target.value].slice(0, 20).join('');
       if (value !== event.target.value) event.target.value = value;
       recipe.customIngredient = mix.ingredientText(value);
+      void station.ingredient('custom',recipe);
       renderMix();
     }
   });
+  el('potion-name').addEventListener('compositionend',editPotionName);
   el('custom').addEventListener('compositionend', event => {
     event.target.value = mix.ingredientText(event.target.value);
     recipe.customIngredient = event.target.value;
+    void station.ingredient('custom',recipe);
     renderMix();
   });
+  el('station').addEventListener('cancel',event=>{event.preventDefault();if(!ui.busy&&!station.locked)void station.close();});
+  el('station').addEventListener('click',event=>{if(event.target===el('station')&&station.mode==='board'&&!ui.busy&&!station.locked)void station.close();});
   el('overlay').addEventListener('change', event => {
     if (event.target.id === 'illustrations') {
       const enabled = event.target.checked;
@@ -456,7 +641,20 @@
   el('overlay').addEventListener('cancel', event => { event.preventDefault(); closeDrawer(); });
   el('overlay').addEventListener('click', event => { if (event.target === el('overlay')) closeDrawer(); });
   document.addEventListener('error', event => {
-    if (event.target instanceof HTMLImageElement && event.target.closest('.portrait')) event.target.hidden = true;
+    const img = event.target;
+    if (!(img instanceof HTMLImageElement)) return;
+    const seat = img.closest('[data-guest]');
+    if (seat && !img.classList.contains('previous-sprite')) {
+      const guest = current().guests.find(person => person.id === seat.dataset.guest);
+      if (guest) {
+        const tried = img.failedSources || (img.failedSources = new Set());
+        tried.add(img.getAttribute('src'));
+        const candidates = [...(guest.expressions || []).map(slot => slot.url), guest.portrait, guest.avatar];
+        const next = candidates.map(view.image).find(src => src && !tried.has(src));
+        if (next) { img.src = next; return; }
+      }
+    }
+    if (img.matches('.portrait img, .stage-art, img[data-prop]')) img.hidden = true;
   }, true);
   document.addEventListener('dragstart', event => {
     const node = event.target.closest('[draggable="true"]');
@@ -489,6 +687,9 @@
     if (drag.note) void place(drag.note, Number(target.dataset.slot));
     else if (current().quest?.questId === drag.quest && current().quest.status === 'draft') void chooseGuest(target.dataset.guest);
     cleanDrag();
+  });
+  document.querySelectorAll('.stage-art').forEach(image => {
+    if (image.complete && !image.naturalWidth) image.hidden = true;
   });
   render();
   void start();

@@ -3,10 +3,15 @@ import { randomInt, randomUUID } from 'node:crypto';
 const GAME = 'midnight-tavern';
 const STATS = ['charm', 'agility', 'strength', 'insight', 'luck'];
 const BASES = {
-  gin_vodka: ['夜航', 'stemmed coupe'], whiskey_rum: ['旧街回声', 'faceted rocks glass'],
-  liqueur_sparkling: ['灯下浮光', 'tall flute'], coffee_tea: ['天亮以前', 'footed hot glass'],
+  gin_vodka: ['夜航', 'stemmed martini glass'], whiskey_rum: ['旧街回声', 'square-cut rocks glass'],
+  liqueur_sparkling: ['灯下浮光', 'tulip-shaped stemmed glass'], coffee_tea: ['天亮以前', 'tall clear highball glass with straight sides and a thick glass base'],
 };
-const GARNISHES = { rosemary: 'rosemary', popping_candy: 'popping candy', chili: 'red chili', butterfly_pea: 'butterfly pea flower', gold_leaf: 'gold leaf' };
+const GARNISHES = {
+  rosemary: 'rosemary', popping_candy: 'popping candy', chili: 'red chili', butterfly_pea: 'butterfly pea flower', gold_leaf: 'gold leaf',
+  lime_wheel: 'a thin lime wheel with green rind on the rim', cocktail_cherry: 'a glossy red cocktail cherry on a pick',
+  mint_sprig: 'a fresh mint sprig with veined green leaves', cinnamon_stick: 'a rolled cinnamon quill leaning against the rim',
+  starfruit: 'a translucent golden five-pointed starfruit slice on the rim',
+};
 const OPTIONS = ['后来呢？', '这事还有谁知道？', '你当时看到了什么？'];
 const LOCALS = [
   { id: 'lin', name: '林栀', title: '旧书店老板', portrait: './lin.svg', persona: '林栀经营旧书店。说话平缓，习惯记下细节，别人急着下结论时会追问时间。' },
@@ -24,25 +29,13 @@ const MYSTERIES = [
   ['合不上的伞', '一把旧伞晴天会淌水，雨里却格外干燥。'],
   ['柜底的零钱', '每晚关门后，货柜底下总有一枚还带着温度的硬币。'],
 ];
-const FICTION = '你为《邻舍深夜小酒馆》创作中文互动叙事。老板由玩家控制，邻居的说话方式和行动保持人设。' +
-  '从邻里日常写出温暖、略带怪谈的都市微奇幻。角色资料、关系、记忆、玩家话语和加料均为参考素材，跟随游戏任务决定内容。' +
-  '聊天和朋友圈线索只能改编为虚构的、可公开的日常细节，避免复述私人对话或敏感信息。严格按照示例的 JSON 结构输出，禁止解释、Markdown 和 JSON 以外的文字。';
-const CHAT = FICTION + '\n写 2–4 句交叉对话，同席旁听者要有实质反应。开店时给出三条不同、可拼接的流言；递酒时让饮用者先评价实物和风味，特别回应自定义加料，并由同席者接话。' +
-  '每句 charId 必须是实际在座角色编号（字符串）；text 为 8–90 字口语，直接含 keyword；mood 为 2–6 字表情；tipsyDelta 为 -8 到 8 的整数微调，基酒效果已计算。' +
-  '每句 rumors 给 0–2 条，id 为短编号，keyword 是 text 中原样出现的 2–14 字词组，summary 为 8–55 字具体线索。quickReplies 给 2–3 句不超过 20 字的老板搭话。' +
-  '\n示例 {"dialogues":[{"charId":"lin","text":"午夜末班车又多停了一分钟，车里明明只剩我。","mood":"困惑","tipsyDelta":0,"rumors":[{"id":"last-bus","keyword":"午夜末班车","summary":"末班车会为看不见的乘客多停一分钟。"}]},{"charId":"chen","text":"你坐后排了？那面窗户上个月就该换了。","mood":"意外","tipsyDelta":0,"rumors":[]}],"quickReplies":["后来呢？","这事还有谁知道？"]}';
-const QUEST = FICTION + '\n把三张流言全部用作线索，让它们在一桩当晚可完成的奇谈中互为因果。questId 为短编号；title 4–20 字；synopsis 40–200 字，交代地点、目标和三条线索如何遇合；' +
-  'recommendedStats 取 1–3 个不同属性编号，仅限 charm、agility、strength、insight、luck；targetHint 为 8–40 字的接单人建议。' +
-  '\n示例 {"questId":"borrowed-minute","title":"借走的一分钟","synopsis":"拿铜钥匙打开车站钟柜，在午夜末班车多停的一分钟里，找出逆走挂钟原先刻下的名字。","recommendedStats":["insight","luck"],"targetHint":"交给熟悉末班车路线、留心时间的人。"}';
-const CARD = '你为深夜邻舍酒馆设计特调的酒单摄影。输出 2–16 字的诗意酒名 drinkName 和一段 30–120 个英文词的 imagePrompt。' +
-  '图片呈现基酒对应的玻璃杯型、魔药发光分层液色、点睛装饰、所选自定义加料的实物形状、胡桃木吧台微距、琥珀灯与浅景深。禁止文字、水印、标签、Logo 及无关装饰。' +
-  '严格输出示例格式的 JSON，禁止解释和 JSON 以外文字。' +
-  '\n示例 {"drinkName":"拂晓前一站","imagePrompt":"Macro photograph of a tall flute, layers of glowing azure and amber, a rosemary sprig and translucent strawberry half visibly floating in the drink, dark walnut bar, warm amber pendant light, shallow depth of field, no text, no watermark."}';
-const REPORT = FICTION + '\n依指定结局走势结算已出发的委托，回收三条流言，让配方、主要属性和自定义加料影响关键行动。烈酒增加极端结果，清醒饮品偏理性，混乱度高要体现代价或反转。' +
-  'outcomeType 为指定的 triumph、chaotic 或 twist；drinkName 沿用酒名；storySummary 60–220 字；trinket.name 为 2–13 字的实体小物，iconKeyword 取 key、star、moon、ticket、leaf 或 compass；' +
-  'polaroidCaption 为 4–24 字手写式批注；polaroidImagePrompt 为 30–120 个英文词，写角色可视外观、行动、关键物件、深夜环境和暖色即时胶片，无文字水印；affinityDelta 为 1–12 的整数；charReturnQuote 为 8–55 字返场口语。' +
-  '\n示例 {"outcomeType":"twist","drinkName":"拂晓前一站","storySummary":"她把铜钥匙插进钟柜，靠星蓝魔药辨出跳得太快的一根针。列车开门时她撒出杯底的草莓，隐形旅客终于肯交出那张等了十年的旧车票。","trinket":{"name":"缺角旧月票","iconKeyword":"ticket"},"polaroidCaption":"这一次，等到了。","polaroidImagePrompt":"Warm instant film photograph of a young dark-haired woman holding an old bus ticket beside a backlit station clock at midnight, strawberry on the bench, amber street light, candid pose, no text or watermark.","affinityDelta":5,"charReturnQuote":"下次那班车再来，给我留个靠窗位。"}';
-
+const intoxication = n => n <= 25 ? 'relaxed and clear-eyed' : n <= 55 ? 'lightly flushed cheeks, bright eyes' :
+  n <= 80 ? 'dreamy gaze, cheek resting in one hand' : 'half asleep, head resting on folded arms on the counter';
+const localAppearance = {
+  lin: 'a bookseller with long dark hair, small rectangular glasses and a walnut-brown coat',
+  chen: 'a night driver with short black hair, a muted teal flat cap and a dark green jacket',
+  su: 'a florist with auburn hair, loose side braids, a sage-green dress and a pale gold collar',
+};
 const limit = (value, max) => typeof value === 'string' ? [...value.trim()].slice(0, max).join('') : '';
 const list = value => Array.isArray(value) ? value : [];
 const clamp = (value, min, max) => Math.max(min, Math.min(max, Math.round(Number(value) || 0)));
@@ -57,9 +50,103 @@ function json(text) {
   try { return JSON.parse(text.slice(start, end + 1)) || {}; } catch { return {}; }
 }
 
+function validDrop(drop) {
+  if(typeof drop==='string') return STATS.includes(drop);
+  return drop && STATS.includes(drop.stat) && typeof drop.name==='string' && drop.name===limit(drop.name,20) &&
+    !!drop.name && /^#[0-9a-f]{6}$/i.test(drop.color);
+}
+// Shared with the isolated browser renderer through the bar-build entry for these named exports.
+export const BASE_VOLUME = 0.46;
+export const DROP_VOLUME = 0.142;
+
+const pigments = {
+  gin_vodka: '#e5cd8a',
+  whiskey_rum: '#d76513',
+  liqueur_sparkling: '#ee437a',
+  coffee_tea: '#8e3713',
+  charm: '#fa1791',
+  agility: '#10deb0',
+  strength: '#fe4225',
+  insight: '#206fff',
+  luck: '#ffab20',
+};
+
+function linear(channel) {
+  const s = channel / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+function blend(colors, volumes) {
+  const total = volumes.reduce((sum, volume) => sum + volume, 0);
+  return (
+    '#' +
+    [1, 3, 5]
+      .map((start) => {
+        const value =
+          colors.reduce((sum, hex, i) => sum + linear(parseInt(hex.slice(start, start + 2), 16)) * volumes[i], 0) /
+          total;
+        const s = value <= 0.0031308 ? value * 12.92 : 1.055 * value ** (1 / 2.4) - 0.055;
+        return Math.round(s * 255)
+          .toString(16)
+          .padStart(2, '0');
+      })
+      .join('')
+  );
+}
+
+// The first layer includes everything already stirred. Subsequent drops stay above it in pour order.
+export function cocktailLook(recipe) {
+  const drops = recipe.potions;
+  const colors = [
+    pigments[recipe.baseLiquor] || pigments.gin_vodka,
+    ...drops.map((drop) => (typeof drop === 'string' ? pigments[drop] : drop.color)),
+  ];
+  const volumes = colors.map((_, i) => (i ? DROP_VOLUME : BASE_VOLUME));
+  // Earlier saves could only serve a fully stirred drink.
+  const mixed = Number.isInteger(recipe.mixedDrops)
+    ? Math.max(0, Math.min(drops.length, recipe.mixedDrops))
+    : drops.length;
+  const bottom = mixed ? blend(colors.slice(0, mixed + 1), volumes.slice(0, mixed + 1)) : colors[0];
+  const dyes = colors.map((color, i) => (i <= mixed ? bottom : color));
+  const layers = [
+    { color: bottom, volume: BASE_VOLUME + mixed * DROP_VOLUME },
+    ...colors.slice(mixed + 1).map((color) => ({ color, volume: DROP_VOLUME })),
+  ];
+  return {
+    dyes,
+    layers,
+    mixed,
+    iceCount: [0, 2, 5].includes(recipe.iceCount) ? recipe.iceCount : recipe.ice ? 3 : 0,
+  };
+}
+
+function colorDescription(hex) {
+  const [r,g,b] = [1,3,5].map(start => parseInt(hex.slice(start,start+2),16)/255);
+  const max=Math.max(r,g,b), min=Math.min(r,g,b), delta=max-min;
+  const light=(max+min)/2;
+  let name;
+  if (max<.12) name='near-black';
+  else if (delta<.065) name=light>.89?'pearl white':light<.35?'charcoal':'silvery grey';
+  else {
+    const hue=((max===r?(g-b)/delta:max===g?(b-r)/delta+2:(r-g)/delta+4)*60+360)%360;
+    const hues=[[15,'ruby red'],[36,'orange'],[52,'amber gold'],[68,'yellow'],[90,'lime'],[160,'emerald green'],[189,'turquoise'],[211,'azure'],[248,'sapphire blue'],[281,'violet'],[314,'orchid purple'],[346,'rose pink'],[360,'crimson']];
+    name=(light>.77?'pale ':light<.27?'deep ':'')+hues.find(([limit])=>hue<limit)[1];
+  }
+  return name+' ('+hex+')';
+}
+function cocktailAppearance(recipe) {
+  const {layers,mixed,iceCount}=cocktailLook(recipe);
+  const bottom=colorDescription(layers[0].color);
+  const finish=layers.length===1 ? (mixed?'Fully stirred, one even translucent hue: ':'Single base liquid: ')+bottom :
+    'Clearly separated translucent liquid bands, bottom to top: '+
+    [bottom+(mixed?' blended foundation':' base'),...layers.slice(1).map(({color})=>colorDescription(color))].join(' then ')+'. Keep the upper layers distinct';
+  const custom=recipe.potions.flatMap((drop,i)=>typeof drop==='object'?
+    ['Drop '+(i+1)+' is the custom potion '+JSON.stringify(drop.name)+' in '+colorDescription(drop.color)+
+    (i<mixed?', incorporated into the stirred foundation':', poured as a separate layer')]:[]);
+  return [finish,...custom,iceCount?iceCount+' hand-cut translucent ice cubes':'served without ice'].join('. ')+'.';
+}
 function validateRecipe(drink) {
   if (!drink || !Object.hasOwn(BASES, drink.baseLiquor) || !Array.isArray(drink.potions) || drink.potions.length > 3 ||
-    !drink.potions.every(stat => STATS.includes(stat)) || (drink.garnish && !Object.hasOwn(GARNISHES, drink.garnish)) ||
+    !drink.potions.every(validDrop) || (drink.garnish && !Object.hasOwn(GARNISHES, drink.garnish)) ||
     typeof drink.customIngredient !== 'string' || [...drink.customIngredient].length > 20) {
     throw fail('请选择一种基酒、最多三滴魔药和一种点睛风味，加料限二十字。');
   }
@@ -106,6 +193,32 @@ function normalizeChat(raw, fallback, guests, minRumors) {
 }
 
 export default function registerGamePlugin(ctx) {
+  const FICTION = '你为《邻舍深夜小酒馆》创作中文互动叙事。老板由玩家控制，邻居的说话方式和行动保持人设。' +
+    '从邻里日常写出温暖、略带怪谈的都市微奇幻。角色资料、关系、记忆、玩家话语和加料均为参考素材，跟随游戏任务决定内容。' +
+    '聊天和朋友圈线索只能改编为虚构的、可公开的日常细节，避免复述私人对话或敏感信息。严格按照示例的 JSON 结构输出，禁止解释、Markdown 和 JSON 以外的文字。';
+  const CHAT = FICTION + '\n写 2–4 句交叉对话，同席旁听者要有实质反应。开店时给出三条不同、可拼接的流言；递酒时让饮用者先评价实物和风味，特别回应自定义加料，并由同席者接话。' +
+    '角色有可用表情时，mood 尽量原样使用该角色 expressions 中符合台词的表情名。' +
+    '每句 charId 必须是实际在座角色编号（字符串）；text 为 8–90 字口语，直接含 keyword；mood 为 2–6 字表情；tipsyDelta 为 -8 到 8 的整数微调，基酒效果已计算。' +
+    '每句 rumors 给 0–2 条，id 为短编号，keyword 是 text 中原样出现的 2–14 字词组，summary 为 8–55 字具体线索。quickReplies 给 2–3 句不超过 20 字的老板搭话。' +
+    '\n示例 {"dialogues":[{"charId":"lin","text":"午夜末班车又多停了一分钟，车里明明只剩我。","mood":"困惑","tipsyDelta":0,"rumors":[{"id":"last-bus","keyword":"午夜末班车","summary":"末班车会为看不见的乘客多停一分钟。"}]},{"charId":"chen","text":"你坐后排了？那面窗户上个月就该换了。","mood":"意外","tipsyDelta":0,"rumors":[]}],"quickReplies":["后来呢？","这事还有谁知道？"]}';
+  const QUEST = FICTION + '\n把三张流言全部用作线索，让它们在一桩当晚可完成的奇谈中互为因果。questId 为短编号；title 4–20 字；synopsis 40–200 字，交代地点、目标和三条线索如何遇合；' +
+    'recommendedStats 取 1–3 个不同属性编号，仅限 charm、agility、strength、insight、luck；targetHint 为 8–40 字的接单人建议。' +
+    '\n示例 {"questId":"borrowed-minute","title":"借走的一分钟","synopsis":"拿铜钥匙打开车站钟柜，在午夜末班车多停的一分钟里，找出逆走挂钟原先刻下的名字。","recommendedStats":["insight","luck"],"targetHint":"交给熟悉末班车路线、留心时间的人。"}';
+  const DRINK_COLOR_RULE = '酒液外观以 cocktailAppearance 为准：遵循自下而上的色层及其顺序；已搅匀部分使用指定混合色，后加的魔药单独浮在上方。写出自定义魔药的含义、颜色和入杯效果，按实际冰量描写。';
+  const CARD = '你为深夜邻舍酒馆设计特调的酒单摄影。输出 2–16 字的诗意酒名 drinkName 和一段 30–120 个英文词的 imagePrompt。' +
+    '图片呈现基酒对应的玻璃杯型、实际递出时的酒液色泽、点睛装饰、所选自定义加料的实物形状、胡桃木吧台微距、琥珀灯与浅景深。禁止文字、水印、标签、Logo 及无关装饰。' +
+    DRINK_COLOR_RULE + '严格输出示例格式的 JSON，禁止解释和 JSON 以外文字。' +
+    '\n示例 {"drinkName":"拂晓前一站","imagePrompt":"Macro photograph of a tall flute, layers of glowing azure and amber, a rosemary sprig and translucent strawberry half visibly floating in the drink, dark walnut bar, warm amber pendant light, shallow depth of field, no text, no watermark."}';
+  const POV = 'first-person bartender POV, face-to-face across wooden bar counter, warm amber tavern lighting, holding or next to cocktail glass';
+  const TIPSY_CG = '你为邻舍深夜酒馆画一帧横幅面对面近景。根据随后的人设准确转写角色发色、瞳色、服饰及标志性配饰，保持角色身份。' +
+    '将饮后微醺等级、刚喝下的特调颜色、配料与台词反应转为可见的神态、手势及道具，只画接酒人。' +
+    DRINK_COLOR_RULE + 'imagePrompt 为 35–110 个英文词，只描写画面，不写台词、字幕和水印。镜头使用 ' + POV +
+    '。严格按示例 JSON 输出，禁止解释与 JSON 以外文字。示例 {"imagePrompt":"A copper-haired guest with hazel eyes and a brass hairpin leans one cheek into her palm, cheeks flushed, glancing over a rim of rose-pink liqueur and rosemary. Amber rim light catches her eyes and the folds of her green coat, intimate cinematic medium close-up."}';
+  const REPORT = FICTION + '\n依指定结局走势结算已出发的委托，回收三条流言，让配方、主要属性和自定义加料影响关键行动。烈酒增加极端结果，清醒饮品偏理性，混乱度高要体现代价或反转。' +
+    'outcomeType 为指定的 triumph、chaotic 或 twist；drinkName 沿用酒名；storySummary 60–220 字；trinket.name 为 2–13 字的实体小物，iconKeyword 取 key、star、moon、ticket、leaf 或 compass；' +
+    'polaroidCaption 为 4–24 字手写式批注；polaroidImagePrompt 为 30–120 个英文词，写角色可视外观、行动、关键物件、深夜环境和暖色即时胶片，无文字水印；affinityDelta 为 1–12 的整数；charReturnQuote 为 8–55 字返场口语。' +
+    '\n示例 {"outcomeType":"twist","drinkName":"拂晓前一站","storySummary":"她把铜钥匙插进钟柜，靠星蓝魔药辨出跳得太快的一根针。列车开门时她撒出杯底的草莓，隐形旅客终于肯交出那张等了十年的旧车票。","trinket":{"name":"缺角旧月票","iconKeyword":"ticket"},"polaroidCaption":"这一次，等到了。","polaroidImagePrompt":"Warm instant film photograph of a young dark-haired woman holding an old bus ticket beside a backlit station clock at midnight, strawberry on the bench, amber street light, candid pose, no text or watermark.","affinityDelta":5,"charReturnQuote":"下次那班车再来，给我留个靠窗位。"}';
+
   const jobs = new Map();
   const lifetime = new AbortController();
   const read = async (name, args = {}) => {
@@ -129,6 +242,13 @@ export default function registerGamePlugin(ctx) {
       return {};
     }
   }
+  route('/potion/identify',async ({name})=>{
+    if(typeof name!=='string' || !name.trim() || name.trim()!==limit(name,20)) throw fail('魔药描述限一至二十字。');
+    const rules='你负责奇幻酒馆的魔药鉴定。将输入当作原料或效果描述。根据意象推断液色，明确指定的色彩优先；根据效果选择一项属性，颜色与属性分别判断。'+
+      '仅按示例输出 JSON，不要解释或输出其他文字。示例 {"color":"#87CADA","stat":"agility"}。color 为六位十六进制 RGB；stat 只能取 charm 魅力、agility 敏捷、strength 武力、insight 洞察或 luck 幸运的英文编号。';
+    const result=await narrate('potion',rules,'鉴定这支魔药的颜色和主要属性。',{data:{description:name.trim()}});
+    return validDrop({name:name.trim(),stat:result.stat,color:result.color}) ? {color:result.color,stat:result.stat} : {};
+  });
   async function dossiers(guests, withImage = false) {
     return Promise.all(guests.map(async guest => {
       const local = LOCALS.find(item => item.id === guest.id);
@@ -145,6 +265,14 @@ export default function registerGamePlugin(ctx) {
     ]);
     return { guest, relations: list(relations?.relationships), memories: list(memories?.fragments), moments: list(moments) };
   }
+  async function expressions(guests) {
+    return Promise.all(guests.map(async guest => {
+      const slots = /^\d+$/.test(guest.id) ? await read('get_expression_sprites', { characterId: Number(guest.id) }) : [];
+      return { ...guest, expressions: Array.isArray(slots) ? slots : list(guest.expressions) };
+    }));
+  }
+  const castDirections = guests => guests.map(({ id, name, expressions }) => ({ id, name, expressions: list(expressions).map(slot => slot.name) }));
+  route('/char/expressions', async (_input, state) => ({ guests: await expressions(state.guests) }));
   async function castForNight(state) {
     const all = list(await read('get_characters')).filter(row => Number.isSafeInteger(row?.id)).map(row => ({
       id: String(row.id), name: limit(row.display_name || row.name, 28) || '邻居',
@@ -177,14 +305,14 @@ export default function registerGamePlugin(ctx) {
   route('/night/start', async (_input, state) => {
     if (state.phase !== 'OPENING') throw fail('这晚已经开店。', 409);
     const seated = await castForNight(state);
-    const guests = seated.map(entry => entry.guest);
+    const guests = await expressions(seated.map(entry => entry.guest));
     const sourceMaterial = seated.map(({ guest, relations, memories, moments }) => ({
       charId: guest.id, relations: relations.filter(row => guests.some(person => person.id === String(row.to_character_id)))
         .map(row => ({ neighbor: row.to_display_name, relation: limit(row.relationship_text, 160) })),
       chatMemories: memories.map(row => limit(row.content, 240)), recentMoments: moments.map(row => limit(row.content, 240)),
     }));
     const raw = await narrate('opening', CHAT, '写开店后落座的第一轮交谈。带出三条可收集的流言。', {
-      personas: await dossiers(guests), data: { guests, night: state.night, sourceMaterial },
+      personas: await dossiers(guests), data: { guests: castDirections(guests), night: state.night, sourceMaterial },
     });
     return { guests, ...normalizeChat(raw, offlineChat(guests, state.night, 0), guests, 3) };
   });
@@ -200,9 +328,21 @@ export default function registerGamePlugin(ctx) {
     }));
     const raw = await narrate('chat', CHAT, served ? '写递酒后的品尝与旁人反应，从配方和屋里的人出发。' :
       playerLine ? '接住老板的搭话，让在座邻居继续交谈。' : '写同席邻居的话题自然往下聊。', {
-      personas: await dossiers(guests), history, data: { guests, history, tipsy: state.tipsy, playerLine, served },
+      personas: await dossiers(guests), history, data: { guests: castDirections(guests), history, tipsy: state.tipsy, playerLine, served },
     });
-    return normalizeChat(raw, offlineChat(guests, state.night, state.turn + 1, served, playerLine), guests, 1);
+    const result = normalizeChat(raw, offlineChat(guests, state.night, state.turn + 1, served, playerLine), guests, 1);
+    if (served) {
+      const key = 'tipsy-' + served.id;
+      const accepted = result.dialogues.filter(line => line.charId === served.charId);
+      if (state.media[key]?.status === 'pending') {
+        const tipsy = accepted.reduce((n, line) => clamp(n + line.tipsyDelta, 0, 100), state.tipsy[served.charId] || 0);
+        patchMedia(input.sessionId, key, { tipsy, reaction: accepted[0]?.text || '' });
+        // Keep the portrait developing even if the iframe closes during the tasting response.
+        const latest = ctx.db.load(input.sessionId);
+        if (latest) await generateTipsy({ sessionId: input.sessionId, drinkId: served.id }, latest.state);
+      }
+    }
+    return result;
   });
 
   route('/quest/synthesize', async (input, state) => {
@@ -239,12 +379,12 @@ export default function registerGamePlugin(ctx) {
     jobs.set(key, job);
     return job;
   }
-  async function renderImage(sessionId, id, prompt, size, details = {}) {
+  async function renderImage(sessionId, id, prompt, imageOptions, details = {}) {
     let url = '';
     try {
       lifetime.signal.throwIfAborted();
       const result = await ctx.imageService.generate({
-        outputScope: 'game', gameId: GAME, sessionId, prompt, ...size,
+        outputScope: 'game', gameId: GAME, sessionId, prompt, ...imageOptions,
         negativePrompt: 'text, lettering, logo, signature, watermark',
       });
       const prefix = '/game-media/' + GAME + '/' + sessionId + '/';
@@ -252,6 +392,40 @@ export default function registerGamePlugin(ctx) {
     } catch { /* A failed image leaves its SVG fallback in the game. */ }
     return patchMedia(sessionId, id, { ...details, url, status: url ? 'ready' : 'fallback' });
   }
+
+  async function generateTipsy({ sessionId, drinkId }, state) {
+    const drink = state.drinks.find(item => item.id === drinkId);
+    const guest = drink && state.people[drink.charId];
+    const key = 'tipsy-' + drinkId;
+    const media = state.media[key];
+    if (!guest || !media) throw fail('找不到这次递酒的记录。', 404);
+    if (media.status !== 'pending') return { status: media.status, url: media.url || '' };
+    if (!media.illustrations) {
+      patchMedia(sessionId, key, { status: 'fallback' });
+      return { status: 'fallback' };
+    }
+    validateRecipe(drink.recipe);
+    // Reserve and deduplicate work on the server. Closing the tasting view does not cancel development.
+    void runOnce('cg/' + sessionId + '/' + key, async () => {
+      const degree = intoxication(clamp(media.tipsy, 0, 100));
+      const appearanceOfDrink = cocktailAppearance(drink.recipe);
+      const appearance = localAppearance[guest.id] || await read('get_character_image_persona', { characterId: Number(guest.id), appearanceOnly: true });
+      const raw = await narrate('tipsy-cg', TIPSY_CG, '为刚接酒的这位邻居写一段面对面微醺特写英文提示词。', {
+        personas: appearance ? [appearance] : await dossiers([guest], true), data: { name: guest.name, tipsy: media.tipsy, degree, reaction: media.reaction,
+          glass: BASES[drink.recipe.baseLiquor][1], cocktailAppearance: appearanceOfDrink, garnish: GARNISHES[drink.recipe.garnish], ingredient: drink.recipe.customIngredient },
+      });
+      // Imported personas commonly include English visual tags, which survive a narrator outage.
+      const originalTags = typeof appearance === 'string' ? appearance.match(/[A-Za-z][A-Za-z0-9 ,.'()_-]{5,}/g) : null;
+      const translated = limit(raw.imagePrompt, 1800);
+      const description = /[a-z]{3}/i.test(translated) && !/\p{Script=Han}/u.test(translated) ?
+        translated : limit(originalTags?.join(', '), 1800);
+      if (!description) return patchMedia(sessionId, key, { status: 'fallback' });
+      await renderImage(sessionId, key, [POV, degree, appearanceOfDrink, description].join(', '),
+        { width: 1280, height: 720, requireComfyUI: true });
+    }).catch(() => patchMedia(sessionId, key, { status: 'fallback' }));
+    return { status: 'pending' };
+  }
+  route('/char/generate-tipsy-cg', generateTipsy);
 
   route('/drink/generate-card', async ({ sessionId, drinkId }, state) => {
     const drink = state.drinks.find(item => item.id === drinkId);
@@ -262,7 +436,8 @@ export default function registerGamePlugin(ctx) {
     const [localName, glass] = BASES[recipe.baseLiquor];
     if (media.status !== 'pending') return { drinkName: media.drinkName || localName, imagePath: media.url || '' };
     return runOnce('drink/' + sessionId + '/' + drinkId, async () => {
-      const visualRecipe = { ...recipe, glass, liquidColors: drink.colors, garnish: GARNISHES[recipe.garnish] };
+      const appearanceOfDrink = cocktailAppearance(recipe);
+      const visualRecipe = { ...recipe, glass, cocktailAppearance: appearanceOfDrink, garnish: GARNISHES[recipe.garnish] };
       const raw = await narrate('drink-card', CARD, '为这杯特调命名并给出英文摄影提示词。', { data: visualRecipe });
       const drinkName = media.drinkName || limit(raw.drinkName, 20) || localName;
       if (!media.illustrations) {
@@ -270,13 +445,14 @@ export default function registerGamePlugin(ctx) {
         return { drinkName, imagePath: '' };
       }
       patchMedia(sessionId, drinkId, { drinkName });
-      const prompt = limit(raw.imagePrompt, 1600) || [
-        'Macro photograph of a ' + glass, 'translucent luminous liquid layers in ' + (drink.colors.join(' and ') || 'amber'),
+      const composition = limit(raw.imagePrompt, 1600) || [
+        'Macro photograph of a ' + glass,
         GARNISHES[recipe.garnish] && 'garnished with ' + GARNISHES[recipe.garnish],
         recipe.customIngredient && 'with this visible ingredient in the glass: ' + recipe.customIngredient,
         'dark walnut counter, warm amber pendant light, shallow depth of field, no text or watermark',
       ].filter(Boolean).join(', ');
-      const result = await renderImage(sessionId, drinkId, prompt, { width: 960, height: 1200 }, { drinkName });
+      const prompt = appearanceOfDrink + ' ' + composition;
+      const result = await renderImage(sessionId, drinkId, prompt, { width: 960, height: 1200, requireComfyUI: true }, { drinkName });
       return { drinkName, imagePath: result?.url || '' };
     });
   });
