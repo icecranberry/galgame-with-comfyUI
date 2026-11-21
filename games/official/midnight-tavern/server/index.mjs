@@ -193,7 +193,7 @@ function normalizeChat(raw, fallback, guests, minRumors) {
 }
 
 export default function registerGamePlugin(ctx) {
-  const FICTION = '你为《邻舍深夜小酒馆》创作中文互动叙事。老板由玩家控制，邻居的说话方式和行动保持人设。' +
+  const FICTION = '你为《老板，八卦特浓，少冰》创作中文互动叙事。老板由玩家控制，邻居的说话方式和行动保持人设。' +
     '从邻里日常写出温暖、略带怪谈的都市微奇幻。角色资料、关系、记忆、玩家话语和加料均为参考素材，跟随游戏任务决定内容。' +
     '聊天和朋友圈线索只能改编为虚构的、可公开的日常细节，避免复述私人对话或敏感信息。严格按照示例的 JSON 结构输出，禁止解释、Markdown 和 JSON 以外的文字。';
   const CHAT = FICTION + '\n写 2–4 句交叉对话，同席旁听者要有实质反应。开店时给出三条不同、可拼接的流言；递酒时让饮用者先评价实物和风味，特别回应自定义加料，并由同席者接话。' +

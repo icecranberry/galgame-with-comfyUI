@@ -4,9 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1d1311">
-  <title>邻舍深夜小酒馆</title>
+  <title>老板，八卦特浓，少冰</title>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./stage.css">
+  <link rel="stylesheet" href="./tavern-hud.css">
+  <link rel="stylesheet" href="./workbench.css">
   <script defer src="./vendor/cocktail-look.js"></script>
   <script defer src="./mix.js"></script>
   <script defer src="./view.js"></script>
@@ -15,18 +17,42 @@
   <script defer src="./app.js"></script>
 </head>
 <body>
-  <main id="tavern" aria-label="邻舍深夜小酒馆">
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute"><defs>
+      <symbol id="ink-lamp" viewBox="0 0 24 24"><path d="M10 5V4a2 2 0 0 1 4 0v1m-7 4 2.5-3h5L17 9m-10 0h10l-1.5 10h-7ZM9 21h6"/><path fill="#e9ae64" stroke="none" d="M12 10q1 2 2 4 1 3-2 3t-2-3Z"/></symbol>
+      <symbol id="ink-board" viewBox="0 0 24 24"><path fill="#edd3a0" stroke="#b18555" d="M4 4h12q3 0 3 3v10h2q0 4-3 4H7q-2 0-2-3V7H2q0-3 2-3Z"/><path stroke="#745340" d="M5 7V6m3 3h7m-7 3h5m-5 3h3"/><path fill="#a95042" stroke="#692f29" d="m15 15-1 5 2-1 2 1-1-5"/><circle cx="16" cy="15" r="2.5" fill="#b86147" stroke="#7e3c32"/></symbol>
+      <symbol id="ink-cocktail" viewBox="0 0 24 24"><path fill="#8eb8a3" fill-opacity=".35" d="m3 6 9 10 9-10Z"/><path fill="#a4ceb3" stroke="none" d="M7.4 9.6q3.3-1.4 6-.2t4-.3L12 15Z"/><path d="M12 16v4m-4 1h8M15 9l5-7"/><circle cx="18" cy="5" r="2" fill="#c77d65" stroke="#ebae8f"/></symbol>
+      <symbol id="ink-menu" viewBox="0 0 24 24"><path d="M4 5q4-2 8 0 4-2 8 0v15q-4-2-8 0-4-2-8 0Zm8 0v15m3-12 3-.5m-3 4 3-.5"/></symbol>
+      <symbol id="ink-wall" viewBox="0 0 24 24"><path d="m3 6 3-3 14 2-2 16-15-2Z"/><path d="m6 8 10 1-1 7-10-1Zm0 6 3-3 2 2 2-1 2 3"/></symbol>
+      <symbol id="ink-people" viewBox="0 0 24 24"><path d="M6 3h13v18H6Zm-3 4h4m-4 5h4m-4 5h4"/><circle cx="13" cy="9" r="2.3"/><path d="M9 16q.4-6 4-4 3.5-2 4 4Z"/></symbol>
+      <symbol id="ink-saves" viewBox="0 0 24 24"><path d="M5 4h14l1 3v13H4V7Zm0 3h14M8 4v3m2 3h4m-5 4h6l-1 4h-4Z"/></symbol>
+      <symbol id="ink-back" viewBox="0 0 24 24"><path d="m10 5-7 7 7 7m-7-7h17"/></symbol>
+      <symbol id="ink-forward" viewBox="0 0 24 24"><path d="M3 12h17m-7-7 7 7-7 7"/></symbol>
+      <symbol id="ink-prev" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+      <symbol id="ink-enter" viewBox="0 0 24 24"><path d="M20 5v8H5m5-5-5 5 5 5"/></symbol>
+      <symbol id="ink-close" viewBox="0 0 24 24"><path d="m6 6 12 12m0-12L6 18"/></symbol>
+      <symbol id="ink-star" viewBox="0 0 24 24"><path d="m12 2 2.3 7.7L22 12l-7.7 2.3L12 22l-2.3-7.7L2 12l7.7-2.3Z"/></symbol>
+      <symbol id="ink-key" viewBox="0 0 24 24"><circle cx="8" cy="8" r="4"/><path d="m11 11 9 9m-5-5 3-3m0 6 3-3"/></symbol>
+      <symbol id="ink-moon" viewBox="0 0 24 24"><path d="M15 3a9 9 0 1 0 6 13A10 10 0 0 1 15 3Z"/></symbol>
+      <symbol id="ink-ticket" viewBox="0 0 24 24"><path d="m2 10 16-7 4 10-16 7-1-3q3-2-1-4Zm12-4 1 2m0 2 1 2m1 2 1 2"/></symbol>
+      <symbol id="ink-leaf" viewBox="0 0 24 24"><path d="M4 19Q0 5 21 3q-1 17-15 15m-3 3L16 8"/></symbol>
+      <symbol id="ink-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m16 6-2 8-6 4 2-8Z"/></symbol>
+      <symbol id="ink-bottle" viewBox="0 0 24 24"><path d="M9 2h6v3h-1v4l4 4v8H6v-8l4-4V5H9Zm-2 13h10m-9 4h8"/><path d="m12 11 2 2-2 2-2-2Z" fill="currentColor"/></symbol>
+      <symbol id="ink-vial" viewBox="0 0 24 24"><path d="M9 3h6m-5 0v6l-5 8q-2 4 3 4h8q5 0 3-4l-5-8V3M8 15q3-2 5 0t4 0"/><circle cx="11" cy="17" r=".8" fill="currentColor"/></symbol>
+      <symbol id="ink-ice" viewBox="0 0 24 24"><path d="m3 7 9-4 9 4v10l-9 4-9-4Zm0 0 9 4 9-4m-9 4v10m4-7 2-1"/></symbol>
+      <symbol id="ink-spoon" viewBox="0 0 24 24"><ellipse cx="17.2" cy="5.8" rx="2.6" ry="4.4" transform="rotate(36 17.2 5.8)"/><path d="m15 9-9 12m3-10q-6 0-6 3t6 3m-3-3 3 3-4 2"/></symbol>
+  </defs></svg>
+  <main id="tavern" aria-label="老板，八卦特浓，少冰">
     <header class="topbar">
       <div class="bar-status">
-        <button type="button" class="exit" data-action="exit" title="返回游戏馆" aria-label="返回游戏馆">←</button>
+        <button type="button" class="exit" data-action="exit" aria-label="返回游戏馆"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-back"/></svg></button>
         <div id="clock" class="clock">Night 1 · 23:40</div>
         <div id="avatars" class="avatar-queue"></div>
       </div>
       <nav class="bar-nav" aria-label="酒馆图鉴">
-        <button type="button" data-action="drawer" data-id="menu" aria-label="招牌酒单"><span class="nav-icon" aria-hidden="true">♧</span><span class="nav-full">招牌酒单</span><span class="nav-short" aria-hidden="true">酒单</span></button>
-        <button type="button" data-action="drawer" data-id="wall" aria-label="纪念墙"><span class="nav-icon" aria-hidden="true">▧</span><span class="nav-full">纪念墙</span><span class="nav-short" aria-hidden="true">纪念</span></button>
-        <button type="button" data-action="drawer" data-id="people" aria-label="邻舍名录"><span class="nav-icon" aria-hidden="true">♙</span><span class="nav-full">邻舍名录</span><span class="nav-short" aria-hidden="true">名录</span></button>
-        <button type="button" data-action="drawer" data-id="saves" aria-label="存档与设置"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-full">存档与设置</span><span class="nav-short" aria-hidden="true">存档</span></button>
+        <button type="button" data-action="drawer" data-id="menu" aria-label="招牌酒单"><span class="nav-icon" aria-hidden="true"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-menu"/></svg></span><span class="nav-full">招牌酒单</span><span class="nav-short" aria-hidden="true">酒单</span></button>
+        <button type="button" data-action="drawer" data-id="wall" aria-label="纪念墙"><span class="nav-icon" aria-hidden="true"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-wall"/></svg></span><span class="nav-full">纪念墙</span><span class="nav-short" aria-hidden="true">纪念</span></button>
+        <button type="button" data-action="drawer" data-id="people" aria-label="邻舍名录"><span class="nav-icon" aria-hidden="true"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-people"/></svg></span><span class="nav-full">邻舍名录</span><span class="nav-short" aria-hidden="true">名录</span></button>
+        <button type="button" data-action="drawer" data-id="saves" aria-label="存档与设置"><span class="nav-icon" aria-hidden="true"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-saves"/></svg></span><span class="nav-full">存档与设置</span><span class="nav-short" aria-hidden="true">存档</span></button>
       </nav>
     </header>
     <section id="stage" class="stage is-opening" aria-label="来客与吧台对话">
@@ -62,14 +88,14 @@
       <div class="stage-footer">
         <div id="dialogue" class="dialogue" aria-live="polite"></div>
         <nav id="stations" class="station-launchers" aria-label="吧台工作台">
-          <button type="button" data-action="station" data-id="board">📜 传闻委托板 <b id="note-badge">0/3</b></button>
-          <button type="button" data-action="station" data-id="mix">🍸 开始调酒</button>
+          <button type="button" data-action="station" data-id="board"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-board"/></svg> 传闻委托板 <b id="note-badge">0/3</b></button>
+          <button type="button" data-action="station" data-id="mix"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-cocktail"/></svg> 开始调酒</button>
         </nav>
       </div>
     </section>
   </main>
   <dialog id="station" aria-labelledby="station-title">
-    <header class="station-head"><h2 id="station-title">传闻委托板</h2><button type="button" data-action="station-close" aria-label="返回吧台">×</button></header>
+    <header class="station-head"><h2 id="station-title">传闻委托板</h2><button type="button" data-action="station-close" aria-label="返回吧台"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-close"/></svg></button></header>
     <section id="commission-board" class="board">
       <div class="work-heading"><h3>今夜传闻</h3><span id="note-count"></span></div>
       <div id="board" class="board-body"></div>
@@ -79,14 +105,15 @@
         <div id="scene-canvas"></div>
         <div id="glass" class="glass-stage"><div id="glass-model" class="glass-model"></div>
           <svg id="glass-effects" class="glass-effects" viewBox="0 0 200 180" aria-hidden="true"></svg><div id="glass-detail" class="glass-detail"></div></div>
-        <div id="meters" class="meters"></div>
+        <section id="meters" class="meters" aria-label="当前配方属性"></section>
+        <span id="dose-feedback" role="status" class="dose-feedback"></span>
       </div>
       <div class="mix-tray">
         <nav id="mix-steps" class="mix-steps" aria-label="调酒步骤"></nav>
         <h3 id="step-title" class="step-title"></h3>
         <div class="step-content">
           <div data-panel="0"><div id="bases" class="ingredients-grid bases" role="group" aria-label="基酒"></div>
-            <div class="ice-choices" role="group" aria-label="冰量"><span>冰量</span>
+            <div class="ice-choices" role="group" aria-label="冰量"><span><svg class="ink-icon" aria-hidden="true"><use href="#ink-ice"/></svg> 冰量</span>
               <button type="button" data-action="ice" data-id="0">去冰</button>
               <button type="button" data-action="ice" data-id="2">少冰</button>
               <button type="button" data-action="ice" data-id="5">多冰</button>
@@ -109,11 +136,11 @@
                 <button type="button" data-action="blend-potion">鉴定魔药</button></div>
             </div></div>
           <div data-panel="2" hidden><div id="garnishes" class="ingredients-grid garnishes" role="group" aria-label="点睛风味"></div>
-            <label class="custom"><span aria-hidden="true">✦</span><input id="custom" maxlength="40" placeholder="自定义加料（可选）" aria-label="自定义加料，最多二十字" autocomplete="off"></label></div>
+            <label class="custom"><span aria-hidden="true"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-star"/></svg></span><input id="custom" maxlength="40" placeholder="自定义加料（可选）" aria-label="自定义加料，最多二十字" autocomplete="off"></label></div>
           <div data-panel="3" hidden><div id="recipients" role="group" aria-label="接酒邻居"></div></div>
         </div>
         <div class="pour-rail"><span id="mix-status"></span><div>
-          <button type="button" data-action="stir">搅拌</button>
+          <button type="button" data-action="stir"><svg class="ink-icon" aria-hidden="true"><use href="#ink-spoon"/></svg> 搅拌</button>
           <button type="button" class="primary pour" data-action="step-next">下一步</button>
           <button type="button" class="primary pour" data-action="pour" hidden>递酒</button></div></div>
       </div>

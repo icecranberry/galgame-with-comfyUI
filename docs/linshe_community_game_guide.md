@@ -1,6 +1,10 @@
 # 邻舍.EXE 社区游戏开发指南
 
-社区游戏由独立前端和可选的单文件后端插件组成。游戏包可以自行设计 UI，通过 `LinSheGameSDK` 使用邻舍的角色资料、存档、LLM 和生图服务。官方跑团的规则、模组与运行机制见[游戏模块文档](game-module.md)。
+社区游戏由独立前端和可选的单文件后端插件组成，通过 `LinSheGameSDK` 使用邻舍的角色资料、存档、LLM 和生图服务。官方跑团的规则、模组与运行机制见[游戏模块文档](game-module.md)。
+
+- **游戏目录**。社区游戏的本地试玩包必须放在 `agent-core/data/games_community/<gameId>/`。`games/official/` 仅供随主仓库发布的官方游戏使用，禁止在此创建、开发或提交社区游戏。
+- **UI 风格**。每个游戏都必须采用符合题材和核心玩法的风格化 UI，并保持自己的视觉语言。在确定游戏主题时，必须同步规划 UI 主题，明确整体视觉风格，以及它如何体现在主要界面、控件和玩法反馈中。
+- **游戏命名**。游戏名称必须有趣、好记，体现题材或玩法的看点。禁止套用「邻舍＋类型／玩法」这类模板化名称。
 
 ## 1. 创建游戏与本地调试
 
@@ -12,7 +16,7 @@
 
 ### 制作并运行最小示例
 
-以下示例使用 `hello-linshe` 作为游戏 ID。在邻舍根目录执行建目录命令，然后创建下面的两个 UTF-8 文件。
+以下最小示例用于验证 SDK 连接和存档，使用 `hello-linshe` 作为游戏 ID。在邻舍根目录执行建目录命令，然后创建下面的两个 UTF-8 文件。
 
 ```powershell
 New-Item -ItemType Directory -Path .\agent-core\data\games_community\hello-linshe\web
@@ -30,7 +34,7 @@ agent-core/data/games_community/hello-linshe/
 ```json
 {
   "id": "hello-linshe",
-  "name": "邻舍计数器",
+  "name": "再按一下",
   "version": "1.0.0",
   "description": "数一数已经来过多少次。",
   "entry": "web/index.html",
@@ -47,7 +51,7 @@ agent-core/data/games_community/hello-linshe/
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>邻舍计数器</title>
+  <title>再按一下</title>
   <style>
     body { margin: 0; min-height: 100dvh; display: grid; place-items: center; font: 1rem system-ui; }
     main { padding: 1rem; text-align: center; }
@@ -55,7 +59,7 @@ agent-core/data/games_community/hello-linshe/
 </head>
 <body>
   <main>
-    <h1>邻舍计数器</h1>
+    <h1>再按一下</h1>
     <p>当前计数 <output id="count">0</output></p>
     <button id="increment" disabled>+1 并保存</button>
     <p id="status" role="status">正在连接邻舍…</p>
@@ -100,7 +104,7 @@ agent-core/data/games_community/hello-linshe/
 ```
 
 1. 使用源码仓库时，在邻舍根目录运行 `npm run dev`，打开终端显示的 Vite 地址，默认是 `http://localhost:5173`。开发模式会扫描新游戏。若已在开发模式下运行，保存完两个文件后等后端重启就绪即可。使用整合包时，两个文件就位后通过启动器启动邻舍。已运行的整合包需要重启后端，或把两个文件打成 ZIP 直接导入。
-2. 打开「游戏中心 → 我的游戏 → 邻舍计数器」，点击「开始游戏」。
+2. 打开「游戏中心 → 我的游戏 → 再按一下」，点击「开始游戏」。
 3. 点「+1 并保存」，等页面显示「已保存」，再通过左上角「游戏馆」退出并重进。首次试玩时预期显示「已读档」，计数仍是 `1`。
 
 ### 反复修改和试玩

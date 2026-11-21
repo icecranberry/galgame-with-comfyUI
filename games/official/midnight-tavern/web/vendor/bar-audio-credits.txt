@@ -1,4 +1,4 @@
-Midnight Tavern bar sound effects
+Midnight Tavern audio credits
 
 The following Freesound recordings are dedicated to the public domain under CC0 1.0.
 https://creativecommons.org/publicdomain/zero/1.0/
@@ -18,3 +18,28 @@ https://freesound.org/people/hanasmusic/sounds/841481/
 
 Garnish — Glass Tap, by zembacraftworks
 https://freesound.org/people/zembacraftworks/sounds/427389/
+
+Serve — Glass Slide 8, by WasabiWielder
+https://freesound.org/people/WasabiWielder/sounds/323422/
+
+Interface effects (CC0 1.0, trimmed, filtered and encoded as mono MP3)
+
+Button, confirm, close — click2.wav, switch12.wav and switch19.wav from 51 UI sound effects, by Kenney
+https://opengameart.org/content/51-ui-sound-effects-buttons-switches-and-clicks
+
+Dialogue and scene transition — book_flip.6.ogg and book_flip.3.ogg from 10 Book Page Flips, by StarNinjas
+https://opengameart.org/content/10-book-page-flips
+https://opengameart.org/users/starninjas
+
+Music by RandomMind (CC0 1.0, level-matched and re-encoded as stereo MP3)
+
+room.mp3 — Medieval: The Old Tower Inn (loop version)
+https://opengameart.org/content/medieval-the-old-tower-inn
+
+night.mp3 — Fantasy: Rising Moon
+https://opengameart.org/content/fantasy-rising-moon
+
+mix.mp3 — Night on the Docks - Sax, by Kevin MacLeod (incompetech.com)
+https://incompetech.com/music/royalty-free/index.html?Search=Search&isrc=USUAN1100137
+Licensed under Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
+Trimmed, crossfaded and level-matched for looping. Re-encoded as stereo MP3.

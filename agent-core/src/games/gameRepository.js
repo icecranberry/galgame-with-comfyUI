@@ -30,7 +30,8 @@ export function createGameRepository(db) {
     claims: id => db.prepare(`SELECT id, source, repo_url, zip_fingerprint, installed,
       EXISTS (SELECT 1 FROM game_sessions WHERE game_id=installed_games.id) AS has_sessions
       FROM installed_games WHERE id = ? COLLATE NOCASE`).all(validId(id)),
-    list: () => db.prepare('SELECT * FROM installed_games WHERE installed=1 ORDER BY source=\'official\' DESC,name').all(),
+    list: () => db.prepare(`SELECT * FROM installed_games WHERE installed=1
+      ORDER BY (source='official' AND id='trpg-simulator') DESC, (source='official') DESC, name`).all(),
     sessions: gameId => db.prepare(`SELECT session_id AS sessionId,title,created_at AS createdAt,updated_at AS updatedAt,revision,
       json_extract(state_json,'$.ended') AS ended,
       CASE WHEN json_type(state_json,'$.round') = 'integer' THEN json_extract(state_json,'$.round') END AS round

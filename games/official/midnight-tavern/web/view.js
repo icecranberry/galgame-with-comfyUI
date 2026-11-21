@@ -6,7 +6,8 @@
   const statuses = ['清醒', '微醺', '醉意朦胧', '酣醉'];
   const tipsyLabel = n => statuses[n <= 25 ? 0 : n <= 55 ? 1 : n <= 80 ? 2 : 3];
   const resultNames = { triumph: '漂亮收场', chaotic: '一夜闹剧', twist: '意外转折' };
-  const icons = { key: '⚿', star: '✶', moon: '☾', ticket: '▱', leaf: '❧', compass: '✥' };
+  const trinketIcons = new Set(['key', 'star', 'moon', 'ticket', 'leaf', 'compass']);
+  const icon = name => `<svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-${name}"/></svg>`;
   const button = (action, label, { id = '', css = '', disabled = false, attrs = '' } = {}) =>
     `<button type="button" data-action="${action}" data-id="${esc(id)}" class="${css}" ${disabled ? 'disabled' : ''} ${attrs}>${label}</button>`;
   const bottles = {
@@ -72,14 +73,14 @@
       const firstHint = !state.notes.length && offset === 0 && !captured ? '<small class="collect-hint">＋收起</small>' : '';
       html += esc(line.text.slice(offset, index)) + button('collect', esc(note.keyword) + firstHint, {
         id: note.id, css: 'rumor' + (captured ? ' is-collected' : ''), disabled: busy || captured,
-        attrs: `title="${captured ? '已收录' : '记下流言'}"`,
+        attrs: `aria-description="${captured ? '已收录' : '记下流言'}"`,
       });
       offset = index + note.keyword.length;
     }
     return html + esc(line.text.slice(offset));
   }
   function dialogue(state, ui) {
-    if (state.phase === 'OPENING') return `<div class="opening-content"><h1><span>邻舍</span>深夜小酒馆</h1>
+    if (state.phase === 'OPENING') return `<div class="opening-content"><h1><span>老板，</span>八卦特浓，<wbr>少冰</h1>
       ${ui.error ? `<p role="alert">${esc(ui.error)}</p>` : ''}
       ${button(ui.error ? 'retry' : 'open', ui.busy || (ui.error ? '重新连接' : '开门迎客'), { css: 'primary', disabled: !!ui.busy })}</div>`;
     if (state.phase === 'REPORT') return `<div class="after-hours"><strong>来客归席</strong><div>
@@ -89,15 +90,15 @@
     const line = state.history[state.cursor];
     const more = state.cursor < state.history.length - 1;
     const crafting = ['draft', 'assigned'].includes(state.quest?.status);
-    return `<div class="speech-head"><strong>${esc(state.people[line?.charId]?.name || (line?.charId === 'player' ? '老板' : '吧台'))}</strong>
+    return `<div class="speech-head"><strong>${icon('lamp')}${esc(state.people[line?.charId]?.name || (line?.charId === 'player' ? '老板' : '吧台'))}</strong>
       ${line?.mood ? `<span>${esc(line.mood)}</span>` : ''}
-      <div class="speech-progress">${!state.quest && state.reports.at(-1)?.night === state.night ? button('next-night', '打烊', { css: 'quiet', disabled: !!ui.busy }) : ''}${button('previous', '‹', { css: 'arrow', disabled: !state.cursor || !!ui.busy, attrs: 'aria-label="上一句"' })}${state.cursor + 1} / ${state.history.length}</div></div>
+      <div class="speech-progress">${!state.quest && state.reports.at(-1)?.night === state.night ? button('next-night', '打烊', { css: 'quiet', disabled: !!ui.busy }) : ''}${button('previous', icon('prev'), { css: 'arrow', disabled: !state.cursor || !!ui.busy, attrs: 'aria-label="上一句"' })}${state.cursor + 1} / ${state.history.length}</div></div>
       <div class="speech-line" data-line="${state.cursor}">${line ? lineMarkup(line, state, !!ui.busy) : '有人推门进来了。'}</div>
       <div class="speech-controls">
         <div class="speech-actions"><div class="quick-replies">${state.quickReplies.map(reply => button('reply', esc(reply), { id: reply, css: 'quiet', disabled: !!ui.busy })).join('')}</div>
-        ${button('listen', esc(ui.busy || (more ? '继续倾听' : '继续闲聊')) + (!ui.busy ? ' <span aria-hidden="true">→</span>' : ''), { css: (crafting ? 'quiet' : 'primary') + ' listen', disabled: !!ui.busy })}</div>
+        ${button('listen', esc(ui.busy || (more ? '继续倾听' : '继续闲聊')) + (!ui.busy ? icon('forward') : ''), { css: (crafting ? 'quiet' : 'primary') + ' listen', disabled: !!ui.busy })}</div>
         <div class="reply-form" id="reply-form"><input name="line" aria-label="老板搭话" placeholder="顺口搭句话..." maxlength="160" autocomplete="off" value="${esc(ui.reply)}">
-        ${button('speak', '搭话 ↵', { disabled: !!ui.busy })}</div>
+        ${button('speak', '搭话' + icon('enter'), { disabled: !!ui.busy })}</div>
       </div>`;
   }
   function board(state, ui) {
@@ -108,7 +109,7 @@
       const tilt = (seed % 401) / 100 - 2;
       return button('slot-note', `<strong>${esc(note.keyword)}</strong><small>${esc(note.summary)}</small>`, {
         id: note.id, css: 'note ' + (state.slots.includes(note.id) ? 'is-slotted' : ''),
-        disabled: locked, attrs: `draggable="${!locked}" data-note="${esc(note.id)}" title="${esc(note.summary)}" style="--note-tilt:${tilt}deg"`,
+        disabled: locked, attrs: `draggable="${!locked}" data-note="${esc(note.id)}" style="--note-tilt:${tilt}deg"`,
       });
     }).join('') : '<p class="board-empty">从对话中收起划线的流言。</p>';
     if (quest) return `<div class="board-layout"><div class="notes">${shelf}</div>
@@ -117,14 +118,14 @@
         <h3>${esc(quest.title)}</h3><p>${esc(quest.synopsis)}</p>
         <div class="quest-stats">${quest.recommendedStats.map(id => `<span>${mix.get(mix.potions, id)?.label || ''}</span>`).join('')}</div>
         ${quest.status === 'draft' ? `<p class="quest-hint">${esc(quest.targetHint)}<br>选择一位接单人。</p><div class="assignees">${state.guests.map(guest => button('guest', esc(guest.name), { id: guest.id, css: 'wax', disabled: !!ui.busy, attrs: `data-guest="${esc(guest.id)}"` })).join('')}</div>` : ''}
-        ${quest.status === 'assigned' ? `<p class="quest-hint">为${esc(state.people[quest.charId]?.name)}调制送行特调。</p>${button('focus-workshop', '去调酒 →', { css: 'wax', disabled: !!ui.busy })}` : ''}
-        ${quest.status === 'away' ? button('resolve', '等待归来 →', { css: 'wax', disabled: !!ui.busy }) : ''}
+        ${quest.status === 'assigned' ? `<p class="quest-hint">为${esc(state.people[quest.charId]?.name)}调制送行特调。</p>${button('focus-workshop', '去调酒' + icon('forward'), { css: 'wax', disabled: !!ui.busy })}` : ''}
+        ${quest.status === 'away' ? button('resolve', '等待归来' + icon('forward'), { css: 'wax', disabled: !!ui.busy }) : ''}
       </article></div>`;
     const filled = state.slots.filter(Boolean).length;
     return `<div class="board-layout"><div class="notes">${shelf}</div>
       <div class="quest-paper parchment"><div class="slots">${state.slots.map((id, index) => {
         const note = state.notes.find(item => item.id === id);
-        return button('clear-slot', note ? `${esc(note.keyword)} <span aria-hidden="true">×</span>` : `<span>${String(index + 1).padStart(2, '0')}</span><span>待贴便签</span>`, {
+        return button('clear-slot', note ? `${esc(note.keyword)} ${icon('close')}` : `<span>${String(index + 1).padStart(2, '0')}</span><span>待贴便签</span>`, {
           id: index, css: 'slot' + (note ? ' is-filled' : ''), disabled: locked,
           attrs: `data-slot="${index}" aria-label="槽位 ${index + 1}${note ? '，移除' + esc(note.keyword) : '，待放入便签'}"`,
         });
@@ -162,6 +163,11 @@
   };
   const vesselFor = recipe => glasses[recipe.baseLiquor] || glasses.gin_vodka;
   const garnishIcons = {
+    rosemary: '<path d="m6 28 17-24m-12 17-4-7m7 3-2-9m6 5V6m-8 16 9-2m-6-3 10-3m-5-3 8-4" fill="none" stroke="#a9c590" stroke-width="2.2" stroke-linecap="round"/>',
+    popping_candy: '<path fill="#db94bc" stroke="#f5cde2" d="m3 14 7-5 5 7-5 6Zm14 5 5-3 5 5-4 6Z"/><path d="m21 3 1 4 4 1-4 2-1 4-2-4-3-2 4-1Z" fill="#f5d2ae"/>',
+    chili: '<path d="M5 24q10 2 13-13 1-4 6-2t3 7Q21 29 5 26Z" fill="#c6624c" stroke="#f5a579"/><path d="M19 10q3-3 7 2l-1-4q-3-3 1-6" fill="none" stroke="#9bae76" stroke-width="2"/>',
+    butterfly_pea: '<path d="M16 21Q1 18 4 10q2-4 8 1-2-10 5-9 6 0 4 9 8-6 9 1t-14 9Z" fill="#888cc8" stroke="#c6c3eb"/><path d="m11 13 5 8 6-8m-6 8-3 8" stroke="#d2d2b4" fill="none" stroke-width="1.6"/>',
+    gold_leaf: '<path d="m3 16 8-10 8 5-5 12Zm15 3 6-6 5 5-4 7ZM13 4l3-2 2 4Z" fill="#e7b957" stroke="#ffe59b"/><path d="m11 7-1 10 4 5" fill="none" stroke="#ab803b"/>',
     lime_wheel: '<circle cx="16" cy="16" r="14" fill="#70a343"/><circle cx="16" cy="16" r="12" fill="#bad961" stroke="#eff1aa"/><path d="M16 4v24M4 16h24M7.5 7.5l17 17m0-17-17 17" stroke="#eff1aa"/>',
     cocktail_cherry: '<path d="m4 27 22-22" stroke="#e6b978" stroke-width="1.5"/><circle cx="15" cy="20" r="9" fill="#a9274b"/><path d="M15 13q0-8 7-11" fill="none" stroke="#97a25a" stroke-width="2"/><path d="M9 19q1-3 3-3" stroke="#ffb2bb" stroke-width="2" fill="none"/>',
     mint_sprig: '<path d="M16 29Q15 16 20 4" fill="none" stroke="#aac576" stroke-width="2"/><path d="M16 22Q3 24 3 11q12-1 13 11m1-6Q18 4 30 6q-2 12-13 10m2-7Q12 9 13 1q8 2 6 8" fill="#70ab75"/><path d="m5 13 11 9m2-7 9-7" stroke="#b9d89a" fill="none"/>',
@@ -190,11 +196,11 @@
       const x=100+[-.37,.22,.52,-.64,-.04][i]*shape.radius, y=shape.surface+[0,3,1,4,-3][i];
       return `<g transform="translate(${x} ${y}) rotate(${13*i-20})"><path d="M-8-4l4-5 11 1 3 5-3 11-11 1-5-4Z" fill="#c8edfa" fill-opacity=".49" stroke="#e5f9ff" stroke-width=".9"/><path d="M-8-4l7 3 8-7M-1-1l-2 9" stroke="#f3fcff" fill="none" opacity=".67"/></g>`;
     }).join('');
-    const liquid = full ? `<g clip-path="url(#${id}-clip)">
+    const liquid = full ? `<g clip-path="url(#${id}-clip)"><g class="cup-contents" data-rise="${shape.depth - shape.surface + 12}">
       <path class="liquid-color" fill="url(#${id}-liquid)" d="${wave(shape, shape.surface)}V${shape.depth + 4}H10Z"/>
       ${ice}
       <path class="liquid-glint" fill="none" stroke="#fff0ca" stroke-opacity=".74" d="${wave(shape, shape.surface)}"/>
-      ${[76, 91, 108, 124].map((x, i) => `<circle class="bubble" cx="${x}" cy="${Math.min(shape.depth - 6, shape.surface + 18 + i * 7)}" r="${1.6 + (i % 2)}" style="--delay:${-i * .52}s"/>`).join('')}</g>` : '';
+      ${[76, 91, 108, 124].map((x, i) => `<circle class="bubble" cx="${x}" cy="${Math.min(shape.depth - 6, shape.surface + 18 + i * 7)}" r="${1.6 + (i % 2)}" style="--delay:${-i * .52}s"/>`).join('')}</g></g>` : '';
     return `<svg class="glass-art" viewBox="0 0 200 180" aria-hidden="true">
       <defs><linearGradient id="${id}-glass"><stop stop-color="#fff4d3" stop-opacity=".32"/><stop offset=".35" stop-color="#fff8ed" stop-opacity=".05"/><stop offset=".66" stop-color="#f0c396" stop-opacity=".12"/><stop offset="1" stop-color="#d89c79" stop-opacity=".37"/></linearGradient>
       <linearGradient id="${id}-liquid" x1="0" y1="1" x2="0" y2="0">${fills}</linearGradient>
@@ -204,8 +210,7 @@
       ${liquid}
       <path d="${shape.rim}" fill="none" stroke="#ffe3b8" stroke-opacity=".9" stroke-width="1.6"/>
       <path d="${shape.detail}" fill="none" stroke="#ffedce" stroke-opacity=".46" stroke-width="1.3" stroke-linecap="round"/>
-      ${garnish && garnishIcons[garnish.id] ? garnishIcon(garnish, shape.ornament[0]-10, shape.ornament[1]-19, 29) :
-        garnish ? `<text x="${shape.ornament[0]}" y="${shape.ornament[1]}" style="fill:${garnish.color}" font-size="27" transform="rotate(16 ${shape.ornament.join(' ')})">${garnish.symbol}</text>` : ''}
+      ${garnish ? garnishIcon(garnish, shape.ornament[0]-10, shape.ornament[1]-19, 29) : ''}
       ${pending ? `<text class="mix-pending" x="100" y="${shape.surface + 20}" text-anchor="middle">待调特调</text>` : ''}</svg>`;
   }
   function potionEffect(recipe, color) {
@@ -218,33 +223,49 @@
   }
   function meters(recipe) {
     const { stats, tipsyDelta, chaos } = mix.calculate(recipe);
-    const bar = (label, value, total, color = 'var(--amber)') => `<div class="meter"><span>${label}</span><i><b style="--amount:${Math.abs(value) / total * 100}%;--meter-color:${color}"></b></i></div>`;
-    return `<div class="stat-list">${mix.potions.map(item => bar(item.label + ' ' + stats[item.id], stats[item.id], 3, item.color)).join('')}</div>
-      <div class="effect-list">${bar('微醺 ' + (tipsyDelta < 0 ? '清零' : '+' + tipsyDelta), tipsyDelta, 100)}${bar('混乱 ' + chaos, chaos, 100, '#ec8a76')}</div>`;
+    const sigils = {
+      charm: 'M12 20C8 17 2 13 3 8c1-5 7-5 9-1 2-4 8-4 9 1 1 5-5 9-9 12Z',
+      agility: 'M3 9h11c5 0 6-6 2-6M2 13h16c5 0 5 6 1 6M5 17h6',
+      strength: 'm13 2-2 7-3-2c0 5-5 6-3 11 3 7 16 5 15-4-1-4-4-6-7-12Zm0 11c3 5 3 7-1 8',
+      insight: 'M2 12q10-15 20 0-10 15-20 0Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+      luck: 'm12 2 2.8 6.6 7.2 1-5.3 5.1 1.3 7.1-6-3.4-6 3.4 1.3-7.1L2 9.6l7.2-1Z',
+    };
+    const tiles = mix.potions.map(({id, label, color}) => {
+      const n = stats[id];
+      return `<div class="stat-dial" data-stat="${id}" data-value="${n}" style="--ink:${color}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="3" aria-valuenow="${n}">
+        <span class="dial-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${sigils[id]}"/></svg>${label}</span>
+        <strong class="dial-value" aria-hidden="true" data-previous="${Math.max(0,n-1)}"><span>${n}</span></strong><span class="dial-delta" aria-hidden="true">+1</span>
+        <span class="dial-marks" aria-hidden="true">${[1,2,3].map(i=>`<i class="${i<=n?'filled':''}"></i>`).join('')}</span></div>`;
+    }).join('');
+    const effect = (label, text, n, color) => `<div class="effect-gauge" style="--ink:${color}"><span>${label}</span><b>${text}</b><i aria-hidden="true" style="--amount:${n}%"></i></div>`;
+    return `<div class="dial-heading"><span>魔药刻度</span><span>${recipe.potions.length} / 3 滴</span></div>
+      <div class="stat-list">${tiles}</div><div class="effect-list">
+      ${effect('微醺', tipsyDelta < 0 ? '清零' : '+'+tipsyDelta, Math.max(0,tipsyDelta), '#e5ba79')}
+      ${effect('混乱', chaos, chaos, '#e6907c')}</div>`;
   }
   function ingredients(recipe, draft = {}) {
     const base = mix.bases.map(item => {
       const [name, silhouette] = bottles[item.id];
       const art = prop(name, `<path fill="currentColor" fill-opacity=".62" stroke="currentColor" stroke-width="2" d="${silhouette}"/><path d="M27 41v14" stroke="#fff1d3" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>`);
       return button('base', art + `<span class="prop-label">${item.label}</span>`, {
-        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" title="${item.name}" aria-label="${item.name} · ${item.label}" aria-pressed="${recipe.baseLiquor === item.id}"`,
+        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" aria-label="${item.name} · ${item.label}" aria-pressed="${recipe.baseLiquor === item.id}"`,
       });
     }).join('');
     const potion = mix.potions.map(item => {
       const n = recipe.potions.filter(id => id === item.id).length;
       const art = prop('potion-' + item.id, '<path fill="#3a282a" stroke="#cf9b68" stroke-width="2" d="M29 25V13a5 5 0 0 1 10 0v12Z"/><path fill="currentColor" fill-opacity=".75" stroke="currentColor" stroke-width="2" d="M27 25h14v37a7 7 0 0 1-14 0Z"/><path d="M31 33v21" stroke="#fff1d3" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>');
       return button('potion', art + `<span class="prop-label">${item.label}</span>${n ? `<span class="potion-badge" aria-hidden="true">${n}</span>` : ''}`, {
-        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" aria-label="${item.name}，${item.label}${n ? '，已滴 ' + n + ' 滴' : ''}" title="${item.name}" aria-pressed="${!!n}"`,
+        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" aria-label="${item.name}，${item.label}${n ? '，已滴 ' + n + ' 滴' : ''}" aria-pressed="${!!n}"`,
       });
     }).join('');
     const customDrops=recipe.potions.filter(drop=>typeof drop==='object').length;
     const tint=draft.result?.color || '#76c8ae';
     const customBottle=button('edit-potion', `<span class="prop-art" aria-hidden="true"><img class="elixir-bottle" data-prop src="${propsPath}potion-custom.webp" alt=""><svg viewBox="0 0 68 76"><path fill="currentColor" d="M28 8h12v15l16 28q5 15-10 17H22Q7 66 12 51l16-28Z"/></svg></span><span class="prop-label">自定义</span>${customDrops ? '<span class="potion-badge">'+customDrops+'</span>' : ''}`,{
-      css:'ingredient prop-choice',attrs:`style="--ink:${tint}" aria-controls="potion-editor" aria-expanded="${!!draft.open}" title="调配自定义魔药"`,
+      css:'ingredient prop-choice',attrs:`style="--ink:${tint}" aria-controls="potion-editor" aria-expanded="${!!draft.open}" aria-label="调配自定义魔药"`,
     });
     const dots = `<div class="drop-count"><span>${recipe.potions.length}/3</span><i></i><i></i><i></i>${button('clear-potions', '清空魔药', { css: 'arrow', disabled: !recipe.potions.length, attrs: 'aria-label="清空魔药"' })}</div>`;
-    const garnish = mix.garnishes.map(item => button('garnish', `<i aria-hidden="true">${garnishIcons[item.id] ? garnishIcon(item) : item.symbol}</i><span>${item.label}</span>`, {
-      css: 'ingredient', id: item.id, attrs: `style="--ink:${item.color}" title="${item.effect}" aria-pressed="${recipe.garnish === item.id}"`,
+    const garnish = mix.garnishes.map(item => button('garnish', `<i aria-hidden="true">${garnishIcon(item)}</i><span>${item.label}</span>`, {
+      css: 'ingredient', id: item.id, attrs: `style="--ink:${item.color}" aria-description="${item.effect}" aria-pressed="${recipe.garnish === item.id}"`,
     })).join('');
     return { bases: base, potions: potion + customBottle + dots, garnishes: garnish };
   }
@@ -267,7 +288,7 @@
   function promote(id, media) {
     return button('promote', media?.promoted ? '已保存至大相册' : '保存至大相册', {
       id, css: 'quiet', disabled: !media?.url || !!media?.promoted,
-      attrs: !media?.url ? 'title="可收藏显影完成的图片"' : '',
+      attrs: !media?.url ? 'aria-description="可收藏显影完成的图片"' : '',
     });
   }
   function report(state, item) {
@@ -275,7 +296,7 @@
     const drink = state.drinks.find(row => row.id === item.quest.drinkId);
     const cup = state.media[drink.id];
     return `<div class="report-grid"><div class="instant"><figure>${printArt(item, media, 'photo')}<figcaption>${esc(outcome.polaroidCaption)}</figcaption></figure>
-      <span class="trinket" title="战利品"><i aria-hidden="true">${icons[outcome.trinket.iconKeyword] || '✶'}</i> ${esc(outcome.trinket.name)}</span></div>
+      <span class="trinket"><i aria-hidden="true">${icon(trinketIcons.has(outcome.trinket.iconKeyword) ? outcome.trinket.iconKeyword : 'star')}</i> ${esc(outcome.trinket.name)}</span></div>
       <div class="report-copy"><div class="report-meta"><span>${resultNames[outcome.outcomeType]}</span><strong>好感 +${outcome.affinityDelta}</strong></div>
       <h3>${esc(item.quest.title)}</h3><p>${esc(outcome.storySummary)}</p><blockquote>「${esc(outcome.charReturnQuote)}」</blockquote>
       <div class="report-drink">${printArt(drink, cup, 'drink')}<div><strong>${esc(cup?.drinkName || outcome.drinkName)}</strong><small>${esc(mix.recipeLabel(drink.recipe))} · 混乱 ${drink.chaos}</small>${chip(drink.recipe)}</div></div></div></div>
@@ -305,6 +326,7 @@
       <span>好感 ${state.affinity[guest.id] || 0} · ${tipsyLabel(state.tipsy[guest.id] || 0)}</span></article>`).join('')
       || '<p class="empty">开店后，来客就会出现在名录里。</p>'}</div>`;
     if (kind === 'saves') content = `<div class="save-controls"><label><input type="checkbox" id="illustrations" ${state.settings.illustrations ? 'checked' : ''}> 为特调、来客神态和战报生成图片</label>
+      <label><input type="checkbox" id="sound" ${(ui.soundPreview ?? state.settings.sound) !== false ? 'checked' : ''}> 酒馆声音</label>
       ${button('new-save', '新开一间酒馆', { css: 'quiet', disabled: !!ui.busy })}</div>
       <div class="save-list">${ui.saves.map(item => `<article><div><strong>${esc(item.title)}</strong><small>${new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div>
       ${item.sessionId === ui.sessionId ? '<span>当前存档</span>' : button('load', '读档', { id: item.sessionId, disabled: !!ui.busy })}</article>`).join('') || '<p class="empty">暂无存档。</p>'}</div>
@@ -313,8 +335,8 @@
       const item = state.reports.find(row => row.questId === ui.reportId);
       content = item ? report(state, item) : '';
     }
-    return `<header class="overlay-head"><h2 id="overlay-title">${titles[kind]}</h2>${button('close', '×', { css: 'close', attrs: 'aria-label="关闭浮层"' })}</header><div class="overlay-content">${content}</div>`;
+    return `<header class="overlay-head"><h2 id="overlay-title">${titles[kind]}</h2>${button('close', icon('close'), { css: 'close', attrs: 'aria-label="关闭浮层"' })}</header><div class="overlay-content">${content}</div>`;
   }
 
-  window.TavernView = { image, esc, button, avatar, seats, dialogue, board, ingredients, glass, potionEffect, chip, meters, drawer, tipsyLabel };
+  window.TavernView = { icon, image, esc, button, avatar, seats, dialogue, board, ingredients, glass, potionEffect, chip, meters, drawer, tipsyLabel };
 })();

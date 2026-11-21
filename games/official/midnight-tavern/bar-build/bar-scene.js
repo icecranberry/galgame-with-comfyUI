@@ -151,7 +151,19 @@ function shell(parent, shape) {
     ...inner,
     [0, shape.floor],
   ];
-  mesh(parent, lathe(profile, shape.square, !!shape.square), m);
+  const bowlGlass = m.clone();
+  // The drink is already composited at full resolution. Preserve its detail
+  // while sampling along the refracted ray through the outer glass.
+  bowlGlass.onBeforeCompile = (shader) => {
+    const clearTransmission = T.ShaderChunk.transmission_pars_fragment.replace(
+      'return textureBicubic( transmissionSamplerMap, fragCoord.xy, lod );',
+      'return textureLod(transmissionSamplerMap, fragCoord.xy, 0.0);',
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <transmission_pars_fragment>', clearTransmission,
+    );
+  };
+  mesh(parent, lathe(profile, shape.square, !!shape.square), bowlGlass);
   if (shape.stem)
     mesh(
       parent,
@@ -208,7 +220,10 @@ function create(container, onLost, plate, onReady, onSound) {
     lastFrame = null;
   const viewport = new T.Vector2(1, 1),
     origin = new T.Vector2();
-  const interior = new T.WebGLRenderTarget(1, 1, { type: T.HalfFloatType, samples: 0 });
+  const iceSamples = context.getInternalformatParameter(context.RENDERBUFFER, context.RGBA16F, context.SAMPLES);
+  const interior = new T.WebGLRenderTarget(1, 1, {
+    type: T.HalfFloatType, samples: iceSamples.find(count => count <= 4) || 0,
+  });
   const scene = new T.Scene(),
     camera = new T.PerspectiveCamera(34, 1, 0.1, 60);
   const cup = new T.Group(),
@@ -218,6 +233,7 @@ function create(container, onLost, plate, onReady, onSound) {
     dew = new T.Group(),
     ornament = new T.Group(),
     tools = new T.Group();
+  const cupModels = new Map();
   scene.add(cup, tools);
   cup.add(vessel, liquid, ice, dew, ornament);
   let shape = vessels.gin_vodka,
@@ -225,6 +241,7 @@ function create(container, onLost, plate, onReady, onSound) {
     fizz = null,
     cubes = [],
     drive = 0,
+    circulation = 0,
     impact = 0,
     tilt = 0,
     tiltVelocity = 0,
@@ -250,6 +267,7 @@ function create(container, onLost, plate, onReady, onSound) {
     tween?.finish();
     tween = null;
     clearGroup(scene);
+    cupModels.clear();
     tagTexture?.dispose();
     backdrop?.dispose();
     coasterMap?.dispose();
@@ -260,19 +278,19 @@ function create(container, onLost, plate, onReady, onSound) {
     renderer.forceContextLoss();
     renderer.domElement.remove();
   }
-  function animate(ms, tick) {
+  function animate(ms, tick, paced = false) {
     if (released) return Promise.resolve();
     if (tween) {
       tween.tick(1);
       tween.finish();
       tween = null;
     }
-    if (reduced) {
+    if (reduced && !paced) {
       tick(1);
       return Promise.resolve();
     }
     return new Promise((finish) => {
-      tween = { start: performance.now(), ms, tick, finish };
+      tween = { start: paced ? null : performance.now(), ms, tick, finish, paced };
     });
   }
   function setGarnish(recipe) {
@@ -329,26 +347,36 @@ function create(container, onLost, plate, onReady, onSound) {
       );
     }
   }
-  function setCup(recipe) {
+  function setCup(recipe, action) {
     clearGroup(liquid);
     fluid = null;
     fizz = null;
     const nextShape = vessels[recipe.baseLiquor] || vessels.gin_vodka;
     const changed = shape !== nextShape;
     if (changed || !vessel.children.length) {
-      clearGroup(vessel);
+      const previous = cupModels.get(shape);
+      if (previous) previous.visible = false;
       clearGroup(dew);
       shape = nextShape;
-      shell(vessel, shape);
+      let model = cupModels.get(shape);
+      if (!model) {
+        model = new T.Group();
+        shell(model, shape);
+        vessel.add(model);
+        cupModels.set(shape, model);
+      }
+      model.visible = true;
       if (cubes.length) condensation(dew, shape, radius);
     }
     mixAmount = 0;
     drive = 0;
+    circulation = 0;
     impact = 0;
     if (recipe.baseLiquor) {
       fluid = createFluid(liquid, shape, radius, recipe, interior.texture, viewport);
       fizz = effervescence(liquid, shape, radius, recipe);
-      fill = fluid.amount;
+      fill = action === 'base' ? 0 : action === 'potion' ? fluid.amount - fluid.dose : fluid.amount;
+      fluid.setFill(fill);
     } else fill = 0;
     if (changed && cubes.length) setIce(cubes.length, true);
     setGarnish(recipe);
@@ -387,13 +415,16 @@ function create(container, onLost, plate, onReady, onSound) {
     }
     if (instant || reduced) placeFloatingIce(cubes, level, shape);
   }
-  function pour(recipe, kind) {
-    setCup(recipe);
+  async function pour(recipe, kind) {
+    if (kind === 'base') tilt = tiltVelocity = displacement = 0;
+    setCup(recipe, kind);
     clearGroup(tools);
     const potion = kind === 'potion',
-      start = potion ? fluid.amount - fluid.dose : 0;
-    fill = start;
-    fluid.setFill(fill);
+      start = fill;
+    if (reduced) {
+      onSound?.(potion ? 'drop' : 'pour');
+      return animate(320, p => { fill = T.MathUtils.lerp(start, fluid.amount, smooth(p)); }, true);
+    }
     const color = new T.Color(
       (potion ? window.TavernMix.dose(recipe.potions.at(-1)) : window.TavernMix.base(recipe)).color,
     );
@@ -426,8 +457,8 @@ function create(container, onLost, plate, onReady, onSound) {
     const spray = Array.from({ length: 9 }, (_, i) =>
       mesh(streamGroup, new T.SphereGeometry(0.013 + (i % 3) * 0.005, 10, 8), streamMat),
     );
-    let sounded = false;
-    return animate(potion ? 1250 : 1550, (p) => {
+    let sounded = false, landed = false;
+    return animate(potion ? 690 : 1250, (p) => {
       const enter = smooth(Math.min(p / 0.23, 1)),
         exit = smooth(T.MathUtils.clamp((p - 0.78) / 0.22, 0, 1));
       flask.rotation.z = -0.32 - enter * 1.88 + exit * 1.48;
@@ -471,6 +502,10 @@ function create(container, onLost, plate, onReady, onSound) {
       }
       const tail = T.MathUtils.clamp((p - 0.72) / 0.13, 0, 1);
       drop.visible = tail > 0 && tail < 1;
+      if (!landed && tail === 1) {
+        landed = true;
+        impact = Math.max(impact, potion ? 0.38 : 0.56);
+      }
       drop.position.copy(spout).lerp(vec(-0.1, fluid.level, 0.035), tail * tail);
       drop.scale.set(0.65, 1.3, 0.65);
       for (let i = 0; i < spray.length; i++) {
@@ -485,7 +520,7 @@ function create(container, onLost, plate, onReady, onSound) {
         spray[i].scale.setScalar(aperture * (1 - age * 0.7));
       }
       flask.userData.adjustFill(q);
-    }).finally(() => {
+    }, true).finally(() => {
       if (!released) {
         fill = fluid.amount;
 
@@ -510,9 +545,9 @@ function create(container, onLost, plate, onReady, onSound) {
     const alreadyMixed = mixAmount;
     const at = fluid?.level || shape.rim * 0.6;
     let sounded = false;
-    return animate(1850, (p) => {
+    return animate(1060, (p) => {
       const dip = smooth(Math.min(p / 0.19, 1)) * smooth(Math.min((1 - p) / 0.24, 1)),
-        a = p * Math.PI * 7.6;
+        a = p * Math.PI * 5.2;
       const radius = Math.min(0.24, (shape.rim - at) * 0.45 + 0.11);
       spoon.position.set(
         Math.cos(a) * radius,
@@ -536,7 +571,6 @@ function create(container, onLost, plate, onReady, onSound) {
     });
   }
   try {
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2.25));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = T.PCFSoftShadowMap;
     renderer.toneMapping = T.ACESFilmicToneMapping;
@@ -631,10 +665,20 @@ function create(container, onLost, plate, onReady, onSound) {
     coasterMap = coaster(scene);
     cup.position.y = 0.041;
     cup.rotation.y = -0.25;
+    const maxBufferSize = Math.min(renderer.capabilities.maxTextureSize, context.getParameter(context.MAX_RENDERBUFFER_SIZE));
+    const gpuInfo = context.getExtension('WEBGL_debug_renderer_info');
+    const software = gpuInfo && /swiftshader|llvmpipe|software/i.test(context.getParameter(gpuInfo.UNMASKED_RENDERER_WEBGL));
+    let renderScale = 1, slowFrames = 0;
     function resize() {
       const { width, height } = container.getBoundingClientRect();
       if (!width || !height) return;
-      renderer.setSize(width, height, false);
+      // Supersample the whole composition, including shader highlights and
+      // transmission. The canvas is displayed at the container's CSS size.
+      const nativeRatio = Math.min(window.devicePixelRatio || 1, 2.25);
+      const pixelBudget = Math.sqrt((software ? 400000 : 3840 * 2160) / (width * height));
+      const preferred = software ? Math.min(1, pixelBudget) : Math.min(nativeRatio * 2, Math.max(nativeRatio, pixelBudget));
+      const ratio = Math.min(preferred * renderScale, maxBufferSize / Math.max(width, height));
+      renderer.setDrawingBufferSize(width, height, ratio);
       renderer.getDrawingBufferSize(viewport);
       interior.setSize(viewport.x, viewport.y);
       camera.aspect = width / height;
@@ -662,19 +706,32 @@ function create(container, onLost, plate, onReady, onSound) {
     }
     function renderFrame(now) {
       if (released) return;
-      const dt = Math.min(0.08, Math.max(0, (now - (lastFrame ?? now)) / 1000));
+      const interval = now - (lastFrame ?? now);
+      const dt = Math.min(0.08, Math.max(0, interval / 1000));
       lastFrame = now;
+      // Preserve headroom for UI input when transmission and shadows saturate the renderer.
+      slowFrames = interval > 38 && !document.hidden ? slowFrames + 1 : 0;
+      if (slowFrames >= 6 && renderScale > 0.58) {
+        renderScale = Math.max(0.58, renderScale * 0.78);
+        slowFrames = 0;
+        resize();
+      }
       clock += dt;
       if (tween) {
-        const current = tween,
-          p = Math.min(1, (now - current.start) / current.ms);
+        const current = tween;
+        // A pour starts on its first draw. Shader compilation and missed frames
+        // cannot skip the empty glass or consume the whole rise of the liquid.
+        const stamp = current.paced ? clock * 1000 : now;
+        current.start ??= stamp;
+        const p = T.MathUtils.clamp((stamp - current.start) / current.ms, 0, 1);
         current.tick(p);
         if (p === 1) {
           tween = null;
           current.finish();
         }
       }
-      impact *= Math.exp(-dt * 3.2);
+      impact *= Math.exp(-dt * 1.85);
+      circulation = Math.max(drive, circulation * Math.exp(-dt * 1.45));
       if (fluid) {
         const displaced = cubes.reduce(
           (sum, b) => sum + T.MathUtils.clamp((fluid.level - b.node.position.y + b.r) / (2 * b.r), 0, 1) * 0.012,
@@ -707,17 +764,17 @@ function create(container, onLost, plate, onReady, onSound) {
         fizz?.(reduced ? 0 : clock, fluid.level, drive, fluid.uniforms.slope.value);
         fluid.uniforms.time.value = reduced ? 0 : clock;
         fluid.uniforms.impact.value = reduced ? 0 : impact;
-        fluid.uniforms.stir.value = drive;
+        fluid.uniforms.stir.value = reduced ? 0 : circulation;
         fluid.uniforms.mixed.value = mixAmount;
       }
       glow.position.x = cup.position.x + 0.33;
       footprint.position.x = cup.position.x;
       footprint.position.z = cup.position.z;
       footprint.scale.setScalar(shape.stem ? 0.42 : 0.63);
-      glow.visible = !!fluid;
+      liquid.visible = fill > 0;
+      glow.visible = !!fluid && fill > 0;
 
       if (fluid) {
-        fluid.uniforms.hasIce.value = cubes.length > 0;
         for (const b of cubes) {
           b.crystal.visible = true;
           b.resolved.visible = false;
@@ -767,7 +824,7 @@ function create(container, onLost, plate, onReady, onSound) {
     setGarnish,
     serve() {
       let lastSpeed = 0;
-      return animate(1150, (p) => {
+      return animate(720, (p) => {
         const release = 0.25,
           peak = 1 / (release / 2 + (1 - release) / 2.5);
         const coast = (1 - p) / (1 - release);

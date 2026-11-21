@@ -14,11 +14,11 @@
     { id: 'luck', label: '幸运', name: '琥珀金', color: '#efbb6b', english: 'amber gold' },
   ];
   const garnishes = [
-    { id: 'rosemary', label: '迷迭香', effect: '冷静克制', symbol: '❧', color: '#9fbe82', chaos: -10 },
-    { id: 'popping_candy', label: '跳跳糖', effect: '突发变数', symbol: '✺', color: '#e6a9ca', chaos: 23 },
-    { id: 'chili', label: '辣椒片', effect: '热血暴走', symbol: '♨', color: '#e98a73', chaos: 22 },
-    { id: 'butterfly_pea', label: '蝶豆花', effect: '意外反转', symbol: '✿', color: '#9ba2f0', chaos: 15 },
-    { id: 'gold_leaf', label: '金箔', effect: '豪横排场', symbol: '✦', color: '#f2d283', chaos: 8 },
+    { id: 'rosemary', label: '迷迭香', effect: '冷静克制', color: '#9fbe82', chaos: -10 },
+    { id: 'popping_candy', label: '跳跳糖', effect: '突发变数', color: '#e6a9ca', chaos: 23 },
+    { id: 'chili', label: '辣椒片', effect: '热血暴走', color: '#e98a73', chaos: 22 },
+    { id: 'butterfly_pea', label: '蝶豆花', effect: '意外反转', color: '#9ba2f0', chaos: 15 },
+    { id: 'gold_leaf', label: '金箔', effect: '豪横排场', color: '#f2d283', chaos: 8 },
     { id: 'lime_wheel', label: '青柠轮片', effect: '清酸果香', color: '#b9d979', chaos: 0 },
     { id: 'cocktail_cherry', label: '酒渍樱桃', effect: '浓甜果香', color: '#e87283', chaos: 0 },
     { id: 'mint_sprig', label: '薄荷嫩枝', effect: '清凉草香', color: '#86c397', chaos: 0 },

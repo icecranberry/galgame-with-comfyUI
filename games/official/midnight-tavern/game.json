@@ -1,9 +1,9 @@
 {
   "id": "midnight-tavern",
-  "name": "邻舍深夜小酒馆",
+  "name": "老板，八卦特浓，少冰",
   "version": "1.0.0",
   "author": "icecranberry",
-  "description": "化身深夜吧台老板，听邻居吐露心事、拼凑流言委托，并用自由加料的属性特调改写他们的奇遇结局。",
+  "description": "“老板，真没加别的？”\n“放心，就一点点运气，和昨晚那张旧车票。”\n半真半假的传闻，配一杯来路不明的特调——门外夜色正好，总得有人替我出去撞撞大运。",
   "cover": "web/cover.png",
   "entry": "web/index.html",
   "nsfw": false,

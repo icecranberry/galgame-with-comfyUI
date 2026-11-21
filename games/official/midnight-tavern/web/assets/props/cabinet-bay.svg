@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="156" viewBox="0 0 180 156" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="timber" x2=".83" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#70503a"/><stop offset=".33" stop-color="#423028"/><stop offset=".72" stop-color="#31201b"/><stop offset="1" stop-color="#715039"/>
+    </linearGradient>
+    <linearGradient id="shelf" x2="0" y2="1">
+      <stop stop-color="#bc9060"/><stop offset=".12" stop-color="#895d3e"/><stop offset=".45" stop-color="#513626"/><stop offset=".7" stop-color="#36241d"/><stop offset=".83" stop-color="#845e40"/><stop offset="1" stop-color="#30231d"/>
+    </linearGradient>
+    <path id="scroll" d="M8 27V8h24C22 9 15 14 12 21q6-3 6-7-5 0-6 6"/>
+  </defs>
+  <!-- Open arch leaves the cabinet lining and its selection light visible. -->
+  <path fill="url(#timber)" fill-rule="evenodd" d="M0 0h180v156H0ZM8 129h164V44C172 20 139 8 90 8S8 20 8 44Z"/>
+  <path d="M7 130V44C7 18 41 7 90 7s83 11 83 37v86" fill="none" stroke="#bb9560" stroke-width="1.3"/>
+  <path d="M12 129V46c0-23 33-34 78-34s78 11 78 34v83" fill="none" stroke="#a89059" opacity=".45" stroke-width=".8"/>
+  <g fill="none" stroke="#ceaa72" opacity=".8">
+    <use href="#scroll"/><use href="#scroll" transform="translate(180 0) scale(-1 1)"/>
+    <path d="M3 43v82m174-82v82M55 4h28m14 0h28"/>
+  </g>
+  <path d="m90 1 5 3-5 3-5-3Z" fill="#d0ae72"/>
+  <path d="M9 128h162l9 8H0Z" fill="#826044"/>
+  <path d="M0 135h180v21H0Z" fill="url(#shelf)"/>
+  <path d="M8 133h164M3 145h174M0 152h180" stroke="#cd9860" opacity=".26"/>
+</svg>

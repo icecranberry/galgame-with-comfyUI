@@ -13,6 +13,25 @@
   font-family: 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
 }
 
+/* The full-screen player can also open dialogs mounted directly under body. */
+:where(.game-theme, body:has(.game-player)) * {
+  -webkit-user-select: inherit !important;
+  user-select: inherit !important;
+}
+
+:where(.game-theme, body:has(.game-player)),
+:where(.game-theme, body:has(.game-player)) [contenteditable="false" i] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+:where(.game-theme, body:has(.game-player)) :is(input, textarea, [contenteditable=""], [contenteditable="true" i], [contenteditable="plaintext-only" i]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
 /* Opt-in skin for the game hall; standalone games keep their own visual language. */
 .game-theme--pixel {
   --game-bg: #faf8f0;

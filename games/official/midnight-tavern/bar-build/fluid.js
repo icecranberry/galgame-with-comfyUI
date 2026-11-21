@@ -39,46 +39,52 @@ float profile(float y){
 const vertex =
   shared +
   `
-varying vec3 localPos, worldPos; varying float cap;
+varying vec3 localPos, worldPos, surfaceNormal; varying float cap;
+float surfaceOffset(vec2 p, float radius){
+ vec2 u=abs(p)/radius;
+ float r=mix(length(u),pow(pow(u.x,8.)+pow(u.y,8.),.125),square);
+ float d=length(p-vec2(-.105,.035));
+ float wave=impact*.017*sin(32.*d-time*12.)*exp(-1.6*d);
+ wave+=(.0042*sin(dot(p,vec2(8.,5.))-time*1.12)+.0026*cos(dot(p,vec2(-5.,10.))+time*.81))*(1.-.55*r);
+ // A pair of shallow spiral crests travels around the spoon's depression.
+ float spiral=.012*smoothstep(.025,.22,r)*sin(13.*length(p)-2.*atan(p.y,p.x+.00001)+time*5.);
+ float vortex=stir*(.045*r*r-.09*exp(-8.*r*r)+spiral);
+ return (.011*pow(r,12.)+wave+vortex+dot(slope,p))*smoothstep(.002,.12,level-bottom);
+}
 void main(){
  float h=mix(bottom,level,position.y), radius=profile(h);
  vec2 axis=normalize(position.xz);
  float corner=mix(1.,pow(pow(abs(axis.x),8.)+pow(abs(axis.y),8.),-.125),square);
  vec2 p=position.xz*radius*corner;
- float r=length(position.xz);
- float wave=impact*.024*sin(length(p-vec2(-.12,.03))*36.-time*15.)*exp(-1.5*r);
- // Small travelling capillary waves move the reflected bar light across the meniscus.
- wave+=(.0042*sin(dot(p,vec2(8.,5.))-time*1.12)+.0026*cos(dot(p,vec2(-5.,10.))+time*.81))*(1.-.55*r);
- float vortex=stir*(.055*r*r-.13*exp(-8.*r*r));
- float edge=.011*pow(r,12.);
- h+=(wave+vortex+edge+dot(slope,p))*pow(position.y,4.);
+ float offset=surfaceOffset(p,radius);
+ h+=offset*pow(position.y,4.);
+ surfaceNormal=vec3(0.,1.,0.);
+ if(position.y==1.){
+   // Interpolate smooth normals from the same height field that moves the mesh.
+   const float e=.002;
+   float dx=surfaceOffset(p+vec2(e,0.),radius)-surfaceOffset(p-vec2(e,0.),radius);
+   float dz=surfaceOffset(p+vec2(0.,e),radius)-surfaceOffset(p-vec2(0.,e),radius);
+   surfaceNormal=mat3(modelMatrix)*normalize(vec3(-dx,2.*e,-dz));
+ }
  localPos=vec3(p.x,h,p.y); cap=position.y;
  vec4 w=modelMatrix*vec4(localPos,1.);worldPos=w.xyz;gl_Position=projectionMatrix*viewMatrix*w;
 }`;
 const fragment =
   shared +
   `
-uniform sampler2D behind; uniform vec2 viewport; uniform bool hasIce;
+uniform sampler2D behind; uniform vec2 viewport;
 uniform vec3 dyes[4]; uniform float stops[4], count;
-varying vec3 localPos,worldPos; varying float cap;
+varying vec3 localPos,worldPos,surfaceNormal; varying float cap;
 void main(){
  vec3 N=normalize(cross(dFdx(worldPos),dFdy(worldPos))),V=normalize(cameraPosition-worldPos);
+ if(cap>.999) N=normalize(surfaceNormal);
  if(dot(V,N)<0.)N=-N;
  float ndv=clamp(dot(N,V),.01,1.);
  vec2 uv=gl_FragCoord.xy/viewport;
- vec3 nv=mat3(viewMatrix)*N;
  float radius=max(.02,profile(localPos.y));
  float across=clamp(localPos.x/radius,-1.,1.);
  float chord=sqrt(max(.015,1.-across*across*.96));
- vec3 background;
- if(hasIce){
-   // Keep both halves of a floating cube aligned at the moving waterline.
-   background=texture2D(behind,uv).rgb;
- }else{
-   vec2 off=nv.xy*(.007+.023*(1.-ndv))+vec2(-across*.047, .013*chord);
-   off+=.0015*vec2(sin(localPos.y*27.+time*2.),cos(localPos.x*34.-time*2.))*impact;
-   background=vec3(texture2D(behind,clamp(uv+off*1.05,.001,.999)).r, texture2D(behind,clamp(uv+off,.001,.999)).g,texture2D(behind,clamp(uv+off*.96,.001,.999)).b);
- }
+ vec3 background=texture2D(behind,uv).rgb;
  float y=(localPos.y-bottom)/(rim-bottom), angle=atan(localPos.z,localPos.x);
  float fold=sin(angle*2.+y*12.-time*2.)*.028+sin(angle*3.-y*18.+time)*.014;
  float tendril=sin(angle*4.+24.*y+2.5*sin(6.*y-time*2.))*sin(12.*y+angle-time*2.);
@@ -104,11 +110,16 @@ void main(){
  c+=vec3(1.,.83,.55)*(gleam*1.8+strip*(.04+.42*pow(1.-ndv,3.)));
  if(cap>.999){
    float ring=length(localPos.xz)/radius;
-   float ripples=impact*exp(-ring*2.)*pow(.5+.5*cos(38.*length(localPos.xz-vec2(-.12,.03))-time*15.),8.);
    c=mix(c,background*(.74+.19*ndv)+vec3(.22,.15,.085),.13+.30*pow(1.-ndv,2.));
-   float reflectedStrip=exp(-pow((R.x+.18)*12.,2.))*smoothstep(.15,.85,R.y);
-   c+=vec3(.92,.82,.64)*.26*reflectedStrip;
-   c+=lamp*(.28*ripples+.17*pow(clamp(ring,0.,1.),16.));
+   // Reflected bar lights lie behind the counter. A crest sweeps the ray
+   // across the lamps while the transmitted drink stays at its original UV.
+   vec2 lightPos=worldPos.xy+R.xy*(worldPos.z+2.2)/max(.15,-R.z);
+   vec2 key=(lightPos-vec2(-.58,1.72))/vec2(.14,.63);
+   vec2 fill=(lightPos-vec2(.48,1.86))/vec2(.075,.49);
+   vec3 reflected=vec3(2.2,1.58,.86)*exp(-dot(key,key))+
+                  vec3(.85,1.05,1.2)*exp(-dot(fill,fill));
+   c+=reflected*(.085+.62*pow(1.-ndv,3.))*smoothstep(.02,.16,level-bottom);
+   c+=lamp*.17*pow(clamp(ring,0.,1.),16.);
  }
  gl_FragColor=vec4(c,1.);
  #include <tonemapping_fragment>
@@ -150,7 +161,6 @@ export function createFluid(parent, shape, radius, recipe, background, viewport)
     stops: Array.from({ length: 4 }, (_, i) => (height(base + i * dose) - bottom) / (rim - bottom)),
     count: dyes.length,
     behind: background,
-    hasIce: false,
     viewport,
   }))
     uniforms[key] = { value };

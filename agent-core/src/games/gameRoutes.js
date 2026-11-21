@@ -135,9 +135,21 @@ export function mountGameAssets(app, getManager = initGames) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-cache');
     if (path.extname(file) === '.html') {
-      const script = '<script src="/game-sdk.js"></script>';
+      const gameHead = `<style>
+        * { -webkit-user-select: inherit !important; user-select: inherit !important; }
+        :root, [contenteditable="false" i] {
+          -webkit-touch-callout: none;
+          -webkit-user-select: none !important;
+          user-select: none !important;
+        }
+        :is(input, textarea, [contenteditable=""], [contenteditable="true" i], [contenteditable="plaintext-only" i]) {
+          -webkit-touch-callout: default;
+          -webkit-user-select: text !important;
+          user-select: text !important;
+        }
+      </style><script src="/game-sdk.js"></script>`;
       const html = fs.readFileSync(file, 'utf8');
-      res.type('html').send(/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + script) : script + html);
+      res.type('html').send(/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + gameHead) : gameHead + html);
     } else res.sendFile(file);
   }));
   app.get('/game-media/:gameId/:sessionId/:filename', run((req, res, manager) => {

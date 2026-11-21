@@ -1,5 +1,6 @@
 (() => {
   const el = (id) => document.getElementById(id);
+  const audio = window.TavernAudio;
   const motion = matchMedia('(prefers-reduced-motion: reduce)');
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, motion.matches ? 1 : ms));
   let scene,
@@ -7,15 +8,23 @@
     generation = 0,
     closing,
     trigger,
+    rendererReady,
+    resolveRenderer,
     locked = false;
   let mode = '',
     step = 0;
   const titles = ['基酒与冰', '魔药', '点睛风味', '滑杯递出'];
+  const stepIcons = ['bottle', 'vial', 'leaf', 'cocktail'];
   function rendererState(state) {
-    const workshop = el('workshop');
-    workshop.dataset.renderer = state;
-    workshop.querySelector('.mix-tray').inert = state === 'loading';
+    el('workshop').dataset.renderer = state;
     el('scene-canvas').setAttribute('aria-busy', String(state === 'loading'));
+    if (state !== 'loading') {
+      resolveRenderer?.();
+      resolveRenderer = null;
+    }
+  }
+  function activeScene() {
+    return el('workshop').dataset.renderer === 'webgl' ? scene : null;
   }
   function loadScene() {
     if (!bundle)
@@ -34,29 +43,34 @@
   }
   function dispose() {
     generation++;
-    window.TavernAudio?.close();
     scene?.dispose();
     scene = null;
+    el('glass').classList.remove('sliding', 'shaking');
     rendererState('idle');
   }
   function reset() {
     step = 0;
+    el('mix-steps').classList.remove('has-moved');
+    el('workshop').style.removeProperty('--step-direction');
   }
   function open(kind, getRecipe, render) {
-    if (mode || closing) return;
+    if (closing || (mode && (mode !== 'board' || kind !== 'mix'))) return;
+    if (!mode) trigger = document.activeElement;
     mode = kind;
-    trigger = document.activeElement;
     const dialog = el('station');
     dialog.dataset.mode = kind;
     el('station-title').textContent = kind === 'mix' ? '调酒工坊' : '传闻委托板';
     el('commission-board').hidden = kind !== 'board';
     el('workshop').hidden = kind !== 'mix';
-    if (kind === 'mix') rendererState('loading');
-    dialog.showModal();
+    if (kind === 'mix') {
+      rendererReady = new Promise(resolve => { resolveRenderer = resolve; });
+      rendererState('loading');
+    }
+    if (!dialog.open) dialog.showModal();
+    audio?.play('scene');
     render();
     dialog.querySelector('[data-action="station-close"]').focus();
     if (kind !== 'mix') return;
-    window.TavernAudio?.open();
     const epoch = ++generation;
     const active = () => epoch === generation && !closing && mode === 'mix';
     const fallback = () => {
@@ -77,8 +91,10 @@
         const plate = await api.prepare();
         if (!active()) return;
         scene = api.create(el('scene-canvas'), fallback, plate, () => {
-          if (active()) rendererState('webgl');
-        }, sound => { if (active()) void window.TavernAudio?.play(sound); });
+          if (!active()) return;
+          rendererState('webgl');
+          render();
+        }, sound => { if (active()) void audio?.play(sound); });
         if (!scene) {
           fallback();
           return;
@@ -93,12 +109,14 @@
     if (!mode) return;
     if (closing) return closing;
     const dialog = el('station');
-    window.TavernAudio?.close();
+    audio?.play('close');
     dialog.classList.add('closing');
+    dialog.inert = true;
     closing = wait(300).then(() => {
       dispose();
       dialog.close();
       dialog.classList.remove('closing');
+      dialog.inert = false;
       mode = '';
       closing = null;
       locked = false;
@@ -108,14 +126,16 @@
   }
   function draw(recipe, guest, canServe, view, setContent) {
     const nav = el('mix-steps');
+    const loading = el('workshop').dataset.renderer === 'loading';
+    nav.style.setProperty('--step', step);
     el('step-title').textContent = ['挑选基酒', '滴入魔药', '装点杯口', '把酒递给谁'][step];
     setContent(
       nav,
       titles
         .map((title, i) =>
-          view.button('step', '<small>0' + (i + 1) + '</small> ' + title, {
+          view.button('step', view.icon(stepIcons[i]) + '<span>' + title + '</span>', {
             id: i,
-            disabled: locked || (i > 0 && !recipe.baseLiquor),
+            disabled: i > 0 && !recipe.baseLiquor,
             attrs: i === step ? 'aria-current="step"' : '',
           }),
         )
@@ -126,80 +146,123 @@
     });
     const next = el('station').querySelector('[data-action="step-next"]');
     for (const choice of el('station').querySelectorAll('[data-action="ice"]')) {
-      choice.disabled = locked || !recipe.baseLiquor;
+      choice.disabled = locked || loading || !recipe.baseLiquor;
       choice.setAttribute('aria-pressed', String(recipe.iceCount === Number(choice.dataset.id)));
     }
     const stirButton = el('station').querySelector('[data-action="stir"]');
     stirButton.hidden = !recipe.baseLiquor;
     stirButton.disabled = locked;
     next.hidden = step === 3;
-    next.disabled = locked || !recipe.baseLiquor;
-    next.textContent = ['选魔药 →', '选风味 →', '选接酒人 →', ''][step];
+    next.disabled = !recipe.baseLiquor;
+    setContent(next, ['选魔药', '选风味', '选接酒人', ''][step] + view.icon('forward'));
     const serve = el('station').querySelector('[data-action="pour"]');
     serve.hidden = step !== 3;
-    serve.disabled = locked || !canServe;
+    serve.disabled = locked || loading || !canServe;
     serve.textContent = guest ? '递给 ' + guest.name : '请选择接酒人';
-    el('mix-status').textContent =
+    el('mix-status').textContent = loading ? '准备杯具…' :
       step === 0
         ? window.TavernMix.base(recipe)?.name || '先选一种基酒'
         : step === 1
-          ? '魔药 ' + recipe.potions.length + ' / 3 滴'
+          ? ''
           : step === 2
             ? '点睛风味可选'
             : '选择接酒邻居';
     el('station').querySelector('.step-content').inert = locked;
   }
   function restore(recipe) {
-    scene?.restore(recipe);
+    el('glass').classList.remove('sliding');
+    activeScene()?.restore(recipe);
+  }
+  function settleGlint() {
+    if (motion.matches) return;
+    el('glass-model').querySelector('.liquid-glint')?.animate([
+      { opacity: 0.95, transform: 'translateY(-2px)' },
+      { opacity: 0.55, transform: 'translateY(1.3px)', offset: 0.28 },
+      { opacity: 0.82, transform: 'translateY(-0.7px)', offset: 0.58 },
+      { opacity: 0.58, transform: 'translateY(0)' },
+    ], { duration: 1100, easing: 'ease-out' });
   }
   async function act(work, render) {
     if (locked || mode !== 'mix' || closing) return;
+    const epoch = generation;
     locked = true;
     render();
     try {
-      await work();
+      if (el('workshop').dataset.renderer === 'loading') await rendererReady;
+      if (!closing && epoch === generation) await work();
     } finally {
-      locked = false;
-      render();
+      if (epoch === generation) {
+        locked = false;
+        render();
+      }
     }
   }
+  async function fillSvg() {
+    const contents = el('glass-model').querySelector('.cup-contents');
+    if (!contents) return;
+    const distance = Number(contents.dataset.rise);
+    const epoch = generation;
+    const duration = motion.matches ? 320 : 900;
+    let elapsed = 0, previous;
+    contents.setAttribute('transform', `translate(0 ${distance})`);
+    while (elapsed < duration && epoch === generation && !closing && contents.isConnected) {
+      const now = await new Promise(requestAnimationFrame);
+      elapsed += Math.min(80, now - (previous ?? now));
+      previous = now;
+      const p = Math.min(1, elapsed / duration);
+      contents.setAttribute('transform', `translate(0 ${distance * (1 - p * p * (3 - 2 * p))})`);
+    }
+    contents.removeAttribute('transform');
+  }
   async function ingredient(action, recipe) {
+    const renderer = activeScene();
     if (action === 'base' || action === 'potion') {
-      if (scene) await scene.pour(recipe, action);
-      else {
-        void window.TavernAudio?.play(action === 'base' ? 'pour' : 'drop');
-        if (action === 'base') await wait(160);
+      if (renderer) await renderer.pour(recipe, action);
+      if (!closing && el('workshop').dataset.renderer === 'fallback') {
+        if (!renderer) void audio?.play(action === 'base' ? 'pour' : 'drop');
+        if (action === 'base') await fillSvg();
+        settleGlint();
       }
     } else if (action === 'garnish' || action === 'custom') {
-      scene?.setGarnish(recipe);
-      if (action === 'garnish' && recipe.garnish) void window.TavernAudio?.play('garnish');
+      renderer?.setGarnish(recipe);
+      if (action === 'garnish' && recipe.garnish) void audio?.play('garnish');
     } else restore(recipe);
   }
   function next(render) {
     if (step < 3) {
-      step++;
+      setStep(step + 1);
       render();
     }
+  }
+  function setStep(index) {
+    if (!Number.isInteger(index) || index < 0 || index > 3 || index === step || closing) return;
+    el('mix-steps').classList.add('has-moved');
+    el('workshop').style.setProperty('--step-direction', index > step ? '10px' : '-10px');
+    step = index;
+    audio?.play('page');
   }
   async function stir(recipe, render) {
     if (!recipe.baseLiquor) return;
     await act(async () => {
       el('glass').classList.add('shaking');
-      if (scene) await scene.stir();
+      const renderer = activeScene();
+      if (renderer) await renderer.stir();
       else {
-        void window.TavernAudio?.play('stir');
+        void audio?.play('stir');
         await wait(520);
+        settleGlint();
       }
       el('glass').classList.remove('shaking');
       recipe.mixedDrops = recipe.potions.length;
     }, render);
   }
   async function serve() {
-    if (scene) await scene.serve();
+    void audio?.play('serve');
+    const renderer = activeScene();
+    if (renderer) await renderer.serve();
     else {
       el('glass').classList.add('sliding');
-      await wait(700);
-      el('glass').classList.remove('sliding');
+      await wait(520);
     }
   }
   window.TavernStation = {
@@ -220,20 +283,16 @@
     get locked() {
       return locked;
     },
-    setStep(i) {
-      if (i >= 0 && i < 4 && !locked) step = i;
-    },
+    setStep,
     setIce(recipe, count) {
       if (!recipe.baseLiquor || ![0, 2, 5].includes(count) || recipe.iceCount === count) return;
-      if (!scene && count > recipe.iceCount) void window.TavernAudio?.play('ice');
+      const renderer = activeScene();
+      if (!renderer && count > recipe.iceCount) void audio?.play('ice');
       recipe.iceCount = count;
-      scene?.setIce(count);
+      renderer?.setIce(count);
     },
   };
-  const warm = () => void loadScene().then((api) => api?.prepare());
-  el('station').addEventListener('click', () => {
-    if (mode === 'mix' && !closing) window.TavernAudio?.open();
-  }, true);
+  const warm = () => void loadScene().then((api) => api?.prepare()).catch(() => {});
   if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 2500 });
   else window.addEventListener('load', warm, { once: true });
   window.addEventListener('pagehide', dispose);
