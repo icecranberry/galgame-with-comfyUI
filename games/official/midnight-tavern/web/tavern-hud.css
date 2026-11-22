@@ -4,7 +4,7 @@
   background: linear-gradient(#4e3b2e, #231a17);
   box-shadow: inset 0 1px #e9be8052, 0 2px 3px #160d0bd9;
 }
-.lens-switch button, .focus-tools .album-slip {
+.lens-switch button {
   display: inline-flex; align-items: center; justify-content: center;
   gap: 4px; white-space: nowrap; font: 600 13px/1.2 var(--serif);
 }
@@ -14,14 +14,6 @@
 .focus-tools .lens-switch button[aria-pressed="true"] {
   color: #312013; background: linear-gradient(#f0d6a1, #cfa568);
   box-shadow: inset 0 1px #fff0c6, 0 1px 2px #120b08;
-}
-.focus-tools .album-slip {
-  padding: 4px 8px; border: 1px solid #ccad7e; border-radius: 2px;
-  color: #39271d; background: #ead3a9;
-  box-shadow: inset 0 -3px #ccad7e, 0 2px 3px #170e0a99;
-}
-.focus-tools .album-slip:disabled {
-  border: 3px double #886b48; background: #342a22; color: #dcc7a3; box-shadow: none;
 }
 .focus-tools button:enabled:hover { filter: brightness(1.1); }
 @media (max-width: 650px) {

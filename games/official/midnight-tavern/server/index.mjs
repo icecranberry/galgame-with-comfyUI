@@ -1,6 +1,7 @@
 import { randomInt, randomUUID } from 'node:crypto';
 
 const GAME = 'midnight-tavern';
+const GAME_IMAGE_URL = /^\/images\/game\/[\w-]+\.png$/;
 const STATS = ['charm', 'agility', 'strength', 'insight', 'luck'];
 const BASES = {
   gin_vodka: ['夜航', 'stemmed martini glass'], whiskey_rum: ['旧街回声', 'square-cut rocks glass'],
@@ -387,8 +388,7 @@ export default function registerGamePlugin(ctx) {
         outputScope: 'game', gameId: GAME, sessionId, prompt, ...imageOptions,
         negativePrompt: 'text, lettering, logo, signature, watermark',
       });
-      const prefix = '/game-media/' + GAME + '/' + sessionId + '/';
-      if (result?.url?.startsWith(prefix) && /^[\w-]+\.png$/.test(result.url.slice(prefix.length))) url = result.url;
+      if (GAME_IMAGE_URL.test(result?.url)) url = result.url;
     } catch { /* A failed image leaves its SVG fallback in the game. */ }
     return patchMedia(sessionId, id, { ...details, url, status: url ? 'ready' : 'fallback' });
   }

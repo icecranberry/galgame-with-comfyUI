@@ -8,7 +8,6 @@ import { getSetting, setSetting } from '../db/settings.js';
 import { createGameManager } from './gameManager.js';
 import { createGameImporter } from './gameImporter.js';
 import { githubTransport, normalizeGithubProxy } from '../services/githubTransport.js';
-import { promoteGameMedia } from './gameMedia.js';
 import { MEDIA_DIR, inside, removeManaged, regularFile, validId, bad } from './gamePaths.js';
 
 const devBootId = process.env.LINSHE_GAME_DEV === '1' ? randomUUID() : null;
@@ -75,7 +74,6 @@ router.delete('/:gameId', run(async (req, res) => { await manager.uninstall(req.
 router.post('/:gameId/sdk/bridge', run(async (req, res) => res.json(await manager.context(req.params.gameId).bridgeTools.call(req.body?.toolName, req.body?.args))));
 router.post('/:gameId/sdk/llm', run(async (req, res) => res.json({ content: await manager.context(req.params.gameId).llm.chat(req.body?.messages, req.body?.options) })));
 router.post('/:gameId/sdk/image', run(async (req, res) => res.json(await manager.context(req.params.gameId).imageService.generate(req.body))));
-router.post('/:gameId/media/promote-to-album', run(async (req, res) => { manager.get(req.params.gameId); res.json(await promoteGameMedia(manager.repo, req.params.gameId, req.body || {})); }));
 function savePermission(id) {
   const game = manager.get(id);
   if (!game.manifest.permissions.includes('save:rw')) throw bad('游戏没有声明存档权限', 403);
@@ -152,6 +150,7 @@ export function mountGameAssets(app, getManager = initGames) {
       res.type('html').send(/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, match => match + gameHead) : gameHead + html);
     } else res.sendFile(file);
   }));
+  // Existing saves can still point to files created before album storage.
   app.get('/game-media/:gameId/:sessionId/:filename', run((req, res, manager) => {
     manager.get(req.params.gameId);
     if (!manager.repo.session(req.params.gameId, req.params.sessionId)) throw bad('存档不存在', 404);

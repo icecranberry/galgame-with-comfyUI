@@ -17,6 +17,7 @@ export const IMAGE_CATEGORIES = {
   chat:      { dir: 'chat',      label: '聊天' },
   moments:   { dir: 'moments',   label: '朋友圈' },
   events:    { dir: 'events',    label: '奇遇' },
+  game:      { dir: 'game',      label: '游戏' },
   gifts:     { dir: 'gifts',     label: '送礼' },
   avatargen: { dir: 'avatargen', label: '头像' },
   peek:      { dir: 'peek',      label: '日程' },

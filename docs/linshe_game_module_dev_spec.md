@@ -15,7 +15,7 @@
 | **官方游戏本体** | `games/official/<gameId>/` | 纳入仓库版本控制 | 随主程序版本发布直接覆盖更新 | 
 | **社区导入游戏** | `agent-core/data/games_community/<gameId>/` | `.gitignore` 忽略 | GitHub 拉取或 `.zip` 解压落盘 | 
 | **游戏存档与日志** | SQLite（`agent-core/data/` 现有数据库新增表） | `.gitignore` 忽略 | 独立存储，不随官方游戏更新被覆盖 | 
-| **游戏生图落盘** | `agent-core/data/game/<gameId>/<sessionId>/` | `.gitignore` 忽略 | 仅在当前存档展示；删档或卸载游戏时级联清理 | 
+| **游戏相册** | `agent-core/data/images/game/` | `.gitignore` 忽略 | 每张图保存一份，存档只记录相册地址 |
 
 ### 1.2 建议新增的项目目录结构
 
@@ -181,9 +181,9 @@ galgame-with-comfyUI/
 
 ```
 
-* 当 `outputScope === 'game'` 时，图片直接保存至 `agent-core/data/game/<gameId>/<sessionId>/<timestamp>_<uuid>.png`，并通过静态路由 `/game-media/:gameId/:sessionId/:filename` 提供访问。
+* 当 `outputScope === 'game'` 时，宿主在返回成功结果前将每张成片写入 `agent-core/data/images/game/<filename>`，在主站「相册 → 游戏」中显示。返回的 `/images/game/<filename>` 是相册和游戏内的共用地址，存档只记录该 URL。游戏前端收到地址即可展示，无需二次确认或收藏。
 
-* 额外提供一个桥接接口 `POST /api/games/:gameId/media/promote-to-album`，允许玩家在游戏内手动将满意的 CG/剧照收藏到主相册。
+* 相册图由相册独立管理。删除存档或卸载时选择清理本地数据，会清理对应的旧版随档图片。旧存档仍可通过 `/game-media/:gameId/:sessionId/:filename` 读取旧版文件。
 
 ### 4.4 核心路由清单（`gameRoutes.js`）
 
@@ -193,11 +193,11 @@ galgame-with-comfyUI/
 | `GET` | `/api/games/community/discover` | 直连 GitHub Topic `linshe-game` 并带缓存返回社区游戏列表（支持 `?refresh=1`） | 
 | `POST` | `/api/games/import/github` | 从 GitHub 仓库下载并安装游戏 | 
 | `POST` | `/api/games/import/zip` | 上传 `.zip` 压缩包安装游戏 | 
-| `DELETE` | `/api/games/:gameId` | 卸载社区游戏（可选连带清理存档与 `data/game/` 图片） | 
+| `DELETE` | `/api/games/:gameId` | 卸载社区游戏（可选连带清理存档和本地数据） |
 | `GET` | `/game-assets/:gameId/*` | 托管游戏前端静态文件 | 
 | `POST` | `/api/games/:gameId/sdk/bridge` | 调用神说只读工具 | 
 | `POST` | `/api/games/:gameId/sdk/llm` | 代理 LLM 对话/结构化生成请求 | 
-| `POST` | `/api/games/:gameId/sdk/image` | 触发 ComfyUI/NovelAI 生图并落盘 `data/game/` | 
+| `POST` | `/api/games/:gameId/sdk/image` | 触发 ComfyUI/NovelAI 生图，自动保存到游戏相册并返回图片地址 |
 | `GET/POST/DELETE` | `/api/games/:gameId/sessions/*` | 游戏存档的读取、保存与删除 | 
 | `ALL` | `/api/games/:gameId/ext/*` | 转发至游戏自带 `serverEntry` 注册的扩展路由 | 
 

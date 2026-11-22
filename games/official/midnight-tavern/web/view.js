@@ -285,12 +285,6 @@
       <path stroke="#f7c67d" stroke-opacity=".58" stroke-width="2" d="M213 137h7m22-13h8m-48 33h10m58-15h8"/></svg>`}
       ${pending ? '<span class="developing-label">暗房显影中</span>' : ''}</div>`;
   }
-  function promote(id, media) {
-    return button('promote', media?.promoted ? '已保存至大相册' : '保存至大相册', {
-      id, css: 'quiet', disabled: !media?.url || !!media?.promoted,
-      attrs: !media?.url ? 'aria-description="可收藏显影完成的图片"' : '',
-    });
-  }
   function report(state, item) {
     const media = state.media[item.questId], outcome = item.outcome;
     const drink = state.drinks.find(row => row.id === item.quest.drinkId);
@@ -300,7 +294,7 @@
       <div class="report-copy"><div class="report-meta"><span>${resultNames[outcome.outcomeType]}</span><strong>好感 +${outcome.affinityDelta}</strong></div>
       <h3>${esc(item.quest.title)}</h3><p>${esc(outcome.storySummary)}</p><blockquote>「${esc(outcome.charReturnQuote)}」</blockquote>
       <div class="report-drink">${printArt(drink, cup, 'drink')}<div><strong>${esc(cup?.drinkName || outcome.drinkName)}</strong><small>${esc(mix.recipeLabel(drink.recipe))} · 混乱 ${drink.chaos}</small>${chip(drink.recipe)}</div></div></div></div>
-      <footer class="overlay-actions">${promote(item.questId, media)}${button('pin', state.wall.includes(item.questId) ? '已钉在纪念墙上' : '钉在纪念墙', {
+      <footer class="overlay-actions">${button('pin', state.wall.includes(item.questId) ? '已钉在纪念墙上' : '钉在纪念墙', {
         id: item.questId, css: 'primary', disabled: state.wall.includes(item.questId),
       })}</footer>`;
   }
@@ -310,8 +304,7 @@
     if (kind === 'menu') content = `<div class="album-grid">${[...state.drinks].reverse().map(item => {
       const media = state.media[item.id];
       return `<article class="album-card">${printArt(item, media, 'drink')}<h3>${esc(media?.drinkName || mix.base(item.recipe).fallback)}</h3>
-        <p>${esc(state.people[item.charId]?.name)} · Night ${item.night}</p><p>${esc(mix.recipeLabel(item.recipe))}</p>${chip(item.recipe)}
-        <div class="card-actions">${promote(item.id, media)}</div></article>`;
+        <p>${esc(state.people[item.charId]?.name)} · Night ${item.night}</p><p>${esc(mix.recipeLabel(item.recipe))}</p>${chip(item.recipe)}</article>`;
     }).join('') || '<p class="empty">酒单空着，等第一杯特调。</p>'}</div>`;
     if (kind === 'special') {
       const drink = state.drinks.find(item => item.id === ui.cardId);

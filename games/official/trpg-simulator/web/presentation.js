@@ -116,7 +116,6 @@
     const descriptions = new Map(state.mode === 'keeper' ? state.publicLog.filter(log => log.imageJobId)
       .map(log => [log.id, log.description]) : []);
     return state.imageJobs.length ? state.imageJobs.map(job => `<figure class="image-proof">${picture(job, state.ended, 'proof')}
-      ${job.url ? button('promote', '收藏到邻舍相册', '', `data-url="${esc(image(job.url))}" data-network`) : ''}
       ${descriptions.get(job.logId) ? `<details class="picture-description"><summary>画面描述</summary><p>${esc(descriptions.get(job.logId))}</p></details>` : ''}
       </figure>`).join('') : '<p class="empty-copy">还没有跑团印相。</p>';
   }

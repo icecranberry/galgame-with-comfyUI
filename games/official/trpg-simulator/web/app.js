@@ -925,7 +925,7 @@
       modal(state.outcome?.label || (abandon ? '提前收团' : '让这场调查落幕'), `<label for="ending">这一局的结尾</label><textarea id="ending" rows="4" maxlength="1000" placeholder="留下最后一句话…">${esc(state.ended ? state.publicLog.at(-1)?.dialogue : state.proposedEnding)}</textarea><label class="checkbox-label"><input id="write-memory" type="checkbox" ${state.memoryWritten ? 'checked disabled' : ''}>作为“桌游／剧本杀回忆”写入角色长期记忆</label><div class="dialog-footer">${button('finish', state.ended ? '保存回忆' : abandon ? '确认提前收团' : '封存这份卷宗', 'primary', `data-network data-abandon="${abandon}"`)}</div>`);
       return;
     }
-    if (action === 'delete-save') { modal('删除存档', '<p class="empty-copy">这份存档与对应游戏图片将一并删除。</p><div class="dialog-footer">' + button('confirm-delete', '删除存档', 'danger', `data-id="${esc(el.dataset.id)}" data-network`) + '</div>'); return; }
+    if (action === 'delete-save') { modal('删除存档', '<p class="empty-copy">这份存档及其旧版图片将一并删除。相册中的成片仍可查看。</p><div class="dialog-footer">' + button('confirm-delete', '删除存档', 'danger', `data-id="${esc(el.dataset.id)}" data-network`) + '</div>'); return; }
     if (action === 'send' && !draft.trim()) return;
     work(async () => {
       switch (action) {
@@ -1011,7 +1011,6 @@
           render();
           break;
         }
-        case 'promote': await sdk.image.promote(state.sessionId, el.dataset.url.split('/').at(-1)); notice('已收藏到邻舍相册'); break;
         case 'finish': state = await post('/finish', { ending: document.getElementById('ending').value, writeMemory: document.getElementById('write-memory').checked, abandon: el.dataset.abandon === 'true' }); closeModal(); render(); break;
       }
     }, action);

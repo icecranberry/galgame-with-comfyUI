@@ -225,12 +225,7 @@
     const lens = '<div class="lens-switch" role="group" aria-label="酒馆镜头">' +
       view.button('face', view.icon('people') + '群像', { id:'group', attrs:`aria-pressed="${!ui.face}"` }) +
       view.button('face', view.icon('wall') + '特写', { id:'closeup', attrs:`aria-pressed="${!!ui.face}"` }) + '</div>';
-    const album = ui.face && url ? view.button('promote',
-      view.icon(media.promoted ? 'star' : 'wall') + (media.promoted ? '已收藏' : '收藏'), {
-        css: 'album-slip', id: 'tipsy-' + drink.id, disabled: media.promoted,
-        attrs: `aria-label="${media.promoted ? '已存至大相册' : '保存至大相册'}"`
-      }) : '';
-    setContent(el('focus-tools'), drink ? lens + album : '');
+    setContent(el('focus-tools'), drink ? lens : '');
     const card = [...state.drinks].reverse().find(item => item.night === state.night);
     const photo = card && state.media[card.id];
     const cardUrl = view.image(photo?.url);
@@ -575,14 +570,6 @@
     ui.reportId = quest.questId;
     openDrawer('report');
   }
-  async function promote(mediaId) {
-    const media = current().media[mediaId];
-    if (!media?.url || media.promoted) return;
-    const filename = media.url.split('/').at(-1);
-    await sdk.image.promote(ui.sessionId, filename);
-    await commit(state => { state.media[mediaId].promoted = true; });
-    notice('已经保存至大相册。');
-  }
   async function load(sessionId) {
     adopt(await sdk.save.load(sessionId));
     ui.target = current().quest?.status === 'assigned' ? current().quest.charId :
@@ -744,11 +731,10 @@
       await commit(state => { if (!state.wall.includes(questId)) state.wall.push(questId); });
       notice('拍立得已钉在纪念墙。');
     }),
-    promote: mediaId => narrator('保存到大相册…', () => promote(mediaId)),
   };
   const ownSound = new Set(['drawer', 'close', 'show-report', 'special', 'station', 'station-close', 'focus-workshop',
     'face', 'step', 'step-next', 'previous', 'listen', 'reply', 'speak']);
-  const confirmActions = new Set(['open', 'synthesize', 'pin', 'stow', 'promote', 'new-save', 'load', 'next-night']);
+  const confirmActions = new Set(['open', 'synthesize', 'pin', 'stow', 'new-save', 'load', 'next-night']);
   const availableWhileMixing = new Set(['step', 'step-next', 'station-close']);
   document.addEventListener('click', event => { if (event.isTrusted) audio?.open(); }, true);
   document.addEventListener('click', event => {

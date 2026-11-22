@@ -37,7 +37,6 @@ async function dispatch(method, args) {
     case 'bridge': return request('/sdk/bridge', { method: 'POST', body: args })
     case 'llm': return request('/sdk/llm', { method: 'POST', body: args })
     case 'image': return request('/sdk/image', { method: 'POST', body: args })
-    case 'promote': return request('/media/promote-to-album', { method: 'POST', body: args })
     case 'save.list': return request('/sessions')
     case 'save.load': return request(`/sessions/${id()}`)
     case 'save.write': return request(`/sessions/${id()}`, { method: 'POST', body: args })

@@ -34,7 +34,7 @@
     on(type, callback) { const group = listeners.get(type) || new Set(); group.add(callback); listeners.set(type, group); return () => group.delete(callback); },
     bridge: { call: (toolName, args = {}) => rpc('bridge', { toolName, args }) },
     llm: { chat: async (messages, options = {}) => (await rpc('llm', { messages, options })).content },
-    image: { generate: options => rpc('image', options), promote: (sessionId, filename) => rpc('promote', { sessionId, filename }) },
+    image: { generate: options => rpc('image', options) },
     save: { list: () => rpc('save.list'), load: sessionId => rpc('save.load', { sessionId }),
       write: (sessionId, title, state, revision) => rpc('save.write', { sessionId, title, state, revision }), delete: sessionId => rpc('save.delete', { sessionId }) },
     ext: { request: (subPath, fetchOptions = {}) => rpc('ext', { subPath, fetchOptions }) },

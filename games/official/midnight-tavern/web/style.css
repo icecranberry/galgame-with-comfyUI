@@ -418,7 +418,7 @@ img { max-width: 100%; display: block; }
 .album-card h3 { margin-top: 6px; font: 700 17px var(--serif); }
 .album-card p, .empty, .save-list small, .directory small, .wall-card small { color: var(--muted); font-size: 12px; }
 .album-card p { overflow-wrap: anywhere; }
-.album-card .ingredient-chip, .card-actions { margin-top: 5px; }
+.album-card .ingredient-chip { margin-top: 5px; }
 .empty { grid-column: 1/-1; padding: 8px 0; }
 .wall-card > button { display: block; width: 100%; text-align: left; }
 .wall-card small, .wall-card strong, .directory small, .save-list small { display: block; }

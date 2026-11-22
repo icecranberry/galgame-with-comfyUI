@@ -7,7 +7,7 @@
 - 官方包：`games/official/<id>/`，随仓库发布；无需额外安装依赖或构建游戏前端。
 - 社区包：`agent-core/data/games_community/<id>/`。工坊和仓库链接通过 Git 拉取默认分支，本地 ZIP 可单独导入。工坊结果缓存 20 分钟，失败可回用旧缓存。
 - 存档：`installed_games`、`game_sessions`，与游戏包分离。社区游戏在 ID 和来源均匹配时可以恢复保留的数据，见[开发指南](linshe_community_game_guide.md#保留数据更新)。
-- 图片：`agent-core/data/game/<id>/<sessionId>/`。只在游戏中展示，手动收藏后复制到主相册。删档与选择清数据的卸载会清理对应目录。
+- 图片：新生成的成片统一保存到 `agent-core/data/images/game/`，存档只记录相册地址。删档或卸载后，成片仍可在「相册 → 游戏」查看。旧存档可继续读取 `agent-core/data/game/<id>/<sessionId>/` 中的旧版图片。
 - HTTP 代理、GitHub Token 和 Raw 镜像前缀可在游戏中心「连接设置」保存。Git 拉取使用工坊代理，Token 只发送到 GitHub API。
 
 清单与示例见 [开发规格](linshe_game_module_dev_spec.md) 和 [社区开发指南](linshe_community_game_guide.md)。`serverEntry` 为单文件 ESM，可以引用 Node 内置模块，第三方依赖须提前打包；安装时不执行 npm。后端插件是用户信任的本机代码，异步错误兜底和受控 `ctx` 不构成 Node 安全沙箱。
@@ -29,7 +29,7 @@ const stop = sdk.on('media', event => console.log(event.sessionId, event.url));
 stop();
 ```
 
-支持 `bridge.call`、`llm.chat`、`image.generate`、`image.promote`、`save.list/load/write/delete`、`ext.request`、`ui.exit`。桥接工具接受固定白名单：角色列表、完整资料、关系、立绘、记忆目录/搜索、相册、情绪和小镇状态，不提供设置、密钥、向量库管理或任意 HTTP 请求。
+支持 `bridge.call`、`llm.chat`、`image.generate`、`save.list/load/write/delete`、`ext.request`、`ui.exit`。桥接工具接受固定白名单：角色列表、完整资料、关系、立绘、记忆目录/搜索、相册、情绪和小镇状态，不提供设置、密钥、向量库管理或任意 HTTP 请求。
 
 扩展路由注册在 `ctx.router` 下，由 SDK `ext.request('/path', { method, body })` 调用。`ctx.db` 是当前游戏的存档仓库，提供 `list/load/write`，没有全库 SQL 接口；权限仍由清单控制。`ctx.events.emit(type, data)` 通过 SSE 和 SDK 推送给当前游戏。插件默认导出注册函数，可返回 `onUnload()`，或导出同名清理钩子。停用、更新和卸载会清理插件，并取消其未完成的 LLM 请求。
 

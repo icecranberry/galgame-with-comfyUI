@@ -123,7 +123,7 @@
       </template>
     </GameOverlay>
     <GameOverlay v-model="removeOpen" theme="pixel" title="取下这盒游戏？" :close-disabled="!!busy" @after-leave="toRemove = null">
-      <p class="arcade-dialog-description">卸载《{{ toRemove?.name }}》？之后可以重新安装。</p><label class="arcade-check"><input v-model="clearData" type="checkbox" :disabled="!!busy"><span class="arcade-check__box" aria-hidden="true"></span><span>同时删除存档和游戏图片</span></label><p v-if="removeError" class="arcade-dialog-error" role="alert">{{ removeError }}</p>
+      <p class="arcade-dialog-description">卸载《{{ toRemove?.name }}》？之后可以重新安装。</p><label class="arcade-check"><input v-model="clearData" type="checkbox" :disabled="!!busy"><span class="arcade-check__box" aria-hidden="true"></span><span>同时清理游戏存档和本地数据</span></label><p v-if="removeError" class="arcade-dialog-error" role="alert">{{ removeError }}</p>
       <template #footer><GameAction :disabled="!!busy" @click="removeOpen = false">留下</GameAction><GameAction variant="danger" :busy="!!busy" @click="uninstall">卸载游戏</GameAction></template>
     </GameOverlay>
   </main>
