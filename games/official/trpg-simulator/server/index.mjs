@@ -404,8 +404,7 @@ imagesEnabled 为 true 时，在值得单独展示的时刻主动调用 generate
 搜刮成功、幸运检定通过或出现大成功、大失败时，可结合现场调用 give_item 发放一件实用道具、情节物证或搞笑杂物。大失败的杂物不能抹去失败的后果。使用 itemsToResolve 中登记的拿出道具事件裁定现场反应，必要时按模组规则解锁动作；道具效果已由引擎登记，不重复扣次数，不代玩家补写尚未尝试的行动。
 有 scenario.rules 时，以 partyItems 为道具账本，以 progress.actions 为已经完成的剧情动作。发放道具对应的公开线索时调用 reveal_clue，规则引擎会登记道具。玩家明确执行规则列出的动作时，调用 resolve_scenario_action，由引擎验证场景、前置条件、检定和道具，结算规则内的代价并返回是否达成结局。按工具结果叙事，不提前宣告成功、消耗道具或重复扣减。一次玩家行动最多提出一次技能检定，同一调查员的HP/SAN变化合并成一次工具调用。
 只在引擎返回 outcome 后为有规则的剧本调用 propose_ending，结尾必须符合该结果。无结构化规则的剧本按模组条件提议结团。调用 propose_ending 后简短告知玩家可以确认结团。
-工具调用结束后严格输出下例 JSON 对象，不要输出解释、代码围栏或 JSON 以外的文字：
-{"playerExpression":"正常","narration":"[惊讶][玩家:惊讶]车窗外，那盏红灯又亮了。\\n[正常]站台没有人影。","suggestions":["观察红灯的闪烁规律","问队友是否见过红灯","留在原地听站台的动静"]}
+全部工具调用完成后，必须调用 narrate 工具提交本轮公开叙事与行动建议，结束本轮，之后不要再输出任何正文。
 narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。`;
 
 function dialogueCue(dialogue, emotion, slots, { leadingTag = false, preferredSlot } = {}) {
@@ -492,6 +491,11 @@ export const KP_TOOLS = [
   }),
   tool('resolve_scenario_action', '执行剧本中已定义的关键动作，验证前置条件并登记道具、代价和结局。', { actionId: str }),
   tool('propose_ending', '达到结局条件后，提交80–250字的公开结尾，等待玩家确认。', { ending: str }),
+  tool('narrate', '本轮全部工具调用完成后必须调用：提交公开叙事与行动建议，结束本轮。', {
+    playerExpression: { type: 'string', description: '按 playerSpeech 原话推断的玩家表情，从 expressionNames 中原样选一个，无原话或无法判断填 正常。' },
+    narration: { type: 'string', description: '80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]；有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，禁止代玩家说话或行动。' },
+    suggestions: { type: 'array', maxItems: 3, items: str, description: '三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已公开的情报。' },
+  }, ['narration']),
 ];
 
 export default function registerGamePlugin(ctx) {
@@ -1058,17 +1062,37 @@ export default function registerGamePlugin(ctx) {
     const byName = new Map(actors.map(card => [names.get(card.id), card]));
     const audience = 'investigators';
     const humanKeeper = s.mode === 'keeper';
-    const raw = await llm.complete({ rules: humanKeeper ? DECLARATION_RULES : INVESTIGATOR_RULES,
+    const task = `${checkReactionActorId ? '让指定调查员回应刚公布的检定裁定，按约定返回 JSON。' : '继续队伍的对话和行动，按约定返回 JSON。'} 只输出一个 JSON 对象，不要输出对话记录式文本或 JSON 以外的文字。`;
+    const request = { rules: humanKeeper ? DECLARATION_RULES : INVESTIGATOR_RULES,
       personas: [investigatorRoster(s, names)],
       stableData: JSON.stringify({ scenario: { title: s.scenario.meta.title, era: s.scenario.meta.era } }),
       publicHistory: s.publicLog, timeline: promptTimeline(s, audience),
       data: JSON.stringify({ ...investigatorContext(s, false, names), actors: [...byName.keys()], expressionNames: slots.map(slot => slot.name),
         playerMode: s.mode, playerSpeech: playerSpeech(s), checkReactionActor: names.get(checkReactionActorId) }),
-      task: checkReactionActorId ? '让指定调查员回应刚公布的检定裁定，按约定返回 JSON。' : '继续队伍的对话和行动，按约定返回 JSON。',
-      scope: `${s.sessionId}:${audience}` }, { responseFormat: 'json', signal });
-    const output = json(raw);
+      task, scope: `${s.sessionId}:${audience}` };
+    const readOutput = candidate => {
+      const output = json(candidate);
+      const responseLines = output?.lines;
+      if (!Array.isArray(responseLines) || responseLines.length > 8) fail('调查员发言格式不合法', 502);
+      if (checkReactionActorId) {
+        const line = responseLines[0];
+        if (responseLines.length !== 1 || typeof line?.speaker !== 'string' || line.speaker.trim() !== names.get(checkReactionActorId)
+          || !dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots).length) fail('调查员的检定回应格式不合法，请续跑本轮', 502);
+      }
+      return output;
+    };
+    // 校验失败按原请求无痕重试（最多4次）：失败的输出不入档，
+    // 时间线上只会追加同一原始任务的分段，不留错误说明文本。
+    let output = null;
+    for (let attempt = 0; attempt <= 4 && !output; attempt++) {
+      try { output = readOutput(await llm.complete(request, { responseFormat: 'json', signal })); }
+      catch (error) {
+        if (!error.gameMessage) throw error;
+        if (attempt < 4) console.warn(`[游戏:trpg-simulator] 调查员输出未通过校验，按原请求重试（${attempt + 1}/4）：${error.gameMessage}`);
+        else fail(error.gameMessage, 502);
+      }
+    }
     const responseLines = output?.lines;
-    if (!Array.isArray(responseLines) || responseLines.length > 8) fail('调查员发言格式不合法', 502);
     if (checkReactionActorId) {
       const line = responseLines[0];
       const frames = dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots);
@@ -1371,7 +1395,8 @@ export default function registerGamePlugin(ctx) {
       const { meta, scenes, clues, npcs, handouts, keeperSecrets, rules } = s.scenario;
       const keeperName = s.keeper.display_name || s.keeper.name || 'KP';
       const keeperPersona = s.keeper.base_prompt || s.keeper.short_prompt;
-      const content = await llm.agent({ rules: KEEPER_RULES,
+      let narration = null;
+      const input = { rules: KEEPER_RULES,
         taskPersona: keeperPersona ? `## 主持人口吻\n${keeperName}\n\n${keeperPersona}` : '',
         personas: [investigatorRoster(s, names)],
         stableData: JSON.stringify({ scenario: { meta: { title: meta.title, era: meta.era },
@@ -1385,7 +1410,13 @@ export default function registerGamePlugin(ctx) {
           checkToResolve: promptRoll(s.checkToResolve, names),
           itemsToResolve: s.itemsToResolve?.map(({ actorId, ...item }) => ({ ...item, actor: names.get(actorId) })), playerSpeech: playerSpeech(s),
           expressionNames: slots.map(slot => slot.name) }),
-        task: rulingOnly ? '裁定当前已登记的检定或道具行动，按约定返回。' : '根据玩家行动主持下一段，按约定返回公开叙事和行动建议。', scope: `${s.sessionId}:keeper` }, KP_TOOLS, (name, args, calls) => {
+        task: (rulingOnly ? '裁定当前已登记的检定或道具行动，按约定返回。' : '根据玩家行动主持下一段，按约定返回公开叙事和行动建议。') + ' 本轮结束时必须调用 narrate 工具提交叙事与建议；禁止以正文文本结束回合，所有叙事只能通过 narrate 提交。', scope: `${s.sessionId}:keeper` };
+      const executeTool = (name, args, calls) => {
+          if (name === 'narrate') {
+            if (!text(args.narration, 6000).trim()) return { error: 'narration 不能为空，请重新提交本轮叙事与行动建议' };
+            narration = args;
+            return { __endTurn: true, accepted: true };
+          }
           if (s.proposedEnding && name !== 'generate_image') fail('结尾已备好，等待玩家确认');
           if (s.outcome && !['propose_ending', 'generate_image'].includes(name)) fail('结局条件已达成，请提交结尾');
           if (calls.length > 1 && calls.some(call => ['request_check', 'roll_dice'].includes(call.function.name))) fail('请单独调用掷骰工具，收到点数后再裁定');
@@ -1410,12 +1441,26 @@ export default function registerGamePlugin(ctx) {
           }
           const result = apply(s, name, engineArgs, effects);
           return name === 'roll_dice' ? promptRoll(result, names) : result;
-        }, { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), responseFormat: 'json', signal });
-      signal.throwIfAborted();
-      const raw = (content || '').trim();
-      let response = parseKeeperReply(raw);
-      if (!response && s.turn.protocol !== 2) response = /^[{`]/.test(raw) ? json(raw) : { narration: raw };
-      if (typeof response?.narration !== 'string') fail('守秘人的叙事格式不合法，请续跑本轮', 502);
+      };
+      // toolChoice 'required' 关闭正文收尾：回合唯一出口是 narrate 工具，叙事必定经引擎校验落账。
+      const agentOptions = { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), responseFormat: 'json', signal, toolChoice: 'required' };
+      // narrate 未直呼或 content 解析失败时，按原请求无痕重试（最多4次）：
+      // 失败的正文从不写入 continuation，重试的上下文只包含已执行并落账的工具交互。
+      let response = null;
+      for (let attempt = 0; attempt <= 4 && typeof response?.narration !== 'string'; attempt++) {
+        if (attempt > 0) console.warn(`[游戏:trpg-simulator] KP 未提交有效叙事，按原请求无痕重试（${attempt}/4）`);
+        const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
+        signal.throwIfAborted();
+        if (narration) {
+          response = { playerExpression: narration.playerExpression, narration: narration.narration, suggestions: narration.suggestions };
+          break;
+        }
+        if (attempt === 0) console.warn('[游戏:trpg-simulator] KP 未调用 narrate 工具，回退 content 解析');
+        const raw = (content || '').trim();
+        response = parseKeeperReply(raw);
+        if (!response && s.turn.protocol !== 2) response = /^[{`]/.test(raw) ? json(raw) : { narration: raw };
+      }
+      if (typeof response?.narration !== 'string') fail('守秘人一时语塞了，请再试一次', 502);
       updatePlayerExpression(s, response.playerExpression, slots);
       const suggestions = actionSuggestions(response.suggestions);
       if (suggestions.length) s.suggestions = suggestions;

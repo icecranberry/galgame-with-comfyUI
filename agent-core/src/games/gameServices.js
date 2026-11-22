@@ -140,7 +140,7 @@ export function createGameServices(gameId, repo, assertPermission) {
       }
       return llm.chat(built.messages, { lorebook: built.lorebook, responseFormat }, { signal });
     },
-    async agent(input, tools, execute, { checkpoint, save, signal, responseFormat } = {}) {
+    async agent(input, tools, execute, { checkpoint, save, signal, responseFormat, toolChoice } = {}) {
       active(); assertPermission('llm:chat');
       const { chatAgentStream } = await import('../llm/llm-client.js');
       const budget = useReplay(input) ? await trpgPromptBudget() : null;
@@ -172,7 +172,8 @@ export function createGameServices(gameId, repo, assertPermission) {
         signal?.throwIfAborted();
         const assistantIndex = continuation.findLastIndex(message => message.role === 'assistant');
         if (assistantIndex >= 0) {
-          const calls = continuation[assistantIndex].tool_calls;
+          // A content-only assistant may sit here after an injected format-repair exchange.
+          const calls = continuation[assistantIndex].tool_calls || [];
           const completed = continuation.length - assistantIndex - 1;
           for (const call of calls.slice(completed)) {
             signal?.throwIfAborted();
@@ -187,6 +188,14 @@ export function createGameServices(gameId, repo, assertPermission) {
               // A tool that yields to the game UI remains unanswered until the next resume.
               persistContinuation();
               return null;
+            }
+            if (result && typeof result === 'object' && result.__endTurn) {
+              // A terminal tool hands the caller structured output and ends the loop;
+              // the sentinel itself never reaches the provider transcript.
+              continuation.push({ role: 'tool', tool_call_id: call.id,
+                content: JSON.stringify({ ...result, __endTurn: undefined }) });
+              persistContinuation();
+              return continuation[assistantIndex].content || '';
             }
             continuation.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
             // The caller writes both the tool result and the game mutation in one save.
@@ -215,7 +224,9 @@ export function createGameServices(gameId, repo, assertPermission) {
         const ask = async () => {
           let reply;
           for await (const event of chatAgentStream(messages, { tools: requestTools, forceThinking: false,
-            label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget, response_format: format })) {
+            label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget, response_format: format,
+            // toolChoice 'required' 关闭正文出口；空工具列表时必须回退 auto，否则部分接口会拒绝请求。
+            ...(toolChoice && requestTools.length ? { toolChoice } : {}) })) {
             if (event.type === 'assistant_end') reply = event.message;
           }
           return reply;
