@@ -1,7 +1,7 @@
 // 世界观 / 全局规则 / 系统规则仓储（独立模块，缩小 db/index.js 体积）。
 // 依赖方向（单向）：db/index.js 打开数据库后注入句柄并再导出本模块的函数。
 import { config } from '../config.js';
-import { SYSTEM_RULES_CONTENT, THINKING_CHAIN_ZH_PLACEHOLDER, THINKING_CHAIN_ZH_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
+import { SYSTEM_RULES_CONTENT, SYSTEM_ROLEPLAY_RULE, THINKING_CHAIN_ZH_CONTENT, IMAGE_PROMPT_RULE, BUILTIN_RULE_KEYS } from '../builtinRules.js';
 
 let _db = null;
 
@@ -104,39 +104,19 @@ export function getGlobalRule(key) {
 }
 
 /**
- * 获取系统规则（破限词：system_context + core_rules），统一各场景的 jailbreak。
+ * 组装破限词正文、可选思考链与可选角色扮演规则。
  *
  * @param {object} [options]
  * @param {boolean} [options.roleplay=true] - 是否包含完整的 `<roleplay>` 身份规则块（保留标签）。
- *   为 false 时仅返回基础上下文（虚构文学定位、创作自由），适用于无需角色扮演的流程。
+ *   无需角色扮演的流程可传 false 省略该块。
  */
 export function getSystemRules({ roleplay = true } = {}) {
-  // 思考链强制用简体中文：仅当 API 选择了「思考模式开」（thinkingMode === 'enabled'）时注入，
-  // 未开启思考（disabled / omit）时占位符替换为空，保持与旧口径逐字节一致。
-  const thinkingOn = config.llm.thinkingMode === 'enabled';
-  const content = SYSTEM_RULES_CONTENT.replace(
-    THINKING_CHAIN_ZH_PLACEHOLDER,
-    thinkingOn ? THINKING_CHAIN_ZH_CONTENT : ''
-  );
-
-  // 基础内容
-  let base = '';
-  const rpMatch = content.match(/<roleplay>([\s\S]*?)<\/roleplay>/);
-  if (!rpMatch) {
-    base = content;  // 无标签（旧数据），向下兼容
-  } else {
-    const before = content.slice(0, rpMatch.index).replace(/\n{3,}/g, '\n\n').trim();
-    // 启用时原样保留身份规则及其标签；禁用时整块排除，基础上下文不变。
-    base = roleplay ? before + '\n\n' + rpMatch[0] : before;
-  }
-
-  // 只替换默认前缀；先处理内置尾部，避免用户文本中的标签/占位符被误解析。
   const custom = config.systemRules.content;
-  if (custom?.trim()) {
-    const prefixEnd = SYSTEM_RULES_CONTENT.indexOf('</core_rules>') + '</core_rules>'.length;
-    return custom + base.slice(prefixEnd);
+  let rules = custom?.trim() ? custom : SYSTEM_RULES_CONTENT;
+  if (config.llm.thinkingMode === 'enabled') {
+    rules += '\n' + THINKING_CHAIN_ZH_CONTENT;
   }
-  return base;
+  return roleplay ? rules + '\n\n' + SYSTEM_ROLEPLAY_RULE : rules;
 }
 
 // ── 世界观收藏 CRUD ──
