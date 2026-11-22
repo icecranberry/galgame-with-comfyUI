@@ -51,6 +51,15 @@ function parseKeeperReply(raw) {
   return response;
 }
 
+// 叙事补全通道的输出校验：字段与 parseKeeperReply 同口径，但走严格的整体 JSON 解析。
+function readNarration(raw) {
+  const candidate = json(raw);
+  if (typeof candidate?.narration !== 'string' || !text(candidate.narration, 6000).trim() ||
+      typeof candidate?.playerExpression !== 'string' || !Array.isArray(candidate?.suggestions) ||
+      candidate.suggestions.some(suggestion => typeof suggestion !== 'string')) fail('守秘人叙事格式不合法', 502);
+  return candidate;
+}
+
 export function rollD100(skill, difficulty = 'regular', value = randomInt(1, 101)) {
   if (!integer(skill, 1, 99) || !integer(value, 1, 100) || !['regular', 'hard', 'extreme'].includes(difficulty)) fail('检定技能、难度或骰值无效');
   const target = difficulty === 'extreme' ? Math.floor(skill / 5) : difficulty === 'hard' ? Math.floor(skill / 2) : skill;
@@ -406,6 +415,11 @@ imagesEnabled 为 true 时，在值得单独展示的时刻主动调用 generate
 只在引擎返回 outcome 后为有规则的剧本调用 propose_ending，结尾必须符合该结果。无结构化规则的剧本按模组条件提议结团。调用 propose_ending 后简短告知玩家可以确认结团。
 全部工具调用完成后，必须调用 narrate 工具提交本轮公开叙事与行动建议，结束本轮，之后不要再输出任何正文。
 narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。`;
+// 叙事补全通道：narrate 直呼失败时的备用链路，与调查员 batch 同构（chatSync + json 模式 + 重申）。
+const NARRATION_RULES = `你是本局跑团的守秘人，根据已完成的裁定与现场写本轮公开叙事。同条消息含「主持人口吻」时，让叙事自然带出该角色的用词、句式和说话节奏。叙事只公开调查员当前可以观察的信息，不得剧透真相、密信内容或幕后设定，不代替玩家行动。
+narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。
+只输出一个合法的 JSON 对象，严格按下方示例的字段和结构，不要输出解释、代码围栏或 JSON 以外的文字：
+{"playerExpression":"正常","narration":"[惊讶][玩家:惊讶]车窗外，那盏红灯又亮了。\\n[正常]站台没有人影。","suggestions":["观察红灯的闪烁规律","问队友是否见过红灯","留在原地听站台的动静"]}`;
 
 function dialogueCue(dialogue, emotion, slots, { leadingTag = false, preferredSlot } = {}) {
   const byName = new Map(slots.map(slot => [slot.name, slot.id]));
@@ -1442,23 +1456,37 @@ export default function registerGamePlugin(ctx) {
           const result = apply(s, name, engineArgs, effects);
           return name === 'roll_dice' ? promptRoll(result, names) : result;
       };
-      // toolChoice 'required' 关闭正文收尾：回合唯一出口是 narrate 工具，叙事必定经引擎校验落账。
+      // toolChoice 'required' 关闭正文收尾：在执行该参数的上游上，回合唯一出口是 narrate 工具。
       const agentOptions = { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), responseFormat: 'json', signal, toolChoice: 'required' };
-      // narrate 未直呼或 content 解析失败时，按原请求无痕重试（最多4次）：
-      // 失败的正文从不写入 continuation，重试的上下文只包含已执行并落账的工具交互。
+      const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
+      signal.throwIfAborted();
       let response = null;
-      for (let attempt = 0; attempt <= 4 && typeof response?.narration !== 'string'; attempt++) {
-        if (attempt > 0) console.warn(`[游戏:trpg-simulator] KP 未提交有效叙事，按原请求无痕重试（${attempt}/4）`);
-        const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
-        signal.throwIfAborted();
-        if (narration) {
-          response = { playerExpression: narration.playerExpression, narration: narration.narration, suggestions: narration.suggestions };
-          break;
-        }
-        if (attempt === 0) console.warn('[游戏:trpg-simulator] KP 未调用 narrate 工具，回退 content 解析');
+      if (narration) {
+        response = { playerExpression: narration.playerExpression, narration: narration.narration, suggestions: narration.suggestions };
+      } else {
+        // narrate 未直呼：content 兜底解析（容忍正文里夹带合法 JSON）。
+        console.warn('[游戏:trpg-simulator] KP 未调用 narrate 工具，回退 content 解析');
         const raw = (content || '').trim();
         response = parseKeeperReply(raw);
         if (!response && s.turn.protocol !== 2) response = /^[{`]/.test(raw) ? json(raw) : { narration: raw };
+      }
+      if (typeof response?.narration !== 'string') {
+        // 叙事补全通道：narrate 与 content 均未取得有效叙事时，切换到与调查员 batch 同构的
+        // 结构化补全链路（json 模式 + 重申），按原任务无痕重试（最多4次）——失败的正文从不入档。
+        console.warn('[游戏:trpg-simulator] KP narrate/content 均未取得有效叙事，切换叙事补全通道');
+        const narrationInput = { rules: NARRATION_RULES, taskPersona: input.taskPersona,
+          personas: input.personas, stableData: input.stableData, publicHistory: s.publicLog,
+          timeline: promptTimeline(s, 'keeper-narration'), data: input.data,
+          task: (rulingOnly ? '根据已登记的裁定结果，生成本轮公开叙事。' : '根据现场与玩家行动，生成本轮公开叙事。') + ' 只输出一个 JSON 对象，不要输出对话记录式文本或 JSON 以外的文字。',
+          scope: `${s.sessionId}:keeper-narration` };
+        for (let attempt = 0; attempt <= 4 && !response; attempt++) {
+          try { response = readNarration(await llm.complete(narrationInput, { responseFormat: 'json', signal })); }
+          catch (error) {
+            if (!error.gameMessage) throw error;
+            if (attempt < 4) console.warn(`[游戏:trpg-simulator] KP 叙事补全未通过校验，按原请求重试（${attempt + 1}/4）：${error.gameMessage}`);
+            else fail(error.gameMessage, 502);
+          }
+        }
       }
       if (typeof response?.narration !== 'string') fail('守秘人一时语塞了，请再试一次', 502);
       updatePlayerExpression(s, response.playerExpression, slots);
