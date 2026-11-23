@@ -54,10 +54,11 @@ async function* spokenText(stream) {
 }
 
 // One completed native response, then at most one tool-free continuation. Text is never buffered here.
-export async function* streamPrivateChatImages(messages, { nativeStream, textStream, accept, record, signal, onUnavailable, skipTools, resume, imageMode = 'smart', userInput = '', ...opts }) {
+export async function* streamPrivateChatImages(messages, { nativeStream, textStream, accept, record, signal, onUnavailable, skipTools, resume, imageMode = 'smart', userInput = '', disableImageTools = false, ...opts }) {
   if (resume?.text?.trim()) { signal?.throwIfAborted(); yield resume.text; return; }
   // 只检测灵性配图的本轮输入；关闭、导演模式及已受理任务恢复都不再判定索图。
-  const toolChoice = resume || imageMode !== 'smart' ? 'none' : detectImageIntent(userInput) ? 'required' : 'auto';
+  // disableImageTools：续写失败后的重出轮用，避免同一张图被二次受理。
+  const toolChoice = resume || disableImageTools || imageMode !== 'smart' ? 'none' : detectImageIntent(userInput) ? 'required' : 'auto';
   let assistant = resume?.assistant;
   let visible = false;
   try {

@@ -3,6 +3,7 @@ import { getSystemRulesWithWorld } from '../db/worldRepository.js';
 import { Router } from 'express';
 import { getDb, getGlobalRule, getSystemRules, getWorldSetting, repairFtsIndex } from '../db/index.js';
 import { chatStream, chatSync, chatAgentStream } from '../llm/llm-client.js';
+import { FRESH_RESTART_INSTRUCTION, looksLikeRefusal, TAIL_REFUSAL_RE } from '../llm/continuationGuard.js';
 import { chatSync as chatWithLorebook } from '../services/lorebook/runtime.js';
 import { prepareNarrativePrompt } from '../services/presets/narrative.js';
 import { createLorebookRepository } from '../db/lorebookRepository.js';
@@ -1181,11 +1182,12 @@ ${coreRules}
     }
 
     // 流式消费 + flush（一次调用 = 一段 LLM 流；@memory 触发时会被复用跑第二段）
-    async function consumeStream(streamMessages, signal) {
+    async function consumeStream(streamMessages, signal, guard = null, extraOpts = {}) {
       // 仅主聊天流的本轮 user 头部增加模式偏好；重试和回想续写都从原始消息组装，避免重复叠加。
       const requestMessages = withGalgameEmojiPreference(streamMessages, { galgameMode: galgame_mode === true, hasEmojis: emojiMap.size > 0 });
       const stream = streamPrivateChatImages(requestMessages, {
-        ...streamOpts, signal, nativeStream: chatAgentStream, textStream: chatStream,
+        ...streamOpts, ...extraOpts, signal, nativeStream: chatAgentStream, textStream: chatStream,
+        guard,
         imageMode, userInput: realInput,
         resume: imageResume,
         accept: acceptImage,
@@ -1208,8 +1210,10 @@ ${coreRules}
         const cleanChunk = chunk.replace(/<br\s*\/?>/gi, '').replace(/\n{2,}/g, '\n');
         streamState.fullContent += cleanChunk;
 
-        checkRecallGate();
-        if (recallQuery) return; // 首行即检索指令：放弃当前流，转回想流程
+        if (!extraOpts.skipRecall) {
+          checkRecallGate();
+          if (recallQuery) return; // 首行即检索指令：放弃当前流，转回想流程
+        }
 
         const { segments, stopped } = streamState.splitter.feed(cleanChunk);
 
@@ -1245,8 +1249,10 @@ ${coreRules}
     }
 
     send('response_start', {});
+    // 续写守卫：chatStream / chatAgentStream 把「续写失败」写进这个对象，主流程据此决定是否重出
+    const continuationGuard = {};
     try {
-      await consumeStream(msgs, upstreamAbort.signal);
+      await consumeStream(msgs, upstreamAbort.signal, continuationGuard);
     } catch (err) {
       // 客户端已断开：立刻收摊。既不再跑 @memory 回想，也不落库——半截回复进了 raw_messages
       // 会污染后续轮次的上下文，而这一轮用户已经放弃了。
@@ -1281,6 +1287,41 @@ ${coreRules}
     if (recallGateEnabled && !recallChecked) {
       recallChecked = true;
       recallQuery = parseRecallInstruction(streamState.fullContent);
+    }
+
+    // ── 续写失败 → 新会话重出 ──
+    // 触发面：续写复述/整份重写、末尾拒答回填、内容审核掐断。
+    // 请求用**原始 msgs**（不带半截回复），让模型看不到自己的坏输出，从头完整写；
+    // 成功后在校验段发 replace_last_assistant 整条替换（前端 utils/assistantReplace.js）。
+    // 三类轮次跳过：图片工具已受理（无法撤回）、@memory（自己会重组请求）、图片重试恢复。
+    let continuationReplaced = false;
+    if (continuationGuard.freshRestart && !clientGone && !hadToolCalls && !imageResume && !recallQuery) {
+      const originalFullContent = streamState.fullContent;
+      const originalSegments = [...streamState.collectedSegments];
+      console.warn(`[continuation] ▸ 主聊天流续写失败（${continuationGuard.freshRestart.reason || 'unknown'}），改用新会话重出`);
+      try {
+        streamState.fullContent = '';
+        streamState.splitter = new SentenceSplitter();
+        streamState.collectedSegments.length = 0;
+        streamState.wasStopped = false;
+        await consumeStream([...msgs, FRESH_RESTART_INSTRUCTION], upstreamAbort.signal, null, {
+          skipRecall: true,
+          disableImageTools: true,
+        });
+        const freshText = streamState.collectedSegments.join('\n');
+        if (!freshText.trim() || looksLikeRefusal(freshText) || TAIL_REFUSAL_RE.test(freshText.slice(-300))) {
+          throw new Error('continuation fresh restart produced refusal or empty content');
+        }
+        continuationReplaced = true;
+        console.log('[continuation] 重出成功 chars=' + streamState.fullContent.length);
+      } catch (err) {
+        if (clientGone) throw err;
+        streamState.fullContent = originalFullContent;
+        streamState.splitter = new SentenceSplitter();
+        streamState.collectedSegments.length = 0;
+        streamState.collectedSegments.push(...originalSegments);
+        console.warn('[continuation] 重出失败，保留原输出:', err.message);
+      }
     }
 
     // ── 阶段二：@memory 触发 → 检索 → 二次续写 ──
@@ -1395,6 +1436,27 @@ ${coreRules}
       })
       .filter(p => p.content || p.images.length > 0);
     const displayContent = parsedSegments.map(p => p.content).filter(Boolean).join('\n\n');
+
+    // 续写失败重出成功：整条替换已上屏的气泡（保留表情包/图片，末尾多余气泡删掉）
+    if (continuationReplaced) {
+      try {
+        const replaceSegments = parsedSegments.map(p => ({
+          content: p.content,
+          emojiKeys: p.keys || [],
+          stickerUrls: parseEmojiText(p.raw || '', emojiMap).images,
+          images: p.images || [],
+        }));
+        send('replace_last_assistant', {
+          content: replaceSegments.map(s => s.content).filter(Boolean).join('\n\n'),
+          segments: replaceSegments,
+          reason: 'continuation',
+          turn: Date.now(),
+        });
+        console.log('[continuation] replace_last_assistant sent segments=' + replaceSegments.length);
+      } catch (err) {
+        console.warn('[continuation] replace event failed:', err.message);
+      }
+    }
 
     // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
     if (streamState.wasStopped || tags.prompt || hasNeedImageTag) {
