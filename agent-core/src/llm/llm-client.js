@@ -8,47 +8,130 @@ import { recordLlmCall } from '../services/llmTelemetry.js';
 import { defaultMaxTokens, isValidMaxTokens } from './modelCapabilities.js';
 import { buildAgentRequest, readAgentResponse } from './agentStream.js';
 import { applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
+// 续写守卫：复述/整份重写判定与流式缓冲（见 ./continuationGuard.js）
+import { createStreamContinuationGuard, TAIL_REFUSAL_RE } from './continuationGuard.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
+/**
+ * 流式自动续写的上限：每多一次都是十几秒额外等待，流式只兜 2 次。
+ * 内容已经边生成边推给用户，撤不回来，只能在末尾追加「继续」让模型接着写。
+ */
+const MAX_STREAM_CONTINUATIONS = 2;
+
+/** 流式续写指令：要求接在已写内容之后，别重头再来 */
+const STREAM_CONTINUE_INSTRUCTION = '继续。紧接在你上一段话的最后一句之后往下写，'
+  + '不要重复已经写过的内容，不要重新开头，不要解释或道歉，直接续写。';
+
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72, requestBudget } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72, requestBudget, guard = null } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
-  const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature, toolChoice });
-  applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
-  if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
+  // 每轮（含续写）都要重算请求体：消息变了，额度上限也要重新套一次
+  const buildRoundParams = (msgs) => {
+    const next = buildAgentRequest(msgs, tools, llm, { forceThinking, temperature, toolChoice });
+    applyOutputTokenLimit(next, requestBudget?.maxOutputTokens);
+    if (isDeepseek()) next.stream_options = { ...next.stream_options, include_usage: true };
+    return next;
+  };
   const logLabel = requestId ? `${label} [${requestId}]` : label;
+  // 续写守卫状态回流：调用方传了 guard 对象时，把「续写失败」标记进去，
+  // 由调用方决定是否丢弃已推内容、用原始消息重新输出（本函数只负责判定）。
+  const guardReport = guard && typeof guard === 'object' ? guard : null;
+  if (guardReport) {
+    guardReport.freshRestart = null;
+    guardReport.reason = null;
+  }
   let usage;
   let stream;
   let content = '';
   let reasoning = '';
   let response;
   let outcome = 'interrupted';
+  let continued = 0;
   try {
-    signal?.throwIfAborted();
-    requestBudget?.validate(params, messages);
-    console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
-    console.log(JSON.stringify(compressLogMessages(params.messages), null, 2));
-    console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, tool_choice=${params.tool_choice ?? 'none'}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
-    if (!forceThinking) {
-      const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
-      console.log(`[${logLabel}] local_prefix_fingerprint=${fingerprint}（仅本地字节指纹；服务商缓存命中见 usage）`);
-    }
-    console.log(`[${logLabel} 可用工具] ${tools.map(tool => tool.function?.name).filter(Boolean).join(', ')}`);
-    console.log('────────────────────────────────────────────────');
-    stream = await getClient().chat.completions.create(params, { signal, maxRetries: 0 });
-    console.log(`[${providerLabel()} ← ${logLabel} start]`);
-    for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking })) {
-      if (event.type === 'usage') usage = event.usage;
-      else {
-        if (event.type === 'text_delta') content += event.text;
-        if (event.type === 'reasoning_delta') reasoning += event.text;
-        if (event.type === 'assistant_end') response = event.message;
-        yield event;
+    for (;;) {
+      let roundFinish = null;
+      let roundResponse;
+      // 本轮实际保留下来的正文（去过重/裁掉复述后）：续写请求要用它
+      let roundContent = '';
+      // 续写轮先扣住开头用于重复判定；第一轮不缓冲，零延迟
+      const roundGuard = continued > 0 && guardReport ? createStreamContinuationGuard(content) : null;
+      const params = buildRoundParams(messages);
+      signal?.throwIfAborted();
+      requestBudget?.validate(params, messages);
+      console.log(`\n══════════ [${providerLabel()} → ${logLabel}] ══════════`);
+      console.log(JSON.stringify(compressLogMessages(params.messages), null, 2));
+      console.log(`[${logLabel}] model=${params.model}, tools=${tools.length}, tool_choice=${params.tool_choice ?? 'none'}, max_tokens=${params.max_completion_tokens ?? params.max_tokens}`);
+      if (!forceThinking) {
+        const fingerprint = createHash('sha256').update(JSON.stringify({ tools, firstMessage: messages[0] })).digest('hex').slice(0, 16);
+        console.log(`[${logLabel}] local_prefix_fingerprint=${fingerprint}（仅本地字节指纹；服务商缓存命中见 usage）`);
       }
+      console.log(`[${logLabel} 可用工具] ${tools.map(tool => tool.function?.name).filter(Boolean).join(', ')}`);
+      console.log('────────────────────────────────────────────────');
+      try {
+        stream = await getClient().chat.completions.create(params, { signal, maxRetries: 0 });
+        console.log(`[${providerLabel()} ← ${logLabel} start]`);
+        for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking, softLength: true })) {
+          if (event.type === 'usage') usage = event.usage;
+          else {
+            if (event.type === 'text_delta') {
+              const out = roundGuard ? roundGuard.feed(event.text) : event.text;
+              if (out) {
+                content += out;
+                roundContent += out;
+                yield { ...event, text: out };
+              }
+            } else if (event.type === 'reasoning_delta') {
+              reasoning += event.text;
+              yield event;
+            } else if (event.type === 'assistant_end') {
+              // 流结束前把守卫扣住的尾巴放出来，再回报最终累计正文
+              if (roundGuard) {
+                const tail = roundGuard.finishRound();
+                if (tail.text) {
+                  content += tail.text;
+                  roundContent += tail.text;
+                  yield { type: 'text_delta', text: tail.text };
+                }
+              }
+              roundResponse = event.message;
+              roundFinish = event.finishReason ?? null;
+              if (guardReport) guardReport.finishReason = roundFinish;
+              yield { ...event, message: { ...event.message, content, reasoning_content: reasoning } };
+            } else yield event;
+          }
+        }
+      } finally {
+        stream?.controller?.abort?.();
+      }
+      response = roundResponse;
+      // 续写被判定为复述/整份重写 ⇒ 本轮作废，不再继续
+      if (roundGuard && (roundGuard.verdict === 'repeated' || roundGuard.verdict === 'rewrite')) {
+        if (guardReport) guardReport.freshRestart = { reason: roundGuard.verdict, emitted: content };
+        console.warn(`[continuation] ▸ 续写${roundGuard.verdict === 'rewrite' ? '整份重写' : '重复'}，停止续写 (${logLabel})`);
+        outcome = 'completed';
+        break;
+      }
+      // 网关把拒答回填在末尾：本轮到此为止，交给调用方重出
+      if (content.trim() && TAIL_REFUSAL_RE.test(content.slice(-300))) {
+        if (guardReport) guardReport.freshRestart = { reason: 'refusal', emitted: content };
+        console.warn(`[continuation] ▸ 末尾检测到拒答回填，停止续写 (${logLabel})`);
+        outcome = 'completed';
+        break;
+      }
+      // 只有「被截断 + 确实写了正文 + 没在做工具调用」才续写
+      const canContinue = roundFinish === 'length'
+        && continued < MAX_STREAM_CONTINUATIONS
+        && !!content.trim()
+        && !!roundContent.trim()
+        && !roundResponse?.tool_calls?.length;
+      if (!canContinue) { outcome = 'completed'; break; }
+      continued += 1;
+      console.warn(`[stream] ▸ 输出被长度截断（已写 ${content.length} 字），第 ${continued}/${MAX_STREAM_CONTINUATIONS} 次自动续写 (${logLabel})`);
+      // 续写历史用「本轮实际保留下来的正文」，不能把被裁掉的复述再喂回去
+      messages = [...messages, { ...roundResponse, content: roundContent }, { role: 'user', content: STREAM_CONTINUE_INSTRUCTION }];
     }
-    outcome = 'completed';
   } catch (error) {
     outcome = signal?.aborted ? 'cancelled' : 'failed';
     console.error(`[${providerLabel()} ← ${logLabel}] ${outcome}:`, error.message);
@@ -611,25 +694,74 @@ async function* _chatStreamFreeEgg(messages, opts) {
  */
 export async function* chatStream(messages, opts = {}) {
   messages = await compressLlmImageInputs(messages);
-  let anyYielded = false;
-  try {
-    if (config.llm.freeEgg) {
-      for await (const delta of _chatStreamFreeEgg(messages, opts)) {
+  // 续写守卫状态回流：只负责判定，替换/重出由调用方决定
+  const guardReport = opts.guard && typeof opts.guard === 'object' ? opts.guard : null;
+  if (guardReport) {
+    guardReport.freshRestart = null;
+    guardReport.reason = null;
+    guardReport.finishReason = null;
+  }
+  // 已产出的正文：续写时作为 assistant 发言放回去，模型才知道从哪里接
+  let emitted = '';
+  for (let round = 0; ; round += 1) {
+    let finishReason = null;
+    let anyYielded = false;
+    const onFinish = (reason) => {
+      finishReason = reason;
+      if (guardReport) guardReport.finishReason = reason;
+      opts.onFinish?.(reason);
+    };
+    // 续写轮先扣住开头用于重复判定；第一轮不缓冲，零延迟。
+    // guard.dedupe === false 的调用方（按行协议解析的群聊剧本）不做字级去重。
+    const wantDedupe = !guardReport || guardReport.dedupe !== false;
+    const roundGuard = round > 0 && wantDedupe ? createStreamContinuationGuard(emitted) : null;
+    try {
+      const roundStream = config.llm.freeEgg
+        ? _chatStreamFreeEgg(messages, { ...opts, onFinish })
+        : _chatStreamInner(messages, { ...opts, onFinish });
+      for await (const delta of roundStream) {
         anyYielded = true;
-        yield delta;
+        const out = roundGuard ? roundGuard.feed(delta) : delta;
+        if (!out) continue;
+        emitted += out;
+        yield out;
       }
-    } else {
-      for await (const delta of _chatStreamInner(messages, opts)) {
-        anyYielded = true;
+    } catch (err) {
+      if (!(err && err.__freeEggFailover && !anyYielded)) throw err;
+      console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'stream'})`);
+      for await (const delta of _chatStreamInner(messages, { ...opts, onFinish })) {
+        emitted += delta;
         yield delta;
       }
     }
-  } catch (err) {
-    if (!(err && err.__freeEggFailover && !anyYielded)) throw err;
-    console.warn(`[free-egg] ▸ 立即改用自有配置重发本次请求 (${opts.label || 'stream'})`);
-    for await (const delta of _chatStreamInner(messages, opts)) {
-      yield delta;
+    if (roundGuard) {
+      const tail = roundGuard.finishRound();
+      if (tail.text) {
+        emitted += tail.text;
+        yield tail.text;
+      }
+      if (tail.verdict === 'repeated' || tail.verdict === 'rewrite') {
+        if (guardReport) guardReport.freshRestart = { reason: tail.verdict, emitted };
+        console.warn(`[continuation] ▸ 续写${tail.verdict === 'rewrite' ? '整份重写' : '重复'}，停止续写 (${opts.label || 'chatStream'})`);
+        return;
+      }
     }
+    // 网关把拒答回填在末尾：本轮到此为止
+    if (emitted.trim() && TAIL_REFUSAL_RE.test(emitted.slice(-300))) {
+      if (guardReport) guardReport.freshRestart = { reason: 'refusal', emitted };
+      console.warn(`[continuation] ▸ 末尾检测到拒答回填，停止续写 (${opts.label || 'chatStream'})`);
+      return;
+    }
+    // 内容审核直接掐断：已推出去的文字撤不回来，交给调用方处理
+    if (finishReason === 'content_filter' && emitted.trim()) {
+      if (guardReport) guardReport.freshRestart = { reason: 'filtered', emitted };
+      console.warn(`[continuation] ▸ 输出被内容审核中断，停止续写 (${opts.label || 'chatStream'})`);
+      return;
+    }
+    // 只有「被额度截断且确实写了东西」才续写；其余结束原因原样收场
+    if (finishReason !== 'length' || round >= MAX_STREAM_CONTINUATIONS || !emitted.trim()) return;
+    console.warn(`[stream] ▸ 输出被长度截断（已写 ${emitted.length} 字），第 ${round + 1}/${MAX_STREAM_CONTINUATIONS} 次自动续写 (${opts.label || 'chatStream'})`);
+    messages = [...messages, { role: 'assistant', content: emitted }, { role: 'user', content: STREAM_CONTINUE_INSTRUCTION }];
   }
 }
 
@@ -639,6 +771,7 @@ async function* _chatStreamInner(messages, {
   thinking,
   label = 'stream',
   signal, // AbortSignal：客户端断开时中止上游请求，避免空烧 token
+  onFinish, // (finishReason) => void：回流结束原因，供外层判断是否被截断
 } = {}) {
   if (config.features.mergeMessages) messages = mergeConsecutiveRoles(messages);
   if (_limitEnabled()) await acquireSlot();
@@ -682,6 +815,7 @@ async function* _chatStreamInner(messages, {
     console.log(`[${providerLabel()} ← ${label} start]`);
 
     let usage = null;
+    let finishReason = null;
     for await (const chunk of stream) {
       if (signal?.aborted) {
         // 客户端已断开：主动终止上游流，不再消耗后续 token
@@ -689,6 +823,8 @@ async function* _chatStreamInner(messages, {
         break;
       }
       if (chunk.usage) usage = chunk.usage;
+      const chunkFinish = chunk.choices?.[0]?.finish_reason;
+      if (chunkFinish) finishReason = chunkFinish;
       const messageDelta = chunk.choices?.[0]?.delta;
       if (typeof messageDelta?.reasoning_content === 'string') reasoning += messageDelta.reasoning_content;
       const delta = messageDelta?.content;
@@ -697,6 +833,9 @@ async function* _chatStreamInner(messages, {
         yield delta;
       }
     }
+
+    // 把结束原因回流给 chatStream：length = 被额度截断，外层据此自动续写
+    onFinish?.(finishReason);
 
     console.log(`[${providerLabel()} ← ${label} end]`);
     logResponse(label, total || '(empty)', reasoning);

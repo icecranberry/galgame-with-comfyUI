@@ -39,7 +39,7 @@ export function buildAgentRequest(messages, tools, llm, { forceThinking = true, 
   return params;
 }
 
-export async function* readAgentResponse(stream, { signal, allowEmpty = false } = {}) {
+export async function* readAgentResponse(stream, { signal, allowEmpty = false, softLength = false } = {}) {
   const message = { role: 'assistant', content: '', reasoning_content: '' };
   const calls = new Map();
   const details = new Map();
@@ -81,7 +81,13 @@ export async function* readAgentResponse(stream, { signal, allowEmpty = false } 
   }
   signal?.throwIfAborted();
   if (!finishReason) throw new Error('模型连接提前结束，未执行未完成的工具请求');
-  if (!['stop', 'tool_calls'].includes(finishReason)) throw new Error(`模型未完成本轮回复（${finishReason}），请检查输出额度与模型配置`);
+  // 长度截断（调用方传 softLength 时）：把已写内容交出去，由上层追加「继续」写完；
+  // 已经推给用户的文字撤不回来，与其报错收场，不如接着写。没传 softLength 的调用方保持旧行为。
+  const softTruncated = softLength && finishReason === 'length'
+    && !!String(message.content || '').trim() && !calls.size;
+  if (!softTruncated && !['stop', 'tool_calls'].includes(finishReason)) {
+    throw new Error(`模型未完成本轮回复（${finishReason}），请检查输出额度与模型配置`);
+  }
   if (calls.size) {
     message.tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
     const ids = new Set();
@@ -94,5 +100,5 @@ export async function* readAgentResponse(stream, { signal, allowEmpty = false } 
   if (details.size) message.reasoning_details = [...details.values()];
   if (vertexParts.length) message.vertex_parts = vertexParts;
   if (!allowEmpty && !message.content && !message.tool_calls?.length) throw new Error('模型未返回回复或工具调用，请使用支持思考与工具的模型');
-  yield { type: 'assistant_end', message };
+  yield { type: 'assistant_end', message, finishReason };
 }
