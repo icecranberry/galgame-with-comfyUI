@@ -6,8 +6,7 @@
  *     由 LLM 依据 <world_setting> 演算，每条配一幅插画
  *   - 15% 概率出现一条"世界状态"（影响全镇所有人，当天生效）；
  *     注入位置与道具 buff 相同（chat.js 稳定块[1]）
- *   - 绑定角色的特稿会在当天注入：该角色的私聊动态块、其所在群聊的轮次指令（群聊侧限额
- *     GROUP_INJECT_ROUNDS 轮，之后当天不再注入，避免特稿主角被反复提起），
+ *   - 绑定角色的特稿会在当天限量注入该角色的私聊动态块和其所在群聊的轮次指令，
  *     并驱动该角色当天额外发一条吐槽朋友圈（momentScheduler 消费 complaint_after）
  *
  * 纯函数（normalizeNewspaperDraft / build*Block / buildComplaintTopic 等）导出供测试。
@@ -31,9 +30,9 @@ import { ITEM_EFFECTS, WORLD_OUTFIT_CHANCE } from './itemService.js';
 export const NEWSPAPER_NAME = '邻舍日报';
 export const NEWSPAPER_TAGLINE = '今日事 · 早知道';
 export const WORLD_STATE_PROBABILITY = 0.15;
-// 群聊注入限额：报纸块只在该群的前 4 轮群聊里注入，之后当天不再出现。
-// 天天每轮都提醒一次"今早的报纸写了谁"，特稿主角会被反复提起；限额让它只当开场谈资。
-export const GROUP_INJECT_ROUNDS = 4;
+// 让特稿只当开场谈资，群聊和私聊对每期分别计数。
+export const GROUP_INJECT_ROUNDS = 2;
+const PRIVATE_INJECT_ROUNDS = 2;
 // 每天零点起生成当天报纸：replyQueueScheduler 的第一个调度 tick 触发（内部自带去重/节流/错误兜底）
 // 注：日程已不注入报纸素材，无需再等清晨日程刷新；零点刷新让"昨天的预告"与"今天的事"严格对应
 export const GENERATION_HOUR = 0;
@@ -656,12 +655,29 @@ export function getWorldStateBlock() {
   return buildWorldStatePromptBlock(ws);
 }
 
-/** chat.js 注入口：该角色的特稿预告块（非主角返回 ''） */
-export function getCharacterEventBlockFor(characterId) {
+/** chat.js 注入口：同一期只向主角的前几轮私聊发放特稿。同一轮重试复用原额度。 */
+export function takePrivateNewspaperBlockFor(characterId, userRawMsgId) {
   const row = getTodayNewspaper();
   if (!row?.character_id || !row.character_event_json) return '';
   if (String(row.character_id) !== String(characterId)) return '';
-  return buildCharacterEventBlock(null, safeParseJson(row.character_event_json));
+  const block = buildCharacterEventBlock(null, safeParseJson(row.character_event_json));
+  if (!block) return '';
+
+  const db = getDb();
+  const { changes } = db.prepare(`
+    INSERT INTO town_newspaper_private_turns (paper_id, user_raw_msg_id)
+    SELECT id, ? FROM town_newspapers
+    WHERE id = ? AND (
+      SELECT COUNT(*) FROM town_newspaper_private_turns WHERE paper_id = town_newspapers.id
+    ) < ?
+    ON CONFLICT (paper_id, user_raw_msg_id) DO NOTHING
+  `).run(userRawMsgId, row.id, PRIVATE_INJECT_ROUNDS);
+  if (changes) return block;
+
+  const prior = db.prepare(`
+    SELECT 1 FROM town_newspaper_private_turns WHERE paper_id = ? AND user_raw_msg_id = ?
+  `).get(row.id, userRawMsgId);
+  return prior ? block : '';
 }
 
 /**
@@ -684,7 +700,7 @@ function consumeGroupNewspaperRound(groupId, paperId) {
 /** groupChatEngine.js 注入口：该群的报纸块（限额发放，用满 GROUP_INJECT_ROUNDS 轮后当天不再注入）。
  *
  *  限额：报纸块只在该群的前 GROUP_INJECT_ROUNDS 轮群聊里出现（user/idle/lull/opening 都算一轮），
- *  第 5 轮起当天不再注入——否则每轮都在提醒模型"今早报纸写了谁"，特稿主角会被反复提起。
+ *  用满限额后，本期特稿不再作为本轮谈资加入提示词。
  *  轮数按 (群, 报纸) 持久化在 group_chats.newspaper_paper_id / newspaper_rounds_used：
  *  次日新一期自动从 0 重新计，进程重启也不会重新发放；
  *  本轮没真正产出内容（buildGroupNewspaperBlock 返回空）不消耗轮数。

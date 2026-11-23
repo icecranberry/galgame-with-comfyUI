@@ -44,6 +44,12 @@ import { migrateCohabitationSchema } from './cohabitationRepository.js';
 import { migratePhotoStudioSchema, recoverPhotoStudioFinishes } from './photoStudioSchema.js';
 import { migrateGallerySchema } from './gallerySchema.js';
 
+export const DEFAULT_EMOJI_KEYS = [
+  '开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒',
+  '害羞', '惊讶', '委屈', '得意', '比心',
+  '无语', '嫌弃', '心虚',
+];
+
 let db;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -895,6 +901,13 @@ function initSchema(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_town_newspapers_date ON town_newspapers(publish_date);
+
+    -- 一期报纸只有一个私聊主角。同一条用户消息重试时复用记录，清空聊天也保留已用次数。
+    CREATE TABLE IF NOT EXISTS town_newspaper_private_turns (
+      paper_id INTEGER NOT NULL REFERENCES town_newspapers(id) ON DELETE CASCADE,
+      user_raw_msg_id INTEGER NOT NULL,
+      PRIMARY KEY (paper_id, user_raw_msg_id)
+    );
   `);
 
   // 只补齐历史 NULL；保留用户显式关闭后台闲聊的 idle_enabled=0。
@@ -1261,21 +1274,21 @@ function seedEmojiCategories(db) {
   const row = db.prepare('SELECT COUNT(*) AS c FROM emoji_categories').get();
   if (row?.c > 0) return;
   const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
-  const keys = ['开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心', '无语', '嫌弃', '心虚'];
-  for (let i = 0; i < keys.length; i++) insert.run(keys[i], i + 1);
+  db.transaction(() => DEFAULT_EMOJI_KEYS.forEach((key, i) => insert.run(key, i + 1)))();
 }
 
 /** 迁移：给旧默认 12 类追加新增的 3 个默认类别，不打扰已自定义的列表 */
 function migrateEmojiCategoriesV2(db) {
   try {
     const existing = new Set(db.prepare('SELECT emoji_key FROM emoji_categories').all().map(r => r.emoji_key));
-    const legacyDefaults = ['开心', '难过', '悲伤', '生气', '哈哈大笑', '卖萌', '晕倒', '害羞', '惊讶', '委屈', '得意', '比心'];
-    if (!legacyDefaults.every(k => existing.has(k))) return;
-    const newKeys = ['无语', '嫌弃', '心虚'].filter(k => !existing.has(k));
-    if (newKeys.length === 0) return;
+    if (existing.size >= DEFAULT_EMOJI_KEYS.length) return;
+    const legacyDefaults = DEFAULT_EMOJI_KEYS.slice(0, 12);
+    if (!legacyDefaults.every(key => existing.has(key) || (key === '哭' && existing.has('悲伤')))) return;
+    const newKeys = DEFAULT_EMOJI_KEYS.slice(12).filter(key => !existing.has(key));
+    if (existing.size + newKeys.length !== DEFAULT_EMOJI_KEYS.length) return;
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM emoji_categories').get().m;
-    const insert = db.prepare('INSERT OR IGNORE INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
-    newKeys.forEach((k, i) => insert.run(k, maxOrder + i + 1));
+    const insert = db.prepare('INSERT INTO emoji_categories (emoji_key, sort_order) VALUES (?, ?)');
+    db.transaction(() => newKeys.forEach((key, i) => insert.run(key, maxOrder + i + 1)))();
     console.log(`[db] migrateEmojiCategoriesV2: appended ${newKeys.join('、')}`);
   } catch (err) {
     console.log('[db] migrateEmojiCategoriesV2 error:', err.message);
@@ -2995,7 +3008,7 @@ function migrateGroupChatSchema(db) {
     }
     db.exec(`UPDATE group_chats SET idle_budget = 2 WHERE idle_budget IS NULL OR idle_budget <= 0`);
 
-    // 《邻舍日报》群聊注入轮数记账（报纸块只在主角所在群的前 4 轮注入，见 newspaperService）
+    // 《邻舍日报》群聊注入轮数记账，限额见 newspaperService.GROUP_INJECT_ROUNDS。
     if (!groupCols.find(c => c.name === 'newspaper_paper_id')) {
       db.exec(`ALTER TABLE group_chats ADD COLUMN newspaper_paper_id INTEGER`);
       console.log('[db] Added group_chats.newspaper_paper_id column');

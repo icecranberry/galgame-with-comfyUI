@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
+import { config, GROUP_SUMMARY_MAX_ROUNDS, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { normalizeModelCapabilities } from '../llm/modelCapabilities.js';
 import { parseServiceAccount, getVertexAccessToken, listVertexModels } from '../llm/vertex-client.js';
@@ -201,11 +201,11 @@ router.put('/group-temperature', (req, res) => {
   res.json({ ok: true, temperature: config.groupChat.temperature });
 });
 
-// PUT /api/config/group-summary-interval — 更新群聊记忆总结/滑动窗口推进轮次 2~6（所有群共享）
+// PUT /api/config/group-summary-interval — 更新群聊记忆总结/滑动窗口推进轮次（所有群共享）
 router.put('/group-summary-interval', (req, res) => {
   const { value } = req.body;
-  if (value == null || typeof value !== 'number' || value < 2 || value > 6) {
-    return res.status(400).json({ error: 'value must be 2~6' });
+  if (value == null || typeof value !== 'number' || value < 2 || value > GROUP_SUMMARY_MAX_ROUNDS) {
+    return res.status(400).json({ error: `value must be 2~${GROUP_SUMMARY_MAX_ROUNDS}` });
   }
   updateGroupSummaryInterval(value);
   res.json({ ok: true, summaryInterval: config.groupChat.summaryInterval });

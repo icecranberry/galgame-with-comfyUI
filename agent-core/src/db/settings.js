@@ -4,7 +4,7 @@
 //   db/index.js → settings.js（打开数据库后注入句柄并触发装载）
 //   config.js  → settings.js（读写系统设置）
 //   settings.js → （无内部依赖，db 句柄由 initSettingsHandle 注入）
-import { config } from '../config.js';
+import { config, GROUP_SUMMARY_MAX_ROUNDS } from '../config.js';
 
 let _db = null;
 
@@ -214,8 +214,8 @@ export function loadSystemSettings(db) {
     if (mapping) {
       let value = castValue(row.setting_value, mapping.type);
       if (value !== undefined) {
-        // 群聊记忆轮数历史遗留值收敛到 2~6
-        if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(6, value));
+        // 群聊记忆轮数历史遗留值收敛到支持范围
+        if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, value));
         if (row.setting_key === 'comfy_global_lora') value = migrateGlobalLoraScenes(value);
         config[mapping.obj][mapping.key] = value;
         applied++;

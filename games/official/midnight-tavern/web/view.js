@@ -76,7 +76,8 @@
       const entry = state.media?.[standingKey];
       const standing = entry?.kind === 'standing' && entry.status === 'ready' ? image(entry.url) : '';
       const recordedMood = spoken?.mood || '';
-      const mood = standing ? (talking && spoken?.explicitMood ? recordedMood : '') : recordedMood || degree.mood;
+      const useDialogueExpression = talking && line.explicitMood && !(latest && line.potionReaction);
+      const mood = standing ? (useDialogueExpression ? recordedMood : '') : recordedMood || degree.mood;
       const css = ['seat', guest === featured && 'is-featured', talking && 'is-speaking', picked && 'is-selected',
         !standing && degree.id !== 'sober' && 'is-tipsy'].filter(Boolean).join(' ');
       const photo = ui.guestPhotos.get(guest.name);

@@ -30,7 +30,7 @@ import { generateImage, getLastWorkflowMode, captureImageGenerationConfig } from
 import { charArtistOverride } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
-import { getWorldStateBlock, getCharacterEventBlockFor } from '../services/newspaperService.js';
+import { getWorldStateBlock, takePrivateNewspaperBlockFor } from '../services/newspaperService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
@@ -1035,8 +1035,8 @@ ${coreRules}
     dynamicBlocks.push(`<time_context>\n${timeBlocks.join('\n')}\n</time_context>`);
     dynamicBlocks.push(buildCharacterTownSceneBlock(req.townAdmission));
 
-    // 当日《邻舍日报》人物特稿：仅当天主角的私聊注入，预告ta今天将要经历的事
-    const newspaperEventBlock = getCharacterEventBlockFor(characterId);
+    // 当日《邻舍日报》人物特稿：只有主角的前两轮私聊携带这期预告。
+    const newspaperEventBlock = takePrivateNewspaperBlockFor(characterId, userRawMsgId);
     if (newspaperEventBlock) {
       dynamicBlocks.push(newspaperEventBlock);
     }

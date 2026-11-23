@@ -348,7 +348,7 @@
               <div class="advanced-cat-list">
                 <div v-for="(k, i) in categoryDrafts" :key="i" class="advanced-cat-row">
                   <span class="advanced-cat-index">{{ i + 1 }}</span>
-                  <linshe-input v-model="categoryDrafts[i]" class="advanced-cat-input" type="text" />
+                  <linshe-input v-model="categoryDrafts[i]" class="advanced-cat-input" type="text" :disabled="categorySaving" />
                 </div>
                 </div>
               <div v-if="categoryError" class="emoji-error">{{ categoryError }}</div>
@@ -1044,12 +1044,13 @@ async function removeEmoji(charId, key) {
 }
 
 async function saveAdvancedSettings() {
+  if (categorySaving.value) return
   const keys = categoryDrafts.value.map(k => String(k || '').trim())
   const tagsText = String(fixedTagsDraft.value || '').trim()
   categoryError.value = ''
   fixedTagsError.value = ''
-  if (keys.length !== 15 || keys.some(k => !k)) {
-    categoryError.value = '表情类别固定为 15 个，且名称不能为空'
+  if (keys.length === 0 || keys.some(k => !k)) {
+    categoryError.value = '表情类别名称不能为空'
     return
   }
   if (!tagsText) {
@@ -1059,16 +1060,20 @@ async function saveAdvancedSettings() {
   const size = Math.round(Number(resolutionSize.value)) || 512
   categorySaving.value = true
   try {
-    const d = await api.updateEmojiCategories(keys)
-    if (d.error) throw new Error(d.error)
-    emojiKeys.value = d.keys || []
+    if (keys.some((key, i) => key !== emojiKeys.value[i])) {
+      const d = await api.updateEmojiCategories(keys)
+      if (!Array.isArray(d.keys) || d.keys.length !== keys.length) {
+        throw new Error(d.error || '未收到保存后的表情类别')
+      }
+      await loadOverview()
+      emojiKeys.value = d.keys
+    }
     categoryDrafts.value = [...emojiKeys.value]
     const t = await api.updateEmojiFixedTags(tagsText, styleMode.value, { width: size, height: size })
     if (t.error) throw new Error(t.error)
     fixedTagsDraft.value = t.tags || tagsText
     if (t.styleMode) styleMode.value = t.styleMode
     if (t.resolution) resolutionSize.value = t.resolution.width
-    showAdvancedSettings.value = false
     toast?.('高级设置已保存', 'success')
   } catch (err) {
     categoryError.value = err.message

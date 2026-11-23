@@ -470,7 +470,9 @@
     el('close-night').disabled = !!ui.busy || !view.hasReadOpening(visible);
     const listen = el('listen');
     listen.disabled = !!ui.busy;
-    setContent(listen, view.esc(ui.busy || '继续闲聊') + (ui.busy ? '' : view.icon('advance')));
+    setContent(listen, ui.busy
+      ? `<span>${view.esc(ui.busy.replace(/…$/, ''))}<span class="wait-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`
+      : '继续闲聊' + view.icon('advance'));
     renderSeats(visible);
     const dialogue = el('dialogue');
     const page = `${ui.sessionId}/${state.night}/${state.turn}/${cursor}`;

@@ -1,7 +1,7 @@
 .seat-photo, .cg-frame, #drink-preview { --photo-paper: #efe2c8; }
 .seat-photo {
   --print-inset: clamp(25px, 15%, 70px);
-  position: absolute; z-index: 2; top: 51%; right: var(--print-inset);
+  position: absolute; z-index: 2; top: max(11%, clamp(25px, 14cqw, 48px)); right: var(--print-inset);
   width: clamp(31px, 18cqw, 64px); aspect-ratio: 4/5;
   display: grid; color: var(--cream);
   padding: clamp(3px, 1.4cqw, 5px) clamp(3px, 1.4cqw, 5px) clamp(7px, 3.2cqw, 13px);
@@ -11,7 +11,6 @@
   animation: seat-print-arrive var(--transition) var(--settle) both;
 }
 .seat-scene > :is(.portrait-illustrated,.portrait-expression) + .seat-photo { z-index: 0; }
-.seat-scene > .portrait-illustrated + .seat-photo { top: calc(15% + min(44%, 66cqw)); }
 .seat-scene > .portrait-avatar + .seat-photo { right: max(var(--print-inset), calc(50% - 80px)); }
 .seat[data-photo-open] .seat-scene > .seat-photo { visibility: hidden; }
 .seat-scene:has(> .seat-hit:focus-visible) > .seat-photo { outline: 2px solid var(--amber); outline-offset: 3px; }

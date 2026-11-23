@@ -390,8 +390,10 @@
   display:flex; align-items:center; justify-content:center; gap:.55em; margin-top:clamp(10px,2.6svh,22px);
   color:var(--muted); font:500 14px/1.5 var(--body); letter-spacing:.06em;
 }
-.night-dots { display:flex; gap:4px; color:var(--amber); }
-.night-dots i { width:4px; height:4px; border-radius:50%; background:currentColor; }
+.wait-dots { display:inline-flex; align-items:center; vertical-align:middle; gap:4px; }
+.wait-dots i { width:var(--dot-size,4px); height:var(--dot-size,4px); border-radius:50%; background:currentColor; }
+.night-wait .wait-dots { color:var(--amber); }
+.listen .wait-dots { --dot-size:.17em; gap:.12em; margin-inline-start:.08em; }
 .night-transition.reopening .night-sign { transform:rotateY(0deg); }
 .night-transition.reopening .night-wait { opacity:0; }
 .night-transition.reopening.closing .night-lamp::before { opacity:1; transform:translate(-50%,-43%) scale(1.65); }
@@ -405,9 +407,9 @@
   .night-transition:not(.reopening,.closing) .night-lamp::after { animation:night-flame .86s ease-in-out infinite alternate; }
   .night-transition:not(.reopening,.closing) .night-lamp::before { animation:night-lamplight 1.72s ease-in-out infinite alternate; }
   .night-transition:not(.reopening,.closing) .night-sign-closed::after { animation:night-reflection 2.4s ease-in-out infinite alternate; }
-  .night-transition:not(.reopening,.closing) .night-dots i { animation:night-dot 1.35s ease-in-out var(--delay,0s) infinite; }
-  .night-dots i:nth-child(2) { --delay:.18s; }
-  .night-dots i:nth-child(3) { --delay:.36s; }
+  :is(.listen,.night-transition:not(.reopening,.closing)) .wait-dots i { animation:wait-dot 1.35s ease-in-out var(--delay,0s) infinite; }
+  .wait-dots i:nth-child(2) { --delay:.18s; }
+  .wait-dots i:nth-child(3) { --delay:.36s; }
 }
 @keyframes night-sign-close { 0%,30% { transform:rotateY(0deg); } to { transform:rotateY(180deg); } }
 @keyframes night-sign-open { from { transform:rotateY(180deg); } to { transform:rotateY(0deg); } }
@@ -424,7 +426,7 @@
   from { opacity:.45; mask-position:16% 50%; }
   to { opacity:.82; mask-position:84% 50%; }
 }
-@keyframes night-dot {
+@keyframes wait-dot {
   0%,64%,100% { opacity:.32; transform:translateY(0); }
   30% { opacity:1; transform:translateY(-3px); }
 }

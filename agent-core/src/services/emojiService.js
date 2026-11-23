@@ -1,4 +1,4 @@
-import { getDb, getSystemRules, getSetting, setSetting } from '../db/index.js';
+import { DEFAULT_EMOJI_KEYS, getDb, getSystemRules, getSetting, setSetting } from '../db/index.js';
 import { chatSync } from './lorebook/runtime.js';
 import { generateImageRaw } from './imageSkill.js';
 import { buildImageCrossRefInfo, buildCharacterAppearanceSection } from './characterPersona.js';
@@ -6,40 +6,25 @@ import { saveBase64Image } from './imagePaths.js';
 import { invalidateGalleryCache } from './galleryCache.js';
 import { resolveStandingOutfits, normalizeStandingOutfitScene, validateMissingOutfitPolicy, hasStandingOutfit, completeStandingOutfit } from './expressionStandingAppearance.js';
 
-export const DEFAULT_EMOJI_KEYS = [
-  '开心', '难过', '哭', '生气', '哈哈大笑', '卖萌', '晕倒',
-  '害羞', '惊讶', '委屈', '得意', '比心',
-  '无语', '嫌弃', '心虚',
-];
+export { DEFAULT_EMOJI_KEYS };
 
 /** 读取表情类别（可编辑，默认 15 类） */
 export function getEmojiCategories(db = getDb()) {
   const rows = db.prepare('SELECT emoji_key FROM emoji_categories ORDER BY sort_order, id').all();
-  if (rows.length > 0) {
-    const keys = rows.map(r => r.emoji_key);
-    const existing = new Set(keys);
-    const legacyDefaults = DEFAULT_EMOJI_KEYS.slice(0, 12);
-    if (legacyDefaults.every(k => existing.has(k))) {
-      const missing = DEFAULT_EMOJI_KEYS.filter(k => !existing.has(k));
-      if (missing.length > 0) return [...keys, ...missing];
-    }
-    return keys;
-  }
-  return [...DEFAULT_EMOJI_KEYS];
+  return rows.length > 0 ? rows.map(r => r.emoji_key) : [...DEFAULT_EMOJI_KEYS];
 }
 
-/** 保存表情类别（固定 15 个，仅修改名称） */
+/** 保存表情类别（保留存档中的类别数，仅修改名称） */
 export function saveEmojiCategories(keys, db = getDb()) {
-  const list = Array.isArray(keys) ? keys.map(k => String(k || '').trim()).filter(Boolean) : [];
-  if (list.length !== 15) {
-    throw new Error('表情类别固定为 15 个');
-  }
-  if (new Set(list).size !== list.length) {
-    throw new Error('表情类别不能重复');
-  }
+  const list = Array.isArray(keys) ? keys.map(k => String(k || '').trim()) : [];
 
   const replace = db.transaction(() => {
     const old = db.prepare('SELECT id,emoji_key FROM emoji_categories ORDER BY sort_order,id').all();
+    const count = old.length || DEFAULT_EMOJI_KEYS.length;
+    if (list.length !== count) throw new Error(`表情类别固定为 ${count} 个`);
+    if (list.some(key => !key)) throw new Error('表情类别名称不能为空');
+    if (new Set(list).size !== list.length) throw new Error('表情类别不能重复');
+
     for (let i = 0; i < old.length; i++) {
       const temp = `__category_rename_${old[i].id}__`;
       db.prepare('UPDATE emoji_categories SET emoji_key=? WHERE id=?').run(temp, old[i].id);

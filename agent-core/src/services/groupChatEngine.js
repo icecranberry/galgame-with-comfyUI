@@ -25,7 +25,7 @@ import { getDb, getSystemRules, getWorldSetting, getGlobalRule } from '../db/ind
 import { chatStream } from '../llm/llm-client.js';
 import { prepareNarrativePrompt } from './presets/narrative.js';
 import { getGodWorldContext } from './godSays/worldContext.js';
-import { config } from '../config.js';
+import { config, GROUP_SUMMARY_MAX_ROUNDS } from '../config.js';
 import { countCompletedGroupRounds } from './groupRoundCounter.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
@@ -56,10 +56,10 @@ const TRIM_KEEP_RAWS = 24;        // 边界推进后保留的最近 raw 条数�
 const MAX_ROUND_MESSAGES = 18;     // 每轮剧本消息的绝对上限（动态上限见 computeRoundMessageLimit，按群人数与话题浮动）
 const IMAGE_NUDGE_PROBABILITY = 0.75;  // 每轮抽卡鼓励发图的概率
 
-/** 群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享；默认 4） */
+/** 群聊记忆总结/滑动窗口推进轮次（所有群共享；默认 4） */
 function getGroupSummaryInterval() {
   const n = config.groupChat?.summaryInterval;
-  return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
+  return Number.isInteger(n) ? Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, n)) : 4;
 }
 
 /**
@@ -401,15 +401,18 @@ function buildTranscript(db, conversationId) {
   }
 
   const raws = db.prepare(`
-    SELECT id, role, content FROM raw_messages
+    SELECT role, content, strftime('[%m月%d日-%H:%M]', created_at, 'localtime') AS timeTag
+    FROM raw_messages
     WHERE conversation_id = ? AND id > ? AND role IN ('user','assistant')
     ORDER BY id ASC
   `).all(conversationId, afterId);
 
-  const segments = raws.map(r => r.role === 'user'
-    ? formatGroupUserMessage(r.content)
-    : stripImagePromptLines(r.content.trim())
-  ).filter(Boolean);
+  const segments = raws.map(r => {
+    const text = r.role === 'user'
+      ? formatGroupUserMessage(r.content)
+      : stripImagePromptLines(r.content.trim());
+    return text && r.timeTag ? `${r.timeTag}\n${text}` : text;
+  }).filter(Boolean);
   return { transcript: segments.join('\n'), rawCount: raws.length, segments };
 }
 

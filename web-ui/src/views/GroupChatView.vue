@@ -301,7 +301,7 @@
               </div>
               <linshe-slider
                 aria-label="携带上下文消息记忆轮数"
-                :min="2" :max="6" :step="1"
+                :min="2" :max="GROUP_SUMMARY_MAX_ROUNDS" :step="1"
                 v-model="editSummaryInterval"
                 @change="onSummaryIntervalChange"
               />
@@ -470,6 +470,7 @@ const editName = ref('')
 const editTopic = ref('')
 const editMemberIds = ref([])
 const editTemperature = ref(0.7)
+const GROUP_SUMMARY_MAX_ROUNDS = 10
 const editSummaryInterval = ref(4)
 const editActivity = ref(2)
 const activityDelaySeconds = { 1: 80, 2: 40, 3: 27, 4: 20, 5: 16 }
@@ -753,13 +754,13 @@ async function loadGroupSummaryInterval() {
   try {
     const cfg = await getConfig()
     const n = cfg?.groupChat?.summaryInterval
-    if (Number.isInteger(n)) editSummaryInterval.value = Math.max(2, Math.min(6, n))
+    if (Number.isInteger(n)) editSummaryInterval.value = Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, n))
   } catch { /* 拉取失败保留当前值 */ }
   finally { summaryIntervalLoading = false }
 }
 
 async function onSummaryIntervalChange() {
-  const v = Math.max(2, Math.min(6, Math.round(Number(editSummaryInterval.value) || 4)))
+  const v = Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, Math.round(Number(editSummaryInterval.value) || 4)))
   editSummaryInterval.value = v
   try {
     const res = await updateGroupSummaryInterval(v)

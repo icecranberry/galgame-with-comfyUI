@@ -18,6 +18,7 @@ const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
 // 免费模型名单（2026-09 检测：deepseek-flash-free / hy3-free 已下线，muse-spark 系地区封锁）；
 // 本轮失败过的模型只记内存，下次开启重新开始
 export const FREE_EGG_MODELS = ['mimo-v2.5-free'];
+export const GROUP_SUMMARY_MAX_ROUNDS = 10;
 const FREE_EGG_MODEL = FREE_EGG_MODELS[0];
 
 export const config = {
@@ -318,10 +319,10 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     temperature: parseFloat(process.env.GROUP_CHAT_TEMPERATURE) >= 0.5 && parseFloat(process.env.GROUP_CHAT_TEMPERATURE) <= 1.2
       ? parseFloat(process.env.GROUP_CHAT_TEMPERATURE)
       : 0.7,
-    // 群聊记忆总结/滑动窗口推进轮次（2~6），所有群共享；DB system_settings 持久化，启动时覆盖默认值
+    // 群聊记忆总结/滑动窗口推进轮次，所有群共享；DB system_settings 持久化，启动时覆盖默认值
     summaryInterval: (() => {
       const n = parseInt(process.env.GROUP_CHAT_SUMMARY_INTERVAL, 10);
-      return Number.isInteger(n) ? Math.max(2, Math.min(6, n)) : 4;
+      return Number.isInteger(n) ? Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, n)) : 4;
     })(),
   },
   weather: {
@@ -687,10 +688,10 @@ export function updateGroupTemperature(value) {
 }
 
 /**
- * 更新群聊记忆总结/滑动窗口推进轮次（2~6，所有群共享）
+ * 更新群聊记忆总结/滑动窗口推进轮次（所有群共享）
  */
 export function updateGroupSummaryInterval(value) {
-  const n = Math.max(2, Math.min(6, parseInt(value, 10) || 4));
+  const n = Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, parseInt(value, 10) || 4));
   config.groupChat.summaryInterval = n;
   persistSettingSync('group_summary_interval', String(n));
   console.log(`[config] groupChat summaryInterval = ${n}`);

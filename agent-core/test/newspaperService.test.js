@@ -515,7 +515,7 @@ test('group newspaper block stops after GROUP_INJECT_ROUNDS rounds for the same 
   const paperId = db.prepare(`SELECT id FROM town_newspapers WHERE publish_date = ?`).get(getLocalDateKey()).id;
 
   const group = { id: groupId, members: [{ id: leadId, display_name: '限额小姐' }] };
-  // 主角不在群：不发块、也不消耗轮数（之后主角入群仍能拿到完整的 4 轮）
+  // 主角入群之前的聊天不消耗额度。
   assert.equal(svc.takeGroupNewspaperBlockFor({ id: groupId, members: [{ id: bystanderId, display_name: '路人先生' }] }), '');
   assert.equal(
     db.prepare('SELECT newspaper_rounds_used FROM group_chats WHERE id = ?').get(groupId).newspaper_rounds_used, 0,
@@ -528,7 +528,7 @@ test('group newspaper block stops after GROUP_INJECT_ROUNDS rounds for the same 
       `round ${round} must still carry the newspaper block`,
     );
   }
-  // 第 5 轮起当天不再注入（用户反馈：主角在群里被反复提起）
+  // 用满额度后，本期特稿停止注入。
   assert.equal(svc.takeGroupNewspaperBlockFor(group), '', 'after the limit the block must be gone for the day');
   const usage = db.prepare('SELECT newspaper_paper_id, newspaper_rounds_used FROM group_chats WHERE id = ?').get(groupId);
   assert.equal(usage.newspaper_paper_id, paperId, 'usage is recorded against the current paper');
