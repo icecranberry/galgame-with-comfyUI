@@ -1192,8 +1192,8 @@ export default function registerGamePlugin(ctx) {
   function recordReceipt(s, body, type, result) {
     if (body.operationId !== undefined) (s.receipts ||= []).push({ id: body.operationId, type, result });
   }
-  async function completeScenario(input, validate, signal) {
-    const ask = task => llm.complete({ ...input, task }, { responseFormat: 'json', signal });
+  async function completeScenario(input, validate, { signal, forceThinkingMode } = {}) {
+    const ask = task => llm.complete({ ...input, task }, { responseFormat: 'json', signal, forceThinkingMode });
     const raw = await ask(input.task);
     try { return validate(json(raw)); }
     catch (error) {
@@ -1220,12 +1220,12 @@ export default function registerGamePlugin(ctx) {
   route('post', '/creator/assess', async (body, _query, signal) => completeScenario({
     rules: CREATOR_ASSESS_RULES, data: JSON.stringify({ idea: creatorIdea(body.idea) }),
     task: '评估玩家的想法，返回评估与引导问题 JSON。', scope: 'creator-assess',
-  }, validateAssessment, signal), { lock: false, disconnect: true });
+  }, validateAssessment, { signal }), { lock: false, disconnect: true });
   route('post', '/creator/generate', async (body, _query, signal) => {
     const scenario = await completeScenario({ rules: CREATOR_GENERATE_RULES,
       data: JSON.stringify({ idea: creatorIdea(body.idea), answers: creatorAnswers(body.answers) }),
       task: '根据玩家的想法与问答生成完整剧本 JSON。', scope: 'creator-generate',
-    }, validateCreatedScenario, signal);
+    }, validateCreatedScenario, { signal, forceThinkingMode: 'enabled' });
     return {
       draftId: storeScenarioDraft(scenario),
       meta: scenario.meta,
@@ -1273,7 +1273,7 @@ export default function registerGamePlugin(ctx) {
     if (body.edit === true) fail('请保留剧本 JSON 的标题和场景结构');
     const scenario = await completeScenario({ rules: SCENARIO_IMPORT_RULES, data: content,
       task: '归纳这份剧本，按规范输出完整 JSON。', scope: 'parse',
-    }, validateScenario, signal);
+    }, validateScenario, { signal, forceThinkingMode: 'enabled' });
     return parsedResponse(scenario);
   }, { lock: false, disconnect: true });
   route('post', '/start', async body => {
@@ -1457,7 +1457,8 @@ export default function registerGamePlugin(ctx) {
           return name === 'roll_dice' ? promptRoll(result, names) : result;
       };
       // toolChoice 'required' 关闭正文收尾：在执行该参数的上游上，回合唯一出口是 narrate 工具。
-      const agentOptions = { checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), responseFormat: 'json', signal, toolChoice: 'required' };
+      const requestOptions = { responseFormat: 'json', signal, forceThinkingMode: 'enabled' };
+      const agentOptions = { ...requestOptions, checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), toolChoice: 'required' };
       const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
       signal.throwIfAborted();
       let response = null;
@@ -1480,7 +1481,7 @@ export default function registerGamePlugin(ctx) {
           task: (rulingOnly ? '根据已登记的裁定结果，生成本轮公开叙事。' : '根据现场与玩家行动，生成本轮公开叙事。') + ' 只输出一个 JSON 对象，不要输出对话记录式文本或 JSON 以外的文字。',
           scope: `${s.sessionId}:keeper-narration` };
         for (let attempt = 0; attempt <= 4 && !response; attempt++) {
-          try { response = readNarration(await llm.complete(narrationInput, { responseFormat: 'json', signal })); }
+          try { response = readNarration(await llm.complete(narrationInput, requestOptions)); }
           catch (error) {
             if (!error.gameMessage) throw error;
             if (attempt < 4) console.warn(`[游戏:trpg-simulator] KP 叙事补全未通过校验，按原请求重试（${attempt + 1}/4）：${error.gameMessage}`);
