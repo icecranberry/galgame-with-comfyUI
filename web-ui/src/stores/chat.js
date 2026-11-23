@@ -7,6 +7,7 @@ import { emitCharacterAvatarChanged } from '../utils/characterReactionProducers.
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
 import { onEvent } from './unifiedStream.js'
 import { readChatRecovery, writeChatRecovery } from '../utils/chatRecovery.js'
+import { applyAssistantReplace } from '../utils/assistantReplace.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
@@ -518,6 +519,8 @@ export const useChatStore = defineStore('chat', () => {
     //    这比 "收到任何 token" 更严格 —— 防止只收到几个残字就不重试的问题
     const MAX_STREAM_RETRIES = 2
     let fullResponse = ''
+    // 最近一次已应用的 replace_last_assistant.turn：比它更旧的替换事件丢弃（防乱序/重复投递）
+    let lastReplaceTurn = 0
     let sawImageGen = false  // 本轮是否出现过生图任务（图即回复时禁止 "..." 兜底）
     let admissionError = null
 
@@ -688,6 +691,20 @@ export const useChatStore = defineStore('chat', () => {
                 messages.value = messages.value.filter(x => x.id !== bubbleIds[i])
               }
               bubbleIds.length = parts.length
+            }
+            // ── replace_last_assistant（续写失败重出后的整条替换）──
+            // 后端只在重出成功后发；失败/空流不发，所以这里不用处理空内容。
+            // segments 逐气泡对齐：复用已有气泡、删掉末尾多余的、保留表情包与图片。
+            if (lastEvent === 'replace_last_assistant' && Array.isArray(d.segments) && d.segments.length > 0) {
+              const turn = Number(d.turn)
+              const stale = Number.isFinite(turn) && turn > 0 && turn < lastReplaceTurn
+              if (!stale) {
+                if (Number.isFinite(turn) && turn > 0) lastReplaceTurn = turn
+                if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
+                clearPendingEmojiTimers()
+                applyAssistantReplace({ messages: messages.value, bubbleIds, segments: d.segments, uid, now: new Date().toISOString() })
+                if (d.content !== undefined && d.content !== null) fullResponse = d.content
+              }
             }
             // ── @memory 主动回想：状态条 ──
             if (lastEvent === 'memory_recall_start') {
