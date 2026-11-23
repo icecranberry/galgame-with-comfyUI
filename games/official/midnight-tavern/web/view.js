@@ -275,14 +275,24 @@
     const predicted = mix.predictTipsy(now, recipe);
     const blocked = !mix.canServeDrink(now, recipe);
     const prediction = blocked ? '仅收无酒精' : `预计 ${predicted}/100 · ${tipsyLabel(predicted)}`;
+    const forecastMark = recipe.baseLiquor && !blocked && predicted !== now
+      ? `<i style="--forecast:${predicted}%"></i>` : '';
     const stats = Object.entries(mix.potionAttributes).map(([key, label]) => statDial(key, label, attributes[key], 2)).join('');
     const strength = statDial('strength', '酒劲', tipsyDelta, 20, -20 * mix.maxDrops);
-    return `<header class="dial-heading"><span class="dial-emblem">${icon('vial')}</span><h3 id="meters-title">魔药刻度</h3>${potionProgress(recipe)}</header>
+    return `<header class="dial-heading">
+        <div class="dial-name"><span class="dial-emblem">${icon('vial')}</span><h3 id="meters-title">魔药刻度</h3></div>
+        ${potionProgress(recipe)}
+      </header>
       <div class="stat-list" role="group" aria-label="当前配方属性">${stats}${strength}</div>
-      ${recipe.baseLiquor ? `<div class="drink-effects">${esc(mix.drinkEffects[effectId].label)}</div>` : ''}
-      <div class="effect-gauge"><span>${guest ? esc(guest.name) + ' · 醉酒度' : '醉酒度'}</span>
-        <b>${now}/100 · ${tipsyLabel(now)}</b><i aria-hidden="true" style="--amount:${now}%"></i>
-        ${recipe.baseLiquor ? `<span class="tipsy-forecast">${prediction}</span>` : ''}</div>`;
+      <div class="drink-summary">
+        ${recipe.baseLiquor ? `<div class="drink-effects">${esc(mix.drinkEffects[effectId].label)}</div>` : ''}
+        <div class="effect-gauge">
+          <div class="tipsy-reading"><span>${guest ? esc(guest.name) + ' · 醉酒度' : '醉酒度'}</span>
+            <b>${now}/100 · ${tipsyLabel(now)}</b></div>
+          <div class="mix-tipsy-track" aria-hidden="true" style="--amount:${now}%">${forecastMark}</div>
+          ${recipe.baseLiquor ? `<span class="tipsy-forecast${blocked ? ' is-blocked' : ''}">${prediction}</span>` : ''}
+        </div>
+      </div>`;
   }
   function potionTint(id, color) {
     return `<filter id="tint-${id}" color-interpolation-filters="sRGB">
