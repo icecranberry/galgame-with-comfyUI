@@ -5,7 +5,7 @@
   const audio = new window.TrpgAudioManager(sdk?.trpgAudio);
   let closeAudioControls;
   let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, pendingAction = '', advanceFlight;
-  let mode = 'investigator', scenarioId = '', keeperId = null, draft = '', npcSpeaker = '';
+  let mode = 'investigator', scenarioId = '', keeperName = null, draft = '', npcSpeaker = '';
   let castAssets, castRequest = 0;
   const lineups = { keeper: [], investigator: [] };
   const partyLimits = { keeper: 4, investigator: 5 };
@@ -66,7 +66,7 @@
   const pendingOperations = new Map();
   let submittedTurn, firstNewFrame, turnIllustration = false;
   let uiSessionId, lastBackground = '';
-  let controlChar = '', replacementId = '';
+  let controlChar = '', replacementName = '';
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const button = (action, label, kind = '', extra = '') => `<button type="button" data-action="${action}" class="${kind}" ${extra}>${label}</button>`;
   const post = (url, body) => sdk.ext.request(url, { method: 'POST', body: JSON.stringify({ ...(state ? { sessionId: state.sessionId } : {}), ...body }) });
@@ -151,7 +151,7 @@
   }
   function keeperToolModal(title, content, actor) {
     const back = actor ? button('hud-actor', '← 返回个人操作', 'quiet-action actor-panel-back',
-      `data-target="${esc(actor.id)}" data-network`) : '';
+      `data-target="${esc(actor.name)}" data-network`) : '';
     modal(title, back + content);
   }
   function closeModal(target = dialog) {
@@ -185,11 +185,14 @@
   function lobbyData() {
     const { scenarios } = catalog;
     const scenario = scenarios.find(item => item.id === scenarioId);
-    const selected = lineups[mode];
+    const available = characters.filter(character => ![castAssets.player.name, 'all', 'party'].includes(character.name));
+    const names = new Set(available.map(character => character.name));
+    const selected = lineups[mode].filter(name => names.has(name));
+    const selectedKeeper = names.has(keeperName) ? keeperName : null;
     const handoutCount = scenario?.handoutCount ?? 0;
     const limit = handoutCount ? Math.min(partyLimits[mode], handoutCount - (mode === 'investigator' ? 1 : 0)) : partyLimits[mode];
-    const canStart = !!scenario && selected.length <= limit && (mode === 'keeper' ? selected.length > 0 : keeperId !== null);
-    return { scenarios, scenario, characters, saves, mode, selected, limit, keeperId, castAssets, canStart };
+    const canStart = !!scenario && selected.length <= limit && (mode === 'keeper' ? selected.length > 0 : selectedKeeper !== null);
+    return { scenarios, scenario, characters: available, saves, mode, selected, limit, keeperName: selectedKeeper, castAssets, canStart };
   }
   function lobby() {
     closeAudioControls = null;
@@ -212,27 +215,29 @@
   async function refreshCastAssets() {
     const request = ++castRequest;
     try {
-      const assets = await sdk.ext.request('/cast');
+      const [assets, roster] = await Promise.all([sdk.ext.request('/cast'), sdk.bridge.call('get_characters')]);
       if (request !== castRequest) return false;
       castAssets = assets;
+      characters = roster;
       return true;
     } catch {
       if (request === castRequest) notice('表情立绘刷新失败，请稍后重试', true);
       return false;
     }
   }
-  function assignParty(action, id) {
-    const party = lineups[mode];
+  function assignParty(action, name) {
+    const { selected: party, characters, limit } = lobbyData();
+    if (!characters.some(character => character.name === name)) return;
     if (action === 'pick-keeper') {
-      if (id === keeperId) return;
-      keeperId = id;
-      lineups.investigator = party.filter(member => member !== id);
-    } else if (party.includes(id)) {
-      lineups[mode] = party.filter(member => member !== id);
-    } else if (party.length < lobbyData().limit) {
-      party.push(id);
+      if (name === keeperName) return;
+      keeperName = name;
+      lineups.investigator = party.filter(member => member !== name);
+    } else if (party.includes(name)) {
+      lineups[mode] = party.filter(member => member !== name);
+    } else if (party.length < limit) {
+      lineups[mode] = [...party, name];
     } else {
-      notice(`当前模组最多可邀请 ${lobbyData().limit} 位 AI 调查员`);
+      notice(`当前模组最多可邀请 ${limit} 位 AI 调查员`);
       return;
     }
     updateLobby('partyStatus', 'roster', 'launch');
@@ -244,11 +249,11 @@
   }
   function randomizeParty() {
     const { scenario, limit, characters } = lobbyData();
-    const pool = characters.map(character => character.id);
+    const pool = characters.map(character => character.name);
     if (!pool.length) return;
     const draw = () => pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
     const playerSeats = mode === 'investigator' ? 1 : 0;
-    if (playerSeats) keeperId = draw();
+    if (playerSeats) keeperName = draw();
     const capacity = Math.min(limit, pool.length) + playerSeats;
     const recommendation = String(scenario?.briefing?.party ?? '').normalize('NFKC')
       .match(/^\s*([1-9]\d*)(?:\s*[-~–—至到]\s*([1-9]\d*))?\s*(?:人|名|位)?\s*(?:调查员|玩家|PL)?\s*(?=$|[(,。])/i);
@@ -345,9 +350,9 @@
     });
   }
   async function startSelectedScenario() {
-    const { selected, canStart, scenario } = lobbyData();
+    const { selected, canStart, scenario, keeperName } = lobbyData();
     if (!canStart) return;
-    state = await post('/start', { mode, characterIds: selected, scenarioId: scenario.id, keeperId, imagesEnabled: true });
+    state = await post('/start', { mode, characterNames: selected, scenarioId: scenario.id, keeperName, imagesEnabled: true });
     draft = '';
     render();
   }
@@ -409,8 +414,8 @@
       <div><dt>音乐</dt><dd>Dark Walk、Gloom Horizon — Music by Kevin MacLeod (incompetech.com)，CC BY 3.0。</dd></div>
     </dl>`);
   }
-  const ui = () => ({ tab: activeTab, packTab, packActor, characters, castAssets, catalog, controlChar, replacementId, secretRoll, rolls: recentRolls, pendingRolls, draft, npcSpeaker, turnIllustration, thinking: isThinking() });
-  function logs(list) { return view.logs(state, list, { characters }); }
+  const ui = () => ({ tab: activeTab, packTab, packActor, characters, castAssets, catalog, controlChar, replacementName, secretRoll, rolls: recentRolls, pendingRolls, draft, npcSpeaker, turnIllustration, thinking: isThinking() });
+  function logs(list) { return view.logs(state, list); }
 
   function animateActionChange(element) {
     if (!element || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -492,8 +497,8 @@
     const follow = !oldTranscript || oldTranscript.scrollHeight - oldTranscript.scrollTop - oldTranscript.clientHeight < 70;
     if (oldTranscript?.clientHeight) scrollPositions.narrative = oldTranscript.scrollTop;
     for (const panel of document.querySelectorAll('.story-panel:not([hidden])')) if (panel.id !== 'panel-narrative') scrollPositions[panel.id] = panel.scrollTop;
-    if (!state.investigators.some(actor => actor.id === controlChar)) {
-      controlChar = state.investigators.find(actor => !actor.outOfAction)?.id || state.investigators[0]?.id || '';
+    if (!state.investigators.some(actor => actor.name === controlChar)) {
+      controlChar = state.investigators.find(actor => !actor.outOfAction)?.name || state.investigators[0]?.name || '';
     }
     const background = state.imageJobs.filter(j => j.status === 'done' && j.kind === 'scene' && j.sceneId === state.scene.id).at(-1)?.url || '';
     const backgroundChanged = lastBackground !== background;
@@ -560,7 +565,7 @@
     if (!state) return;
     // Tool results can arrive before the first reply and play in order with it.
     if (firstNewFrame !== undefined && state.publicLog.slice(firstNewFrame)
-      .some(log => log.kind === 'dialogue' && log.actorId !== 'player')) firstNewFrame = undefined;
+      .some(log => log.kind === 'dialogue' && log.speakerRole !== 'player')) firstNewFrame = undefined;
     if (!state.playbackRemaining) return;
     // Older hosts omit the hint, but queue the dice immediately after the check request.
     const checkReady = state.checkPlaybackReady ??
@@ -664,7 +669,7 @@
       await turn();
     } else notice('已使用道具');
   }
-  function readControl() { replacementId = document.getElementById('replacement')?.value || replacementId; }
+  function readControl() { replacementName = document.getElementById('replacement')?.value || replacementName; }
   async function dice(manual) {
     const secret = manual && dialog.querySelector('#secret-roll').checked;
     const checkId = state.pendingCheck?.id;
@@ -815,7 +820,7 @@
     }
     if (action === 'hud-actor') {
       if (state?.mode !== 'keeper' || dialog.classList.contains('closing')) return;
-      const actor = state.investigators.find(person => person.id === el.dataset.target);
+      const actor = state.investigators.find(person => person.name === el.dataset.target);
       if (!actor) return;
       if (!dialog.open) el.focus({ preventScroll: true });
       modal(actor.name, view.keeperActorPanel(state, actor));
@@ -824,10 +829,10 @@
     }
     if (['temporary-check', 'check-action', 'keeper-tool'].includes(action)) {
       if (dialog.classList.contains('closing') || state?.mode !== 'keeper') return;
-      const pinnedActor = el.dataset.target && state.investigators.find(person => person.id === el.dataset.target);
+      const pinnedActor = el.dataset.target && state.investigators.find(person => person.name === el.dataset.target);
       if (el.dataset.target && !pinnedActor) return;
       if (action === 'keeper-tool') {
-        const task = view.keeperDialog(state, { ...ui(), controlChar: pinnedActor?.id ?? controlChar }, el.dataset.tool);
+        const task = view.keeperDialog(state, { ...ui(), controlChar: pinnedActor?.name ?? controlChar }, el.dataset.tool);
         keeperToolModal(task.title, task.content, pinnedActor);
         const form = dialog.querySelector('#give-item-form');
         if (form) syncGrantPreset(form);
@@ -844,7 +849,7 @@
     if (action === 'describe-action') {
       const declaration = state.declaration;
       if (!declaration || declaration.logId !== el.dataset.log) return;
-      const actor = state.investigators.find(person => person.id === declaration.actorId);
+      const actor = state.investigators.find(person => person.name === declaration.actor);
       modal(declaration.roll ? '描述检定结果' : '直接描述结果',
         `<p class="field-note">${esc(actor.name)} · ${esc(declaration.reason)}</p>
         ${declaration.roll ? view.rollCard(declaration.roll, !declaration.roll.logId) : ''}
@@ -892,7 +897,7 @@
       return;
     }
     if (action === 'random-party') { randomizeParty(); return; }
-    if (action === 'pick' || action === 'pick-keeper') { assignParty(action, Number(el.dataset.id)); return; }
+    if (action === 'pick' || action === 'pick-keeper') { assignParty(action, el.dataset.name); return; }
     if (action === 'rules') { showRules(); return; }
     if (action === 'jump-party') { jumpToParty(); return; }
     if (action === 'import-scenario') { showScenarioImport(); return; }
@@ -937,7 +942,7 @@
           playReadyFrame();
           break;
         }
-        case 'manage-standings': await sdk.ui.openStandings(el.dataset.subject === 'player' ? 'player' : Number(el.dataset.subject)); break;
+        case 'manage-standings': await sdk.ui.openStandings(el.dataset.player === 'true' ? { player: true } : { characterName: el.dataset.subject }); break;
         case 'exit-game': await sdk.ui.exit(); break;
         case 'confirm-delete': await sdk.save.delete(el.dataset.id); closeModal(); await reloadLobby(); break;
         case 'lobby': await reloadLobby(); break;
@@ -974,7 +979,7 @@
           const i = Number(el.dataset.stat), targetChar = el.dataset.target;
           await control('update_investigator_stat', { targetChar, hpDelta: i < 2 ? (i === 0 ? -1 : 1) : 0,
             sanDelta: i >= 2 ? (i === 2 ? -1 : 1) : 0, reason });
-          const actor = state.investigators.find(person => person.id === targetChar);
+          const actor = state.investigators.find(person => person.name === targetChar);
           const status = dialog.querySelector('#stat-current');
           if (status && actor) status.innerHTML = view.actorStats(actor);
           break;
@@ -1004,7 +1009,7 @@
           closeModal();
           break;
         }
-        case 'replacement': state = await post('/replacement', { characterId: Number(replacementId) }); render(); break;
+        case 'replacement': state = await post('/replacement', { characterName: replacementName }); render(); break;
         case 'retry-image': {
           acceptState(await post('/retry-image', { jobId: el.dataset.id }));
           if (dialog.dataset.imageCollection) closeModal();
@@ -1020,10 +1025,10 @@
       if (!sdk) throw new Error('请从邻舍游戏中心打开本游戏');
       await sdk.ready;
       [catalog, characters, saves, castAssets] = await Promise.all([sdk.ext.request('/catalog'), sdk.bridge.call('get_characters'), sdk.save.list(), sdk.ext.request('/cast'), audio.restore()]);
-      const recommended = view.orderCharacters(characters, castAssets);
-      lineups.keeper = recommended.slice(0, 3).map(c => c.id);
-      keeperId = recommended[0]?.id ?? null;
-      lineups.investigator = recommended.slice(1, 3).map(c => c.id);
+      const recommended = view.orderCharacters(lobbyData().characters, castAssets);
+      lineups.keeper = recommended.slice(0, 3).map(c => c.name);
+      keeperName = recommended[0]?.name ?? null;
+      lineups.investigator = recommended.slice(1, 3).map(c => c.name);
       scenarioId = catalog.scenarios[0]?.id || '';
       lobby();
       sdk.on?.('standing-assets', async () => {

@@ -243,6 +243,8 @@ galgame-with-comfyUI/
 
 ### 6.2 轻量化 CoC 数据模型
 
+角色关联遵循开发指南的[角色姓名匹配](linshe_community_game_guide.md#34-角色姓名匹配)。调查员卡、主持人、NPC、游戏请求、工具回执和存档统一使用本局内唯一的姓名。场景、线索和道具继续保留各自的编号。
+
 1. **调查员卡（`Investigator`）**：
 
    * 基础属性：`STR`, `CON`, `DEX`, `INT`, `POW`, `APP`, `SIZ`, `EDU`
@@ -251,7 +253,7 @@ galgame-with-comfyUI/
 
    * 核心技能（约 12 项）：`侦查`, `图书馆`, `聆听`, `话术`, `说服`, `心理学`, `格斗`, `闪避`, `急救`, `神秘学`, `锁匠`, `潜行`
 
-   * 物品与密信：`inventory: string[]`, `handout: string`
+   * `inventory` 保存道具对象及其编号。`handout` 保存本局分配的秘密 HO。
 
    * *角色导入联动*：通过 `bridgeTools` 读取邻舍「酒馆」角色人设与外观 Tag，开局时用一次 LLM 调用自动生成契合人设的 CoC 属性与 2\~3 个特长技能。
 
@@ -266,7 +268,7 @@ galgame-with-comfyUI/
        "meta": { "title": "", "era": "1920s / 现代", "stylePrompt": "dark lovecraftian oil painting..." },
        "scenes": [{ "id": "s1", "name": "", "publicDesc": "", "hiddenNotes": "", "imagePrompt": "" }],
        "clues": [{ "id": "c1", "title": "", "content": "", "sceneId": "s1", "requiredSkill": "侦查", "isSecret": false }],
-       "npcs": [{ "id": "n1", "name": "", "persona": "", "secret": "" }],
+       "npcs": [{ "name": "", "persona": "", "secret": "" }],
        "keeperSecrets": "模组完整真相、幕后黑手与关键事件时间线"
      }
      
@@ -280,7 +282,7 @@ galgame-with-comfyUI/
 
    * `kpSecrets`：模组真相、隐藏节点、暗骰结果（**模式 A 下绝对不注入 AI 调查员 Prompt**）；
 
-   * `handouts[charId]`：私密线索与单独的 SAN 幻觉，仅注入对应角色。
+   * `handouts[characterName]`：以调查员姓名索引私密线索和个人密信，按可见范围提供给主持人及对应玩家。
 
 2. **AI 调查员「分段批处理 + 检定断点」**：
 
@@ -322,7 +324,7 @@ galgame-with-comfyUI/
 
    * 为 KP Agent 注册专属 Function Calling Tools：
 
-     * `request_and_roll_dice(targetChar, skill, difficulty)`
+     * `request_check(skill, difficulty, reason)` 为玩家本人检定。
 
      * `update_investigator_stat(targetChar, hpDelta, sanDelta, reason)`
 
@@ -331,6 +333,8 @@ galgame-with-comfyUI/
      * `switch_scene(sceneId)`
 
      * `send_secret_handout(targetChar, content)`
+
+   * `targetChar` 填调查员姓名。`targetCharOrAll` 私发时填调查员姓名，公开发放时填 `all`。
 
 ### 6.4 长局摘要、主世界记忆隔离与异步生图
 

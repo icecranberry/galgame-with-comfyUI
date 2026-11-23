@@ -116,7 +116,7 @@ export function listExpressionStandings(id) {
   };
 }
 
-function snapshotConfig(char) {
+export function captureStandingImageConfig(char) {
   return structuredClone({ ...captureImageGenerationConfig('portrait'), artist: charArtistOverride(char) ?? config.comfyui.momentsArtist,
     loras: char ? parseCharacterLoras(char) : [], ...(char?.custom_workflow ? { customWorkflow: char.custom_workflow } : {}), width: 768, height: 1536 });
 }
@@ -176,16 +176,27 @@ export function startAllStandingBatches({ mode, requirement = '', outfitScene = 
   return result;
 }
 
-export async function generateStandingPrompts(char, slots, requirement, persona, outfitScene = 'work', { player = false, readAvatar = readPlayerAvatar, chat = chatSync } = {}) {
+export async function generateStandingPrompts(char, slots, requirement, persona, outfitScene = 'work', { player = false, readAvatar = readPlayerAvatar, chat = chatSync, drinkState, signal } = {}) {
   const avatarImage = player ? await readAvatar() : null;
   const { messages, lorebook } = buildStandingPromptRequest({
     systemRules: getWorldSetting() ? getSystemRulesWithWorld({ roleplay: false }) : getSystemRules({ roleplay: false }),
     worldRule: getWorldSetting() ? getWorldIntegrationRule('interaction') : '',
     slots, persona: persona ?? (player ? buildUserImageCrossRefInfo() : buildStandingPersona(char, outfitScene)),
-    requirement, outfitScene, player, avatarImage,
+    requirement, outfitScene, player, avatarImage, drinkState,
   });
-  const raw = await chat(messages, { temperature: 0.7, response_format: { type: 'json_object' }, label: '批量立绘提示词', ...(lorebook && { lorebook }) });
-  return parseStandingPrompts(raw, slots);
+  const options = {
+    temperature: 0.7, label: drinkState ? '酒馆临时立绘提示词' : '批量立绘提示词', retries: drinkState ? 0 : 4,
+    ...(!drinkState && { response_format: { type: 'json_object' } }),
+    ...(signal && { signal }),
+    ...(lorebook && { lorebook }),
+  };
+  const raw = await chat(messages, options);
+  if (!drinkState) return parseStandingPrompts(raw, slots);
+  const prompt = typeof raw === 'string' ? raw.trim() : '';
+  if (!/[a-z]{3}/i.test(prompt) || /\p{Script=Han}|^`{3}|^[{\[]/u.test(prompt)) {
+    throw new Error('酒馆立绘提示词格式有误，请再试一次。');
+  }
+  return new Map([[slots[0].id, frameStandingPrompt(prompt)]]);
 }
 
 async function commitImage(id, slot, buffer, { removeBg = true, source = true } = {}) {
@@ -258,7 +269,7 @@ export function startStandingBatch(id, { slotIds, requirement = '', outfitScene 
   const rows = slots.map(s => ensureSlot(id, s.id));
   if (reusePrompts && rows.some(r => !r.prompt.trim())) throw fail('请先生成或保存提示词');
   requirement = String(requirement).trim().slice(0, 2000);
-  const generation = snapshotConfig(char);
+  const generation = captureStandingImageConfig(char);
   let persona = personaSnapshot ?? (player ? buildUserImageCrossRefInfo() : missingOutfit && missingOutfitPolicy === 'generate' ? null : buildStandingPersona(char, outfitScene));
   const jobId = randomUUID();
   const requestSnapshot = promptsReady => JSON.stringify({ requirement, outfitScene, missingOutfitPolicy, persona, promptsReady });
@@ -421,7 +432,7 @@ export function updateStandingPrompt(id, slot, prompt, generation) {
   assertIdle(id); ensureSlot(id, slot);
   if (typeof prompt !== 'string' || prompt.trim().length < 10 || prompt.length > 4000) throw fail('提示词需为 10–4000 字符');
   const row = ensureSlot(id, slot);
-  const old = { ...snapshotConfig(isPlayer(id) ? null : character(id)), ...JSON.parse(row.config_json) };
+  const old = { ...captureStandingImageConfig(isPlayer(id) ? null : character(id)), ...JSON.parse(row.config_json) };
   const next = generation ? { ...old, artist: String(generation.artist ?? old.artist ?? ''), loras: Array.isArray(generation.loras) ? generation.loras : old.loras } : old;
   standingStore(id).update(slot, 'prompt=?,config_json=?', [prompt.trim(), JSON.stringify(next)]);
   notify(id);

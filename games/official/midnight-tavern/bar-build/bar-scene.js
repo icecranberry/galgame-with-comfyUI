@@ -320,7 +320,7 @@ function create(container, onLost, plate, onReady, onSound) {
       ctx.quadraticCurveTo(507, 100, end, 100);
       ctx.lineTo(54, 100);
       ctx.closePath();
-      ctx.fillStyle = '#243e38';
+      ctx.fillStyle = '#583a32';
       ctx.fill();
       ctx.strokeStyle = '#e3bb73';
       ctx.lineWidth = 4;
@@ -588,7 +588,7 @@ function create(container, onLost, plate, onReady, onSound) {
         [3, 2, -1, 0.32, 4, 0xffd394, 7],
         [0, 4, -2, 2, 0.35, 0xffeed6, 4],
         [-2, 1, -3, 2.1, 2.6, 0xe69044, 1.2],
-        [1, 1, 3, 1.3, 2.8, 0x749c9c, 0.85],
+        [1, 1, 3, 1.3, 2.8, 0x8495ac, 0.85],
         [0.5, -1, 2, 4, 3, 0x936a46, 0.53],
       ]) {
         const softbox = mesh(
@@ -636,7 +636,7 @@ function create(container, onLost, plate, onReady, onSound) {
     const footprint = contact.clone();
     scene.add(footprint);
     footprint.position.y = 0.039;
-    scene.add(new T.HemisphereLight(0xffe2ca, 0x384943, 0.9));
+    scene.add(new T.HemisphereLight(0xffe2ca, 0x544039, 0.9));
     keyLight.position.set(-3, 6, 3);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);

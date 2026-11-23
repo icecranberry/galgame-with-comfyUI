@@ -1,26 +1,88 @@
-.focus-tools .lens-switch {
-  display: inline-flex; align-items: stretch; padding: 3px; gap: 2px;
-  border: 1px solid #a48154; border-radius: 7px;
-  background: linear-gradient(#4e3b2e, #231a17);
-  box-shadow: inset 0 1px #e9be8052, 0 2px 3px #160d0bd9;
+.seat-photo, .cg-frame, #drink-preview { --photo-paper: #efe2c8; }
+.seat-photo {
+  --print-inset: clamp(25px, 15%, 70px);
+  position: absolute; z-index: 2; top: 51%; right: var(--print-inset);
+  width: clamp(31px, 18cqw, 64px); aspect-ratio: 4/5;
+  display: grid; color: var(--cream);
+  padding: clamp(3px, 1.4cqw, 5px) clamp(3px, 1.4cqw, 5px) clamp(7px, 3.2cqw, 13px);
+  border-radius: 1px; background: var(--photo-paper);
+  box-shadow: 0 1px 1px #7a6045, 0 3px 9px #160c09b8;
+  translate: 50% -50%; rotate: -15deg; pointer-events: none;
+  animation: seat-print-arrive var(--transition) var(--settle) both;
 }
-.lens-switch button {
-  display: inline-flex; align-items: center; justify-content: center;
-  gap: 4px; white-space: nowrap; font: 600 13px/1.2 var(--serif);
+.seat-scene > :is(.portrait-illustrated,.portrait-expression) + .seat-photo { z-index: 0; }
+.seat-scene > .portrait-illustrated + .seat-photo { top: calc(15% + min(44%, 66cqw)); }
+.seat-scene > .portrait-avatar + .seat-photo { right: max(var(--print-inset), calc(50% - 80px)); }
+.seat[data-photo-open] .seat-scene > .seat-photo { visibility: hidden; }
+.seat-scene:has(> .seat-hit:focus-visible) > .seat-photo { outline: 2px solid var(--amber); outline-offset: 3px; }
+.seat-photo-image { position: relative; display: grid; place-items: center; overflow: hidden; background: var(--wood); }
+.seat-photo-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 64% 42%; }
+.seat-photo-image .ink-icon { width: 14px; height: 14px; }
+.seat-photo-image img:not([hidden]) + .ink-icon { visibility: hidden; }
+@keyframes seat-print-arrive { from { opacity: 0; transform: translate(-9px, 3px); } }
+
+#cg-preview, #drink-preview {
+  padding: 0; border: 0; overflow: visible; background: transparent; color: var(--cream);
+  max-width: calc(100vw - 24px); max-height: calc(100dvh - 16px);
 }
-.focus-tools .lens-switch button {
-  min-height:32px; padding:3px 6px; border:0; border-radius:3px; background:transparent; color:#d4bca1;
+#cg-preview {
+  --drink-thumb-width: clamp(68px, min(14vw, 23dvh), 190px);
+  --drink-rail: 0px;
+  padding-right: var(--drink-rail);
 }
-.focus-tools .lens-switch button[aria-pressed="true"] {
-  color: #312013; background: linear-gradient(#f0d6a1, #cfa568);
-  box-shadow: inset 0 1px #fff0c6, 0 1px 2px #120b08;
+#cg-preview:has(.cg-drink-print:not([hidden])) { --drink-rail: calc(var(--drink-thumb-width) * .8); }
+#cg-preview::backdrop { background: #120d0ba8; backdrop-filter: blur(3px); animation: reveal var(--transition) both; }
+#drink-preview::backdrop { background: transparent; }
+#cg-preview.closing::backdrop { animation: conceal var(--transition) both; }
+#cg-preview.closing.loading { animation: conceal var(--transition) both; }
+#cg-preview:not(.loading) .cg-loading { display: none; }
+.cg-loading { display: block; padding: 12px 18px; text-align: center; font-size: 13px; }
+.cg-frame { position: relative; }
+.cg-frame > img, #drink-preview > img {
+  width: auto; height: auto; object-fit: contain;
+  border: clamp(3px, .65vw, 9px) solid var(--photo-paper); border-bottom-width: clamp(8px, 1.5vw, 22px);
+  border-radius: 1px; box-shadow: 0 4px 24px #160c0999;
 }
-.focus-tools button:enabled:hover { filter: brightness(1.1); }
-@media (max-width: 650px) {
-  .focus-tools .lens-switch button { gap:2px; padding-inline:3px; }
-  .focus-tools .ink-icon { width: 15px; height: 15px; }
+.cg-frame > img {
+  max-width: min(calc(100vw - 24px - var(--drink-rail)), 1080px); max-height: min(calc(100dvh - 76px), 760px);
 }
+#drink-preview > img {
+  max-width: min(78vw, 620px); max-height: min(78dvh, 740px);
+}
+.cg-drink {
+  position: absolute; z-index: 1; left: 100%; bottom: clamp(8px, 1.2vw, 18px);
+  width: var(--drink-thumb-width); translate: -20% 0; transition: opacity var(--transition);
+}
+.cg-drink-print {
+  position: relative; display: block; width: 100%; aspect-ratio: 6/7;
+  padding: 0; background: transparent; border: 0; filter: drop-shadow(0 3px 9px #160c09b8);
+}
+.cg-drink-print canvas { display: block; width: 100%; height: auto; }
+.cg-drink-print img {
+  position: absolute; top: 50%; left: 50%; width: 83.3333%; aspect-ratio: 4/5; object-fit: cover;
+  translate: -50% -50%; rotate: 9deg;
+  border: clamp(2px, .4vw, 4px) solid var(--photo-paper); border-bottom-width: clamp(4px, .8vw, 10px);
+}
+.cg-drink-print:hover { filter: brightness(1.08) drop-shadow(0 3px 9px #160c09b8); }
+#cg-preview.loading .cg-drink { visibility: hidden; }
+.cg-drink.expanded { visibility: hidden; }
+#cg-preview.closing .cg-drink { opacity: 0; pointer-events: none; }
+#cg-preview:not(.loading) .cg-drink-print { animation: cg-drink-arrive var(--transition) var(--settle) both; }
+@keyframes cg-drink-arrive { from { opacity: 0; transform: translate(8px, 6px) scale(.94); } }
+.cg-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 7px 4px 4px; }
+#cg-preview:is(.loading,.closing) .cg-tools { opacity: 0; pointer-events: none; }
+.cg-tools button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-height: 44px; padding: 4px 10px; border: 1px solid #ccad7e; border-radius: 3px;
+  color: var(--wood); background: var(--paper); font: 600 13px/1.2 var(--serif);
+  box-shadow: inset 0 -3px #ccad7e, 0 2px 3px #170e0a99;
+}
+.cg-tools .cg-close { width: 44px; color: var(--cream); background: var(--wood); border-color: var(--line); box-shadow: none; }
+.cg-tools .album-slip:disabled { border-color: var(--line); background: var(--wood); color: var(--muted); box-shadow: none; }
+.cg-tools button:enabled:hover, .seat-scene:has(> .seat-hit:hover) > .seat-photo { filter: brightness(1.12); }
 @media (prefers-reduced-motion: no-preference) {
-  .bar-nav button, .focus-tools button { transition: filter 300ms, border-color 300ms; }
-  .lens-switch button { transition: color 300ms, box-shadow 300ms; }
+  .cg-tools button, .seat-photo { transition: filter var(--transition), border-color var(--transition); }
+  .cg-loading { animation: reveal 150ms 150ms both; }
+  .cg-tools { transition: opacity 120ms 160ms; }
+  #cg-preview:is(.loading,.closing) .cg-tools { transition-delay: 0s; }
 }

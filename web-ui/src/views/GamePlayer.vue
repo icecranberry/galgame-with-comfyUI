@@ -1,6 +1,6 @@
 <template>
   <main class="game-theme game-player" :class="{ 'is-leaving': leaving }">
-    <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" sandbox="allow-scripts" referrerpolicy="same-origin" />
+    <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" :allow="isOfficialTavern() ? 'autoplay' : undefined" sandbox="allow-scripts" referrerpolicy="same-origin" />
     <div v-if="error || game?.source !== 'official' || !['trpg-simulator', 'midnight-tavern'].includes(game?.id)" class="game-exit"><GameAction variant="quiet" compact @click="exit">← 游戏馆</GameAction></div>
     <div v-if="error" class="game-error" role="alert">{{ error }}</div>
   </main>
@@ -30,6 +30,7 @@ const exit = () => {
 }
 const request = (path, options) => gameRequest(base + path, { ...options, signal: abort.signal })
 const isOfficialTrpg = () => game.value?.id === 'trpg-simulator' && game.value.source === 'official'
+const isOfficialTavern = () => game.value?.id === 'midnight-tavern' && game.value.source === 'official'
 const trpgAudioKey = 'linshe.trpg.audio'
 async function dispatch(method, args) {
   const id = () => { if (!/^[\w-]{1,80}$/.test(args.sessionId)) throw new Error('无效存档编号'); return encodeURIComponent(args.sessionId) }
@@ -63,7 +64,7 @@ async function dispatch(method, args) {
     case 'exit': exit(); return { ok: true }
     case 'standings': {
       const { subject } = args
-      if (game.value?.id !== 'trpg-simulator' || game.value.source !== 'official' || (subject !== 'player' && (!Number.isSafeInteger(subject) || subject < 1))) {
+      if (!isOfficialTrpg() || (subject?.player !== true && (typeof subject?.characterName !== 'string' || !subject.characterName.trim()))) {
         throw new Error('立绘管理入口不可用')
       }
       const target = frame.value?.contentWindow, requestChannel = channel

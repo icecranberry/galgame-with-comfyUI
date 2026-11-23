@@ -180,6 +180,7 @@ test('外观段默认保留标题，直接生图可仅移除标题而保留正�
   }
   assert.equal(buildCharacterAppearanceSection({ base_prompt: '无外观段' }, { outfits: null, includeHeading: false }), '');
   assert.equal(buildCharacterAppearanceSection({ base_prompt: '## 你的外观\n' }, { outfits: null, includeHeading: false }), '');
+  assert.equal(buildCharacterAppearanceSection(CHAR, { outfits: null, includeHeading: false, person: '小满' }), '小满有着栗色长发与琥珀色眼睛。');
 });
 
 test('省略外观标题不丢失生效服饰、基础外观或着装优先级', () => {
@@ -206,6 +207,7 @@ test('无外观段的角色：short 兜底整卡、full 原样返回', () => {
   const plain = { id: 2, display_name: '阿岚', short_prompt: '', base_prompt: '你是阿岚，来自邻舍镇的邮差。' };
   assert.equal(buildCharacterPersona(plain, { outfits: null }), '你是阿岚，来自邻舍镇的邮差。');
   assert.equal(buildCharacterPersona(plain, { variant: 'full', outfits: null }), '你是阿岚，来自邻舍镇的邮差。');
+  assert.equal(buildCharacterPersona(plain, { outfits: null, fallbackToBase: false }), '');
 });
 
 // 外观段编辑与身份提取：与人格组装共同维护，避免同名测试分散。

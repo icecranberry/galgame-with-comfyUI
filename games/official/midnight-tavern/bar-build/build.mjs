@@ -30,10 +30,10 @@ await build({
 await build({
   absWorkingDir: here,
   stdin: {
-    contents: "export { BASE_VOLUME, DROP_VOLUME, cocktailLook } from '../server/index.mjs';",
+    contents: "export { BASE_VOLUME, DROP_VOLUME, MAX_DROPS, BASE_TIPSY, cocktailLook, primaryPotions, compoundPotions, intoxication, predictTipsy, canServeDrink, drinkEffects, recipeEffects, recipeName, potionDose, potionAttributes, garnishes } from '../server/index.mjs';",
     resolveDir: here,
   },
-  // The host requires a single-file backend. Only its pure appearance exports go into the browser.
+  // The host requires a single-file backend. Share the pure recipe data and appearance logic with the browser.
   plugins: [{
     name: 'omit-server-builtins',
     setup(build) {

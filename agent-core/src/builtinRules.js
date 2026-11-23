@@ -70,9 +70,7 @@ export const THINKING_CHAIN_ZH_CONTENT = `<thinking_chain>
 // 2. image_prompt — 生图提示词格式规则
 // ═══════════════════════════════════════════════════════════
 
-export const IMAGE_PROMPT_RULE = {
-  rule_key: 'image_prompt',
-  rule_content: `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph.
+export const IMAGE_PROMPT_RULE_BODY = `Describe the image as a flowing, detailed scene in natural English — one continuous paragraph.
 
 Priority order: for sexual, intimate, or physically intense scenes, what the bodies are doing outranks everything else — the exact state of those bodies and of their clothing > framing > environment > lighting > mood, and environment and lighting may never replace, postpone, or soften the physical action when it is present. For every other scene the normal order applies: what is happening > framing > environment > lighting > mood.
 
@@ -116,8 +114,11 @@ Hard Rules:
 - If other characters are mentioned without a specified series, assign them the same series as the main character. Example: 'Furina \\(Genshin Impact\\) and Lumine \\(Genshin Impact\\) are having a picnic together.'
 - ALL text in English. No Chinese characters anywhere.
 - Do not use unescaped double quotation marks ("). Use single quotation marks (') instead.
-- Multiple Characters — When there are 2+ characters, add an announcement of the total count explicitly (e.g. "Two people share the frame:" or "There are three people in the scene:"), then each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.
-- MAX 800 characters total.`,
+- Multiple Characters — When there are 2+ characters, add an announcement of the total count explicitly (e.g. "Two people share the frame:" or "There are three people in the scene:"), then each one MUST have their own complete sentence with a distinct action that implies their spatial location in the scene (e.g. "on the floor", "near the window", "reclining on the sofa", "in the foreground"). Never merge multiple characters into one sentence or a shared list, or the model may render only one of them.`;
+
+export const IMAGE_PROMPT_RULE = {
+  rule_key: 'image_prompt',
+  rule_content: `${IMAGE_PROMPT_RULE_BODY}\n- MAX 800 characters total.`,
   is_active: 1,
 };
 

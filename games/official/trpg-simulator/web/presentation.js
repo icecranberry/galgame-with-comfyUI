@@ -58,25 +58,23 @@
     'ink-action', `data-log="${esc(logId)}" data-network`);
   function isKeeperLine(state, log) {
     if (log?.kind !== 'dialogue') return false;
-    const keeperId = state?.mode === 'keeper' ? 'player' : state?.keeperId;
-    return log.actorId != null ? keeperId != null && String(log.actorId) === String(keeperId) : log.speaker === 'KP';
+    return log.speakerRole === 'keeper' || (state?.mode === 'keeper' && log.speakerRole === 'player') ||
+      (!log.speakerRole && log.speaker === 'KP');
   }
   const speakerName = (name, keeper) => `${esc(name)}${keeper ? ' <span class="speaker-kp">KP</span>' : ''}`;
   function actionControls(state, log) {
     const action = state.declaration;
     if (!action || action.logId !== log.id || action.roll) return '';
-    const actor = state.investigators.find(person => person.id === action.actorId);
+    const actor = state.investigators.find(person => person.name === action.actor);
     return `<div class="control-row action-ruling">${describeButton(log.id, false)}
       ${actor?.outOfAction ? '' : button('check-action', '要求检定', '', `data-log="${esc(log.id)}" data-network`)}</div>`;
   }
-  function logs(state, list, { interactive = false, pendingRolls, characters = [] } = {}) {
+  function logs(state, list, { interactive = false, pendingRolls } = {}) {
     const jobs = new Map((state?.imageJobs || []).map(job => [job.id, job]));
     const declaration = interactive && state.declaration;
     const check = declaration?.roll;
     const pictureSource = interactive ? 'transcript' : 'history';
-    const keeperName = state?.mode === 'keeper' ? state.player?.name :
-      state?.publicLog?.findLast(log => isKeeperLine(state, log) && log.speaker && log.speaker !== 'KP')?.speaker ||
-      characterName(characters.find(character => String(character.id) === String(state?.keeperId)));
+    const keeperName = state?.mode === 'keeper' ? state.player?.name : state?.keeperName;
     return list.map((log, index) => {
       if (log.kind === 'dice') {
         const roll = parseRoll(log);
@@ -87,7 +85,8 @@
         if (job?.kind === 'scene' && image(job.url)) return '';
         return `<figure class="story-illustration" data-log-id="${esc(log.id)}">${picture(job, state.ended, pictureSource)}</figure>`;
       }
-      const characterIndex = state?.investigators.findIndex(c => log.actorId ? c.id === log.actorId : c.name === log.speaker) ?? -1;
+      const characterIndex = log.kind === 'dialogue' && !isKeeperLine(state, log)
+        ? state?.investigators.findIndex(c => c.name === log.speaker) ?? -1 : -1;
       const narration = ['scene', 'ending', 'encounter'].includes(log.kind);
       const checkRequest = log.kind === 'check' && log.speaker === 'KP';
       const color = characterIndex >= 0 ? colors[characterIndex % colors.length] : '#8b6a31';
@@ -123,31 +122,31 @@
     return state.investigators.map((c, i) => {
       const portrait = state.mode === 'keeper'
         ? button('hud-actor', avatar(c) + '<span class="hud-actor-menu" aria-hidden="true">…</span>', 'hud-portrait hud-actor-trigger',
-          `id="hud-actor-${esc(c.id)}" data-target="${esc(c.id)}" aria-label="打开${esc(c.name)}的操作面板" aria-haspopup="dialog"`)
+          `id="hud-actor-${esc(c.name)}" data-target="${esc(c.name)}" aria-label="打开${esc(c.name)}的操作面板" aria-haspopup="dialog"`)
         : `<div class="hud-portrait">${avatar(c)}${c.player ? '<span class="hud-you">你</span>' : ''}</div>`;
       return `<article class="investigator ${c.outOfAction ? 'retired' : ''} ${c.san / c.maxSan < .3 ? 'san-critical' : ''}" style="--character-color:${colors[i % colors.length]}">${portrait}<div class="hud-details"><div class="investigator-name">${esc(c.name)}${c.outOfAction ? '<span>退场</span>' : c.insane ? '<span>疯狂</span>' : ''}</div><div class="meter-row"><span>HP</span><meter class="hp" min="0" max="${c.maxHp}" value="${c.hp}" aria-label="${esc(c.name)} HP"></meter><b>${c.hp}</b></div><div class="meter-row"><span>SAN</span><meter class="san" min="0" max="${c.maxSan}" value="${c.san}" aria-label="${esc(c.name)} SAN"></meter><b>${c.san}</b></div></div></article>`;
     }).join('');
   }
+  const castExpressions = (assets, name) => Object.hasOwn(assets.characters, name) ? assets.characters[name] : {};
   function castFrame(state, ui) {
     const player = state.mode === 'investigator'
-      ? { ...state.player, id: 'player', expressions: ui.castAssets.player.expressions } : null;
+      ? { ...state.player, expressions: ui.castAssets.player.expressions } : null;
     const investigators = state.investigators.filter(c => !c.player).map(c => ({
-      ...c, expressions: ui.castAssets.characters[c.id] || {},
+      ...c, expressions: castExpressions(ui.castAssets, c.name),
     }));
     const people = player ? [player, ...investigators] : investigators;
-    const byId = new Map(people.map(person => [String(person.id), person]));
+    const byName = new Map(people.map(person => [person.name, person]));
     const [first, second] = people.filter(person => !person.outOfAction);
     const slots = [first, second].map(actor => actor ? { actor, expression: 'normal' } : null);
     let side = player && second ? 1 : 0;
-    let currentLine, speakerId;
+    let currentLine, speaker;
     for (const log of state.publicLog) {
       if (log.kind !== 'dialogue' || (log.sceneId && log.sceneId !== state.scene.id)) continue;
-      const actor = isKeeperLine(state, log) ? null :
-        log.actorId ? byId.get(String(log.actorId)) : people.find(person => person.name === log.speaker);
+      const actor = isKeeperLine(state, log) ? null : byName.get(log.speaker);
       currentLine = log;
-      speakerId = actor?.id;
+      speaker = actor?.name;
       if (actor) {
-        const existing = slots.findIndex(slot => slot?.actor.id === actor.id);
+        const existing = slots.findIndex(slot => slot?.actor.name === actor.name);
         side = existing < 0 ? 1 - side : existing;
         slots[side] = { actor, expression: log.expressionSlot || 'normal' };
       }
@@ -156,7 +155,7 @@
         slots[playerSide < 0 ? 1 - side : playerSide] = { actor: player, expression: log.playerExpressionSlot };
       }
     }
-    return { slots, side, currentLine, speakerId };
+    return { slots, side, currentLine, speaker };
   }
   function setPortrait(figure, actor, expression) {
     const expressions = actor.expressions;
@@ -188,21 +187,21 @@
     });
   }
   function updateCast(stage, state, ui) {
-    const { slots, side, currentLine, speakerId } = castFrame(state, ui);
+    const { slots, side, currentLine, speaker } = castFrame(state, ui);
     const keeperSpeaking = isKeeperLine(state, currentLine);
     slots.forEach((slot, index) => {
       let figure = stage.querySelector(`[data-cast-side="${index}"]`);
       if (!slot) { figure?.remove(); return; }
-      if (figure?.dataset.actor !== slot.actor.id) {
+      if (figure?.dataset.actor !== slot.actor.name) {
         figure?.remove();
         figure = document.createElement('figure');
         figure.dataset.castSide = index;
-        figure.dataset.actor = slot.actor.id;
+        figure.dataset.actor = slot.actor.name;
         figure.className = 'cast-portrait';
         stage.append(figure);
       }
       figure.classList.toggle('is-active', !keeperSpeaking && index === side);
-      figure.setAttribute('aria-label', `${slot.actor.name}${slot.actor.id === speakerId ? '，当前发言' : ''}`);
+      figure.setAttribute('aria-label', `${slot.actor.name}${slot.actor.name === speaker ? '，当前发言' : ''}`);
       setPortrait(figure, slot.actor, slot.expression);
     });
     const caption = stage.querySelector('.stage-line');
@@ -225,7 +224,7 @@
     return options.map(({ value, label }) => `<option value="${esc(value)}" ${value === current ? 'selected' : ''}>${esc(label)}</option>`).join('');
   }
   const liveActors = state => state.investigators.filter(actor => !actor.outOfAction);
-  const actorOptions = actors => actors.map(actor => ({ value: actor.id, label: `${actor.name}${actor.outOfAction ? ' · 退场' : ''}` }));
+  const actorOptions = actors => actors.map(actor => ({ value: actor.name, label: `${actor.name}${actor.outOfAction ? ' · 退场' : ''}` }));
   function grantItemForm(ui, target) {
     const amount = (id, label, min, max, value) => `<label>${label}<input name="${id}" type="number" min="${min}" max="${max}" value="${value}" required data-network></label>`;
     return `<form id="give-item-form" class="item-grant-form" autocomplete="off" data-target="${esc(target)}">
@@ -249,11 +248,11 @@
     const skill = declaration?.suggestedSkill || '侦查';
     const dice = skill === '理智' ? 'd100' : 'd20';
     const actors = liveActors(state);
-    const target = actors.find(person => person.id === ui.controlChar) || actors[0];
-    const actor = declaration && state.investigators.find(person => person.id === declaration.actorId);
-    return `<section class="control-section check-form" data-log="${esc(declaration?.logId || '')}" data-target="${esc(pinnedActor?.id)}">
+    const target = actors.find(person => person.name === ui.controlChar) || actors[0];
+    const actor = declaration && state.investigators.find(person => person.name === declaration.actor);
+    return `<section class="control-section check-form" data-log="${esc(declaration?.logId || '')}" data-target="${esc(pinnedActor?.name)}">
       ${declaration ? `<p class="field-note">${esc(actor.name)} · ${esc(declaration.reason)}</p>`
-        : pinnedActor ? '' : `<h3>调查员</h3>${choices('check-target', actorOptions(actors), target?.id, '检定对象')}`}
+        : pinnedActor ? '' : `<h3>调查员</h3>${choices('check-target', actorOptions(actors), target?.name, '检定对象')}`}
       <h3>检定技能</h3><p class="field-note check-skill-hint">检定按角色卡上所选技能的数值判定。找线索用「侦查」，听门后的动静用「聆听」。</p>
       ${choices('skill', ui.catalog.skills.map(value => ({ value, label: value })), skill, '选择技能')}
       <h3>难度</h3>${choices('difficulty', Object.entries(difficultyLabels).map(([value, label]) => ({ value, label })), 'regular', '检定难度')}
@@ -275,7 +274,7 @@
     `data-tool="${tool}" data-network ${attributes} ${disabled ? 'disabled' : ''}`);
   function actorCommands(state, actor, pinned = false) {
     const locked = state.ended || state.outcome || state.pendingCheck;
-    const attributes = tool => pinned ? `data-target="${esc(actor.id)}"` : `id="kp-command-${tool}"`;
+    const attributes = tool => pinned ? `data-target="${esc(actor.name)}"` : `id="kp-command-${tool}"`;
     return `<div class="keeper-commands">
       ${button('temporary-check', '临时检定', 'keeper-command keeper-command-check', `${attributes('check')} data-network ${locked || !actor || actor.outOfAction ? 'disabled' : ''}`)}
       ${keeperCommand('stat', '调整状态', locked || !actor, attributes('stat'))}
@@ -292,8 +291,8 @@
     </section>`;
   }
   function keeperDialog(state, ui, tool) {
-    const actor = state.investigators.find(person => person.id === ui.controlChar);
-    const target = actor?.id;
+    const actor = state.investigators.find(person => person.name === ui.controlChar);
+    const target = actor?.name;
     const footer = (action, label, attrs = '') => `<div class="dialog-footer">${button(action, label, 'primary', `data-network ${attrs}`)}</div>`;
     const targetAttr = `data-target="${esc(target)}"`;
     switch (tool) {
@@ -331,7 +330,7 @@
   }
   function consoleMarkup(state, ui) {
     const actions = state.actions || [];
-    const actor = state.investigators.find(person => person.id === ui.controlChar);
+    const actor = state.investigators.find(person => person.name === ui.controlChar);
     const locked = state.ended || state.outcome || state.pendingCheck;
     const command = (tool, label, disabled) => keeperCommand(tool, label, disabled, `id="kp-command-${tool}"`);
     return `<section class="keeper-console">
@@ -374,12 +373,12 @@
     const content = keeper ? state.investigators.map(actor =>
       `<details class="keeper-truth secret-ho-disclosure"><summary>${esc(actor.name)} · ${esc(actor.handout ? `${actor.hoId} ${actor.handout.title}` : '未分配 HO')}</summary>
         ${actor.handout ? handoutCard(actor.handout) : ''}
-        ${state.ended ? '' : button('ho-focus-kp', '在 KP 控制台选中', 'quiet-action', `data-id="${esc(actor.id)}"`)}</details>`).join('')
+        ${state.ended ? '' : button('ho-focus-kp', '在 KP 控制台选中', 'quiet-action', `data-id="${esc(actor.name)}"`)}</details>`).join('')
       : own?.handout ? handoutCard(own.handout) : '<p class="empty-copy">本局没有分配秘密 HO。</p>';
     return `<section class="evidence-collection"><div class="panel-heading"><h2>${keeper ? '全员 HO 总览' : '我的秘密 HO'}</h2></div>${content}</section>`;
   }
   function clues(state) {
-    return `<section class="evidence-collection">${state.clues.length ? state.clues.map((c, i) => `<button class="evidence-card ${c.isSecret ? 'is-private' : ''}" data-action="evidence" data-id="${esc(c.id)}"><span class="evidence-label">证物 ${String(i + 1).padStart(2, '0')}<span>${c.isSecret ? '私密' : '公开'}</span></span><h3>${esc(c.title)}</h3><p>${highlight(c)}</p><span class="evidence-bottom">${esc(c.requiredSkill || '现场发现')}<span aria-hidden="true">↗</span></span></button>`).join('') : '<p class="empty-copy">还没有留下可以拼合的碎片。</p>'}${Object.entries(state.handouts).filter(([, text]) => text).map(([id, content]) => `<article class="handout-note"><span class="eyebrow">PRIVATE NOTE</span><h3>交给 ${esc(state.investigators.find(c => c.id === id)?.name || '调查员')}</h3><p>${esc(content)}</p></article>`).join('')}</section>`;
+    return `<section class="evidence-collection">${state.clues.length ? state.clues.map((c, i) => `<button class="evidence-card ${c.isSecret ? 'is-private' : ''}" data-action="evidence" data-id="${esc(c.id)}"><span class="evidence-label">证物 ${String(i + 1).padStart(2, '0')}<span>${c.isSecret ? '私密' : '公开'}</span></span><h3>${esc(c.title)}</h3><p>${highlight(c)}</p><span class="evidence-bottom">${esc(c.requiredSkill || '现场发现')}<span aria-hidden="true">↗</span></span></button>`).join('') : '<p class="empty-copy">还没有留下可以拼合的碎片。</p>'}${Object.entries(state.handouts).filter(([, text]) => text).map(([name, content]) => `<article class="handout-note"><span class="eyebrow">PRIVATE NOTE</span><h3>交给 ${esc(name)}</h3><p>${esc(content)}</p></article>`).join('')}</section>`;
   }
   const itemIcons = {
     consumable: '<path d="M4 6h16v14H4zM8 6V4h8v2m-7 7h6m-3-3v6"/>',
@@ -401,21 +400,21 @@
         ${item.desc ? `<p>${esc(item.desc)}</p>` : ''}
         <div class="pack-item-effects">${effects || (item.type === 'key' ? '<span>关键物品</span>' : '<span>趣味杂物</span>')}${armed ? '<span class="pack-effect-armed">加值已备好</span>' : ''}</div>
       </div>
-      ${button('use-item', '使用', 'ink-action pack-use', `data-id="${esc(item.id)}" data-target="${esc(actor?.id)}" aria-label="使用 ${esc(item.name)}" data-network ${disabled ? 'disabled' : ''}`)}
+      ${button('use-item', '使用', 'ink-action pack-use', `data-id="${esc(item.id)}" data-target="${esc(actor?.name)}" aria-label="使用 ${esc(item.name)}" data-network ${disabled ? 'disabled' : ''}`)}
     </article>`;
   }
   function packItems(state, ui) {
     const actors = liveActors(state), personal = state.investigators;
     const keeper = state.mode === 'keeper';
     const shared = state.partyInventory || [];
-    const actor = keeper ? actors.find(c => c.id === ui.packActor) || actors.find(c => c.id === ui.controlChar) || actors[0] : actors.find(c => c.player);
+    const actor = keeper ? actors.find(c => c.name === ui.packActor) || actors.find(c => c.name === ui.controlChar) || actors[0] : actors.find(c => c.player);
     const locked = state.ended || state.outcome || state.pendingTurn || state.playbackRemaining || state.awaitingItem;
     const items = [
       ...shared.map(item => ({ item, owner: '全队共享', actor })),
       ...personal.flatMap(c => (c.inventory || []).map(item => ({ item, owner: c.name, actor: c }))),
     ].sort((a, b) => Number(a.item.uses === 0) - Number(b.item.uses === 0));
     return `${keeper && shared.some(item => item.uses !== 0) && actors.length ? `<div class="pack-actor"><label for="pack-actor">共享道具使用者</label>
-      <select id="pack-actor" class="trpg-select" data-network>${optionList(actorOptions(actors), actor?.id)}</select></div>` : ''}
+      <select id="pack-actor" class="trpg-select" data-network>${optionList(actorOptions(actors), actor?.name)}</select></div>` : ''}
       <div class="pack-items">${items.length ? items.map(entry => itemCard(entry.item, entry.owner, entry.actor, locked)).join('') : '<p class="empty-copy">行囊里还没有道具。</p>'}</div>`;
   }
   function backpack(state, ui) {
@@ -444,7 +443,8 @@
     const needsPlayback = nextFrame || state.pendingTurn;
     const available = !state.declaration && !needsPlayback && !state.pendingCheck && !state.awaitingRuling && !state.awaitingItem && !state.outcome && !state.proposedEnding;
     const inlineTurn = state.mode === 'investigator' && available && !own?.outOfAction;
-    const eligible = ui.characters.filter(c => c.id !== state.keeperId && !state.investigators.some(i => i.id === String(c.id)));
+    const usedNames = new Set([state.keeperName, state.player.name, 'all', 'party', ...state.investigators.map(card => card.name)]);
+    const eligible = ui.characters.filter(c => !usedNames.has(c.name));
     const replacement = available && eligible.length && state.investigators.some(c => c.outOfAction);
     let primary = '';
     if (ui.thinking && needsPlayback) primary = turnButton('waiting', '继续行动', 'primary', 'aria-busy="true" disabled');
@@ -459,8 +459,8 @@
     const hidden = nextFrame && !ui.thinking || ui.tab !== 'narrative' && !needsPlayback && !state.pendingCheck && !state.outcome;
     return `<footer class="composer" ${hidden ? 'hidden' : ''}>
       ${Number.isInteger(state.clockRemaining) && state.clockRemaining > 0 && !state.outcome ? `<p class="archive-note">倒计时剩余 ${state.clockRemaining} 回合</p>` : ''}
-      ${state.pendingCheck ? `<div class="check-request"><div><span>${esc(state.investigators.find(c => c.id === state.pendingCheck.targetChar)?.name)} · 请求检定</span><strong>${esc(state.pendingCheck.skill)} · ${esc(difficultyLabels[state.pendingCheck.difficulty] || state.pendingCheck.difficulty)}${state.pendingCheck.mode && state.pendingCheck.mode !== 'normal' ? ` · ${esc(modeLabels[state.pendingCheck.mode])}` : ''}</strong><small>${esc(state.pendingCheck.reason)}</small></div>${state.mode === 'keeper' ? button('roll', `掷 ${(state.pendingCheck.dice || 'd100').toUpperCase()}`, 'primary', 'data-network') : ''}</div>` : ''}
-      ${replacement && !state.ended ? `<details class="replacement"><summary>有人退场 · 引入替补</summary>${choices('replacement', eligible.map(c => ({ value: c.id, label: characterName(c) })), ui.replacementId, '选择替补')}${turnButton('replacement', '邀请加入', 'quiet-action')}</details>` : ''}
+      ${state.pendingCheck ? `<div class="check-request"><div><span>${esc(state.investigators.find(c => c.name === state.pendingCheck.targetChar)?.name)} · 请求检定</span><strong>${esc(state.pendingCheck.skill)} · ${esc(difficultyLabels[state.pendingCheck.difficulty] || state.pendingCheck.difficulty)}${state.pendingCheck.mode && state.pendingCheck.mode !== 'normal' ? ` · ${esc(modeLabels[state.pendingCheck.mode])}` : ''}</strong><small>${esc(state.pendingCheck.reason)}</small></div>${state.mode === 'keeper' ? button('roll', `掷 ${(state.pendingCheck.dice || 'd100').toUpperCase()}`, 'primary', 'data-network') : ''}</div>` : ''}
+      ${replacement && !state.ended ? `<details class="replacement"><summary>有人退场 · 引入替补</summary>${choices('replacement', eligible.map(c => ({ value: c.name, label: c.name })), ui.replacementName, '选择替补')}${turnButton('replacement', '邀请加入', 'quiet-action')}</details>` : ''}
       ${state.ended ? '<p class="archive-note">本局已落幕。留下的线索与故事，仍可随时翻阅。</p>' : `
         ${!available ? '' : own?.outOfAction ? '<p class="archive-note">你已退场，可以继续旁观调查。</p>' : `
           <div class="action-suggestions" aria-label="行动方向" role="group">${ui.suggestions.map(suggestion => button('suggest-action', esc(suggestion), 'pill', 'data-network')).join('')}</div>
@@ -479,7 +479,7 @@
       ...(state.hasSecretHO ? [{ id: 'ho', label: '秘密 HO' }] : []), { id: 'cards', label: '角色卡' }];
     const hoPanel = state.hasSecretHO ? `<section id="panel-ho" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-ho" ${ui.tab === 'ho' ? '' : 'hidden'}>${secretHandouts(state)}</section>` : '';
     const rendered = logs(state, state.publicLog.filter(log => !ui.pendingRolls.has(log.id)),
-      { interactive: true, pendingRolls: ui.pendingRolls, characters: ui.characters });
+      { interactive: true, pendingRolls: ui.pendingRolls });
     const extraRolls = ui.rolls.filter(roll => !state.publicLog.some(log => log.id === roll.logId));
     return `<main class="table narrative-table ${ui.entering ? 'is-entering' : ''}"><section class="visual-stage" aria-label="场景与人物">${ui.previousBackground ? `<div class="stage-backdrop has-image" style="--scene:url('${image(ui.previousBackground)}')"></div>` : ''}<div class="stage-backdrop ${background ? 'has-image' : ''} ${ui.backgroundChanged ? 'is-new-background' : ''}" ${background ? `style="--scene:url('${image(background.url)}')"` : ''}></div><div class="stage-grain" aria-hidden="true"></div><div class="stage-vignette" aria-hidden="true"></div>${button('lobby', '← 主页', 'stage-link stage-exit', 'data-network')}<header class="stage-navigation"><span class="mode-badge">${state.mode === 'keeper' ? '守秘人视角' : '调查员视角'}<i></i>第 ${state.round + 1} 轮</span><div>${button('finish-dialog', state.ended ? '结团回忆' : '结团', 'stage-link', 'data-network')}</div></header><section class="hud" aria-label="调查员状态">${hud(state)}</section><div class="stage-cast"><div class="stage-line" hidden><strong></strong><p></p></div></div><div class="stage-caption"><span class="eyebrow">${esc(state.title)}</span><h2>${esc(state.scene.name)}</h2><span class="stage-caption-rule"></span></div>${state.ended ? '<span class="ended-stamp">本局落幕</span>' : ''}</section><aside class="narrative-column"><header class="story-heading"><span class="eyebrow">${esc(state.title)}</span><h1>${esc(state.scene.name)}</h1><div class="story-heading-rule"><span></span><i>✦</i><span></span></div></header><nav class="story-tabs" role="tablist" aria-label="调查桌">${tabs.map(tab => button('tab', tab.label, ui.tab === tab.id ? 'is-active' : '', `data-tab="${tab.id}" id="tab-${tab.id}" role="tab" aria-selected="${ui.tab === tab.id}" aria-controls="panel-${tab.id}" tabindex="${ui.tab === tab.id ? 0 : -1}"`)).join('')}</nav><div class="story-scroll" id="story-scroll"><section id="panel-narrative" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-narrative" ${ui.tab === 'narrative' ? '' : 'hidden'}><div class="transcript" id="transcript" aria-label="本幕叙事">${rendered}${extraRolls.map(roll => rollCard(roll)).join('')}</div></section>${state.mode === 'keeper' ? `<section id="panel-keeper" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-keeper" ${ui.tab === 'keeper' ? '' : 'hidden'}>${consoleMarkup(state, ui)}</section>` : ''}<section id="panel-clues" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-clues" ${ui.tab === 'clues' ? '' : 'hidden'}>${backpack(state, ui)}</section>${hoPanel}<section id="panel-cards" class="story-panel ${ui.tabChanged ? 'is-switching' : ''}" role="tabpanel" aria-labelledby="tab-cards" ${ui.tab === 'cards' ? '' : 'hidden'}>${cards(state)}</section></div><div class="story-utilities">${button('history', '往日记录', 'quiet-action')}${button('images', '场景印相', 'quiet-action')}</div>${composer(state, ui)}</aside></main>`;
   }
@@ -502,7 +502,6 @@
   const version = scenario => scenario.briefing?.version ? `v${scenario.briefing.version}` : '';
   const saveTime = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
   const characterCollator = new Intl.Collator('zh-CN-u-co-pinyin', { sensitivity: 'base', numeric: true });
-  const characterName = character => character?.display_name || character?.name || '';
   function scenarioList({ scenarios, scenario }) {
     return scenarios.map((item, i) => {
       const active = item === scenario;
@@ -553,20 +552,18 @@
       return button('lobby-mode', `${title} <small>${abbreviation}</small>`, '', `id="lobby-mode-${value}" data-mode="${value}" aria-pressed="${mode === value}" data-network`);
     }).join('');
   }
-  function partyStatus({ mode, selected, limit, characters, keeperId, castAssets }) {
-    const names = new Map(characters.map(character => [character.id, characterName(character)]));
-    const member = (id, keeper = false) => {
-      const name = names.get(id);
+  function partyStatus({ mode, selected, limit, characters, keeperName, castAssets }) {
+    const member = (name, keeper = false) => {
       if (!name) return '';
       if (keeper) return `<li><span class="party-selection-role">KP</span> ${esc(name)}</li>`;
-      const rank = standingRank(castAssets, castAssets.characters[id]);
+      const rank = standingRank(castAssets, castExpressions(castAssets, name));
       const { group, label } = standingStatuses[rank];
       return `<li>${esc(name)}
         <small class="party-selection-standing" data-standing-rank="${rank}" title="${group}">${label}</small></li>`;
     };
     const lineup = [
-      mode === 'investigator' ? member(keeperId, true) : '',
-      ...selected.map(id => member(id)),
+      mode === 'investigator' ? member(keeperName, true) : '',
+      ...selected.map(name => member(name)),
     ].join('');
     const hint = mode === 'keeper' ? `邀请 1–${limit} 位 AI 调查员` : characters.length ? '用眼睛指定守秘人，可另选队友' : '请先招募一位邻舍担任守秘人';
     return `<div class="party-status-line">
@@ -586,38 +583,37 @@
   }
   function orderCharacters(characters, castAssets) {
     return [...characters].sort((a, b) =>
-      standingRank(castAssets, castAssets.characters[a.id]) - standingRank(castAssets, castAssets.characters[b.id]) ||
-      characterCollator.compare(characterName(a), characterName(b)));
+      standingRank(castAssets, castExpressions(castAssets, a.name)) - standingRank(castAssets, castExpressions(castAssets, b.name)) ||
+      characterCollator.compare(a.name, b.name));
   }
-  function standingButton(subject, name, needsStanding) {
+  function standingButton(name, needsStanding, player = false) {
     const label = needsStanding ? '补齐立绘' : '管理立绘';
     return button('manage-standings', label, 'party-standing-link',
-      `id="party-standing-${subject}" data-subject="${subject}" data-network aria-label="${label} · ${esc(name)}"`);
+      `${player ? 'id="party-self-standing" data-player="true"' : `id="party-standing-${esc(name)}" data-subject="${esc(name)}"`} data-network aria-label="${label} · ${esc(name)}"`);
   }
-  function roster({ mode, characters, selected, keeperId, castAssets }) {
+  function roster({ mode, characters, selected, keeperName, castAssets }) {
     const player = castAssets.player;
     const playerNeedsStanding = mode === 'investigator' && standingRank(castAssets, player.expressions) > 0;
     const playerRow = `<li class="party-self">${avatar(player)}<span class="party-person"><strong>${esc(player.name)}</strong>
-      <small>你 · ${mode === 'keeper' ? '守秘人' : '调查员'}</small></span>${standingButton('player', '我', playerNeedsStanding)}</li>`;
+      <small>你 · ${mode === 'keeper' ? '守秘人' : '调查员'}</small></span>${standingButton('我', playerNeedsStanding, true)}</li>`;
     if (!characters.length) return playerRow + '<li class="lobby-empty">先去邻舍酒馆邀请一位角色。</li>';
     let group = -1;
     const rows = orderCharacters(characters, castAssets).map(character => {
-      const { id, personaSummary } = character;
-      const name = characterName(character);
-      const keeper = mode === 'investigator' && id === keeperId;
-      const invited = selected.includes(id);
+      const { name, personaSummary } = character;
+      const keeper = mode === 'investigator' && name === keeperName;
+      const invited = selected.includes(name);
       const role = keeper ? '守秘人' : invited ? 'AI 调查员' : '';
-      const rank = standingRank(castAssets, castAssets.characters[id]);
+      const rank = standingRank(castAssets, castExpressions(castAssets, name));
       const heading = rank === group ? '' : `<li class="party-group"><h3>${standingStatuses[rank].group}</h3></li>`;
       group = rank;
       const row = button('pick', `${avatar(character)}<span class="party-person"><strong>${esc(name)}</strong>
         <small title="${esc(personaSummary)}">${esc(personaSummary?.trim() || '邻舍角色')}</small></span>
         ${invited ? `<span class="party-role" title="AI 调查员">${icon('search')}</span>` : ''}
         <span class="party-dot" aria-hidden="true"></span>`, 'party-pick',
-      `id="party-char-${id}" data-id="${id}" aria-label="${esc(role ? `${name} · ${role}` : name)}" aria-pressed="${keeper || invited}" data-network ${keeper ? 'disabled' : ''}`);
+      `id="party-char-${esc(name)}" data-name="${esc(name)}" aria-label="${esc(role ? `${name} · ${role}` : name)}" aria-pressed="${keeper || invited}" data-network ${keeper ? 'disabled' : ''}`);
       const assignKeeper = mode === 'investigator' ? button('pick-keeper', `${icon('eye')}${keeper ? '<small>KP</small>' : ''}`, 'party-role-button',
-        `id="pick-keeper-${id}" data-id="${id}" aria-label="设 ${esc(name)} 为守秘人" title="设 ${esc(name)} 为守秘人" aria-pressed="${keeper}" data-network`) : '';
-      const reminder = rank > 0 && invited && !keeper ? `<div class="party-standing-note"><span>${rank === 1 ? '表情立绘未齐' : '缺少表情立绘'}</span>${standingButton(id, name, true)}</div>` : '';
+        `id="pick-keeper-${esc(name)}" data-name="${esc(name)}" aria-label="设 ${esc(name)} 为守秘人" title="设 ${esc(name)} 为守秘人" aria-pressed="${keeper}" data-network`) : '';
+      const reminder = rank > 0 && invited && !keeper ? `<div class="party-standing-note"><span>${rank === 1 ? '表情立绘未齐' : '缺少表情立绘'}</span>${standingButton(name, true)}</div>` : '';
       return `${heading}<li class="party-row${keeper ? ' is-keeper' : ''}"><div class="party-member">${row}${assignKeeper}</div>${reminder}</li>`;
     }).join('');
     return playerRow + '<li class="party-priority">优先邀请表情立绘齐全的角色</li>' + rows;

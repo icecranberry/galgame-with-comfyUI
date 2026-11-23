@@ -129,9 +129,9 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 
 1. system0＝破甲词 + 世界观（如果有）：走 `getSystemRulesWithWorld({ roleplay: false })`，无世界观退 `getSystemRules`（都在 `agent-core/src/db/worldRepository.js`）
 2. system1＝世界观强化（有世界观才注入）：`getWorldIntegrationRule(scope)`（`agent-core/src/builtinRules.js`），scope 按任务选（`interaction` / `moments` / `photo` / `event` / `town_asset` 等）；没有世界观就不要加这层
-3. 任务角色人设与输出规范同属不变内容，共用静态 system 层：设计师身份 + 任务要求 + 输出格式写进同一段（或紧挨的静态层组），形如「你是一个日程安排设计师，你将给下面注入的角色人设设计一张日程表；日程要求是……；输出为 JSON，具体格式为……」；JSON 需给完整示例（字段名 + 示例值 + 字段约束，口径见下节「LLM 输出」，参考 `townPromptBuilder.js` 的 `NPC_SET_OUTPUT_STRUCTURE`）。这一层紧跟世界观强化之后、角色人设注入之前；不要拆进 user，也不要内插本次调用才有的数据
-4. 静态层结束后才注入变量内容：本次调用的角色人设（含小镇居民）、素材/场景信息等随调用变化的数据，如 `townPromptBuilder.js` 的 `【角色外观信息】` 层；角色人设统一走 characterPersona 组装入口（见「角色生图人格组装」），不要手写正则截取
-5. user 收尾：最后一条 user 消息只简要强调本次任务（执行什么、按什么格式输出），用户额外指定也放这里；不复述规范、不塞长上下文
+3. 任务角色人设与输出规范同属不变内容，共用静态 system 层。设计师身份、任务要求和输出格式写进同一段或相邻静态层。要求 JSON 时，明确输出单个顶层为对象的 JSON，并提供完整示例与逐字段约束，具体口径见下节「LLM 输出」。这一层紧跟世界观强化之后、角色人设注入之前，保持逐字节稳定。
+4. 静态层结束后才注入变量内容，例如本次角色人设、素材和场景背景。角色人设统一走 characterPersona 组装入口（见「角色生图人格组装」），不要手写正则截取。除 JSON 输出规范中的格式示例外，提示词正文禁止直接插入 JSON 对象或其序列化文本。先解析输入，逐字段提取任务需要的信息，把字段含义、列表项及其关系写成自然语句，再按原有分层拼装。例如将 `location` 和 `prop` 写成「场景设在旧车站，长椅旁放着一只皮箱。」
+5. user 收尾。任务需要用到实时数值或相邻请求间很可能变化的状态时，例如当前金币余额、醉酒度、实时天气或正在进行的活动，必须将本轮值放在最后一条 user 的任务指令之前。最后一条 user 必须交代本次要完成的具体任务、交付内容和输出格式。需要将用户自定义内容体现在输出中时，必须在这一层明确写出用户指定的内容，并要求按该要求生成或修改对应部分。本次请求注入了世界观时，必须在这一层再次明确声明「请遵循 `<world_setting>` 中的世界观设定」。完整输出规范留在静态 system，长篇背景材料放在前面的业务层。
 
 参考实现：`townPromptBuilder.js`（纯文本与 JSON 输出两套齐备）、`libraryGenerator.js` 的 `buildSystemLayers`（静态前缀 + designer 层）、`characterReactionService.js` 的 `promptPrefixFingerprint`（前缀稳定性核对）。
 
@@ -139,10 +139,26 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 
 编写或修改 LLM 生成相关的 prompt 时：
 
-1. 如果要求模型输出 JSON 格式，必须在 prompt 中举例说明 JSON 输出的完整格式（字段名 + 示例值），不能只口头描述
-2. 示例中每个字段的值要写明该字段的内容要求与约束（如字数、语气、格式、禁止项），让模型照着填，参考 `agent-core/src/services/eventGenerator.js` 中 `formatPrompt` 的写法
-3. 必须明确要求模型严格按示例格式输出，不要输出任何解释或 JSON 以外的文字
-4. 新增或修改输出字段时，同步更新 prompt 中的 JSON 示例与解析代码，保持两者一致
+1. 如果要求模型输出 JSON，必须明确要求只返回一个合法的 JSON 对象（JSON object），顶层使用 `{}`。列表放进对象的命名字段，禁止顶层数组、字符串等其他类型。
+2. 静态 system 的输出规范必须给出可直接解析的完整 JSON 示例，包含全部字段、符合约束的示例值及嵌套结构。逐字段写清类型、内容要求和约束，例如字数、语气、格式或禁止项，并注明可选字段及缺失时的处理方式。
+3. 必须要求模型严格按示例结构输出，禁止代码围栏、解释或任何 JSON 以外的文字。
+4. 新增或修改输出字段时，同步更新字段说明、JSON 示例与解析代码，保持三者一致。
+
+**日程生成的静态输出规范示例**
+
+> 只返回一个合法的 JSON 对象，严格使用下方示例的字段和结构。所有字段必填。`title` 为 2–12 个汉字的日程标题。`activities` 为按时间升序排列的非空数组。每项的 `time` 为 24 小时制 `HH:mm` 字符串，`description` 为 5–30 个汉字的简体中文活动描述。输出仅包含 JSON 对象，禁止代码围栏、解释或额外字段。
+
+```json
+{
+  "title": "雨天日程",
+  "activities": [
+    {
+      "time": "09:00",
+      "description": "到旧车站接朋友"
+    }
+  ]
+}
+```
 
 ## 最少必要测试与脚本清理
 

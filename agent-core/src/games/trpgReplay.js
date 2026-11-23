@@ -15,12 +15,12 @@ function publicLine({ id, speaker, kind, dialogue, action }) {
   return `${label}：${dialogue || ''}${action ? `〔${action}〕` : ''}`.replace(/\r?\n/g, '\n  ');
 }
 
-function logRole({ kind, actorId }) {
-  return kind === 'dialogue' && actorId && actorId !== 'player' ? 'assistant' : 'user';
+function logRole({ kind, speakerRole }) {
+  return kind === 'dialogue' && (speakerRole === 'investigator' || speakerRole === 'keeper') ? 'assistant' : 'user';
 }
 
 export function appendReplay(previous, records, fields, task) {
-  const prior = previous?.compact && previous.end <= records.length &&
+  const prior = previous && previous.end <= records.length &&
     (!previous.end || previous.lastLogId === records[previous.end - 1]?.id) ? previous : null;
   const before = prior?.fields || {};
   const changes = changedFields(before, fields);
@@ -38,23 +38,22 @@ export function appendReplay(previous, records, fields, task) {
   const end = records.length;
   const segments = prior?.segments || [];
   return {
-    compact: true, speakerRoles: true, start: prior?.start || 0, end, lastLogId: records[end - 1]?.id ?? null, fields,
+    start: prior?.start || 0, end, lastLogId: records[end - 1]?.id ?? null, fields,
     archive: prior?.archive || [],
     segments: [...segments, { end, changes, userTail: `</dynamic_context>\n${task}` }],
   };
 }
 
-function segmentBlocks(segment, records, start, archive = [], compact = false) {
+function segmentBlocks(segment, records, start, archive = []) {
   const parts = [];
-  const format = compact ? publicLine : row => JSON.stringify(row);
-  if (archive.length) parts.push('<public_archive>\n' + archive.map(format).join('\n') + '\n</public_archive>');
-  if (segment.end > start) parts.push('<public_log>\n' + records.slice(start, segment.end).map(format).join('\n') + '\n</public_log>');
+  if (archive.length) parts.push('<public_archive>\n' + archive.map(publicLine).join('\n') + '\n</public_archive>');
+  if (segment.end > start) parts.push('<public_log>\n' + records.slice(start, segment.end).map(publicLine).join('\n') + '\n</public_log>');
   if (Object.keys(segment.changes).length) parts.push('<round_state>\n' + JSON.stringify(segment.changes) + '\n</round_state>');
   return parts;
 }
 
-export function turnHead(segment, records, start, archive, compact) {
-  return `<dynamic_context>\n${segmentBlocks(segment, records, start, archive, compact).join('\n\n')}\n`;
+function turnHead(segment, records, start, archive) {
+  return `<dynamic_context>\n${segmentBlocks(segment, records, start, archive).join('\n\n')}\n`;
 }
 
 export function replayTurns(replay, records) {
@@ -63,49 +62,36 @@ export function replayTurns(replay, records) {
     const messages = [];
     let logStart = start;
     let archive = index === 0 ? replay.archive : [];
-    // An older in-flight checkpoint still uses its original user-only format.
-    if (replay.speakerRoles) {
-      for (let cursor = start; cursor < segment.end;) {
-        if (logRole(records[cursor]) !== 'assistant') {
-          cursor++;
-          continue;
-        }
-        const blocks = segmentBlocks({ end: cursor, changes: {} }, records, logStart, archive, replay.compact);
-        if (blocks.length) messages.push({ role: 'user', content: blocks.join('\n\n') });
-        archive = [];
-        let end = cursor + 1;
-        while (end < segment.end && logRole(records[end]) === 'assistant') end++;
-        messages.push({ role: 'assistant', content: records.slice(cursor, end).map(publicLine).join('\n') });
-        logStart = cursor = end;
+    for (let cursor = start; cursor < segment.end;) {
+      if (logRole(records[cursor]) !== 'assistant') {
+        cursor++;
+        continue;
       }
+      const blocks = segmentBlocks({ end: cursor, changes: {} }, records, logStart, archive);
+      if (blocks.length) messages.push({ role: 'user', content: blocks.join('\n\n') });
+      archive = [];
+      let end = cursor + 1;
+      while (end < segment.end && logRole(records[end]) === 'assistant') end++;
+      messages.push({ role: 'assistant', content: records.slice(cursor, end).map(publicLine).join('\n') });
+      logStart = cursor = end;
     }
-    const content = turnHead(segment, records, logStart, archive, replay.compact) + segment.userTail;
+    const content = turnHead(segment, records, logStart, archive) + segment.userTail;
     start = segment.end;
     return [...messages, { role: 'user', content }];
   });
 }
 
-export function replayMessage(replay, records) {
-  let start = replay.start;
-  const parts = replay.segments.flatMap((segment, index) => {
-    const blocks = segmentBlocks(segment, records, start, index === 0 ? replay.archive : []);
-    start = segment.end;
-    return blocks;
-  });
-  return { role: 'system', content: parts.join('\n\n') };
-}
-
-function archivedExcerpts(records, end, compact) {
+function archivedExcerpts(records, end) {
   const important = new Set(['scene', 'clue', 'item', 'objective', 'stat', 'encounter']);
   const excerpts = [];
   let facts = Math.floor(ARCHIVE_TOKENS * 2 / 3);
   let dialogue = ARCHIVE_TOKENS - facts;
   for (let i = end - 1; i >= 0 && Math.max(facts, dialogue) >= 48; i--) {
-    const { round, sceneId, kind, speaker, dialogue: say, action } = records[i];
+    const { kind, speaker, dialogue: say, action } = records[i];
     if (kind === 'illustration') continue;
     const excerpt = [say, action].filter(Boolean).join(' ').slice(0, 160);
-    const row = compact ? { kind, speaker, dialogue: excerpt } : { round, sceneId, kind, speaker, excerpt };
-    const tokens = textTokens((compact ? publicLine(row) : JSON.stringify(row)) + '\n');
+    const row = { kind, speaker, dialogue: excerpt };
+    const tokens = textTokens(publicLine(row) + '\n');
     if (important.has(kind)) {
       if (tokens > facts) continue;
       facts -= tokens;
@@ -118,29 +104,16 @@ function archivedExcerpts(records, end, compact) {
   return excerpts.reverse();
 }
 
-export function fitReplay(replay, records, prefix, tail, tools, inputLimit) {
-  return fitMessages(replay, records, current => [...prefix, replayMessage(current, records), ...tail], tools, inputLimit);
-}
-
 export function fitNativeReplay(replay, records, prefix, continuation, tools, inputLimit) {
-  return fitMessages(replay, records, current => [...prefix, ...replayTurns(current, records), ...continuation], tools, inputLimit);
-}
-
-function fitMessages(replay, records, assemble, tools, inputLimit) {
-  // Legacy saves kept completed provider messages here. The active checkpoint is separate.
-  if (replay.segments.some(segment => Object.hasOwn(segment, 'responses'))) {
-    replay = { ...replay, segments: replay.segments.map(({ responses, ...segment }) => segment) };
-  }
+  const assemble = current => [...prefix, ...replayTurns(current, records), ...continuation];
   const current = assemble(replay);
   if (promptTokens(current, tools) <= Math.floor(inputLimit * 0.9)) return { replay, messages: current };
 
   const baseline = { ...replay, start: replay.end, archive: [], segments: [{ ...replay.segments.at(-1), end: replay.end, changes: replay.fields }] };
-  if (replay.compact) {
-    // Consolidate state snapshots before cutting the dialogue transcript.
-    const transcript = { ...baseline, start: replay.start, archive: replay.archive };
-    const transcriptMessages = assemble(transcript);
-    if (promptTokens(transcriptMessages, tools) <= Math.floor(inputLimit * 0.9)) return { replay: transcript, messages: transcriptMessages };
-  }
+  // Consolidate state snapshots before cutting the dialogue transcript.
+  const transcript = { ...baseline, start: replay.start, archive: replay.archive };
+  const transcriptMessages = assemble(transcript);
+  if (promptTokens(transcriptMessages, tools) <= Math.floor(inputLimit * 0.9)) return { replay: transcript, messages: transcriptMessages };
   const fixed = promptTokens(assemble(baseline), tools);
   const retain = Math.max(0, Math.min(Math.floor(inputLimit * 0.75) - fixed, inputLimit - fixed) - ARCHIVE_TOKENS - 32);
   let start = replay.end;
@@ -148,12 +121,10 @@ function fitMessages(replay, records, assemble, tools, inputLimit) {
   let nextRole;
   while (start > replay.start) {
     const row = records[start - 1];
-    if (replay.speakerRoles) {
-      const role = logRole(row);
-      if (role !== nextRole) used += LOG_BLOCK_OVERHEAD;
-      nextRole = role;
-    }
-    used += textTokens((replay.compact ? publicLine(row) : JSON.stringify(row)) + '\n');
+    const role = logRole(row);
+    if (role !== nextRole) used += LOG_BLOCK_OVERHEAD;
+    nextRole = role;
+    used += textTokens(publicLine(row) + '\n');
     if (used > retain) break;
     start--;
   }
@@ -161,7 +132,7 @@ function fitMessages(replay, records, assemble, tools, inputLimit) {
     const boundary = records.findIndex((row, i) => i > start && i < replay.end && row.round !== records[start].round);
     if (boundary > start) start = boundary;
   }
-  const archive = start === replay.start ? replay.archive : archivedExcerpts(records, start, replay.compact);
+  const archive = start === replay.start ? replay.archive : archivedExcerpts(records, start);
   const compacted = { ...baseline, start, archive };
   const messages = assemble(compacted);
   // The recap is optional if a single fixed scene, user message or tool transcript nearly fills the window.

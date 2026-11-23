@@ -8,7 +8,7 @@ export function applyLorebookLayout(original, activation, options = {}) {
   const tail = original.findLastIndex(message => message.role === 'user');
   const taskText = original[tail]?.content;
   const dynamicEnd = typeof taskText === 'string' ? taskText.lastIndexOf('</dynamic_context>') : -1;
-  const taskTarget = { index: tail, offset: dynamicEnd >= 0 ? dynamicEnd : 0 };
+  const taskTarget = options.fallbackTarget ?? { index: tail, offset: dynamicEnd >= 0 ? dynamicEnd : 0 };
   if (tail >= 0) injectionOptions.fallbackTarget = taskTarget;
   // Examples are prose, not invented API user/assistant turns. Prefer the
   // adjacent system end; otherwise use a dedicated lore-only system slot.

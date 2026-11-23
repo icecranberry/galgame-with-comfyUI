@@ -231,13 +231,15 @@ export function isAppearanceOnlyPromptChange(oldBase, newBase) {
  * @param {object} [opts]
  * @param {'auto'|null|Array|{limited,exclusive}} [opts.outfits='auto'] - 同 buildCharacterPersona 的 opts.outfits
  * @param {boolean} [opts.includeHeading=true] - false 时只返回外观正文
+ * @param {string|null} [opts.person=null] - 用角色名替换外观中的第二人称
  * @returns {string} base_prompt 无外观段且无生效外观时返回 ''
  */
 export function buildCharacterAppearanceSection(character, opts = {}) {
   const outfits = resolveOutfits(character, opts.outfits);
   const appearance = extractAppearanceSection(character?.base_prompt);
   const section = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(outfits));
-  return opts.includeHeading === false ? section.replace(APPEARANCE_HEADING_RE, '').trim() : section;
+  const text = opts.includeHeading === false ? section.replace(APPEARANCE_HEADING_RE, '').trim() : section;
+  return toThirdPerson(text, opts.person);
 }
 
 function resolveOutfits(character, outfits) {
@@ -268,6 +270,7 @@ function resolveOutfits(character, outfits) {
  *                                           'auto'/缺省 = 按 character.id 查询生效外观并注入；
  *                                           null = 不注入；数组 = 视作多套限时服饰；对象 = 显式 {limited, exclusive}
  * @param {string} [opts.joiner='\n'] - short variant 中 short_prompt 与外观段的连接符
+ * @param {boolean} [opts.fallbackToBase=true] - short 和外观皆空时是否回退整卡
  * @returns {string}
  */
 export function buildCharacterPersona(character, opts = {}) {
@@ -298,7 +301,7 @@ export function buildCharacterPersona(character, opts = {}) {
   if (!short && !appearance) {
     // short_prompt 与外观段皆空：兜底整卡（与旧 maibot/dreamService 口径一致），
     // 此时无处锚定注入，跳过外观注入
-    return basePrompt.trim();
+    return opts.fallbackToBase === false ? '' : basePrompt.trim();
   }
   let appearancePart = injectOutfitsIntoAppearance(appearance, buildOutfitInjectionBlocks(outfits)).trim();
   appearancePart = toThirdPerson(appearancePart, person);

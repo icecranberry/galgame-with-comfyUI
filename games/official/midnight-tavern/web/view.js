@@ -3,8 +3,7 @@
   const mix = window.TavernMix;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=&-]+$|^\.\/(?:lin|chen|su)\.svg$/.test(value || '') && !value.includes('..') ? value : '';
-  const statuses = ['清醒', '微醺', '醉意朦胧', '酣醉'];
-  const tipsyLabel = n => statuses[n <= 25 ? 0 : n <= 55 ? 1 : n <= 80 ? 2 : 3];
+  const tipsyLabel = n => mix.intoxication(n).label;
   const resultNames = { triumph: '漂亮收场', chaotic: '一夜闹剧', twist: '意外转折' };
   const trinketIcons = new Set(['key', 'star', 'moon', 'ticket', 'leaf', 'compass']);
   const icon = name => `<svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-${name}"/></svg>`;
@@ -17,120 +16,140 @@
     coffee_tea: ['bottle-nonalcohol', 'M24 36h20q10 9 10 22t-20 9q-20 0-20-9 0-6 2-10L6 37l13 5Zm30 7q15-7 13 6t-13 10'],
   };
   const propsPath = './assets/props/';
-  function prop(name, fallback) {
-    return `<span class="prop-art" aria-hidden="true"><img src="${propsPath}${name}.png" alt="" draggable="false" data-prop><svg viewBox="0 0 68 76" focusable="false">${fallback}</svg></span>`;
+  function prop(name, fallback, tint = '') {
+    return `<span class="prop-art" aria-hidden="true"><img src="${propsPath}${name}.png" alt="" draggable="false" data-prop ${tint ? `style="filter:url(#tint-${tint})"` : ''}><svg viewBox="0 0 68 76" focusable="false">${fallback}</svg></span>`;
   }
-  const seal = () => prop('wax-seal', '<path fill="#a33e35" stroke="#dc7b65" stroke-width="3" d="M34 10c15-2 26 11 25 24 5 18-12 29-25 28C15 65 7 50 9 37c-4-16 11-26 25-27Z"/><circle cx="34" cy="36" r="17" fill="none" stroke="#692721" stroke-width="3"/><path fill="#e28d70" d="m34 22 3 10 10 4-10 3-3 10-4-10-9-3 9-4Z"/>');
-
   // Custom expression packs supply their own names. Prefer an actual matching slot, then a related mood.
   const moodFamilies = [/笑|喜|乐|开心|高兴|愉悦|得意|happy|smile/i, /惊|讶|意外|surpris/i, /羞|脸红|微醺|害臊|shy|blush/i,
     /思|惑|疑|好奇|沉吟|困扰|think|curious/i, /生气|怒|愤|不满|angry/i, /伤心|悲|难过|失落|sad/i, /困倦|疲|醉|迷离|sleep/i];
-  function spriteFor(guest,mood) {
-    const sprites = (guest.expressions || []).filter(slot => image(slot.url));
-    const normalized = String(mood || '').toLowerCase();
+  function matchSprite(sprites, mood) {
+    const normalized = String(mood || '').trim().toLowerCase();
+    if (!normalized) return;
     const family = moodFamilies.find(group => group.test(normalized));
-    return (sprites.find(slot => slot.name.toLowerCase() === normalized || slot.id === normalized) ||
-      sprites.find(slot => normalized && (normalized.includes(slot.name.toLowerCase()) || slot.name.includes(mood))) ||
-      sprites.find(slot => family?.test(slot.name)) || sprites.find(slot => slot.id === 'normal') || sprites[0])?.url;
+    return sprites.find(slot => slot.name?.toLowerCase() === normalized || slot.id === normalized) ||
+      sprites.find(slot => slot.name && (normalized.includes(slot.name.toLowerCase()) || slot.name.toLowerCase().includes(normalized))) ||
+      sprites.find(slot => family?.test(slot.name));
   }
-  function avatar(guest, large = false, mood = '') {
-    const sprite = spriteFor(guest,mood);
-    const url = image(large ? sprite || guest.portrait || guest.avatar : guest.avatar || sprite || guest.portrait);
+  function avatar(guest, large = false, mood = '', standing = '') {
+    const sprites = (guest.expressions || []).filter(slot => image(slot.url));
+    const expression = matchSprite(sprites, mood);
+    const sprite = (expression || sprites.find(slot => slot.id === 'normal') || sprites[0])?.url;
+    const usual = image(large ? sprite || guest.portrait || guest.avatar : guest.avatar || sprite || guest.portrait);
+    const defaultStanding = standing && (!expression || expression.id === 'normal') ? standing : '';
+    const url = defaultStanding || usual;
     const single = esc([...guest.name][0]);
-    const style = large && (sprite ? 'portrait-expression' : !image(guest.portrait) ? 'portrait-avatar' : url.startsWith('./') ? 'portrait-illustrated' : '');
+    const style = large && (defaultStanding || sprite ? 'portrait-expression' : !image(guest.portrait) ? 'portrait-avatar' :
+      usual.startsWith('./') ? 'portrait-illustrated' : '');
     return `<span class="portrait${style ? ' ' + style : ''}" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" draggable="false">` : ''}<span>${single}</span></span>`;
+  }
+  const potionShapes = {
+    relax: '<path d="M9 58c13-2 17-17 27-21 13-5 18 9 8 14-9 5-17-7-7-18 12-14 26-7 36-15m-36 19c10-10 25-9 39 1m-35 0c-8 10-3 22 3 26"/>',
+    awaken: '<ellipse cx="49" cy="37" rx="13" ry="7"/><ellipse cx="49" cy="37" rx="26" ry="13"/><path d="M10 38C10 14 88 14 88 38S10 62 10 38Z"/>',
+    warmth: '<path d="m30 41 4-13 3 10 10 2-9 5-1 11-6-8-9-3Zm29-23 1-11 4 8 9 1-8 5-2 9-4-6-8-1ZM69 53l6-8 2 9 8 4-9 2-3 8-3-8-8-3Z" fill="currentColor"/>',
+    reminisce: '<path d="m49 7 28 18v28L49 68 21 53V25Zm0 0v22m28-4-28 11-28-11m28 11v32m-16-25 7-7m21 14 6-5"/><circle cx="49" cy="36" r="6" fill="currentColor"/>',
+    soothe: '<path d="M49 8v56M24 22l50 28m0-28L24 50m16-35 9 8 9-8m-18 42 9-8 9 8M25 31l12-2-3-11m40 13-12-2 3-11M25 41l12 2-3 11m40-13-12 2 3 11"/>',
+  };
+  function potionSign(line, cursor) {
+    const effect = line?.drinkEffect;
+    const shape = Object.hasOwn(potionShapes, effect) ? potionShapes[effect] : '';
+    return `<span class="seat-spell" aria-hidden="true">${shape ?
+      `<svg viewBox="0 0 98 73" data-effect="${effect}" data-line="${cursor}" focusable="false">${shape}</svg>` : ''}</span>`;
+  }
+  function featuredGuest(state, targetName, cursor = state.cursor) {
+    const line = state.history[cursor];
+    const speaker = line?.role === 'assistant' ? line.speaker : undefined;
+    return state.guests.find(guest => guest.name === speaker) ||
+      state.guests.find(guest => guest.name === targetName) || state.guests[0];
   }
   function seats(state, ui) {
     const line = state.history[state.cursor];
-    const quest = state.quest;
+    const latest = state.cursor === state.history.length - 1;
+    const featured = featuredGuest(state, ui.target);
     return state.guests.map(guest => {
-      const n = state.tipsy[guest.id] || 0;
-      const talking = line?.charId === guest.id;
-      const away = quest?.status === 'away' && quest.charId === guest.id;
-      const picked = ui.target === guest.id;
-      const offered = quest?.status === 'draft';
-      const focus = ui.focusId === guest.id && ui.face;
-      const assignee = quest?.status === 'assigned' && quest.charId === guest.id;
-      const mood = talking ? line.mood : [...state.history.slice(0, state.cursor + 1)].reverse().find(item => item.charId === guest.id)?.mood;
-      const css = ['seat', talking && 'is-speaking', away && 'is-away', offered && 'is-offered', picked && 'is-selected', assignee && 'is-assignee', n > 25 && 'is-tipsy', focus && 'is-face'].filter(Boolean).join(' ');
-      return button('guest', `${avatar(guest, true, focus && n > 25 && !talking ? (n > 80 ? '困倦' : '微醺') : mood)}
-        <span class="seat-mood" data-tipsy="${tipsyLabel(n)}">${esc(focus ? '品尝特调' : away ? '奇遇途中' : offered ? '交付委托' : assignee ? '等候送行' : mood || '在座')}</span>
-        <span class="seat-label"><strong>${esc(guest.name)}</strong><span>${tipsyLabel(n)}</span></span>
-        <span class="tipsy-track" role="meter" aria-label="微醺度" aria-valuenow="${n}" aria-valuemin="0" aria-valuemax="100"><i style="--amount:${n}%"></i></span>`, {
-        id: guest.id, css, disabled: away || state.phase === 'REPORT',
-        attrs: `data-guest="${esc(guest.id)}" aria-pressed="${picked}"`,
-      });
+      const now = state.tipsy[guest.name] || 0;
+      const status = tipsyLabel(now);
+      const talking = line?.role === 'assistant' && line.speaker === guest.name;
+      const picked = ui.target === guest.name;
+      const spoken = talking ? line : state.history.slice(0, state.cursor + 1).findLast(item => item.role === 'assistant' && item.speaker === guest.name);
+      const degree = mix.intoxication(latest ? now : spoken?.tipsy ?? now);
+      const standingKey = latest && Object.hasOwn(state.standingByGuest, guest.name) ? state.standingByGuest[guest.name] : spoken?.standing;
+      const entry = state.media?.[standingKey];
+      const standing = entry?.kind === 'standing' && entry.status === 'ready' ? image(entry.url) : '';
+      const recordedMood = spoken?.mood || '';
+      const mood = standing ? (talking && spoken?.explicitMood ? recordedMood : '') : recordedMood || degree.mood;
+      const css = ['seat', guest === featured && 'is-featured', talking && 'is-speaking', picked && 'is-selected',
+        !standing && degree.id !== 'sober' && 'is-tipsy'].filter(Boolean).join(' ');
+      const photo = ui.guestPhotos.get(guest.name);
+      const select = { id: guest.name, attrs: `aria-label="选中${esc(guest.name)}接酒，${status}，醉酒度 ${now}/100" aria-pressed="${picked}"` };
+      const hit = photo ? button('guest-photo', '', {
+        id: guest.name, css: 'seat-hit', attrs: `aria-label="查看${esc(guest.name)}的照片" aria-haspopup="dialog" aria-controls="cg-preview"`,
+      }) : button('guest', '', { ...select, css: 'seat-hit', attrs: select.attrs + ' tabindex="-1"' });
+      const print = photo ? `<span class="seat-photo" aria-hidden="true"><span class="seat-photo-image">
+        <img src="${esc(photo.url)}" alt="" decoding="async" draggable="false">${icon('wall')}
+      </span></span>` : '<span class="seat-photo" hidden></span>';
+      const label = `<strong>${esc(guest.name)}</strong><span class="seat-status"><span>${status}</span><span class="seat-value">${now}<small>/100</small></span></span>`;
+      return `<div class="${css}" data-guest="${esc(guest.name)}"><div class="seat-scene">${avatar(guest, true, mood, standing)}${print}${potionSign(talking ? line : null, state.cursor)}${hit}</div>
+        <div class="seat-plaque">
+          ${button('guest', label, { ...select, css: 'seat-label' })}
+          <span class="tipsy-track" role="meter" aria-label="${esc(guest.name)}的醉酒度" aria-valuenow="${now}" aria-valuetext="${status}，${now}/100" aria-valuemin="0" aria-valuemax="100"><i style="--amount:${now / 100}"></i></span>
+        </div>
+      </div>`;
     }).join('');
   }
-  function lineMarkup(line, state, busy) {
-    const matches = line.rumors.map(note => ({ note, index: line.text.indexOf(note.keyword) }))
-      .filter(match => match.index >= 0).sort((a, b) => a.index - b.index);
-    let offset = 0;
-    let html = '';
-    for (const { note, index } of matches) {
-      if (index < offset) continue;
-      const captured = state.notes.some(old => old.id === note.id || old.keyword === note.keyword);
-      const firstHint = !state.notes.length && offset === 0 && !captured ? '<small class="collect-hint">＋收起</small>' : '';
-      html += esc(line.text.slice(offset, index)) + button('collect', esc(note.keyword) + firstHint, {
-        id: note.id, css: 'rumor' + (captured ? ' is-collected' : ''), disabled: busy || captured,
-        attrs: `aria-description="${captured ? '已收录' : '记下流言'}"`,
-      });
-      offset = index + note.keyword.length;
-    }
-    return html + esc(line.text.slice(offset));
+
+  const hasReadOpening = (state, cursor = state.cursor) => state.openingRead === true ||
+    (state.turn === 0 && state.history.length > 0 && cursor >= state.history.length - 1);
+
+  function replyGuest(state, cursor = state.cursor) {
+    const line = state.history[cursor];
+    const reply = line?.role === 'user' ? state.history[cursor + 1] : line;
+    return reply?.role === 'assistant' ? state.guests.find(guest => guest.name === reply.speaker) : undefined;
   }
-  function dialogue(state, ui) {
-    if (state.phase === 'OPENING') return `<div class="opening-content"><h1><span>老板，</span>八卦特浓，<wbr>少冰</h1>
-      ${ui.error ? `<p role="alert">${esc(ui.error)}</p>` : ''}
-      ${button(ui.error ? 'retry' : 'open', ui.busy || (ui.error ? '重新连接' : '开门迎客'), { css: 'primary', disabled: !!ui.busy })}</div>`;
-    if (state.phase === 'REPORT') return `<div class="after-hours"><strong>来客归席</strong><div>
-      ${button('show-report', '查看战报', { id: state.reports.at(-1)?.questId, css: 'quiet' })}
-      ${button('continue', '继续接待', { disabled: !!ui.busy })}
-      ${button('next-night', '打烊进入下一夜', { css: 'primary', disabled: !!ui.busy })}</div></div>`;
+
+  function reactionLabel(reaction) {
+    if (!reaction) return '';
+    const { effectId, speech, before, after } = reaction;
+    const legacy = { relax: '说真心话', awaken: '笑出声', reminisce: '讲一段往事' };
+    const talk = Object.hasOwn(mix.drinkEffects, effectId) ? mix.drinkEffects[effectId].label :
+      Object.hasOwn(legacy, speech) ? legacy[speech] : '';
+    const tipsy = Number.isInteger(before) && Number.isInteger(after) ? `醉酒度 ${before} → ${after}` : '';
+    return [talk, tipsy].filter(Boolean).join(' · ');
+  }
+
+  function dialogue(state, ui, pageIndex, pageCount) {
     const line = state.history[state.cursor];
-    const more = state.cursor < state.history.length - 1;
-    const crafting = ['draft', 'assigned'].includes(state.quest?.status);
-    return `<div class="speech-head"><strong>${icon('lamp')}${esc(state.people[line?.charId]?.name || (line?.charId === 'player' ? '老板' : '吧台'))}</strong>
-      ${line?.mood ? `<span>${esc(line.mood)}</span>` : ''}
-      <div class="speech-progress">${!state.quest && state.reports.at(-1)?.night === state.night ? button('next-night', '打烊', { css: 'quiet', disabled: !!ui.busy }) : ''}${button('previous', icon('prev'), { css: 'arrow', disabled: !state.cursor || !!ui.busy, attrs: 'aria-label="上一句"' })}${state.cursor + 1} / ${state.history.length}</div></div>
-      <div class="speech-line" data-line="${state.cursor}">${line ? lineMarkup(line, state, !!ui.busy) : '有人推门进来了。'}</div>
+    const previous = state.history[state.cursor - 1];
+    const bossLine = line?.role === 'assistant' && previous?.role === 'user' ? previous.text : '';
+    const potion = reactionLabel(line?.potionReaction);
+    const guest = replyGuest(state);
+    const quickReplies = line?.role === 'assistant' ? line.quickReplies : undefined;
+    const address = guest ? esc(`向${guest.name}搭话`) : '搭话';
+    const speaker = line?.role === 'assistant' ? line.speaker : undefined;
+    const currentStanding = speaker && Object.hasOwn(state.standingByGuest, speaker) ? state.standingByGuest[speaker] : undefined;
+    const drawing = [currentStanding, line?.standing].some(key => state.media[key]?.status === 'pending');
+    const developing = state.drinks.some(drink => drink.night === state.night && drink.guestName === speaker &&
+      [state.media[drink.id], state.media['tipsy-' + drink.id]].some(entry => entry?.status === 'pending' && entry.illustrations));
+    const status = [drawing && '正在绘制立绘', developing && '正在显影照片'].filter(Boolean);
+    return `<div class="speech-head"><div class="speech-speaker">
+      <strong>${esc(line?.speaker || '吧台')}</strong>
+      ${status.length ? `<span class="speech-media" role="status">${status.join(' · ')}</span>` : ''}
+      </div>
+      <div class="speech-progress">${button('previous', icon('prev') + '上一句', { css: 'arrow', disabled: pageIndex === 0 || !!ui.busy })}
+        <span>${pageIndex + 1}/${pageCount}</span>
+        ${button('next', '下一句' + icon('next'), { css: 'arrow', disabled: pageIndex + 1 >= pageCount || !!ui.busy })}</div></div>
+      <div class="speech-reading">
+        <div class="speech-line">
+          ${potion ? `<span class="speech-potion">${esc(potion)}</span>` : ''}
+          ${bossLine ? `<span class="speech-boss">——「${esc(bossLine)}」</span>` : ''}
+          ${line?.action ? `<span class="speech-action">${esc(line.action)}</span>` : ''}
+          <span class="speech-copy">${esc(line?.text)}</span>
+        </div>
+      </div>
       <div class="speech-controls">
-        <div class="speech-actions"><div class="quick-replies">${state.quickReplies.map(reply => button('reply', esc(reply), { id: reply, css: 'quiet', disabled: !!ui.busy })).join('')}</div>
-        ${button('listen', esc(ui.busy || (more ? '继续倾听' : '继续闲聊')) + (!ui.busy ? icon('forward') : ''), { css: (crafting ? 'quiet' : 'primary') + ' listen', disabled: !!ui.busy })}</div>
-        <div class="reply-form" id="reply-form"><input name="line" aria-label="老板搭话" placeholder="顺口搭句话..." maxlength="160" autocomplete="off" value="${esc(ui.reply)}">
-        ${button('speak', '搭话' + icon('enter'), { disabled: !!ui.busy })}</div>
+        ${guest && quickReplies?.length ? `<div class="quick-replies">${quickReplies.map(reply => button('reply', esc(reply), { id: reply, css: 'reply-ticket', disabled: !!ui.busy })).join('')}</div>` : ''}
+        <div class="reply-form" id="reply-form"><input name="line" aria-label="${address}" placeholder="${address}…" maxlength="160" autocomplete="off" value="${esc(ui.reply)}" ${guest ? '' : 'disabled'}>
+        ${button('speak', '搭话' + icon('enter'), { disabled: !!ui.busy || !guest })}</div>
       </div>`;
-  }
-  function board(state, ui) {
-    const locked = !!ui.busy || state.phase !== 'CHATTING';
-    const quest = state.quest;
-    const shelf = state.notes.length ? state.notes.map(note => {
-      const seed = [...note.id].reduce((hash, character) => Math.imul(hash, 31) + character.charCodeAt(0), 0) >>> 0;
-      const tilt = (seed % 401) / 100 - 2;
-      return button('slot-note', `<strong>${esc(note.keyword)}</strong><small>${esc(note.summary)}</small>`, {
-        id: note.id, css: 'note ' + (state.slots.includes(note.id) ? 'is-slotted' : ''),
-        disabled: locked, attrs: `draggable="${!locked}" data-note="${esc(note.id)}" style="--note-tilt:${tilt}deg"`,
-      });
-    }).join('') : '<p class="board-empty">从对话中收起划线的流言。</p>';
-    if (quest) return `<div class="board-layout"><div class="notes">${shelf}</div>
-      <article class="quest-paper" draggable="${quest.status === 'draft' && !ui.busy}" data-quest="${esc(quest.questId)}">
-        <span class="paper-kicker">委托 · ${{ draft: '待派单', assigned: '待送行', away: '已出发' }[quest.status]}</span>
-        <h3>${esc(quest.title)}</h3><p>${esc(quest.synopsis)}</p>
-        <div class="quest-stats">${quest.recommendedStats.map(id => `<span>${mix.get(mix.potions, id)?.label || ''}</span>`).join('')}</div>
-        ${quest.status === 'draft' ? `<p class="quest-hint">${esc(quest.targetHint)}<br>选择一位接单人。</p><div class="assignees">${state.guests.map(guest => button('guest', esc(guest.name), { id: guest.id, css: 'wax', disabled: !!ui.busy, attrs: `data-guest="${esc(guest.id)}"` })).join('')}</div>` : ''}
-        ${quest.status === 'assigned' ? `<p class="quest-hint">为${esc(state.people[quest.charId]?.name)}调制送行特调。</p>${button('focus-workshop', '去调酒' + icon('forward'), { css: 'wax', disabled: !!ui.busy })}` : ''}
-        ${quest.status === 'away' ? button('resolve', '等待归来' + icon('forward'), { css: 'wax', disabled: !!ui.busy }) : ''}
-      </article></div>`;
-    const filled = state.slots.filter(Boolean).length;
-    return `<div class="board-layout"><div class="notes">${shelf}</div>
-      <div class="quest-paper parchment"><div class="slots">${state.slots.map((id, index) => {
-        const note = state.notes.find(item => item.id === id);
-        return button('clear-slot', note ? `${esc(note.keyword)} ${icon('close')}` : `<span>${String(index + 1).padStart(2, '0')}</span><span>待贴便签</span>`, {
-          id: index, css: 'slot' + (note ? ' is-filled' : ''), disabled: locked,
-          attrs: `data-slot="${index}" aria-label="槽位 ${index + 1}${note ? '，移除' + esc(note.keyword) : '，待放入便签'}"`,
-        });
-      }).join('')}</div>
-      ${button('synthesize', seal() + '<span>盖章发单</span>', { css: 'wax stamp-action', disabled: locked || filled !== 3 })}</div></div>`;
   }
 
   const glasses = {
@@ -181,7 +200,7 @@
     const left = 100 - shape.radius, width = shape.radius * 2;
     return `M${left - 10} ${depth}q${width / 4} -7 ${width / 2 + 10} 0t${width / 2 + 10} 0`;
   }
-  function glass(recipe, id, pending = false) {
+  function glass(recipe, id) {
     const shape = vesselFor(recipe);
     const {layers,iceCount}=window.TavernAppearance.cocktailLook(recipe);
     const garnish = mix.get(mix.garnishes, recipe.garnish);
@@ -211,7 +230,7 @@
       <path d="${shape.rim}" fill="none" stroke="#ffe3b8" stroke-opacity=".9" stroke-width="1.6"/>
       <path d="${shape.detail}" fill="none" stroke="#ffedce" stroke-opacity=".46" stroke-width="1.3" stroke-linecap="round"/>
       ${garnish ? garnishIcon(garnish, shape.ornament[0]-10, shape.ornament[1]-19, 29) : ''}
-      ${pending ? `<text class="mix-pending" x="100" y="${shape.surface + 20}" text-anchor="middle">待调特调</text>` : ''}</svg>`;
+      </svg>`;
   }
   function potionEffect(recipe, color) {
     const { surface, radius } = vesselFor(recipe);
@@ -221,115 +240,238 @@
       <ellipse class="potion-ripple second-ring" rx="${Math.min(radius - 8, 33)}" ry="4"/>
     </g>`;
   }
-  function meters(recipe) {
-    const { stats, tipsyDelta, chaos } = mix.calculate(recipe);
-    const sigils = {
-      charm: 'M12 20C8 17 2 13 3 8c1-5 7-5 9-1 2-4 8-4 9 1 1 5-5 9-9 12Z',
-      agility: 'M3 9h11c5 0 6-6 2-6M2 13h16c5 0 5 6 1 6M5 17h6',
-      strength: 'm13 2-2 7-3-2c0 5-5 6-3 11 3 7 16 5 15-4-1-4-4-6-7-12Zm0 11c3 5 3 7-1 8',
-      insight: 'M2 12q10-15 20 0-10 15-20 0Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
-      luck: 'm12 2 2.8 6.6 7.2 1-5.3 5.1 1.3 7.1-6-3.4-6 3.4 1.3-7.1L2 9.6l7.2-1Z',
-    };
-    const tiles = mix.potions.map(({id, label, color}) => {
-      const n = stats[id];
-      return `<div class="stat-dial" data-stat="${id}" data-value="${n}" style="--ink:${color}" role="meter" aria-label="${label}" aria-valuemin="0" aria-valuemax="3" aria-valuenow="${n}">
-        <span class="dial-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${sigils[id]}"/></svg>${label}</span>
-        <strong class="dial-value" aria-hidden="true" data-previous="${Math.max(0,n-1)}"><span>${n}</span></strong><span class="dial-delta" aria-hidden="true">+1</span>
-        <span class="dial-marks" aria-hidden="true">${[1,2,3].map(i=>`<i class="${i<=n?'filled':''}"></i>`).join('')}</span></div>`;
+  const statSigils = {
+    desire: 'M12 20C8 17 2 13 3 8c1-5 7-5 9-1 2-4 8-4 9 1 1 5-5 9-9 12Z',
+    shy: 'm12 2 2.8 6.6 7.2 1-5.3 5.1 1.3 7.1L12 18l-6.1 3.4 1.3-7.1L2 9.6l7.2-1Z',
+    candid: 'M2 12q10-15 20 0-10 15-20 0Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+    tease: 'M3 9h11c5 0 6-6 2-6M2 13h16c5 0 5 6 1 6M5 17h6',
+    strength: 'm13 2-2 7-3-2c0 5-5 6-3 11 3 7 16 5 15-4-1-4-4-6-7-12Zm0 11c3 5 3 7-1 8',
+  };
+  const dialNumber = (stat, value) => stat === 'strength' && value > 0 ? `+${value}` : String(value);
+  function statDial(stat, label, value, pointsPerMark, min = 0) {
+    const marks = Array.from({ length: mix.maxDrops }, (_, index) => {
+      const fill = Math.min(1, Math.max(0, Math.abs(value) / pointsPerMark - index));
+      return `<i${fill ? ` class="filled" style="--fill:${fill * 100}%"` : ''}></i>`;
     }).join('');
-    const effect = (label, text, n, color) => `<div class="effect-gauge" style="--ink:${color}"><span>${label}</span><b>${text}</b><i aria-hidden="true" style="--amount:${n}%"></i></div>`;
-    return `<div class="dial-heading"><span>魔药刻度</span><span>${recipe.potions.length} / 3 滴</span></div>
-      <div class="stat-list">${tiles}</div><div class="effect-list">
-      ${effect('微醺', tipsyDelta < 0 ? '清零' : '+'+tipsyDelta, Math.max(0,tipsyDelta), '#e5ba79')}
-      ${effect('混乱', chaos, chaos, '#e6907c')}</div>`;
+    return `<div class="stat-dial" data-stat="${stat}" data-value="${value}" role="meter" aria-label="${esc(label)}"
+      aria-valuemin="${min}" aria-valuemax="${mix.maxDrops * pointsPerMark}" aria-valuenow="${value}">
+      <span class="dial-label"><svg class="stat-sigil" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${statSigils[stat]}"/></svg>${esc(label)}</span>
+      <span class="dial-marks" aria-hidden="true">${marks}</span>
+      <strong class="dial-value" aria-hidden="true"><span>${dialNumber(stat, value)}</span></strong>
+      <span class="dial-delta" aria-hidden="true"></span></div>`;
+  }
+  function animatePotionDials(panel, dose) {
+    for (const [key, change] of Object.entries({ ...dose.attributes, strength: dose.tipsyDelta })) {
+      if (!change) continue;
+      const dial = panel.querySelector(`[data-stat="${key}"]`);
+      dial.querySelector('.dial-value').dataset.previous = dialNumber(key, Number(dial.dataset.value) - change);
+      dial.querySelector('.dial-delta').textContent = change > 0 ? `+${change}` : String(change);
+      dial.classList.add('dose-added');
+    }
+  }
+  function meters(recipe, guest, now) {
+    const { effectId, attributes, tipsyDelta } = mix.recipeEffects(recipe);
+    const predicted = mix.predictTipsy(now, recipe);
+    const blocked = !mix.canServeDrink(now, recipe);
+    const prediction = blocked ? '仅收无酒精' : `预计 ${predicted}/100 · ${tipsyLabel(predicted)}`;
+    const stats = Object.entries(mix.potionAttributes).map(([key, label]) => statDial(key, label, attributes[key], 2)).join('');
+    const strength = statDial('strength', '酒劲', tipsyDelta, 20, -20 * mix.maxDrops);
+    return `<header class="dial-heading"><span class="dial-emblem">${icon('vial')}</span><h3 id="meters-title">魔药刻度</h3>${potionProgress(recipe)}</header>
+      <div class="stat-list" role="group" aria-label="当前配方属性">${stats}${strength}</div>
+      ${recipe.baseLiquor ? `<div class="drink-effects">${esc(mix.drinkEffects[effectId].label)}</div>` : ''}
+      <div class="effect-gauge"><span>${guest ? esc(guest.name) + ' · 醉酒度' : '醉酒度'}</span>
+        <b>${now}/100 · ${tipsyLabel(now)}</b><i aria-hidden="true" style="--amount:${now}%"></i>
+        ${recipe.baseLiquor ? `<span class="tipsy-forecast">${prediction}</span>` : ''}</div>`;
+  }
+  function potionTint(id, color) {
+    return `<filter id="tint-${id}" color-interpolation-filters="sRGB">
+      <feColorMatrix in="SourceGraphic" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  -5 5 0 0 -.06" result="liquid"/>
+      <feColorMatrix in="SourceGraphic" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 1 0" result="light"/>
+      <feFlood flood-color="${color}" result="pigment"/>
+      <feComposite in="light" in2="pigment" operator="arithmetic" k1="1"/>
+      <feComposite in2="liquid" operator="in"/>
+      <feComposite in2="SourceGraphic" operator="atop"/>
+    </filter>`;
+  }
+  function potionNotes(potion) {
+    return `<span class="potion-effects" aria-hidden="true">${mix.potionLabels(potion).map(label => `<span>${esc(label)}</span>`).join('')}</span>`;
+  }
+  function customBottleArt(filled = false) {
+    return `<span class="prop-art custom-bottle" aria-hidden="true">${filled ? '<span class="bottle-color"></span>' : ''}
+      <img data-prop src="${propsPath}potion-custom.webp" alt="" draggable="false"><svg viewBox="0 0 68 76" focusable="false"><path fill="currentColor" d="M28 8h12v15l16 28q5 15-10 17H22Q7 66 12 51l16-28Z"/></svg></span>`;
+  }
+  function potionLibrary(potions, recipe) {
+    return potions.map(item => {
+      const potion = mix.dose(item);
+      if (!potion || typeof item === 'string') return '';
+      const count = recipe.potions.filter(drop => drop?.name === potion.name).length;
+      const name = esc(potion.name);
+      const detail = esc(mix.potionLabels(potion).join('，'));
+      const bottle = button('saved-potion', `${customBottleArt(true)}<span class="prop-label">${name}</span>${potionNotes(potion)}${count ? `<span class="potion-badge" aria-hidden="true">${count}</span>` : ''}`, {
+        id: potion.name, css: 'ingredient prop-choice', disabled: recipe.potions.length >= mix.maxDrops,
+        attrs: `title="${name} · ${potion.color}" aria-label="滴入${name}${count ? '，已滴 ' + count + ' 滴' : ''}" aria-description="${detail}" aria-pressed="${Boolean(count)}"`,
+      });
+      const remove = button('remove-potion', icon('close'), {
+        id: potion.name, css: 'potion-remove', attrs: `aria-label="删除${name}" title="删除${name}"`,
+      });
+      return `<div class="saved-potion" style="--ink:${potion.color}">${bottle}${remove}</div>`;
+    }).join('');
+  }
+  function potionProgress(recipe) {
+    const used = recipe.potions.length;
+    const slots = Array.from({ length: mix.maxDrops }, (_, i) => {
+      const potion = mix.dose(recipe.potions[i]);
+      return `<span${potion ? ` class="filled" style="--ink:${potion.color}"` : ''}>${icon('drop')}</span>`;
+    }).join('');
+    return `<div class="potion-progress" data-full="${used === mix.maxDrops}" role="meter" aria-label="已滴入魔药"
+      aria-valuemin="0" aria-valuemax="${mix.maxDrops}" aria-valuenow="${used}" aria-valuetext="${used} / ${mix.maxDrops} 滴">
+      <span class="potion-progress-count" aria-hidden="true"><strong>${used}</strong> / ${mix.maxDrops} 滴</span>
+      <span class="potion-progress-slots" aria-hidden="true">${slots}</span>
+    </div>`;
   }
   function ingredients(recipe, draft = {}) {
     const base = mix.bases.map(item => {
       const [name, silhouette] = bottles[item.id];
       const art = prop(name, `<path fill="currentColor" fill-opacity=".62" stroke="currentColor" stroke-width="2" d="${silhouette}"/><path d="M27 41v14" stroke="#fff1d3" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>`);
-      return button('base', art + `<span class="prop-label">${item.label}</span>`, {
-        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" aria-label="${item.name} · ${item.label}" aria-pressed="${recipe.baseLiquor === item.id}"`,
+      const delta = item.tipsyDelta < 0 ? `−${Math.abs(item.tipsyDelta)}` : `+${item.tipsyDelta}`;
+      const tipsy = `醉酒度 ${delta}`;
+      return button('base', art + `<span class="prop-label">${item.label}<b class="base-tipsy">${tipsy}</b></span>`, {
+        css: 'ingredient prop-choice', id: item.id,
+        attrs: `style="--ink:${item.color}" aria-label="${item.name} · ${item.label} · ${tipsy}" aria-pressed="${recipe.baseLiquor === item.id}"`,
       });
     }).join('');
     const potion = mix.potions.map(item => {
       const n = recipe.potions.filter(id => id === item.id).length;
-      const art = prop('potion-' + item.id, '<path fill="#3a282a" stroke="#cf9b68" stroke-width="2" d="M29 25V13a5 5 0 0 1 10 0v12Z"/><path fill="currentColor" fill-opacity=".75" stroke="currentColor" stroke-width="2" d="M27 25h14v37a7 7 0 0 1-14 0Z"/><path d="M31 33v21" stroke="#fff1d3" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>');
-      return button('potion', art + `<span class="prop-label">${item.label}</span>${n ? `<span class="potion-badge" aria-hidden="true">${n}</span>` : ''}`, {
-        css: 'ingredient prop-choice', id: item.id, attrs: `style="--ink:${item.color}" aria-label="${item.name}，${item.label}${n ? '，已滴 ' + n + ' 滴' : ''}" aria-pressed="${!!n}"`,
+      const sub = Boolean(item.label);
+      const labels = mix.potionLabels(item);
+      const detail = labels.join('，');
+      const art = prop('potion-' + (sub ? 'agility' : item.id), '<path fill="#3a282a" stroke="#cf9b68" stroke-width="2" d="M29 25V13a5 5 0 0 1 10 0v12Z"/><path fill="currentColor" fill-opacity=".75" stroke="currentColor" stroke-width="2" d="M27 25h14v37a7 7 0 0 1-14 0Z"/><path d="M31 33v21" stroke="#fff1d3" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>', sub ? item.id : '');
+      return button('potion', art + `<span class="prop-label">${sub ? item.label : item.name}</span>${potionNotes(item)}${n ? `<span class="potion-badge" aria-hidden="true">${n}</span>` : ''}`, {
+        css: 'ingredient prop-choice' + (sub ? ' compound-potion' : ''), id: item.id,
+        attrs: `style="--ink:${item.color}" title="${detail}" aria-label="${item.name}${n ? '，已滴 ' + n + ' 滴' : ''}" aria-description="${detail}" aria-pressed="${!!n}"`,
       });
     }).join('');
-    const customDrops=recipe.potions.filter(drop=>typeof drop==='object').length;
-    const tint=draft.result?.color || '#76c8ae';
-    const customBottle=button('edit-potion', `<span class="prop-art" aria-hidden="true"><img class="elixir-bottle" data-prop src="${propsPath}potion-custom.webp" alt=""><svg viewBox="0 0 68 76"><path fill="currentColor" d="M28 8h12v15l16 28q5 15-10 17H22Q7 66 12 51l16-28Z"/></svg></span><span class="prop-label">自定义</span>${customDrops ? '<span class="potion-badge">'+customDrops+'</span>' : ''}`,{
-      css:'ingredient prop-choice',attrs:`style="--ink:${tint}" aria-controls="potion-editor" aria-expanded="${!!draft.open}" aria-label="调配自定义魔药"`,
+    const customBottle = button('edit-potion', customBottleArt() + '<span class="prop-label">自定义</span>', {
+      css: 'ingredient prop-choice', attrs: `style="--ink:#cda776" aria-controls="potion-editor" aria-expanded="${Boolean(draft.open)}" aria-label="鉴定自定义魔药"`,
     });
-    const dots = `<div class="drop-count"><span>${recipe.potions.length}/3</span><i></i><i></i><i></i>${button('clear-potions', '清空魔药', { css: 'arrow', disabled: !recipe.potions.length, attrs: 'aria-label="清空魔药"' })}</div>`;
-    const garnish = mix.garnishes.map(item => button('garnish', `<i aria-hidden="true">${garnishIcon(item)}</i><span>${item.label}</span>`, {
-      css: 'ingredient', id: item.id, attrs: `style="--ink:${item.color}" aria-description="${item.effect}" aria-pressed="${recipe.garnish === item.id}"`,
-    })).join('');
-    return { bases: base, potions: potion + customBottle + dots, garnishes: garnish };
+    const filters = mix.potions.filter(item => item.label).map(item => potionTint(item.id, item.pigment)).join('');
+    const garnish = mix.garnishes.map(item => {
+      return button('garnish', `<i aria-hidden="true">${garnishIcon(item)}</i><span>${item.label}</span>
+        <span class="garnish-effect">${item.flavor}</span>`, {
+        css: 'ingredient', id: item.id, attrs: `style="--ink:${item.color}" aria-pressed="${recipe.garnish === item.id}"`,
+      });
+    }).join('');
+    return { bases: base, potions: potion + customBottle, garnishes: garnish, filters };
   }
   const chip = recipe => recipe.customIngredient ? `<span class="ingredient-chip"><span>+ ${esc(recipe.customIngredient)}</span></span>` : '';
   function printArt(item, media, kind) {
     const url = image(media?.url);
-    if (url) return `<div class="print-image"><img src="${esc(url)}" alt="${kind === 'drink' ? '特调成品照' : '邻居归来的纪念照'}"></div>`;
-    const pending = media?.status === 'pending';
-    return `<div class="print-image illustrated ${pending ? 'developing' : ''}">
-      ${kind === 'drink' ? glass(item.recipe, 'card-' + item.id) : `<svg class="instant-art" viewBox="0 0 320 216" aria-hidden="true">
-      <defs><linearGradient id="sky-${item.questId}" x2="0" y2="1"><stop stop-color="#282533"/><stop offset="1" stop-color="#94604d"/></linearGradient></defs>
-      <path fill="url(#sky-${item.questId})" d="M0 0h320v216H0z"/><circle cx="245" cy="52" r="24" fill="#f0c78b"/>
-      <path fill="#34242b" d="M0 146l45-36 24 18 30-40 46 45 80-24 35 32 60-30v105H0z"/>
-      <path fill="#201d23" d="M0 176l93-14 35-55 40 47 152 37v25H0z"/><path stroke="#e6a775" stroke-width="3" d="M186 170v-60h22"/>
-      <path fill="#f1b878" d="M201 111h14l3 8h-20z"/><path fill="#876251" d="M174 216l14-46 12 4 25 42z"/>
-      <circle cx="143" cy="154" r="10" fill="#2c2225"/><path d="M134 168q9-9 17 0l7 35h-30z" fill="#2c2225"/>
-      <path stroke="#f7c67d" stroke-opacity=".58" stroke-width="2" d="M213 137h7m22-13h8m-48 33h10m58-15h8"/></svg>`}
-      ${pending ? '<span class="developing-label">暗房显影中</span>' : ''}</div>`;
+    if (url) return `<div class="print-image"><img src="${esc(url)}" alt="${kind === 'drink' ? '特调成品照' : '角色归来的纪念照'}"></div>`;
+    if (media?.status === 'pending') return '<div class="print-image"><span class="developing-label">暗房显影中</span></div>';
+    return '';
+  }
+
+  function mediaRetry(state, key, label) {
+    const entry = state.media[key];
+    if (!entry || !['failed', 'fallback'].includes(entry.status) || !(entry.illustrations || entry.kind === 'standing')) return '';
+    return `<p class="drink-meta" role="status">${esc(label)} · ${esc(entry.error || '生成失败')}
+      ${button('media-retry', '重试', { id: key, css: 'quiet', attrs: `aria-label="重新生成${esc(label)}"` })}</p>`;
   }
   function report(state, item) {
     const media = state.media[item.questId], outcome = item.outcome;
     const drink = state.drinks.find(row => row.id === item.quest.drinkId);
-    const cup = state.media[drink.id];
+    const cup = drink && state.media[drink.id];
     return `<div class="report-grid"><div class="instant"><figure>${printArt(item, media, 'photo')}<figcaption>${esc(outcome.polaroidCaption)}</figcaption></figure>
       <span class="trinket"><i aria-hidden="true">${icon(trinketIcons.has(outcome.trinket.iconKeyword) ? outcome.trinket.iconKeyword : 'star')}</i> ${esc(outcome.trinket.name)}</span></div>
       <div class="report-copy"><div class="report-meta"><span>${resultNames[outcome.outcomeType]}</span><strong>好感 +${outcome.affinityDelta}</strong></div>
       <h3>${esc(item.quest.title)}</h3><p>${esc(outcome.storySummary)}</p><blockquote>「${esc(outcome.charReturnQuote)}」</blockquote>
-      <div class="report-drink">${printArt(drink, cup, 'drink')}<div><strong>${esc(cup?.drinkName || outcome.drinkName)}</strong><small>${esc(mix.recipeLabel(drink.recipe))} · 混乱 ${drink.chaos}</small>${chip(drink.recipe)}</div></div></div></div>
-      <footer class="overlay-actions">${button('pin', state.wall.includes(item.questId) ? '已钉在纪念墙上' : '钉在纪念墙', {
-        id: item.questId, css: 'primary', disabled: state.wall.includes(item.questId),
-      })}</footer>`;
+      ${drink ? `<div class="report-drink">${printArt(drink, cup, 'drink')}<div><strong>${esc(cup?.drinkName || outcome.drinkName)}</strong><small>${esc(mix.recipeLabel(drink.recipe))}</small>${chip(drink.recipe)}</div></div>` : ''}</div></div>`;
   }
+  function directory(state, ui) {
+    const roster = new Map((ui.guestRoster || []).map(guest => [guest.name, guest]));
+    const people = { ...state.people, ...Object.fromEntries(roster) };
+    const seated = new Set(state.guests.map(guest => guest.name));
+    const status = ui.guestRosterPending ? '<p class="empty" role="status">正在读取角色状态…</p>' :
+      ui.guestRosterError ? `<p class="empty" role="status">${esc(ui.guestRosterError)} ${button('guest-roster', '重试', { css: 'quiet' })}</p>` : '';
+    const entry = (guest, present) => {
+      const known = Object.hasOwn(state.people, guest.name) ? state.people[guest.name] : undefined;
+      const description = guest.title || (!present && known ? '旧识' : '');
+      const reserved = state.reservedGuestName === guest.name;
+      const preference = Object.hasOwn(state.preferences, guest.name) ? state.preferences[guest.name] : undefined;
+      const label = reserved ? '取消留座' : '明晚留座';
+      const reserve = roster.has(guest.name) || reserved ? button('reserve', label, {
+        id: guest.name, css: 'quiet reserve-seat',
+        attrs: `aria-label="${label} ${esc(guest.name)}" aria-pressed="${reserved}" aria-disabled="${!!ui.busy}"`,
+      }) : '';
+      const value = present ? state.tipsy[guest.name] || 0 : 0;
+      const condition = tipsyLabel(value);
+      const meter = present ? `<div class="directory-tipsy">
+        <span>${condition}</span><span>${value}/100</span>
+        <meter min="0" max="100" low="20" high="80" optimum="0" value="${value}" aria-label="${esc(guest.name)}的醉酒度"></meter>
+      </div>` : '';
+      return `<article>${avatar(known ? { ...known, ...guest } : guest)}
+        <div class="directory-name"><strong>${esc(guest.name)}</strong>${description ? `<small>${esc(description)}</small>` : ''}
+        ${meter}${preference ? `<small>${preference.preference === 'likes' ? '偏爱' : '不爱'} · ${esc(preference.flavor)}</small>` : ''}</div>${reserve}</article>`;
+    };
+    const entries = Object.values(people);
+    const groups = [
+      ['今夜在座', entries.filter(guest => seated.has(guest.name)), true],
+      ['其他角色', entries.filter(guest => !seated.has(guest.name)), false],
+    ];
+    return `<div class="directory">${status}${groups.map(([title, guests, present]) => guests.length ?
+      `<section class="directory-group"><h3>${title}</h3>${guests.map(guest => entry(guest, present)).join('')}</section>` : '').join('')}</div>`;
+  }
+
   function drawer(state, ui, kind) {
-    const titles = { menu: '招牌酒单', wall: '纪念墙', people: '邻舍名录', saves: '存档与设置', report: '归来战报', special: '当前特调' };
+    const titles = { menu: '招牌酒单', wall: '纪念墙', people: '角色状态', report: '归来战报', special: '当前特调' };
+    const drawerIcon = { menu: 'cocktail', wall: 'wall', people: 'people' }[kind];
     let content = '';
-    if (kind === 'menu') content = `<div class="album-grid">${[...state.drinks].reverse().map(item => {
+    if (kind === 'menu') content = `<div class="album-grid drink-menu">${[...state.drinks].reverse().map(item => {
       const media = state.media[item.id];
-      return `<article class="album-card">${printArt(item, media, 'drink')}<h3>${esc(media?.drinkName || mix.base(item.recipe).fallback)}</h3>
-        <p>${esc(state.people[item.charId]?.name)} · Night ${item.night}</p><p>${esc(mix.recipeLabel(item.recipe))}</p>${chip(item.recipe)}</article>`;
+      const guest = item.guestName;
+      const tasting = image(state.media['tipsy-' + item.id]?.url);
+      return `<article class="album-card"><div class="drink-photos">${printArt(item, media, 'drink')}
+        ${tasting ? button('menu-photo', `<img src="${esc(tasting)}" alt="" draggable="false">`, {
+          id: item.id, css: 'print-image tasting-print',
+          attrs: `aria-label="查看${esc(guest || '饮用者')}品尝时的照片" aria-haspopup="dialog" aria-controls="cg-preview"`,
+        }) : ''}
+        </div><h3>${esc(media?.drinkName || '特调')}</h3>
+        <p class="drink-meta">${guest ? `<span>${esc(guest)}</span>` : ''}<span>Night ${item.night}</span></p>
+        <p class="drink-recipe">${mix.recipeParts(item.recipe).map(part => `<span>${esc(part)}</span>`).join('')}</p>${chip(item.recipe)}
+        ${mediaRetry(state, item.id, '特调照片')}${mediaRetry(state, 'tipsy-' + item.id, '饮后照片')}${mediaRetry(state, item.tasting?.standing, '角色立绘')}</article>`;
     }).join('') || '<p class="empty">酒单空着，等第一杯特调。</p>'}</div>`;
     if (kind === 'special') {
       const drink = state.drinks.find(item => item.id === ui.cardId);
-      if (drink) content = `<figure class="card-closeup">${printArt(drink,state.media[drink.id],'drink')}<figcaption><strong>${esc(state.media[drink.id]?.drinkName || mix.base(drink.recipe).fallback)}</strong><p>${esc(mix.recipeLabel(drink.recipe))}</p>${chip(drink.recipe)}</figcaption></figure>`;
+      if (drink) content = `<figure class="card-closeup">${printArt(drink,state.media[drink.id],'drink')}<figcaption><strong>${esc(state.media[drink.id]?.drinkName || '特调')}</strong><p>${esc(mix.recipeLabel(drink.recipe))}</p>${chip(drink.recipe)}</figcaption></figure>`;
     }
-    if (kind === 'wall') content = `<div class="album-grid wall-grid">${state.wall.map(id => state.reports.find(row => row.questId === id)).filter(Boolean).reverse().map(item =>
-      `<article class="wall-card">${button('show-report', `${printArt(item, state.media[item.questId], 'photo')}
-        <strong>${esc(item.outcome.polaroidCaption)}</strong><small>Night ${item.night} · ${esc(item.quest.title)}</small>`, { id: item.questId })}</article>`).join('')
-      || '<p class="empty">把归来战报里的拍立得钉在这里。</p>'}</div>`;
-    if (kind === 'people') content = `<div class="directory">${Object.values(state.people).map(guest => `<article>${avatar(guest)}
-      <div><strong>${esc(guest.name)}</strong><small>${esc(guest.title || (state.guests.some(item => item.id === guest.id) ? '今夜来客' : '旧识'))}</small></div>
-      <span>好感 ${state.affinity[guest.id] || 0} · ${tipsyLabel(state.tipsy[guest.id] || 0)}</span></article>`).join('')
-      || '<p class="empty">开店后，来客就会出现在名录里。</p>'}</div>`;
-    if (kind === 'saves') content = `<div class="save-controls"><label><input type="checkbox" id="illustrations" ${state.settings.illustrations ? 'checked' : ''}> 为特调、来客神态和战报生成图片</label>
-      <label><input type="checkbox" id="sound" ${(ui.soundPreview ?? state.settings.sound) !== false ? 'checked' : ''}> 酒馆声音</label>
-      ${button('new-save', '新开一间酒馆', { css: 'quiet', disabled: !!ui.busy })}</div>
-      <div class="save-list">${ui.saves.map(item => `<article><div><strong>${esc(item.title)}</strong><small>${new Date(item.updatedAt).toLocaleString('zh-CN')}</small></div>
-      ${item.sessionId === ui.sessionId ? '<span>当前存档</span>' : button('load', '读档', { id: item.sessionId, disabled: !!ui.busy })}</article>`).join('') || '<p class="empty">暂无存档。</p>'}</div>
-      <footer class="overlay-actions">${button('exit', '保存并返回游戏馆', { disabled: !!ui.busy, css: 'primary' })}</footer>`;
+    if (kind === 'wall') {
+      const photos = [...state.wall].reverse().flatMap(id => {
+        const drink = state.drinks.find(item => item.id === id);
+        const url = image(state.media['tipsy-' + id]?.url);
+        if (!drink || !url) return [];
+        const name = drink.guestName;
+        return [`<article class="wall-card">${button('menu-photo', `<span class="print-image"><img src="${esc(url)}" alt=""></span>
+          <strong>${esc(name)}</strong><small>Night ${drink.night} · ${esc(state.media[id]?.drinkName || '特调')}</small>`, {
+          id, css: 'tasting-print', attrs: `aria-label="查看${esc(name)}的饮后照片" aria-haspopup="dialog" aria-controls="cg-preview"`,
+        })}</article>`];
+      });
+      const reports = [...state.reports].sort((a, b) => {
+        const pinned = state.wall.indexOf(b.questId) - state.wall.indexOf(a.questId);
+        return pinned || b.night - a.night;
+      }).map(item => `<article class="wall-card">${button('show-report', `${printArt(item, state.media[item.questId], 'photo')}
+        <strong>${esc(item.outcome.polaroidCaption)}</strong><small>Night ${item.night} · ${esc(item.quest.title)}</small>`, { id: item.questId })}</article>`);
+      content = `<div class="album-grid wall-grid">${photos.join('')}${reports.join('') || (photos.length ? '' : '<p class="empty">在饮后照片里选择「钉上纪念墙」。</p>')}</div>`;
+    }
+    if (kind === 'people') content = directory(state, ui);
     if (kind === 'report') {
       const item = state.reports.find(row => row.questId === ui.reportId);
       content = item ? report(state, item) : '';
     }
-    return `<header class="overlay-head"><h2 id="overlay-title">${titles[kind]}</h2>${button('close', icon('close'), { css: 'close', attrs: 'aria-label="关闭浮层"' })}</header><div class="overlay-content">${content}</div>`;
+    return `<header class="overlay-head${drawerIcon ? ' drawer-head' : ''}"><h2 id="overlay-title">
+      ${drawerIcon ? `<span class="drawer-emblem">${icon(drawerIcon)}</span>` : ''}${titles[kind]}
+      </h2>${button('close', icon('close'), { css: 'close', attrs: 'aria-label="关闭浮层"' })}</header>
+      <div class="overlay-content${drawerIcon ? ' drawer-content drawer-' + kind : ''}">${content}</div>`;
   }
 
-  window.TavernView = { icon, image, esc, button, avatar, seats, dialogue, board, ingredients, glass, potionEffect, chip, meters, drawer, tipsyLabel };
+  window.TavernView = { icon, image, esc, button, avatar, featuredGuest, seats, dialogue, hasReadOpening, replyGuest, ingredients, glass, potionEffect, potionProgress, potionLibrary, animatePotionDials, meters, drawer, tipsyLabel };
 })();

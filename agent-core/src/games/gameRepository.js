@@ -32,10 +32,14 @@ export function createGameRepository(db) {
       FROM installed_games WHERE id = ? COLLATE NOCASE`).all(validId(id)),
     list: () => db.prepare(`SELECT * FROM installed_games WHERE installed=1
       ORDER BY (source='official' AND id='trpg-simulator') DESC, (source='official') DESC, name`).all(),
-    sessions: gameId => db.prepare(`SELECT session_id AS sessionId,title,created_at AS createdAt,updated_at AS updatedAt,revision,
-      json_extract(state_json,'$.ended') AS ended,
-      CASE WHEN json_type(state_json,'$.round') = 'integer' THEN json_extract(state_json,'$.round') END AS round
-      FROM game_sessions WHERE game_id=? ORDER BY updated_at DESC`).all(validId(gameId)).map(row => ({ ...row, ended: row.ended === 1 })),
+    sessions(gameId) {
+      const trpg = gameId === 'trpg-simulator' && game(gameId)?.source === 'official';
+      return db.prepare(`SELECT session_id AS sessionId,title,created_at AS createdAt,updated_at AS updatedAt,revision,
+        json_extract(state_json,'$.ended') AS ended,
+        CASE WHEN json_type(state_json,'$.round') = 'integer' THEN json_extract(state_json,'$.round') END AS round
+        FROM game_sessions WHERE game_id=? ${trpg ? "AND json_extract(state_json,'$.version') = 4" : ''}
+        ORDER BY updated_at DESC`).all(validId(gameId)).map(row => ({ ...row, ended: row.ended === 1 }));
+    },
     deleteSession: (gameId, id) => db.prepare('DELETE FROM game_sessions WHERE game_id=? AND session_id=?').run(validId(gameId), validId(id)),
     register(manifest, source, installPath, repoUrl = null, zipFingerprint = null) {
       const now = Date.now();

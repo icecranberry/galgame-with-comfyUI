@@ -466,6 +466,7 @@ async function submitWithRetry(rawPrompt, {
   sourceWorkflow,
   imageProvider = config.comfyui.imageProvider,
   outputScope,
+  normalizeComfyCountTags = true,
 } = {}) {
   if (!sourceWorkflow && imageProvider === 'novelai') {
     // NovelAI receives the same prepared scene description and artist tags as ComfyUI,
@@ -473,8 +474,8 @@ async function submitWithRetry(rawPrompt, {
     return submitNovelaiImage(rawPrompt, { artist, onProgress, ...(outputScope === 'game' ? { width, height, negativePrompt } : {}) });
   }
 
-  // 1. 最终阀门
-  let finalPrompt = sourceWorkflow ? rawPrompt : finalizeCountTags(rawPrompt);
+  // 1. 汇总数量标签。需要保留原料原文的自然语言提示词会显式跳过此步。
+  const finalPrompt = sourceWorkflow || !normalizeComfyCountTags ? rawPrompt : finalizeCountTags(rawPrompt);
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 2. 构建 workflow

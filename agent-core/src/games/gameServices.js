@@ -1,8 +1,11 @@
 import { bad } from './gamePaths.js';
 import { createHash } from 'node:crypto';
 import { estimateTokens } from '../services/lorebook/engine.js';
-import { appendReplay, fitNativeReplay, fitReplay, GAME_REPLAY_RULE } from './trpgReplay.js';
+import { getTimeTag } from '../services/timeLight.js';
+import { appendWorldLanguageStyle } from '../services/worldLanguageStyle.js';
+import { appendReplay, fitNativeReplay, GAME_REPLAY_RULE } from './trpgReplay.js';
 import { assertPromptFits, promptTokens, trpgPromptBudget } from './trpgPromptBudget.js';
+import { findCharacterByDisplayName } from './gameBridge.js';
 
 const JSON_OBJECT = { type: 'json_object' };
 
@@ -41,7 +44,7 @@ export function createGameServices(gameId, repo, assertPermission) {
     assertPromptFits(messages, tools, budget.inputLimit);
     const history = [
       { role: 'system', content: input.stableData }, { role: 'system', content: input.data },
-      ...records.slice(fitted.start, fitted.end).map(log => ({ role: log.actorId === 'player' ? 'user' : 'assistant', name: log.speaker,
+      ...records.slice(fitted.start, fitted.end).map(log => ({ role: log.speakerRole === 'player' ? 'user' : 'assistant', name: log.speaker,
         content: [log.dialogue, log.action].filter(Boolean).join('\n') })),
       task,
     ].filter(message => message.content);
@@ -71,7 +74,7 @@ export function createGameServices(gameId, repo, assertPermission) {
     console.log(`[trpg-context] ${budget.model} window=${budget.contextWindow} source=${budget.source} output=${budget.maxOutputTokens} inputLimit=${budget.inputLimit} estimated=${promptTokens(next.messages, tools)} archived=${next.replay.start}`);
     return { ...prepared, messages: next.messages };
   }
-  async function chat(messages, options, signal, budget) {
+  async function chat(messages, options, signal, budget, retry) {
     active(); assertPermission('llm:chat');
     if (!Array.isArray(messages) || !messages.length || messages.some(m => !['system', 'user', 'assistant', 'tool'].includes(m.role) || typeof m.content !== 'string') ||
       (!budget && (messages.length > 100 || JSON.stringify(messages).length > 180000))) throw bad('LLM 消息格式或长度不合法');
@@ -92,6 +95,12 @@ export function createGameServices(gameId, repo, assertPermission) {
       delete requestOptions.response_format;
       result = await chatSync(prepared.messages, requestOptions);
     }
+    if (retry && !retry.accepts(result)) {
+      requestOptions.signal.throwIfAborted();
+      const task = messages.at(-1);
+      const revised = [...messages.slice(0, -1), { ...task, content: task.content + retry.taskSuffix }];
+      result = await chatSync(await prepared.reapply(revised), requestOptions);
+    }
     prepared.commit();
     return result;
   }
@@ -99,13 +108,26 @@ export function createGameServices(gameId, repo, assertPermission) {
     chat(messages, options = {}, { signal } = {}) {
       return chat(messages, options, signal);
     },
-    async request({ rules, taskPersona = '', personas = [], stableData = '', publicHistory = [], data = '', task, scope = 'turn', timeline }) {
+    async request({
+      rules, taskPersona = '', personas = [], stableData = '', publicHistory = [], data = '', turnData = '', task, scope = 'turn', timeline,
+      includeWorldSetting = true, worldScope = 'interaction', characterName, characterNames, expressionRules = '',
+      scanData = [data, turnData].filter(Boolean).join('\n\n'),
+    }) {
       const usesReplay = useReplay({ timeline });
-      const { getSystemRulesWithWorld, getWorldSetting } = await import('../db/worldRepository.js');
-      const { getWorldIntegrationRule } = await import('../builtinRules.js');
-      const messages = [{ role: 'system', content: getSystemRulesWithWorld({ roleplay: false }) }];
-      if (getWorldSetting()) messages.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
-      const taskRules = usesReplay ? `${rules}\n${GAME_REPLAY_RULE}` : rules;
+      const tavernDialogue = gameId === 'midnight-tavern' && ['opening', 'chat', 'tasting'].includes(scope);
+      const { getSystemRules, getSystemRulesWithWorld, getWorldSetting } = await import('../db/worldRepository.js');
+      const { getWorldIntegrationRule, IMAGE_PROMPT_RULE_BODY } = await import('../builtinRules.js');
+      const worldSetting = includeWorldSetting && getWorldSetting();
+      const systemRules = worldSetting
+        ? getSystemRulesWithWorld({ roleplay: false })
+        : getSystemRules({ roleplay: false });
+      const messages = [{ role: 'system', content: systemRules }];
+      if (worldSetting) {
+        messages.push({ role: 'system', content: getWorldIntegrationRule(worldScope) });
+      }
+      const photoRule = gameId === 'midnight-tavern' && scope === 'tipsy-cg' ? IMAGE_PROMPT_RULE_BODY : '';
+      const baseTaskRules = usesReplay ? `${rules}\n${GAME_REPLAY_RULE}` : photoRule ? `${rules}\n\n${photoRule}` : rules;
+      const taskRules = tavernDialogue && includeWorldSetting ? appendWorldLanguageStyle(baseTaskRules) : baseTaskRules;
       const staticTexts = [...messages.map(m => m.content), taskRules];
       messages.push({ role: 'system', content: taskPersona ? `${taskRules}\n\n${taskPersona}` : taskRules });
       const rulesBoundary = { index: messages.length - 1, offset: taskRules.length };
@@ -116,19 +138,41 @@ export function createGameServices(gameId, repo, assertPermission) {
         messages.push({ role: 'system', content: stableData });
         staticTexts.push(stableData);
       }
-      const cacheBoundary = stableData ? { index: messages.length - 1, offset: stableData.length } : rulesBoundary;
+      const cacheBoundary = stableData || tavernDialogue
+        ? { index: messages.length - 1, offset: messages.at(-1).content.length }
+        : rulesBoundary;
+      if (tavernDialogue && expressionRules) messages.push({ role: 'system', content: expressionRules });
       if (data) messages.push({ role: 'system', content: data });
-      messages.push({ role: 'user', content: task });
+      let finalTask = gameId === 'midnight-tavern' && worldSetting
+        ? task + '\n请遵循 <world_setting> 中的世界观设定。'
+        : task;
+      if (gameId === 'midnight-tavern' && ['opening', 'chat'].includes(scope)) {
+        finalTask += `\n\n<time_context>\n当前时间：${getTimeTag()}\n</time_context>`;
+      }
+      const userIndex = messages.length;
+      const turnHeader = '<dynamic_context>\n';
+      const userContent = turnData ? `${turnHeader}${turnData}\n</dynamic_context>\n\n${finalTask}` : finalTask;
+      messages.push({ role: 'user', content: userContent });
+      if (!includeWorldSetting) return { messages, lorebook: false };
       const history = [
         ...(stableData ? [{ role: 'system', content: stableData }] : []),
-        { role: 'system', content: data },
-        ...(usesReplay ? [] : publicHistory).map(log => ({ role: log.actorId === 'player' ? 'user' : 'assistant', name: log.speaker,
+        { role: 'system', content: scanData },
+        ...(usesReplay ? [] : publicHistory).map(log => ({ role: log.role === 'user' || log.actorId === 'player' ? 'user' : 'assistant', name: log.speaker,
           content: [log.dialogue, log.action].filter(Boolean).join('\n') })),
-        { role: 'user', content: task },
+        { role: 'user', content: finalTask },
       ].filter(m => m.content);
-      return { messages, lorebook: { scope: `game:${gameId}:${scope}`, personaTexts, staticTexts, cacheBoundary, history } };
+      const lorebook = {
+        scope: `game:${gameId}:${scope}`, personaTexts, staticTexts, cacheBoundary, history,
+        ...(tavernDialogue && { appendOnly: true }),
+        ...(characterName && { characterName }),
+        ...(characterNames?.length && { characterNames }),
+      };
+      if (turnData) {
+        lorebook.fallbackTarget = { index: userIndex, offset: turnHeader.length + turnData.length + 1, label: '本轮任务之前' };
+      }
+      return { messages, lorebook };
     },
-    async complete(input, { signal, responseFormat } = {}) {
+    async complete(input, { signal, responseFormat, retry } = {}) {
       const built = await llm.request(input);
       if (useReplay(input)) {
         active(); assertPermission('llm:chat');
@@ -138,7 +182,7 @@ export function createGameServices(gameId, repo, assertPermission) {
         prepared.commit();
         return result;
       }
-      return llm.chat(built.messages, { lorebook: built.lorebook, responseFormat }, { signal });
+      return chat(built.messages, { lorebook: built.lorebook, responseFormat }, signal, undefined, retry);
     },
     async agent(input, tools, execute, { checkpoint, save, signal, responseFormat } = {}) {
       active(); assertPermission('llm:chat');
@@ -199,9 +243,7 @@ export function createGameServices(gameId, repo, assertPermission) {
         let messages;
         if (checkpoint?.promptTail) {
           const { replay, prefix } = input.timeline;
-          const next = replay.segments.at(-1)?.userTail !== undefined
-            ? fitNativeReplay(replay, input.publicHistory, prefix, continuation, requestTools, budget.inputLimit)
-            : fitReplay(replay, input.publicHistory, prefix, [checkpoint.promptTail, ...continuation], requestTools, budget.inputLimit);
+          const next = fitNativeReplay(replay, input.publicHistory, prefix, continuation, requestTools, budget.inputLimit);
           messages = next.messages;
           assertPromptFits(messages, requestTools, budget.inputLimit);
           if (next.replay !== replay) {
@@ -254,9 +296,48 @@ export function createGameServices(gameId, repo, assertPermission) {
       const result = await generateImageRaw(options.prompt, { outputScope: 'game', gameId, sessionId: options.sessionId,
         ...(comfyOnly ? { imageProvider: 'comfyui' } : {}),
         width: dimension(options.width), height: dimension(options.height || 576), negativePrompt: String(options.negativePrompt || '').slice(0, 4000),
+        normalizeComfyCountTags: options.normalizeComfyCountTags !== false,
         alreadyPrepared: true, disableRAG: true, scene: 'events', promptScene: 'events' });
       if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
       return { url: result.url, urls: result.urls };
+    }, async generateTavernStanding({ sessionId, key, label, direction, localPersona, onPrompt }) {
+      active(); assertPermission('image:generate'); assertPermission('llm:chat');
+      const game = repo.game(gameId);
+      if (gameId !== 'midnight-tavern' || game.source !== 'official') throw bad('该游戏无法调用酒馆立绘工具', 403);
+      const entry = repo.session(gameId, sessionId)?.state?.media?.[key];
+      if (entry?.kind !== 'standing' || entry.status !== 'pending') {
+        throw bad('没有已触发的酒馆立绘任务', 404);
+      }
+      if (typeof label !== 'string' || !label.trim() || label.length > 20 ||
+        typeof direction !== 'string' || !direction.trim() || direction.length > 1600) {
+        throw bad('临时立绘请求参数无效');
+      }
+      const hasLocalPersona = typeof localPersona === 'string' && !!localPersona.trim();
+      const character = hasLocalPersona ? null : findCharacterByDisplayName(repo.db, entry.guestName);
+      if (!character && !hasLocalPersona) throw bad('客人缺少立绘所需的角色资料', 404);
+      const sessionExists = () => !controller.signal.aborted && !!repo.session(gameId, sessionId);
+      let prompt = typeof entry.prompt === 'string' ? entry.prompt.trim() : '';
+      if (!prompt) {
+        const { generateStandingPrompts } = await import('../services/expressionStandingService.js');
+        const { buildCharacterPersona } = await import('../services/characterPersona.js');
+        const person = character?.display_name || character?.name;
+        const persona = character ? buildCharacterPersona(character, {
+          variant: 'short', person, outfits: null, fallbackToBase: false,
+        }) || person || '酒馆客人' : localPersona;
+        const slots = [{ id: entry.tier, name: label }];
+        const prompts = await generateStandingPrompts(character, slots, '', persona, 'work', {
+          drinkState: { label, value: entry.tipsy, direction },
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]),
+        });
+        if (!sessionExists()) throw bad('酒馆进度已关闭', 409);
+        prompt = prompts.get(entry.tier);
+        onPrompt?.(prompt);
+      }
+      const { renderTavernStanding } = await import('./tavernStanding.js');
+      if (!sessionExists()) throw bad('酒馆进度已关闭', 409);
+      return renderTavernStanding({
+        gameId, sessionId, character, prompt, tier: entry.tier, sessionExists,
+      });
     }, async generateScene({ sessionId, description, characters, playerName, style, background }) {
       active(); assertPermission('image:generate'); assertPermission('llm:chat');
       if (gameId !== 'trpg-simulator' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用跑团画面工具', 403);
@@ -268,11 +349,10 @@ export function createGameServices(gameId, repo, assertPermission) {
       const { config } = await import('../config.js');
       let explicitCharacters = null;
       if (background || characters !== undefined) {
-        const lookup = repo.db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE display_name = ?');
         explicitCharacters = (background ? [] : characters.filter(name => name !== playerName)).map(name => {
-          const matches = lookup.all(name);
-          if (matches.length !== 1) throw bad(`无法唯一识别入镜角色「${name}」`);
-          return matches[0];
+          const character = findCharacterByDisplayName(repo.db, name);
+          if (!character) throw bad(`无法唯一识别入镜角色「${name}」`);
+          return character;
         });
       }
       const includeUser = background ? false : characters?.includes(playerName);

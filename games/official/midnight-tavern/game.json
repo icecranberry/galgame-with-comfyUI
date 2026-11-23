@@ -3,12 +3,12 @@
   "name": "老板，八卦特浓，少冰",
   "version": "1.0.0",
   "author": "icecranberry",
-  "description": "“老板，真没加别的？”\n“放心，就一点点运气，和昨晚那张旧车票。”\n半真半假的传闻，配一杯来路不明的特调——门外夜色正好，总得有人替我出去撞撞大运。",
+  "description": "深夜来客坐上吧台。听他们聊几句，随手调一杯，看同一位客人从清醒到微醺，会怎样接你的话。",
   "cover": "web/cover.png",
   "entry": "web/index.html",
   "nsfw": false,
   "serverEntry": "server/index.mjs",
   "minAppVersion": "3.5.0",
   "permissions": ["bridge:read", "llm:chat", "image:generate", "save:rw"],
-  "tags": ["叙事", "调酒", "奇遇", "官方"]
+  "tags": ["叙事", "调酒", "角色对话", "官方"]
 }

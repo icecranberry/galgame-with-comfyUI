@@ -46,7 +46,7 @@ export function engrave(parent, shape, radius) {
     const gem = object(
       parent,
       new T.OctahedronGeometry(0.105),
-      new T.MeshPhysicalMaterial({ color: 0x19746e, metalness: 0.32, roughness: 0.1, clearcoat: 1 }),
+      new T.MeshPhysicalMaterial({ color: 0x9a4c3e, metalness: 0.32, roughness: 0.1, clearcoat: 1 }),
       0,
       shape.stem * 0.57,
     );
@@ -94,9 +94,9 @@ export function coaster(scene) {
   const c = canvas.getContext('2d');
   c.translate(512, 512);
   const grad = c.createRadialGradient(-120, -160, 22, 0, 0, 500);
-  grad.addColorStop(0, '#325953');
-  grad.addColorStop(0.73, '#183d3b');
-  grad.addColorStop(1, '#102626');
+  grad.addColorStop(0, '#794c42');
+  grad.addColorStop(0.73, '#56312c');
+  grad.addColorStop(1, '#382220');
   c.fillStyle = grad;
   c.fillRect(-512, -512, 1024, 1024);
   c.strokeStyle = '#ba975e';

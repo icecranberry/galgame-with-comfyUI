@@ -53,24 +53,18 @@
     el('mix-steps').classList.remove('has-moved');
     el('workshop').style.removeProperty('--step-direction');
   }
-  function open(kind, getRecipe, render) {
-    if (closing || (mode && (mode !== 'board' || kind !== 'mix'))) return;
-    if (!mode) trigger = document.activeElement;
-    mode = kind;
+  function open(getRecipe, render) {
+    if (closing || mode) return;
+    trigger = document.activeElement;
+    mode = 'mix';
     const dialog = el('station');
-    dialog.dataset.mode = kind;
-    el('station-title').textContent = kind === 'mix' ? '调酒工坊' : '传闻委托板';
-    el('commission-board').hidden = kind !== 'board';
-    el('workshop').hidden = kind !== 'mix';
-    if (kind === 'mix') {
-      rendererReady = new Promise(resolve => { resolveRenderer = resolve; });
-      rendererState('loading');
-    }
-    if (!dialog.open) dialog.showModal();
-    audio?.play('scene');
+    dialog.dataset.mode = mode;
+    rendererReady = new Promise(resolve => { resolveRenderer = resolve; });
+    rendererState('loading');
+    dialog.showModal();
+    audio?.play('workshopOpen');
     render();
     dialog.querySelector('[data-action="station-close"]').focus();
-    if (kind !== 'mix') return;
     const epoch = ++generation;
     const active = () => epoch === generation && !closing && mode === 'mix';
     const fallback = () => {
@@ -124,7 +118,7 @@
     });
     return closing;
   }
-  function draw(recipe, guest, canServe, view, setContent) {
+  function draw(recipe, guest, canServe, message, view, setContent) {
     const nav = el('mix-steps');
     const loading = el('workshop').dataset.renderer === 'loading';
     nav.style.setProperty('--step', step);
@@ -144,6 +138,9 @@
     document.querySelectorAll('[data-panel]').forEach((panel) => {
       panel.hidden = Number(panel.dataset.panel) !== step;
     });
+    const potionToolbar = el('potion-toolbar');
+    potionToolbar.hidden = step !== 1;
+    potionToolbar.querySelector('.clear-potions').disabled = locked || loading || recipe.potions.length === 0;
     const next = el('station').querySelector('[data-action="step-next"]');
     for (const choice of el('station').querySelectorAll('[data-action="ice"]')) {
       choice.disabled = locked || loading || !recipe.baseLiquor;
@@ -159,14 +156,14 @@
     serve.hidden = step !== 3;
     serve.disabled = locked || loading || !canServe;
     serve.textContent = guest ? '递给 ' + guest.name : '请选择接酒人';
-    el('mix-status').textContent = loading ? '准备杯具…' :
+    el('mix-status').textContent = message || (loading ? '准备杯具…' :
       step === 0
         ? window.TavernMix.base(recipe)?.name || '先选一种基酒'
         : step === 1
           ? ''
           : step === 2
             ? '点睛风味可选'
-            : '选择接酒邻居';
+            : '选择接酒的角色');
     el('station').querySelector('.step-content').inert = locked;
   }
   function restore(recipe) {
@@ -223,7 +220,7 @@
         if (action === 'base') await fillSvg();
         settleGlint();
       }
-    } else if (action === 'garnish' || action === 'custom') {
+    } else if (action === 'garnish') {
       renderer?.setGarnish(recipe);
       if (action === 'garnish' && recipe.garnish) void audio?.play('garnish');
     } else restore(recipe);

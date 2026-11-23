@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { EventEmitter } from 'node:events';
 import { builtinModules } from 'node:module';
 import { createGameRepository } from './gameRepository.js';
-import { createGameBridge } from './gameBridge.js';
+import { createGameBridge, findCharacterByDisplayName } from './gameBridge.js';
 import { createGameServices } from './gameServices.js';
 import { getTrpgCast, getTrpgPlayer } from './trpgProfiles.js';
 import { standingSlots } from '../services/expressionStandingAssets.js';
@@ -97,11 +97,12 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
     };
     const host = services(id, repo, assertPermission);
     const tavern = game.source === 'official' && id === 'midnight-tavern';
+    const trpg = game.source === 'official' && id === 'trpg-simulator';
     const gameDataDir = inside(mediaDir, validId(id));
     fs.mkdirSync(gameDataDir, { recursive: true });
     return { gameId: id, gameDataDir, events: { emit: (type, data) => events.emit('update', { gameId: id, type, data }) },
-      bridgeTools: { definitions: (tavern && bridge.tavernDefinitions) || bridge.definitions,
-        call: (name, args) => { assertPermission('bridge:read'); return bridge.call(name, args, { tavern }); } },
+      bridgeTools: { definitions: tavern ? bridge.tavernDefinitions : trpg ? bridge.trpgDefinitions : bridge.definitions,
+        call: (name, args) => { assertPermission('bridge:read'); return bridge.call(name, args, { tavern, trpg }); } },
       ...host,
       // A scoped repository instead of the application's unrestricted SQLite handle.
       db: { list: () => { assertPermission('save:rw'); return repo.sessions(id); }, load: sessionId => { assertPermission('save:rw'); return repo.session(id, sessionId); }, write: (...args) => { assertPermission('save:rw'); return repo.write(id, ...args); } },
@@ -111,16 +112,21 @@ export function createGameManager(db, { officialDir = OFFICIAL_DIR, communityDir
       },
       // Long-term memory is an explicit end-of-game operation of the official
       // simulator, never exposed as a generic bridge capability or REST SDK call.
-      ...(game.source === 'official' && id === 'trpg-simulator' ? {
+      ...(trpg ? {
         playerProfile: getTrpgPlayer,
         expressionSlots: () => standingSlots(db),
         castAssets: () => { assertPermission('bridge:read'); return getTrpgCast(db); },
         async remember(sessionId, investigators, title, summary) {
           if (!repo.session(id, sessionId)) throw bad('存档不存在', 404);
           const { applyMemoryActions } = await import('../services/memory/memoryRepository.js');
-          for (const c of investigators) if (Number.isSafeInteger(c.characterId)) applyMemoryActions({ conversationId: `char_${c.characterId}`, sourceRawStartId: null, sourceRawEndId: null,
-            dedupeKey: `game:${id}:${sessionId}`, actions: [{ action: 'create', memory: { memoryType: 'event', subject: 'character',
-              judgment: `和伙伴们游玩了桌游／剧本杀《${title}》。这是虚构游戏经历，不能当作现实遭遇。${summary}`.slice(0, 2000), tags: ['桌游', '跑团', title], importance: 2 } }] });
+          for (const investigator of investigators) {
+            if (investigator.player) continue;
+            const character = findCharacterByDisplayName(db, investigator.name);
+            if (!character) continue;
+            applyMemoryActions({ conversationId: `char_${character.id}`, sourceRawStartId: null, sourceRawEndId: null,
+              dedupeKey: `game:${id}:${sessionId}`, actions: [{ action: 'create', memory: { memoryType: 'event', subject: 'character',
+                judgment: `和伙伴们游玩了桌游／剧本杀《${title}》。这是虚构游戏经历，不能当作现实遭遇。${summary}`.slice(0, 2000), tags: ['桌游', '跑团', title], importance: 2 } }] });
+          }
         },
       } : {}),
     };

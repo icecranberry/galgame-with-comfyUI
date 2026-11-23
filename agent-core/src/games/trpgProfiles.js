@@ -1,6 +1,7 @@
 import { getUserConfig } from '../config.js';
 import { availableStandingImages, playerStandingImages, standingSlots } from '../services/expressionStandingAssets.js';
 import { imageUrlExists } from '../services/imagePaths.js';
+import { listNamedGameCharacters } from './gameBridge.js';
 
 export function getTrpgPlayer() {
   const { nickname, gender, appearance, persona } = getUserConfig();
@@ -20,6 +21,7 @@ export function getTrpgCast(db) {
   return {
     slots,
     player: { name, avatar, expressions: playerStandingImages(db, slots) },
-    characters: Object.fromEntries([...byCharacter].map(([id, rows]) => [id, availableStandingImages(rows, slots)])),
+    characters: Object.fromEntries(listNamedGameCharacters(db).filter(({ id }) => byCharacter.has(id))
+      .map(({ id, name }) => [name, availableStandingImages(byCharacter.get(id), slots)])),
   };
 }
