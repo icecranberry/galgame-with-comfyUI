@@ -74,7 +74,7 @@ export function createGameServices(gameId, repo, assertPermission) {
     console.log(`[trpg-context] ${budget.model} window=${budget.contextWindow} source=${budget.source} output=${budget.maxOutputTokens} inputLimit=${budget.inputLimit} estimated=${promptTokens(next.messages, tools)} archived=${next.replay.start}`);
     return { ...prepared, messages: next.messages };
   }
-  async function chat(messages, options, signal, budget, retry) {
+  async function chat(messages, options, signal, { budget, retry, forceThinkingMode } = {}) {
     active(); assertPermission('llm:chat');
     if (!Array.isArray(messages) || !messages.length || messages.some(m => !['system', 'user', 'assistant', 'tool'].includes(m.role) || typeof m.content !== 'string') ||
       (!budget && (messages.length > 100 || JSON.stringify(messages).length > 180000))) throw bad('LLM 消息格式或长度不合法');
@@ -82,7 +82,9 @@ export function createGameServices(gameId, repo, assertPermission) {
     const requestOptions = { temperature: Math.max(0, Math.min(2, Number(options.temperature) || 0.7)), label: `游戏:${gameId}`,
       signal: AbortSignal.any([controller.signal, AbortSignal.timeout(240000), ...(signal ? [signal] : [])]), retries: 0,
       ...(options.responseFormat === 'json' ? { response_format: JSON_OBJECT } : {}),
-      ...(budget ? { requestBudget: budget, freeEggFailover: false } : {}) };
+      forceThinkingMode,
+      ...(budget ? { requestBudget: budget } : {}),
+      ...(budget || forceThinkingMode === 'enabled' ? { freeEggFailover: false } : {}) };
     const lorebook = options.lorebook ?? false;
     const prepared = await prepareLorebook(messages, lorebook === false ? false : (lorebook || {}));
     const { chatSync } = await import('../llm/llm-client.js');
@@ -172,19 +174,19 @@ export function createGameServices(gameId, repo, assertPermission) {
       }
       return { messages, lorebook };
     },
-    async complete(input, { signal, responseFormat, retry } = {}) {
+    async complete(input, { signal, responseFormat, retry, forceThinkingMode } = {}) {
       const built = await llm.request(input);
       if (useReplay(input)) {
         active(); assertPermission('llm:chat');
         const budget = await trpgPromptBudget();
         const prepared = await prepareGamePrompt(input, built, budget);
-        const result = await chat(prepared.messages, { lorebook: false, responseFormat }, signal, budget);
+        const result = await chat(prepared.messages, { lorebook: false, responseFormat }, signal, { budget, forceThinkingMode });
         prepared.commit();
         return result;
       }
-      return chat(built.messages, { lorebook: built.lorebook, responseFormat }, signal, undefined, retry);
+      return chat(built.messages, { lorebook: built.lorebook, responseFormat }, signal, { retry, forceThinkingMode });
     },
-    async agent(input, tools, execute, { checkpoint, save, signal, responseFormat } = {}) {
+    async agent(input, tools, execute, { checkpoint, save, signal, responseFormat, toolChoice, forceThinkingMode } = {}) {
       active(); assertPermission('llm:chat');
       const { chatAgentStream } = await import('../llm/llm-client.js');
       const budget = useReplay(input) ? await trpgPromptBudget() : null;
@@ -216,7 +218,8 @@ export function createGameServices(gameId, repo, assertPermission) {
         signal?.throwIfAborted();
         const assistantIndex = continuation.findLastIndex(message => message.role === 'assistant');
         if (assistantIndex >= 0) {
-          const calls = continuation[assistantIndex].tool_calls;
+          // A content-only assistant may sit here after an injected format-repair exchange.
+          const calls = continuation[assistantIndex].tool_calls || [];
           const completed = continuation.length - assistantIndex - 1;
           for (const call of calls.slice(completed)) {
             signal?.throwIfAborted();
@@ -231,6 +234,14 @@ export function createGameServices(gameId, repo, assertPermission) {
               // A tool that yields to the game UI remains unanswered until the next resume.
               persistContinuation();
               return null;
+            }
+            if (result && typeof result === 'object' && result.__endTurn) {
+              // A terminal tool hands the caller structured output and ends the loop;
+              // the sentinel itself never reaches the provider transcript.
+              continuation.push({ role: 'tool', tool_call_id: call.id,
+                content: JSON.stringify({ ...result, __endTurn: undefined }) });
+              persistContinuation();
+              return continuation[assistantIndex].content || '';
             }
             continuation.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
             // The caller writes both the tool result and the game mutation in one save.
@@ -256,8 +267,10 @@ export function createGameServices(gameId, repo, assertPermission) {
         const requestSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(240000), ...(signal ? [signal] : [])]);
         const ask = async () => {
           let reply;
-          for await (const event of chatAgentStream(messages, { tools: requestTools, forceThinking: false,
-            label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget, response_format: format })) {
+          for await (const event of chatAgentStream(messages, { tools: requestTools, forceThinking: false, forceThinkingMode,
+            label: `游戏:${gameId}:KP`, signal: requestSignal, requestBudget: budget, response_format: format,
+            // toolChoice 'required' 关闭正文出口；空工具列表时必须回退 auto，否则部分接口会拒绝请求。
+            ...(toolChoice && requestTools.length ? { toolChoice } : {}) })) {
             if (event.type === 'assistant_end') reply = event.message;
           }
           return reply;

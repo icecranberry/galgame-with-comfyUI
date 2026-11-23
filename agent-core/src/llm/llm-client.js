@@ -12,10 +12,13 @@ import { applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, temperature = 0.72, requestBudget, response_format } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, forceThinkingMode, temperature = 0.72, requestBudget, response_format } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
   const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature, toolChoice });
+  if (forceThinkingMode === 'enabled' || forceThinkingMode === 'disabled') {
+    applyForcedThinking(params, forceThinkingMode, llm);
+  }
   if (response_format) params.response_format = response_format;
   applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
   if (isDeepseek()) params.stream_options = { ...params.stream_options, include_usage: true };
@@ -58,7 +61,7 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
   } finally {
     stream?.controller?.abort?.();
     console.log(`[${providerLabel()} ← ${logLabel} end] ${outcome}`);
-    logResponse(outcome === 'completed' ? logLabel : `${logLabel}（流中断，已收到的部分）`, content, reasoning);
+    logResponse(outcome === 'completed' ? logLabel : `${logLabel}（流中断，已收到的部分）`, content, reasoning, forceThinkingMode);
     if (response?.tool_calls?.length) {
       console.log(`[${providerLabel()} ← ${logLabel} 工具调用]`);
       console.log(JSON.stringify(response.tool_calls, null, 2));
