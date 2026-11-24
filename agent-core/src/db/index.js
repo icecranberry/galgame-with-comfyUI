@@ -1202,6 +1202,8 @@ function initSchema(db) {
 
   // 种子: 注入全部初始数据（仅首次运行生效）
   seedAll(db);
+  // 迁移: 默认助手头像改由前端静态资源提供，旧存档里指向 data/avatars 的路径一并改过来
+  db.prepare(`UPDATE characters SET avatar_path = '/default_assistant_header.png' WHERE avatar_path = '/avatars/default_assistant_header.png'`).run();
   // 新存档 seed 会创建默认角色；首启就完成 actor 回填，避免第二次启动才补身份。
   createTownActorRegistry(db).synchronize();
   // 种子: 表情类别（仅首次运行插入默认 15 类）
