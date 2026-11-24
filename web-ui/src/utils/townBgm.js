@@ -7,42 +7,43 @@ const FADE_IN_MS = 1200
 const FADE_OUT_MS = 600
 
 let audio = null
+let ctx = null
+let gain = null
 let wantPlaying = false // 当前是否有播放意图（区别于「因为静音/离开页面而暂停」）
 let retryBound = false
-let fadeFrame = 0
+let pauseTimer = 0
 
+// 音量走 Web Audio 的 GainNode：渐变在音频线程上执行，世界页加载卡住主线程时也不会一跳一跳
 function ensureAudio() {
   if (!audio) {
     audio = new Audio(BGM_SRC)
     audio.loop = true
-    audio.volume = 0
     audio.preload = 'auto'
+    ctx = new AudioContext()
+    gain = ctx.createGain()
+    gain.gain.value = 0
+    ctx.createMediaElementSource(audio).connect(gain).connect(ctx.destination)
   }
   return audio
 }
 
 // 从当前音量出发，所以淡出途中又回到世界页时会接着往回淡入，不会跳音量
-function fadeTo(target, ms, onDone) {
-  cancelAnimationFrame(fadeFrame)
-  const a = ensureAudio()
-  const from = a.volume
-  const start = performance.now()
-  const step = (now) => {
-    const t = Math.min(1, (now - start) / ms)
-    a.volume = from + (target - from) * t
-    if (t < 1) fadeFrame = requestAnimationFrame(step)
-    else onDone?.()
-  }
-  fadeFrame = requestAnimationFrame(step)
+function fadeTo(target, ms) {
+  const now = ctx.currentTime
+  const param = gain.gain
+  param.cancelScheduledValues(now)
+  param.setValueAtTime(param.value, now)
+  param.linearRampToValueAtTime(target, now + ms / 1000)
 }
 
 function tryPlay() {
   const a = ensureAudio()
+  clearTimeout(pauseTimer)
+  ctx.resume().catch(() => {})
   if (!a.paused) {
     fadeTo(BGM_VOLUME, FADE_IN_MS)
     return
   }
-  a.volume = 0
   a.play().then(() => {
     if (wantPlaying) fadeTo(BGM_VOLUME, FADE_IN_MS)
     else a.pause()
@@ -67,7 +68,9 @@ export function playTownBgm() {
 export function pauseTownBgm() {
   wantPlaying = false
   if (!audio || audio.paused) return
-  fadeTo(0, FADE_OUT_MS, () => audio.pause())
+  fadeTo(0, FADE_OUT_MS)
+  clearTimeout(pauseTimer)
+  pauseTimer = setTimeout(() => audio.pause(), FADE_OUT_MS)
 }
 
 /** 静音开关：静音即暂停（断点保留），取消静音立即续播 */
