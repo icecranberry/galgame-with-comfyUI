@@ -1,16 +1,34 @@
 <template>
   <main class="game-theme game-player" :class="{ 'is-leaving': leaving }">
-    <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" :allow="isOfficialTavern() ? 'autoplay' : undefined" sandbox="allow-scripts" referrerpolicy="same-origin" />
+    <iframe v-if="game && !error" :key="frameRevision" ref="frame" :src="game.entryUrl" :title="game.name" :allow="isOfficialTavern() ? 'autoplay' : undefined" :inert="Boolean(picturePreview)" sandbox="allow-scripts" referrerpolicy="same-origin" />
     <div v-if="error || game?.source !== 'official' || !['trpg-simulator', 'midnight-tavern'].includes(game?.id)" class="game-exit"><GameAction variant="quiet" compact @click="exit">← 游戏馆</GameAction></div>
     <div v-if="error" class="game-error" role="alert">{{ error }}</div>
   </main>
+  <Teleport to="body">
+    <div v-if="isOfficialTrpg()" ref="pictureOverlay" tabindex="-1">
+      <ImageLightbox
+        :visible="pictureVisible"
+        :imgs="picturePreview?.url"
+        :show-delete="false"
+        :scroll-disabled="false"
+        @hide="closePicturePreview"
+      />
+    </div>
+  </Teleport>
+  <ImageEditTaskFloater v-if="isOfficialTrpg()" game-id="trpg-simulator" />
+  <Toast v-if="isOfficialTrpg()" ref="toast" />
 </template>
 <script setup>
-import { inject, ref, onMounted, onBeforeUnmount } from 'vue'
+import { inject, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ImageEditTaskFloater from '../components/ImageEditTaskFloater.vue'
+import ImageLightbox from '../components/ImageLightbox.vue'
+import Toast from '../components/Toast.vue'
 import GameAction from '../games/components/GameAction.vue'
 import '../games/styles/game-ui.css'
 import { gameRequest } from '../api/games.js'
+import { useSettingsStore } from '../stores/settings.js'
+import { startUnifiedStream, stopUnifiedStream } from '../stores/unifiedStream.js'
 import { createClientRequestId } from '../utils/clientRequestId.js'
 const route = useRoute(), router = useRouter(), frame = ref(null), game = ref(null), error = ref('')
 const openGameStandings = inject('openGameStandings')
@@ -21,6 +39,7 @@ let channel = createClientRequestId()
 const seen = new Set(); let inFlight = 0
 let events
 let eventRetry, manifestRequest = 0, pendingFrameReload = false
+let tavernSaveWrite
 const leaving = ref(false)
 let exitTimer
 const exit = () => {
@@ -28,10 +47,69 @@ const exit = () => {
   leaving.value = true
   exitTimer = setTimeout(() => router.push('/games'), window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300)
 }
-const request = (path, options) => gameRequest(base + path, { ...options, signal: abort.signal })
+const request = (path, options) => gameRequest(base + path, { signal: abort.signal, ...options })
 const isOfficialTrpg = () => game.value?.id === 'trpg-simulator' && game.value.source === 'official'
 const isOfficialTavern = () => game.value?.id === 'midnight-tavern' && game.value.source === 'official'
 const trpgAudioKey = 'linshe.trpg.audio'
+const settings = useSettingsStore()
+const toast = ref(null)
+provide('toast', (...args) => toast.value?.show(...args))
+watch(isOfficialTrpg, active => {
+  if (active) {
+    settings.loadComfyConfig()
+    startUnifiedStream()
+  } else {
+    stopUnifiedStream()
+  }
+})
+const pictureOverlay = ref(null)
+const picturePreview = shallowRef(null)
+const pictureVisible = ref(false)
+let pictureCloseTimer
+
+function resetPicturePreview() {
+  clearTimeout(pictureCloseTimer)
+  pictureVisible.value = false
+  picturePreview.value = null
+}
+
+async function openPicturePreview(url) {
+  if (!isOfficialTrpg() || typeof url !== 'string' || !/^\/(?:images|game-media\/trpg-simulator)\/[\w./%?=& -]+$/.test(url)) {
+    throw new Error('图片预览不可用')
+  }
+  const source = new URL(url, window.location.origin)
+  if (!/^\/(?:images|game-media\/trpg-simulator)\//.test(source.pathname)) throw new Error('图片预览不可用')
+  if (picturePreview.value) throw new Error('正在预览图片')
+  picturePreview.value = { url: source.pathname + source.search, target: frame.value?.contentWindow, channel }
+  pictureVisible.value = true
+  await nextTick()
+  pictureOverlay.value?.focus({ preventScroll: true })
+  return { ok: true }
+}
+
+function closePicturePreview() {
+  if (!pictureVisible.value) return
+  const preview = picturePreview.value
+  pictureVisible.value = false
+  pictureCloseTimer = setTimeout(async () => {
+    picturePreview.value = null
+    await nextTick()
+    if (preview.target === frame.value?.contentWindow && preview.channel === channel) {
+      preview.target.postMessage({ type: 'trpg:picture-closed', channel, rpcType: 'event' }, '*')
+    }
+  }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300)
+}
+
+watch(frame, resetPicturePreview)
+
+function refreshTrpgPicture(event) {
+  const { base, url } = event.detail || {}
+  if (!isOfficialTrpg() || !/^\/(?:images\/game|game-media\/trpg-simulator)\//.test(base || '')) return
+  frame.value?.contentWindow?.postMessage({
+    type: 'trpg:picture-updated', channel, rpcType: 'event', data: { base, url },
+  }, '*')
+}
+
 async function dispatch(method, args) {
   const id = () => { if (!/^[\w-]{1,80}$/.test(args.sessionId)) throw new Error('无效存档编号'); return encodeURIComponent(args.sessionId) }
   switch (method) {
@@ -40,8 +118,14 @@ async function dispatch(method, args) {
     case 'image': return request('/sdk/image', { method: 'POST', body: args })
     case 'save.list': return request('/sessions')
     case 'save.load': return request(`/sessions/${id()}`)
-    case 'save.write': return request(`/sessions/${id()}`, { method: 'POST', body: args })
+    case 'save.write': {
+      const options = { method: 'POST', body: args }
+      if (!isOfficialTavern()) return request(`/sessions/${id()}`, options)
+      tavernSaveWrite = request(`/sessions/${id()}`, { ...options, signal: undefined })
+      return tavernSaveWrite
+    }
     case 'save.delete': return request(`/sessions/${id()}`, { method: 'DELETE' })
+    case 'trpg.picture.preview': return openPicturePreview(args.url)
     case 'trpg.audio.load': {
       if (!isOfficialTrpg() || typeof args.file !== 'string' || !/^(?:bgm\/(?:explore|tense)\.mp3|ambience\/rain\.ogg|sfx\/[a-z0-9_]+\.ogg)$/.test(args.file)) {
         throw new Error('音频资源不可用')
@@ -61,7 +145,6 @@ async function dispatch(method, args) {
       localStorage.setItem(trpgAudioKey, JSON.stringify({ music, effects, muted }))
       return { ok: true }
     }
-    case 'exit': exit(); return { ok: true }
     case 'standings': {
       const { subject } = args
       if (!isOfficialTrpg() || (subject?.player !== true && (typeof subject?.characterName !== 'string' || !subject.characterName.trim()))) {
@@ -81,7 +164,18 @@ async function dispatch(method, args) {
       const options = args.fetchOptions || {}, method = String(options.method || 'GET').toUpperCase()
       if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new Error('请求方法不支持')
       const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body
-      return request('/ext' + subPath, { method, body })
+      const fetchOptions = { method, body }
+      if (isOfficialTavern() && method === 'POST') {
+        fetchOptions.signal = undefined
+        if (subPath === '/progress/position' && body) {
+          const previous = await tavernSaveWrite?.catch(() => null)
+          if (previous?.sessionId === body.sessionId && previous.state.night === body.night && previous.state.turn === body.turn &&
+            previous.state.editVersion > body.editVersion) {
+            fetchOptions.body = { ...body, editVersion: previous.state.editVersion }
+          }
+        }
+      }
+      return request('/ext' + subPath, fetchOptions)
     }
     default: throw new Error('SDK 方法不支持')
   }
@@ -96,6 +190,7 @@ async function receive(event) {
     const transfer = result.result instanceof ArrayBuffer ? [result.result] : []
     target.postMessage({ type: 'linshe:rpc:result', channel: requestChannel, id: data.id, ...result }, '*', transfer)
   }
+  if (data.method === 'exit') { exit(); reply({ result: { ok: true } }); return }
   if (inFlight >= 16 || JSON.stringify(data).length > 5 * 1024 * 1024) { reply({ error: '游戏请求过多或数据过大' }); return }
   seen.add(data.id); if (seen.size > 10000) seen.delete(seen.values().next().value)
   inFlight++
@@ -143,12 +238,16 @@ function connectGameEvents() {
 
 onMounted(async () => {
   window.addEventListener('message', receive)
+  window.addEventListener('image-overwritten', refreshTrpgPicture)
   import.meta.hot?.on('linshe:game-reload', refreshGameFrame)
   await loadGame()
   if (!abort.signal.aborted && (!error.value || devQuery)) connectGameEvents()
 })
 onBeforeUnmount(() => {
+  resetPicturePreview()
+  if (isOfficialTrpg()) stopUnifiedStream()
   window.removeEventListener('message', receive)
+  window.removeEventListener('image-overwritten', refreshTrpgPicture)
   import.meta.hot?.off('linshe:game-reload', refreshGameFrame)
   abort.abort()
   events?.close()

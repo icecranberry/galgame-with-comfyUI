@@ -122,7 +122,7 @@
                   v-for="s in sceneOptions"
                   :key="s.value"
                   variant="chip"
-                  size="lg"
+                  size="md"
                   :active="isSceneSelected(item, s.value)"
                   :aria-pressed="isSceneSelected(item, s.value)"
                   @click="toggleScene(item, s.value)"
@@ -442,8 +442,8 @@ async function applyChanges(action, request, message) {
   display: flex;
   flex-shrink: 0;
   align-items: flex-end;
-  gap: 4px;
-  padding: 4px 8px 0;
+  gap: 8px;
+  padding: 7px 9px 0;
   background: var(--bg-primary);
   box-shadow: inset 0 -1px var(--border);
 }
@@ -483,8 +483,8 @@ async function applyChanges(action, request, message) {
 .lora-item-card {
   min-width: 0;
   min-height: 0;
-  background: var(--bg-primary);
-  border: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary));
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 10px 12px 12px;
 }
@@ -508,7 +508,7 @@ async function applyChanges(action, request, message) {
   border-inline-start: 1px solid var(--border);
   padding-inline-start: 16px;
 }
-.lora-scenes-chips { display: flex; flex-wrap: wrap; gap: 12px 6px; align-items: center; }
+.lora-scenes-chips { display: flex; flex-wrap: wrap; gap: 8px 6px; align-items: center; }
 .scene-check { margin-right: 2px; font-size: 10px; }
 .lora-card-enter-active, .lora-card-leave-active {
   overflow: hidden;

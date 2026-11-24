@@ -8,7 +8,7 @@ import fs from 'fs';
 import { setSetting, setSettings, getSetting, GLOBAL_LORA_PRESETS_KEY, GLOBAL_LORA_LIBRARY_KEY } from './db/settings.js';
 import { enabledGlobalLoras, loraLibraryFields, loraModelFields, loraPathKey } from './utils/globalLora.js';
 import { notifyWeatherSourceChange } from './services/weatherSource.js';
-import { defaultMaxTokens, isValidMaxTokens } from './llm/modelCapabilities.js';
+import { defaultMaxTokens, isValidMaxTokens, MAGPIE_PRESET } from './llm/modelCapabilities.js';
 import { parseServiceAccount, normalizeVertexRegion } from './llm/vertex-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,7 @@ dotenv.config({ path: envPath });
 
 // 每日免费鸡蛋：opencode zen 免费端点（无需 API Key，按 IP 限流）
 const FREE_EGG_BASE_URL = 'https://opencode.ai/zen/v1';
+const LLM_CONNECTION_TYPES = ['openai', 'vertexai', 'magpie'];
 // 免费模型名单（2026-09 检测：deepseek-flash-free / hy3-free 已下线，muse-spark 系地区封锁）；
 // 本轮失败过的模型只记内存，下次开启重新开始
 export const FREE_EGG_MODELS = ['mimo-v2.5-free'];
@@ -50,19 +51,22 @@ export const config = {
       : 'disabled',
     _headers: (() => { try { return JSON.parse(process.env.LLM_HEADERS || '{}'); } catch { return {}; } })(),
     _extraBody: (() => { try { return JSON.parse(process.env.LLM_EXTRA_BODY || '{}'); } catch { return {}; } })(),
-    get apiKey() { return this.freeEgg ? '' : this._apiKey; },
+    get apiKey() { return this.freeEgg ? '' : this.connectionType === 'magpie' ? MAGPIE_PRESET.apiKey : this._apiKey; },
     set apiKey(v) { this._apiKey = v; },
-    get baseURL() { return this.freeEgg ? FREE_EGG_BASE_URL : this._baseURL; },
+    get baseURL() { return this.freeEgg ? FREE_EGG_BASE_URL : this.connectionType === 'magpie' ? MAGPIE_PRESET.baseURL : this._baseURL; },
     set baseURL(v) { this._baseURL = v; },
-    get model() { return this.freeEgg ? FREE_EGG_MODEL : this._model; },
+    get model() { return this.freeEgg ? FREE_EGG_MODEL : this.connectionType === 'magpie' ? MAGPIE_PRESET.model : this._model; },
     set model(v) { this._model = v; },
-    get maxTokens() { return this.freeEgg ? defaultMaxTokens(this.baseURL, this.model) : (this._maxTokens ?? defaultMaxTokens(this.baseURL, this.model)); },
+    get maxTokens() {
+      if (this.connectionType === 'magpie') return MAGPIE_PRESET.maxTokens;
+      return (this.freeEgg ? null : this._maxTokens) ?? defaultMaxTokens(this.baseURL, this.model);
+    },
     set maxTokens(v) { this._maxTokens = v; },
     get thinkingMode() { return this.freeEgg ? 'disabled' : this._thinkingMode; },
     set thinkingMode(v) { this._thinkingMode = v; },
-    get headers() { return this.freeEgg ? {} : this._headers; },
+    get headers() { return this.freeEgg || this.connectionType === 'magpie' ? {} : this._headers; },
     set headers(v) { this._headers = v; },
-    get extraBody() { return this.freeEgg ? {} : this._extraBody; },
+    get extraBody() { return this.freeEgg || this.connectionType === 'magpie' ? {} : this._extraBody; },
     set extraBody(v) { this._extraBody = v; },
   },
   vectorService: {
@@ -799,6 +803,12 @@ export function getLlmApiKey() {
   return resolveLlmApiKey();
 }
 
+export function getDraftLlmApiKey(baseURL) {
+  if (config.llm.connectionType !== 'magpie') return config.llm.apiKey;
+  const normalize = url => String(url || '').trim().replace(/\/+$/, '');
+  return normalize(baseURL) === normalize(config.llm._baseURL) ? config.llm._apiKey || '' : '';
+}
+
 export function getLlmConfig() {
   const freeEgg = config.llm.freeEgg === true;
   const key = resolveLlmApiKey();
@@ -834,9 +844,13 @@ export function updateFreeEggEnabled(enabled) {
 }
 
 export function updateLlmConfig({ apiKey, baseURL, model, thinkingMode, maxTokens, headers, extraBody, connectionType, vertexRegion, vertexServiceAccount }) {
+  // Magpie overlays the saved connection so its fixed key never replaces a provider's key.
+  if ((connectionType ?? config.llm._connectionType) === 'magpie') {
+    apiKey = baseURL = model = maxTokens = headers = extraBody = vertexRegion = vertexServiceAccount = undefined;
+  }
   // Validate all new fields before persisting anything; blank JSON means retain the saved secret.
   try {
-    if (connectionType !== undefined && !['openai', 'vertexai'].includes(connectionType)) throw new Error('不支持的 LLM 接入方式');
+    if (connectionType !== undefined && !LLM_CONNECTION_TYPES.includes(connectionType)) throw new Error('不支持的 LLM 接入方式');
     if (vertexRegion !== undefined) vertexRegion = normalizeVertexRegion(vertexRegion);
     if (vertexServiceAccount !== undefined && vertexServiceAccount !== '') vertexServiceAccount = JSON.stringify(parseServiceAccount(vertexServiceAccount));
     for (const [name, raw] of [['headers', headers], ['extraBody', extraBody]]) {
@@ -852,6 +866,10 @@ export function updateLlmConfig({ apiKey, baseURL, model, thinkingMode, maxToken
   }
   if (thinkingMode !== undefined && !['enabled', 'disabled', 'omit'].includes(thinkingMode)) return { ok: false, error: 'thinkingMode must be enabled, disabled, or omit' };
   if (apiKey !== undefined && (typeof apiKey !== 'string' || !apiKey.trim())) return { ok: false, error: 'API Key cannot be empty' };
+  if (config.llm.connectionType === 'magpie' && connectionType === 'openai' && apiKey === undefined
+    && config.llm._apiKey && !getDraftLlmApiKey(baseURL ?? config.llm._baseURL)) {
+    return { ok: false, error: '切换到新的 API 地址时，请填写对应的 API Key' };
+  }
   if (connectionType !== undefined) { config.llm.connectionType = connectionType; setSetting('llm_connection_type', connectionType); }
   if (vertexRegion !== undefined) { config.llm.vertexRegion = vertexRegion; setSetting('llm_vertex_region', vertexRegion); }
   if (vertexServiceAccount) { config.llm.vertexServiceAccount = vertexServiceAccount; setSetting('llm_vertex_service_account', vertexServiceAccount); }
@@ -1033,16 +1051,19 @@ function maskApiKey(key) {
 
 export function getLlmProfiles() {
   const profiles = readProfilesFromDb();
-  return profiles.map(p => ({
-    id: p.id,
-    name: p.name,
-    ...maskApiKey(p.apiKey),
-    connectionType: p.connectionType || 'openai',
-    hasVertexServiceAccount: Boolean(p.vertexServiceAccount),
-    baseURL: p.baseURL || '',
-    model: p.model || '',
-    createdAt: p.createdAt || '',
-  }));
+  return profiles.map(p => {
+    const connection = p.connectionType === 'magpie' ? MAGPIE_PRESET : p;
+    return {
+      id: p.id,
+      name: p.name,
+      ...maskApiKey(connection.apiKey),
+      connectionType: p.connectionType || 'openai',
+      hasVertexServiceAccount: Boolean(p.vertexServiceAccount),
+      baseURL: connection.baseURL || '',
+      model: connection.model || '',
+      createdAt: p.createdAt || '',
+    };
+  });
 }
 
 export function getActiveProfileId() {
@@ -1099,14 +1120,14 @@ export function deleteLlmProfile(id) {
 }
 
 function _applyProfileToConfig(profile) {
-  config.llm.connectionType = profile.connectionType === 'vertexai' ? 'vertexai' : 'openai';
+  config.llm.connectionType = LLM_CONNECTION_TYPES.includes(profile.connectionType) ? profile.connectionType : 'openai';
   config.llm.vertexRegion = profile.vertexRegion || 'global';
   config.llm.vertexServiceAccount = profile.vertexServiceAccount || '';
   setSetting('llm_connection_type', config.llm._connectionType);
   setSetting('llm_vertex_region', config.llm.vertexRegion);
   setSetting('llm_vertex_service_account', config.llm.vertexServiceAccount);
   config.llm.apiKey = profile.apiKey || '';
-  persistEnv('LLM_API_KEY', config.llm.apiKey);
+  persistEnv('LLM_API_KEY', config.llm._apiKey);
   if (profile.baseURL !== undefined) {
     config.llm.baseURL = profile.baseURL;
     persistEnv('LLM_BASE_URL', profile.baseURL);
@@ -1119,12 +1140,12 @@ function _applyProfileToConfig(profile) {
     ? profile.thinkingMode
     : 'disabled';
   persistEnv('LLM_THINKING_MODE', config.llm.thinkingMode);
-  config.llm.maxTokens = isValidMaxTokens(profile.maxTokens) ? profile.maxTokens : defaultMaxTokens(config.llm.baseURL, config.llm.model);
-  persistEnv('LLM_MAX_TOKENS', String(config.llm.maxTokens));
+  config.llm.maxTokens = isValidMaxTokens(profile.maxTokens) ? profile.maxTokens : defaultMaxTokens(config.llm._baseURL, config.llm._model);
+  persistEnv('LLM_MAX_TOKENS', String(config.llm._maxTokens));
   config.llm.headers = profile.headers || {};
-  persistEnv('LLM_HEADERS', JSON.stringify(config.llm.headers));
+  persistEnv('LLM_HEADERS', JSON.stringify(config.llm._headers));
   config.llm.extraBody = profile.extraBody || {};
-  persistEnv('LLM_EXTRA_BODY', JSON.stringify(config.llm.extraBody));
+  persistEnv('LLM_EXTRA_BODY', JSON.stringify(config.llm._extraBody));
 
   if (profile.serializeBackgroundLLM !== undefined) {
     updateFeatureFlag('serializeBackgroundLLM', profile.serializeBackgroundLLM);
@@ -1156,18 +1177,19 @@ export function syncActiveLlmProfile() {
   const profiles = readProfilesFromDb();
   const idx = profiles.findIndex(p => p.id === activeId);
   if (idx === -1) return;
+  const llm = config.llm;
   profiles[idx] = {
     ...profiles[idx],
-    connectionType: config.llm._connectionType,
-    vertexRegion: config.llm.vertexRegion,
-    vertexServiceAccount: config.llm.vertexServiceAccount,
-    apiKey: config.llm.apiKey || '',
-    baseURL: config.llm.baseURL || '',
-    model: config.llm.model || '',
-    thinkingMode: config.llm.thinkingMode || 'disabled',
-    maxTokens: config.llm.maxTokens,
-    headers: config.llm.headers || {},
-    extraBody: config.llm.extraBody || {},
+    connectionType: llm._connectionType,
+    vertexRegion: llm.vertexRegion,
+    vertexServiceAccount: llm.vertexServiceAccount,
+    apiKey: llm._apiKey || '',
+    baseURL: llm._baseURL || '',
+    model: llm._model || '',
+    thinkingMode: llm._thinkingMode || 'disabled',
+    maxTokens: llm._maxTokens ?? defaultMaxTokens(llm._baseURL, llm._model),
+    headers: llm._headers || {},
+    extraBody: llm._extraBody || {},
     serializeBackgroundLLM: config.features.serializeBackgroundLLM || false,
     mergeMessages: config.features.mergeMessages || false,
     backgroundConcurrency: config.features.backgroundLLMMaxConcurrency || 3,

@@ -61,6 +61,7 @@ export const useImageEditTasksStore = defineStore('imageEditTasks', () => {
     if (_connected) return
     _connected = true
     _unsubs = [
+      onEvent('connected', refresh),
       onEvent('image_edit_task_start', _upsert),
       onEvent('image_edit_task_progress', _upsert),
       onEvent('image_edit_task_done', _upsert),

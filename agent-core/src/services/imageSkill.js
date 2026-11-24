@@ -470,7 +470,8 @@ async function submitWithRetry(rawPrompt, {
   if (!sourceWorkflow && imageProvider === 'novelai') {
     // NovelAI receives the same prepared scene description and artist tags as ComfyUI,
     // but does not use either character or global LoRA data.
-    return submitNovelaiImage(rawPrompt, { artist, onProgress, ...(outputScope === 'game' ? { width, height, negativePrompt } : {}) });
+    const gameDimensions = scene === 'game' || outputScope === 'game';
+    return submitNovelaiImage(rawPrompt, { artist, onProgress, ...(gameDimensions ? { width, height, negativePrompt } : {}) });
   }
 
   // 1. 汇总数量标签。需要保留原料原文的自然语言提示词会显式跳过此步。
@@ -480,7 +481,7 @@ async function submitWithRetry(rawPrompt, {
   // 2. 构建 workflow
   const recomposed = sourceWorkflow ? recomposeLoraWorkflow(
     sourceWorkflow.prompt || guiToApi(sourceWorkflow.workflow), sourceWorkflow.generation,
-    filterGlobalLoras(config.comfyui.globalLora || [], sourceWorkflow.generation?.scene),
+    globalLoraSnapshot ?? filterGlobalLoras(config.comfyui.globalLora || [], sourceWorkflow.generation?.scene),
   ) : null;
   let { wf, wfMode } = sourceWorkflow ? {
     wf: randomizeWorkflowSeeds(recomposed.prompt),

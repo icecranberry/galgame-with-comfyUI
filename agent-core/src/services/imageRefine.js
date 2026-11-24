@@ -94,6 +94,7 @@ function loadSourceWorkflow({ sourceMode, customWorkflow, scene } = {}) {
  * @param {Array}  [overrides.loras]          - 角色 LoRA [{path, weight, triggerWord}]
  * @param {string} [overrides.customWorkflow] - 原图使用的自定义工作流文件名
  * @param {string} [overrides.sourceMode]     - 原图工作流模式 'turbo' | 'base' 或自定义文件名（image_tasks.workflow_template）
+ * @param {object} [overrides.sourceWorkflow] - 原图嵌入的工作流快照
  * @param {string} [overrides.scene]          - 全局 LoRA 场景过滤 + 无模式记录时的工作流兜底
  * @param {string|null} [overrides.workflowScene] - hybrid 模式下单独用于选择源工作流；
  *        显式传 null 表示不按场景兜底，与 scene 解耦
@@ -108,7 +109,7 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
     customWorkflow: overrides.customWorkflow,
     scene: workflowScene,
   });
-  const src = srcResult.wf;
+  const src = overrides.sourceWorkflow?.workflow || apiToGui(overrides.sourceWorkflow?.prompt) || srcResult.wf;
   const profile = [3, 4, 5].includes(wf.extra?.linsheHires?.version) ? wf.extra.linsheHires : null;
   if (profile?.version >= 4) {
     const upscaleModel = config.comfyui.hiresUpscaleModel;
@@ -268,7 +269,7 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
     || (srcResult.resolvedMode === 'base' ? PRO_WORKFLOW
       : srcResult.resolvedMode && srcResult.resolvedMode !== 'turbo' ? srcResult.resolvedMode
         : ACTIVE_WORKFLOW);
-  console.log(`[imageRefine] Hires workflow built: ${path.basename(hiresPath())}${src ? ` (params inherited from ${srcLabel})` : ' (source workflow unavailable, template defaults)'}`);
+  console.log(`[imageRefine] Hires workflow built: ${path.basename(hiresPath())}${src ? ` (params inherited from ${overrides.sourceWorkflow ? 'image workflow' : srcLabel})` : ' (source workflow unavailable, template defaults)'}`);
   return { wf, wfPath: hiresPath() };
 }
 
@@ -307,6 +308,7 @@ export async function flattenTransparentOnWhite(buffer) {
  * @param {Array}  [opts.loras]       - 角色 LoRA（全局画风 LoRA 与 HiresFix 细化 LoRA 由配置自动合并）
  * @param {string} [opts.customWorkflow]
  * @param {string} [opts.sourceMode]
+ * @param {object} [opts.sourceWorkflow] - 原图嵌入的工作流快照
  * @param {string} [opts.scene]         - 全局 LoRA 场景过滤 + 无模式记录时的场景兜底
  * @param {string|null} [opts.workflowScene] - hybrid 模式下单独用于选择源工作流，可与 scene 解耦
  * @param {function} [opts.onProgress]
@@ -315,7 +317,7 @@ export async function flattenTransparentOnWhite(buffer) {
  * @returns {Promise<{success: boolean, wfPath: string, filename: string}>}
  */
 export async function refineImage({
-  filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, scene, workflowScene, onProgress,
+  filePath, outPath, promptText, artist, loras, customWorkflow, sourceMode, sourceWorkflow, scene, workflowScene, onProgress,
   buffer, ext, output = 'file',
 }) {
   const sourceBuf = buffer || (filePath ? fs.readFileSync(filePath) : null);
@@ -327,7 +329,7 @@ export async function refineImage({
   console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(uploadBuf.length / 1024).toFixed(0)}KB)`);
 
   const { wf } = buildHiresWorkflow(promptText, {
-    uploadFilename, artist, loras, customWorkflow, sourceMode, scene, workflowScene,
+    uploadFilename, artist, loras, customWorkflow, sourceMode, sourceWorkflow, scene, workflowScene,
   });
 
   if (onProgress) onProgress({ stage: 'submitting' });

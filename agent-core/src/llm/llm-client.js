@@ -5,9 +5,9 @@ import { config, updateFreeEggEnabled, FREE_EGG_MODELS } from '../config.js';
 import { compressLlmImageInputs } from '../services/llmImageInput.js';
 import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
-import { defaultMaxTokens, isValidMaxTokens } from './modelCapabilities.js';
+import { defaultMaxTokens, isValidMaxTokens, MAGPIE_PRESET } from './modelCapabilities.js';
 import { buildAgentRequest, readAgentResponse } from './agentStream.js';
-import { applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
+import { applyThinking, applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
@@ -372,6 +372,11 @@ async function syncRetryDelay(ms, signal) {
  * 不修改全局 config，也不走免费鸡蛋/并发队列，避免影响真实聊天请求。
  */
 export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = config.llm.maxTokens, thinkingMode = config.llm.thinkingMode, headers = {}, extraBody = {}, connectionType = config.llm.connectionType, vertexServiceAccount = config.llm.vertexServiceAccount, vertexRegion = config.llm.vertexRegion } = {}) {
+  if (connectionType === 'magpie') {
+    ({ baseURL, apiKey, model, maxTokens } = MAGPIE_PRESET);
+    headers = {};
+    extraBody = {};
+  }
   if (maxTokens !== undefined && !isValidMaxTokens(maxTokens)) throw Object.assign(new Error('MAX_tokens 必须为正整数'), { status: 400 });
   const effectiveBaseURL = connectionType === 'vertexai' ? vertexBaseURL(vertexRegion) : String(baseURL || config.llm.baseURL || '').trim().replace(/\/+$/, '');
   if (!effectiveBaseURL) throw new Error('API 地址未配置');
@@ -383,7 +388,7 @@ export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = co
   }
 
   const effectiveModel = model || config.llm.model || 'deepseek-flash';
-  const effectiveApiKey = apiKey || config.llm.apiKey || '';
+  const effectiveApiKey = apiKey ?? config.llm.apiKey ?? '';
   const effectiveHeaders = headers && typeof headers === 'object' && !Array.isArray(headers) ? headers : {};
   const effectiveExtraBody = extraBody && typeof extraBody === 'object' && !Array.isArray(extraBody) ? extraBody : {};
 
@@ -405,7 +410,8 @@ export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = co
     model: effectiveModel,
     messages: [{ role: 'user', content: 'ping' }],
   };
-  if (thinkingMode !== 'omit') params.thinking = { type: thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+  const thinking = thinkingMode === 'omit' ? null : { type: thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+  applyThinking(params, thinking, connectionType);
   Object.assign(params, effectiveExtraBody);
   applyOutputTokenLimit(params, maxTokens, effectiveBaseURL);
 
@@ -465,9 +471,7 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   // 全局三态配置默认注入 disabled；选择“不传”时完全省略。
   // 调用方显式传入 thinking/null 时仍可覆盖全局设置。
   const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-  if (effectiveThinking !== null) {
-    params.thinking = effectiveThinking;
-  }
+  applyThinking(params, effectiveThinking, config.llm.connectionType);
   // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
   const extraBody = config.llm.extraBody;
   if (extraBody && Object.keys(extraBody).length > 0) {
@@ -664,9 +668,7 @@ async function* _chatStreamInner(messages, {
     };
 
     const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-    if (effectiveThinking !== null) {
-      params.thinking = effectiveThinking;
-    }
+    applyThinking(params, effectiveThinking, config.llm.connectionType);
 
     // 流式 usage（缓存命中率）：末尾 chunk 携带。仅对官方 API 发送，
     // 第三方渠道可能不认识 stream_options 直接报错。

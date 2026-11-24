@@ -39,7 +39,8 @@
       write: (sessionId, title, state, revision) => rpc('save.write', { sessionId, title, state, revision }), delete: sessionId => rpc('save.delete', { sessionId }) },
     ext: { request: (subPath, fetchOptions = {}) => rpc('ext', { subPath, fetchOptions }) },
     trpgAudio: { load: file => rpc('trpg.audio.load', { file }), preferences: settings => rpc('trpg.audio.preferences', { settings }) },
-    ui: { exit: () => rpc('exit'), openStandings: subject => rpc('standings', { subject }) },
+    ui: { exit: () => rpc('exit'), openStandings: subject => rpc('standings', { subject }),
+      previewTrpgPicture: url => rpc('trpg.picture.preview', { url }) },
   });
   window.parent.postMessage({ type: 'linshe:game:ready' }, '*');
 })();

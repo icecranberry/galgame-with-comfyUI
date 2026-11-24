@@ -30,23 +30,24 @@
   padding-right: var(--drink-rail);
 }
 #cg-preview:has(.cg-drink-print:not([hidden])) { --drink-rail: calc(var(--drink-thumb-width) * .8); }
-#cg-preview::backdrop { background: #120d0ba8; backdrop-filter: blur(3px); animation: reveal var(--transition) both; }
-#drink-preview::backdrop { background: transparent; }
-#cg-preview.closing::backdrop { animation: conceal var(--transition) both; }
-#cg-preview.closing.loading { animation: conceal var(--transition) both; }
-#cg-preview:not(.loading) .cg-loading { display: none; }
+#cg-preview::backdrop, #drink-preview::backdrop { background: #120d0ba8; backdrop-filter: blur(3px); animation: reveal var(--transition) both; }
+#drink-preview.nested::backdrop { background: transparent; backdrop-filter: none; }
+:is(#cg-preview, #drink-preview).closing::backdrop { animation: conceal var(--transition) both; }
+:is(#cg-preview, #drink-preview).closing.loading { animation: conceal var(--transition) both; }
+:is(#cg-preview, #drink-preview):not(.loading) .cg-loading { display: none; }
 .cg-loading { display: block; padding: 12px 18px; text-align: center; font-size: 13px; }
 .cg-frame { position: relative; }
-.cg-frame > img, #drink-preview > img {
+.cg-frame > img {
   width: auto; height: auto; object-fit: contain;
   border: clamp(3px, .65vw, 9px) solid var(--photo-paper); border-bottom-width: clamp(8px, 1.5vw, 22px);
   border-radius: 1px; box-shadow: 0 4px 24px #160c0999;
 }
-.cg-frame > img {
-  max-width: min(calc(100vw - 24px - var(--drink-rail)), 1080px); max-height: min(calc(100dvh - 76px), 760px);
+#cg-frame > img {
+  max-width: min(calc(100vw - 24px - var(--drink-rail)), 1080px); max-height: min(calc(100dvh - 122px), 760px);
 }
-#drink-preview > img {
-  max-width: min(78vw, 620px); max-height: min(78dvh, 740px);
+#drink-frame > img {
+  max-width: min(88vw, 620px); max-height: min(calc(100dvh - 122px), 740px);
+  margin-inline: auto;
 }
 .cg-drink {
   position: absolute; z-index: 1; left: 100%; bottom: clamp(8px, 1.2vw, 18px);
@@ -68,8 +69,8 @@
 #cg-preview.closing .cg-drink { opacity: 0; pointer-events: none; }
 #cg-preview:not(.loading) .cg-drink-print { animation: cg-drink-arrive var(--transition) var(--settle) both; }
 @keyframes cg-drink-arrive { from { opacity: 0; transform: translate(8px, 6px) scale(.94); } }
-.cg-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 7px 4px 4px; }
-#cg-preview:is(.loading,.closing) .cg-tools { opacity: 0; pointer-events: none; }
+.cg-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; padding: 7px 4px 4px; }
+:is(#cg-preview, #drink-preview):is(.loading,.closing) .cg-tools { opacity: 0; pointer-events: none; }
 .cg-tools button {
   display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   min-height: 44px; padding: 4px 10px; border: 1px solid #ccad7e; border-radius: 3px;
@@ -77,11 +78,22 @@
   box-shadow: inset 0 -3px #ccad7e, 0 2px 3px #170e0a99;
 }
 .cg-tools .cg-close { width: 44px; color: var(--cream); background: var(--wood); border-color: var(--line); box-shadow: none; }
-.cg-tools .album-slip:disabled { border-color: var(--line); background: var(--wood); color: var(--muted); box-shadow: none; }
+.cg-tools button:disabled { border-color: var(--line); background: var(--wood); color: var(--muted); box-shadow: none; }
 .cg-tools button:enabled:hover, .seat-scene:has(> .seat-hit:hover) > .seat-photo { filter: brightness(1.12); }
+.redraw-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.redraw-controls:empty { display: none; }
+.redraw-status, .redraw-error { font: 600 13px/1.4 var(--body); overflow-wrap: anywhere; }
+.redraw-error { flex-basis: 100%; }
+.cg-tools .redraw-error, .cg-tools .redraw-status { padding: 4px 8px; border-radius: 3px; background: var(--wood); }
+@media (max-width: 520px) {
+  #cg-preview, #drink-preview { max-width: calc(100vw - 16px); }
+  #cg-frame > img, #drink-frame > img { max-height: min(68dvh, calc(100dvh - 132px)); }
+  #cg-preview .cg-tools { margin-right: calc(-1 * var(--drink-rail)); }
+  #cg-redraw:has([data-action="media-compare"]) { flex-basis: 100%; justify-content: flex-end; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .cg-tools button, .seat-photo { transition: filter var(--transition), border-color var(--transition); }
   .cg-loading { animation: reveal 150ms 150ms both; }
   .cg-tools { transition: opacity 120ms 160ms; }
-  #cg-preview:is(.loading,.closing) .cg-tools { transition-delay: 0s; }
+  :is(#cg-preview, #drink-preview):is(.loading,.closing) .cg-tools { transition-delay: 0s; }
 }

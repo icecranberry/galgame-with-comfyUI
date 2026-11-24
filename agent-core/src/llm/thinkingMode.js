@@ -1,5 +1,18 @@
+export function applyThinking(params, thinking, connectionType) {
+  if (connectionType === 'magpie') {
+    delete params.thinking;
+    if (thinking) params.reasoning_effort = thinking.type === 'enabled' ? 'high' : 'none';
+  } else if (thinking !== null) {
+    params.thinking = thinking;
+  }
+}
+
 // 业务级思考策略在 extraBody 合并之后应用，不修改全局配置或嵌套配置对象。
 export function applyForcedThinking(params, mode, llm) {
+  if (llm.connectionType === 'magpie') {
+    applyThinking(params, { type: mode }, llm.connectionType);
+    return;
+  }
   const enabled = mode === 'enabled';
   const model = String(params.model || '').toLowerCase();
   params.thinking = { type: mode };

@@ -71,6 +71,7 @@ function cleanupStageFiles(stageBase) {
  * @param {string} spec.action       - 'regenerate' | 'upscale' | 自定义标识（如 'standing'）
  * @param {string} spec.url          - 原图 URL（不带 query）
  * @param {string} [spec.targetPath] - 原图绝对路径（确认覆盖时原地写入）
+ * @param {Function} [spec.validateTarget] - 确认覆盖前同步检查原图是否仍可编辑
  * @param {Function} spec.run        - async ({ stageBase, onProgress }) => { filename }
  *                                     必须把生成结果写到 `${stageBase}.${ext}` 并返回文件名
  * @param {Function} [spec.finalize] - async (task) => string；自定义落库钩子，返回新图 URL（自带存储语义的场景用，
@@ -79,14 +80,14 @@ function cleanupStageFiles(stageBase) {
  * @param {object}   [spec.meta]     - 透传给 finalize / restart 的上下文数据
  * @returns {object} 任务记录
  */
-export function startEditTask({ action, url, targetPath, run, finalize, restart, meta }) {
+export function startEditTask({ action, url, targetPath, validateTarget, run, finalize, restart, meta }) {
   const id = randomUUID();
   const token = randomBytes(12).toString('hex');
   const stageBase = path.join(getPendingDir(), `${id}-${token}`);
   fs.mkdirSync(path.dirname(stageBase), { recursive: true });
 
   const task = {
-    id, action, url, targetPath, finalize, restart, meta, token, stageBase,
+    id, action, url, targetPath, validateTarget, finalize, restart, meta, token, stageBase,
     status: 'running', progress: null, previewUrl: null, error: null, createdAt: Date.now(),
   };
   tasks.set(id, task);
@@ -178,6 +179,7 @@ export async function applyEditTask(id, token) {
   if (task.token !== token) throw httpError('任务凭证无效', 403);
   if (!task.pendingPath || !fs.existsSync(task.pendingPath)) throw httpError('暂存文件不存在', 404);
 
+  task.validateTarget?.();
   if (typeof task.finalize === 'function') {
     task.appliedUrl = await task.finalize(task);
   } else {

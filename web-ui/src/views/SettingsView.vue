@@ -15,42 +15,73 @@
         <p class="fd">直接描述画面风格 或者 选择0~2个画风，英文逗号分隔，参考来源：<a href="https://anima.mooshieblob.com/" target="_blank" rel="noopener" class="ext-link">https://anima.mooshieblob.com/</a> · 分辨率越高出图越精细，代价是变慢。参考：5070ti 768×512 base约 7s/图|turbo 约2.5s/图</p>
 
         <linshe-tabs
-          :model-value="comfyTab"
+          v-model="comfyTab"
           :options="comfyTabs"
           class="comfy-tabs"
-          @update:model-value="switchComfyTab"
         />
 
         <div class="comfy-form-stage">
-          <Transition :name="'tab-slide-' + tabSlideDir" mode="out-in">
+          <Transition name="comfy-tab" mode="out-in">
             <div :key="comfyTab" class="comfy-form-inner">
               <div class="fav-input-row">
                 <linshe-input
                   v-model="form[activeFields.artist]"
                   class="fi fav-input"
                   placeholder="画师串"
+                  aria-label="画师串"
                   @input="markDirty"
-                />                <div
-                  role="button"
-                  tabindex="0"
+                />
+                <linshe-button
                   class="fav-star-btn"
-                  :class="{ 'is-disabled': !form[activeFields.artist].trim() }"
-                  :aria-disabled="!form[activeFields.artist].trim()"
-                  title="收藏当前画师串"
-                  @click="addToFavorites(comfyTab)"
-                  @keydown.enter.prevent="addToFavorites(comfyTab)"
-                  @keydown.space.prevent="addToFavorites(comfyTab)"
+                  variant="link"
+                  tone="muted"
+                  :disabled="!currentArtist"
+                  :aria-pressed="isArtistFavorited"
+                  aria-label="收藏当前画师串"
+                  :title="isArtistFavorited ? '已收藏' : '收藏当前画师串'"
+                  @click="addToFavorites"
                 >
-☆
-</div>
+                  <svg :class="{ 'fav-star-filled': isArtistFavorited }" width="18" height="18" viewBox="0 0 24 24" :fill="isArtistFavorited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 2.5l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3.1-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z" />
+                  </svg>
+                </linshe-button>
               </div>
               <template v-if="artistFavorites.length">
                 <div class="fav-section-title">收藏的画师 / 风格</div>
-                <div class="fav-chips">
-                <linshe-button v-for="fav in artistFavorites" :key="fav.id" class="fav-chip" variant="chip" :active="fav.artist === form[activeFields.artist]" @click="applyFavorite(fav, comfyTab)" :title="fav.artist">
-                  {{ fav.label }}
-                  <span class="fav-chip-x" @click.stop="removeFavorite(fav.id)">×</span>
-                </linshe-button>
+                <div ref="favoriteRow" class="fav-collection">
+                  <div class="fav-viewport" :class="{ 'is-expanded': favoritesExpanded }">
+                    <div id="comfy-artist-favorites" ref="favoriteChips" class="fav-chips">
+                      <div
+                        v-for="(fav, index) in artistFavorites"
+                        :key="fav.id"
+                        class="fav-chip-item"
+                        :inert="!favoritesExpanded && index >= visibleFavoriteCount"
+                      >
+                        <linshe-button
+                          class="fav-chip"
+                          variant="chip"
+                          :active="fav.artist === currentArtist"
+                          :aria-pressed="fav.artist === currentArtist"
+                          :title="fav.artist"
+                          @click="applyFavorite(fav)"
+                        >
+                          <span class="fav-chip-label">{{ fav.label }}</span>
+                        </linshe-button>
+                        <linshe-button class="fav-chip-remove" variant="link" tone="muted" size="sm" :aria-label="`取消收藏 ${fav.label}`" @click="removeFavorite(fav.id)">×</linshe-button>
+                      </div>
+                    </div>
+                  </div>
+                  <linshe-button
+                    v-if="favoritesOverflow"
+                    class="fav-more"
+                    variant="link"
+                    size="sm"
+                    :aria-expanded="favoritesExpanded"
+                    aria-controls="comfy-artist-favorites"
+                    @click="favoritesExpanded = !favoritesExpanded"
+                  >
+                    {{ favoritesExpanded ? '收起' : '更多' }}
+                  </linshe-button>
                 </div>
               </template>
               <div class="fr">
@@ -69,34 +100,33 @@
           </Transition>
         </div>
 
-        <div v-if="imageProvider !== 'novelai'" class="hiresfix-section">
-          <div class="hiresfix-header">
-            <span class="hiresfix-title">HiresFix 细化</span>
+        <div class="comfy-advanced">
+          <div class="settings-advanced-heading">
+            <linshe-button variant="link" size="sm" :aria-expanded="comfyAdvancedOpen" aria-controls="comfy-advanced-body" @click="comfyAdvancedOpen = !comfyAdvancedOpen">
+              高级设置
+              <svg class="settings-advanced-chevron" :class="{ open: comfyAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+            </linshe-button>
           </div>
-          <div class="hiresfix-row">
-            <div class="hiresfix-copy">
-              <div class="hiresfix-desc">图片进一步高清细化设置</div>
-            </div>
-            <span class="hiresfix-summary">{{ hiresWorkflowMode === 'advanced' ? '进阶版' : '基础版' }} · 最长边 {{ hiresMaxSize }} · {{ hiresWorkflowMode === 'advanced' && hiresSamplingMode === 'source' ? '采样跟随原图' : `${hiresSteps} 步 · CFG ${hiresCfg}` }} · 重绘 {{ hiresDenoise }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
-            <linshe-button class="hiresfix-link" variant="link" @click="openHiresFixSettings">设置 →</linshe-button>
-          </div>
-        </div>
-        <div class="quality-section">
-          <div class="quality-row">
-            <div class="quality-copy">
-              <div class="quality-subtitle">质量提示词</div>
-              <div class="quality-desc">生图时注入的画质增强词，留空使用系统默认</div>
-            </div>
-            <span class="quality-summary" :class="{ 'is-default': !qualityPrompt }" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt ? qualityPrompt : '系统默认' }}</span>
-            <linshe-button class="quality-link" variant="link" @click="openQualityDialog">更改 →</linshe-button>
-          </div>
-          <div class="quality-row">
-            <div class="quality-copy">
-              <div class="quality-subtitle">负面提示词</div>
-              <div class="quality-desc">生图时排除的负面词条，留空使用工作流内置默认</div>
-            </div>
-            <span class="quality-summary" :class="{ 'is-default': !negativePrompt }" :title="negativePrompt || '使用工作流内置的负面提示词'">{{ negativePrompt ? negativePrompt : '工作流默认' }}</span>
-            <linshe-button class="quality-link" variant="link" @click="openNegativeDialog">更改 →</linshe-button>
+          <div id="comfy-advanced-body" :inert="!comfyAdvancedOpen">
+            <CollapseTransition :show="comfyAdvancedOpen">
+              <div class="comfy-advanced-body">
+                <div v-if="imageProvider !== 'novelai'" class="comfy-advanced-row">
+                  <span class="comfy-advanced-label">HiresFix 细化</span>
+                  <span class="comfy-advanced-summary">{{ hiresWorkflowMode === 'advanced' ? '进阶版' : '基础版' }} · 最长边 {{ hiresMaxSize }} · {{ hiresWorkflowMode === 'advanced' && hiresSamplingMode === 'source' ? '采样跟随原图' : `${hiresSteps} 步 · CFG ${hiresCfg}` }} · 重绘 {{ hiresDenoise }}{{ hiresLoraCount > 0 ? ` · LoRA ${hiresLoraCount}` : '' }}</span>
+                  <linshe-button variant="link" size="sm" aria-label="设置 HiresFix 细化" @click="openHiresFixSettings">设置 →</linshe-button>
+                </div>
+                <div class="comfy-advanced-row">
+                  <span class="comfy-advanced-label">质量提示词</span>
+                  <span class="comfy-advanced-summary is-prompt" :title="qualityPrompt || '使用工作流内置的质量提示词'">{{ qualityPrompt || '系统默认' }}</span>
+                  <linshe-button variant="link" size="sm" aria-label="更改质量提示词" @click="openQualityDialog">更改 →</linshe-button>
+                </div>
+                <div class="comfy-advanced-row">
+                  <span class="comfy-advanced-label">负面提示词</span>
+                  <span class="comfy-advanced-summary is-prompt" :title="negativePrompt || '使用工作流内置的负面提示词'">{{ negativePrompt || '工作流默认' }}</span>
+                  <linshe-button variant="link" size="sm" aria-label="更改负面提示词" @click="openNegativeDialog">更改 →</linshe-button>
+                </div>
+              </div>
+            </CollapseTransition>
           </div>
         </div>
         <div class="sa">
@@ -107,8 +137,9 @@
             全局LoRA
             <span v-if="globalLoraCount > 0" class="float-badge active">已生效 {{ globalLoraCount }}</span>
           </linshe-button>
-          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" :disabled="wfResetting" @click="doWorkflowReset2">{{ wfResetting ? '重置中...' : '重置工作流' }}</linshe-button>
-          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" @click="openWfModeDialog">切换工作流模式</linshe-button>
+          <linshe-button class="wf-action-btn wf-mode-btn" variant="secondary" aria-haspopup="dialog" @click="openWfModeDialog">
+            当前工作流：{{ currentWorkflowModeLabel }}
+          </linshe-button>
         </div>
       </div>
 
@@ -327,7 +358,7 @@
               size="sm"
               :active="profile.id === activeLlmProfileId"
               :aria-pressed="profile.id === activeLlmProfileId"
-              :title="`${profile.name} · ${profile.model || '未选择模型'}`"
+              :title="profile.connectionType === 'magpie' ? profile.name : `${profile.name} · ${profile.model || '未选择模型'}`"
               @click="switchProfile(profile.id)"
             >
               <span class="llm-profile-label">{{ profile.name }}</span>
@@ -356,14 +387,36 @@
         <section class="llm-section" aria-labelledby="llm-connection-heading">
           <div class="llm-section-heading">
             <h4 id="llm-connection-heading">连接信息</h4>
-            <linshe-button variant="link" size="sm" @click="showLlmHelp = true">接入说明</linshe-button>
+            <linshe-button v-if="!isMagpie" variant="link" size="sm" @click="showLlmHelp = true">接入说明</linshe-button>
           </div>
           <div class="llm-field">
             <label class="llm-label" for="llm-connection-type">接入方式</label>
             <linshe-select id="llm-connection-type" v-model="llmConnectionType" :options="llmConnectionOptions" aria-label="接入方式" @update:model-value="onLlmConnectionChange" />
           </div>
           <Transition name="llm-connection" mode="out-in">
-            <div v-if="llmConnectionType === 'openai'" key="openai" class="llm-credentials">
+            <div v-if="isMagpie" key="magpie" class="llm-credentials llm-magpie">
+              <div class="llm-magpie-thinking">
+                <span class="llm-label">思考模式</span>
+                <linshe-tabs v-model="llmThinkingMode" class="llm-magpie-tabs" :options="thinkingModeOptions" size="sm" aria-label="思考模式" aria-describedby="magpie-thinking-hint" @update:model-value="markLlmDirty" />
+                <p id="magpie-thinking-hint" class="llm-field-hint">{{ llmThinkingHint }}</p>
+              </div>
+              <div class="llm-magpie-help">
+                <div class="llm-magpie-guide">
+                  <a href="https://github.com/yetone/magpie/releases/download/v0.1.4740/magpie-windows-amd64.exe" target="_blank" rel="noopener" class="ext-link llm-magpie-download">下载 Magpie <span class="llm-magpie-platform">Windows x64 <span aria-hidden="true">↗</span></span></a>
+                  <p>下载后运行 <code>magpie.exe</code>，在 Magpie 左侧栏打开<strong>「路由 → 永不卡住」</strong>，配置多个 Token 来源。</p>
+                </div>
+                <div class="llm-magpie-preset">
+                  <h5>邻舍已默认配置</h5>
+                  <dl class="llm-magpie-values">
+                    <div><dt>API 地址</dt><dd><code>{{ MAGPIE_PRESET.baseURL }}</code></dd></div>
+                    <div><dt>Key</dt><dd><code>{{ MAGPIE_PRESET.apiKey }}</code></dd></div>
+                    <div><dt>模型</dt><dd><code>{{ MAGPIE_PRESET.model }}</code></dd></div>
+                    <div><dt>最大输出</dt><dd><code>{{ MAGPIE_PRESET.maxTokens }} tokens</code></dd></div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="llmConnectionType === 'openai'" key="openai" class="llm-credentials">
               <div class="llm-inline-help">
                 <p class="llm-help-copy">选择 API 地址并填写服务商提供的 Key，再获取或手动输入模型 ID。DeepSeek 官方接口建议选择 deepseek-flash。<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener" class="ext-link">获取 DeepSeek API Key ↗</a></p>
               </div>
@@ -377,7 +430,7 @@
               <div class="llm-field">
                 <div class="llm-field-heading">
                   <label class="llm-label" for="llm-api-key">API Key</label>
-                  <span class="llm-credential-status" aria-live="polite">{{ llmApiKeyTouched ? '待保存' : llmPreview.hasApiKey ? `已保存 · ${llmPreview.preview}` : '尚未设置' }}</span>
+                  <span v-if="llmPreview.connectionType !== 'magpie' || llmApiKeyTouched" class="llm-credential-status" aria-live="polite">{{ llmApiKeyTouched ? '待保存' : llmPreview.hasApiKey ? `已保存 · ${llmPreview.preview}` : '尚未设置' }}</span>
                 </div>
                 <div class="llm-key-row">
                   <linshe-input
@@ -386,11 +439,11 @@
                     :type="showApiKey ? 'text' : 'password'"
                     name="linshe-llm-key"
                     autocomplete="new-password"
-                    :placeholder="llmPreview.hasApiKey ? '已保存密钥，输入新密钥可替换' : '输入 API Key'"
+                    :placeholder="llmPreview.connectionType !== 'magpie' && llmPreview.hasApiKey ? '已保存密钥，输入新密钥可替换' : '输入 API Key'"
                     @input="onLlmKeyInput"
                   />
                   <div class="llm-inline-actions">
-                    <linshe-button variant="ghost" size="sm" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
+                    <linshe-button v-if="llmPreview.connectionType !== 'magpie' || llmApiKeyTouched" variant="ghost" size="sm" title="复制完整 API Key" @click="copyLlmApiKey">复制</linshe-button>
                     <linshe-button variant="ghost" size="sm" @click="showApiKey = !showApiKey">{{ showApiKey ? '隐藏' : '显示' }}</linshe-button>
                   </div>
                 </div>
@@ -414,6 +467,8 @@
           </Transition>
         </section>
 
+        <Transition name="llm-connection">
+        <div v-if="!isMagpie">
         <section class="llm-section" aria-labelledby="llm-model-heading">
           <div class="llm-section-heading"><h4 id="llm-model-heading">模型参数</h4></div>
           <div class="llm-field">
@@ -442,7 +497,7 @@
             <div class="llm-field">
               <span class="llm-label">思考模式</span>
               <linshe-tabs v-model="llmThinkingMode" :options="thinkingModeOptions" size="sm" aria-label="思考模式" @update:model-value="markLlmDirty" />
-              <p class="llm-field-hint">{{ llmConnectionType === 'vertexai' ? '「不传」使用 Google 默认；Pro 无法完全关闭思考。' : '「不传」使用服务商默认设置。思考模式打开会增加大约30%的消耗，但是日志会很有意思' }}</p>
+              <p class="llm-field-hint">{{ llmConnectionType === 'vertexai' ? '「不传」使用 Google 默认；Pro 无法完全关闭思考。' : llmThinkingHint }}</p>
             </div>
           </div>
         </section>
@@ -457,10 +512,10 @@
         </linshe-modal>
 
         <template v-if="isCustomBaseURL">
-          <div class="llm-advanced-heading">
+          <div class="settings-advanced-heading">
             <linshe-button variant="link" size="sm" :aria-expanded="llmAdvancedOpen" aria-controls="llm-advanced-body" @click="toggleLlmAdvanced">
               高级设置
-              <svg class="llm-advanced-chevron" :class="{ open: llmAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+              <svg class="settings-advanced-chevron" :class="{ open: llmAdvancedOpen }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
             </linshe-button>
             <span class="llm-field-hint">请求参数与兼容选项</span>
           </div>
@@ -539,6 +594,8 @@
             </div>
           </CollapseTransition>
         </template>
+        </div>
+        </Transition>
 
         <div class="llm-footer">
           <div class="llm-footer-actions">
@@ -557,6 +614,7 @@
             <div class="free-egg-title">正在使用 opencode go 免费模型</div>
             <div class="free-egg-desc">每5小时每个IP限额200次请求</div>
             <div class="free-egg-hint">免费模型失败会自动切换；本轮全部失败会自动关闭鸡蛋，改用自有配置重试</div>
+            <div class="free-egg-hint">（哈哈你被骗了，ocg现在压根没有鸡蛋了，看看特效图一乐吧。羊毛到处有，想办法打野吧</div>
           </div>
         </div>
         </Transition>
@@ -573,7 +631,7 @@
               <span>{{ relayConfigBusy ? '新增中…' : '快速配置' }}</span>
             </linshe-button>
           </div>
-          <p class="relay-station-desc">{{ station.desc }}</p>
+          <p class="relay-station-desc llm-relay-desc">{{ station.desc }}</p>
           <p class="relay-station-line"><a :href="station.keysUrl" target="_blank" rel="noopener" class="ext-link relay-station-link">跳转官网→</a></p>
         </div>
         <p class="relay-sponsor-note">可以注意到以上中转均未支付赞助费，看到请及时支付 <strong>**广告位招租**</strong></p>
@@ -1153,7 +1211,7 @@ type="range" min="0" :max="MOMENT_FREQ_STEPS.length - 1" step="1"
     </linshe-modal>
 
     <!-- 工作流模式弹窗 -->
-    <linshe-modal v-model="showWfModeDialog" title="工作流模式" wide>
+    <linshe-modal v-model="showWfModeDialog" title="工作流模式" wide :close-disabled="wfSaving || wfResetting">
       <div class="wf-mode-options">
         <div
 v-for="m in workflowModeOptions" :key="m.value"
@@ -1231,15 +1289,33 @@ base
         </div>
       </Transition>
       <template #footer>
-        <linshe-button variant="secondary" @click="showWfModeDialog = false">取消</linshe-button>
-        <linshe-button variant="primary" :disabled="wfSaving" @click="saveWfModeDialog">{{ wfSaving ? '保存中...' : '保存' }}</linshe-button>
+        <div class="wf-mode-footer">
+          <linshe-button variant="link" tone="danger" size="lg" touch-target :disabled="wfSaving || wfResetting" @click="showWfResetDialog = true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" /><polyline points="3 4 3 9 8 9" />
+            </svg>
+            <strong>重置工作流</strong>
+          </linshe-button>
+          <div class="wf-mode-footer-actions">
+            <linshe-button variant="secondary" :disabled="wfSaving || wfResetting" @click="showWfModeDialog = false">取消</linshe-button>
+            <linshe-button variant="primary" :loading="wfSaving" :disabled="wfResetting" @click="saveWfModeDialog">保存</linshe-button>
+          </div>
+        </div>
+      </template>
+    </linshe-modal>
+
+    <linshe-modal v-model="showWfResetDialog" title="重置工作流" :close-disabled="wfResetting">
+      <p class="form-dialog-desc">将用内置模板覆盖现有的「制图工作流.json」和「制图工作流-pro.json」。</p>
+      <template #footer>
+        <linshe-button variant="secondary" :disabled="wfResetting" @click="showWfResetDialog = false">取消</linshe-button>
+        <linshe-button variant="danger" :loading="wfResetting" @click="resetWorkflow">重置</linshe-button>
       </template>
     </linshe-modal>
 </div>
 </template>
 
 <script setup>
-import { defaultMaxTokens, isValidMaxTokens } from '../../../agent-core/src/llm/modelCapabilities.js'
+import { defaultMaxTokens, isValidMaxTokens, MAGPIE_PRESET } from '../../../agent-core/src/llm/modelCapabilities.js'
 import { validateVertexServiceAccount } from '../api/index.js'
 import { ref, reactive, computed, onMounted, inject, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
@@ -1327,6 +1403,7 @@ const negativePrompt = ref('')
 const negativeDialog = reactive({ show: false, text: '' })
 const negativeSaving = ref(false)
 const comfyTab = ref('chat')
+const comfyAdvancedOpen = ref(false)
 const comfyTabs = [
   { value: 'chat', label: '对话配图' },
   { value: 'moments', label: '朋友圈&信件配图' },
@@ -1337,14 +1414,6 @@ const activeFields = computed(() => {
   if (comfyTab.value === 'event') return { artist: 'eventArtist', width: 'eventWidth', height: 'eventHeight' }
   return { artist: 'artist', width: 'width', height: 'height' }
 })
-const tabSlideDir = ref('forward')
-const comfyTabOrder = { chat: 0, moments: 1, event: 2 }
-function switchComfyTab(mode) {
-  const prev = comfyTabOrder[comfyTab.value] ?? 0
-  const next = comfyTabOrder[mode] ?? 0
-  tabSlideDir.value = next > prev ? 'forward' : 'back'
-  comfyTab.value = mode
-}
 const comfyUrl = ref('')
 const comfySkipTls = ref(false)
 const imageProvider = ref('comfyui')
@@ -1511,11 +1580,38 @@ const presets = [
 
 // ── 画师串收藏夹 ──
 const artistFavorites = ref([])
+const currentArtist = computed(() => form.value[activeFields.value.artist].trim())
+const isArtistFavorited = computed(() => artistFavorites.value.some(fav => fav.artist === currentArtist.value))
+const favoriteRow = ref(null)
+const favoriteChips = ref(null)
+const visibleFavoriteCount = ref(0)
+const favoritesOverflow = ref(false)
+const favoritesExpanded = ref(false)
 const favDialog = reactive({
   show: false,
-  mode: 'chat',
+  artist: '',
   label: '',
 })
+
+watch([favoriteRow, favoriteChips, artistFavorites], ([row, chips], _, onCleanup) => {
+  if (!row || !chips) return
+  const items = Array.from(chips.children)
+  const measure = () => {
+    const { columnGap, paddingLeft, paddingRight } = getComputedStyle(chips)
+    const occupiedWidth = items.reduce((sum, item) => sum + item.getBoundingClientRect().width, 0)
+      + (items.length - 1) * parseFloat(columnGap) + parseFloat(paddingLeft) + parseFloat(paddingRight)
+    // 测整行可用宽度，避免「更多」本身占用空间后阻止按钮消失。
+    favoritesOverflow.value = occupiedWidth > row.clientWidth
+    visibleFavoriteCount.value = items.filter(item => item.offsetTop === items[0].offsetTop).length
+    if (!favoritesOverflow.value) favoritesExpanded.value = false
+  }
+  const observer = new ResizeObserver(measure)
+  observer.observe(row)
+  observer.observe(chips)
+  items.forEach(item => observer.observe(item))
+  onCleanup(() => observer.disconnect())
+  measure()
+}, { flush: 'post' })
 
 async function loadArtistFavorites() {
   try {
@@ -1524,25 +1620,25 @@ async function loadArtistFavorites() {
   } catch {}
 }
 
-function addToFavorites(mode) {
-  const artist = (mode === 'moments' ? form.value.momentsArtist : mode === 'event' ? form.value.eventArtist : form.value.artist).trim()
+function addToFavorites() {
+  const artist = currentArtist.value
   if (!artist) return
-  if (artistFavorites.value.some(f => f.artist === artist)) {
+  if (isArtistFavorited.value) {
     toastFn('已收藏过该画师串', 'warning')
     return
   }
-  favDialog.mode = mode
+  favDialog.artist = artist
   favDialog.label = artist.length > 20 ? artist.slice(0, 20) + '…' : artist
   favDialog.show = true
 }
 
 async function confirmAddFavorite() {
-  const artist = (favDialog.mode === 'moments' ? form.value.momentsArtist : favDialog.mode === 'event' ? form.value.eventArtist : form.value.artist).trim()
+  const artist = favDialog.artist
   const label = favDialog.label.trim() || artist
   try {
     const result = await addArtistFavorite({ label, artist })
     if (result.ok) {
-      artistFavorites.value.push(result.favorite)
+      artistFavorites.value = [...artistFavorites.value, result.favorite]
     }
   } catch (err) {
     console.error('[favorites] add failed:', err)
@@ -1563,14 +1659,8 @@ watch(() => favDialog.show, async (v) => {
   }
 })
 
-function applyFavorite(fav, mode) {
-  if (mode === 'moments') {
-    form.value.momentsArtist = fav.artist
-  } else if (mode === 'event') {
-    form.value.eventArtist = fav.artist
-  } else {
-    form.value.artist = fav.artist
-  }
+function applyFavorite(fav) {
+  form.value[activeFields.value.artist] = fav.artist === currentArtist.value ? '' : fav.artist
   markDirty()
 }
 
@@ -1601,7 +1691,9 @@ function onLlmKeyInput() {
 }
 const llmBaseURL = ref('https://api.deepseek.com')
 const llmConnectionType = ref('openai')
+const isMagpie = computed(() => llmConnectionType.value === 'magpie')
 const llmConnectionOptions = [
+  { value: 'magpie', label: '【推荐】Magpie 统一管理' },
   { value: 'openai', label: 'OpenAI 兼容接口（DeepSeek / 自定义）' },
   { value: 'vertexai', label: 'Google Vertex AI（服务账号）' },
 ]
@@ -1619,8 +1711,8 @@ function onVertexAccountInput() {
   clearLlmModels()
   markLlmDirty()
 }
-function restoreVertexSettings(saved) {
-  llmConnectionType.value = saved.connectionType === 'vertexai' ? 'vertexai' : 'openai'
+function restoreLlmConnection(saved) {
+  llmConnectionType.value = llmConnectionOptions.some(option => option.value === saved.connectionType) ? saved.connectionType : 'openai'
   vertexRegion.value = saved.vertexRegion || 'global'
   hasVertexServiceAccount.value = Boolean(saved.hasVertexServiceAccount)
   vertexServiceAccount.value = ''
@@ -1629,6 +1721,11 @@ function restoreVertexSettings(saved) {
   vertexValidating.value = false
 }
 function onLlmConnectionChange() {
+  if (isMagpie.value) {
+    clearLlmModels()
+    markLlmDirty()
+    return
+  }
   if (llmConnectionType.value === 'vertexai') {
     llmBaseURL.value = 'https://aiplatform.googleapis.com'
     llmModel.value = 'gemini-2.5-pro'
@@ -1678,7 +1775,7 @@ const llmModelSelectVal = computed({
   },
 })
 const llmMaxTokens = ref(defaultMaxTokens(llmBaseURL.value, llmModel.value))
-const llmMaxTokensValid = computed(() => isValidMaxTokens(llmMaxTokens.value))
+const llmMaxTokensValid = computed(() => isMagpie.value || isValidMaxTokens(llmMaxTokens.value))
 const llmTokenSource = ref('default')
 const llmModelCapabilities = ref({})
 let llmModelsVersion = 0
@@ -1703,7 +1800,7 @@ function fillLlmMaxTokens() {
   llmTokenSource.value = isValidMaxTokens(capability?.maxTokens) ? 'model' : 'default'
 }
 function restoreLlmMaxTokens(saved) {
-  restoreVertexSettings(saved)
+  restoreLlmConnection(saved)
   clearLlmModels()
   llmTokenEditVersion++
   llmMaxTokens.value = isValidMaxTokens(saved.maxTokens) ? saved.maxTokens : defaultMaxTokens(llmBaseURL.value, llmModel.value)
@@ -1720,6 +1817,7 @@ function onLlmEndpointInput() {
   markLlmDirty()
 }
 const llmThinkingMode = ref('disabled')
+const llmThinkingHint = '思考模式打开会增加大约30%的消耗，但是日志会很有意思。「不传」使用服务商默认设置，一般不选。'
 const thinkingModeOptions = [
   { value: 'enabled', label: '开' },
   { value: 'disabled', label: '关' },
@@ -1758,14 +1856,14 @@ const llmBaseURLSelectVal = computed({
 const llmHeadersEnabled = ref(false)
 const llmHeadersText = ref('{}')
 const llmHeadersValid = computed(() => {
-  if (!llmHeadersEnabled.value) return true
+  if (isMagpie.value || !llmHeadersEnabled.value) return true
   try { JSON.parse(llmHeadersText.value); return true } catch { return false }
 })
 const llmExtraBodyEnabled = ref(false)
 const llmExtraBodyText = ref('{}')
 const llmExtraBodyPlaceholder = computed(() => JSON.stringify(llmConnectionType.value === 'vertexai' ? { generationConfig: { topK: 40 } } : { agent: 'my-agent', agentName: 'Nova' }))
 const llmExtraBodyValid = computed(() => {
-  if (!llmExtraBodyEnabled.value) return true
+  if (isMagpie.value || !llmExtraBodyEnabled.value) return true
   try { JSON.parse(llmExtraBodyText.value); return true } catch { return false }
 })
 const showApiKey = ref(false)
@@ -1782,8 +1880,20 @@ function toggleLlmAdvanced() { llmAdvancedOpen.value = !llmAdvancedOpen.value }
 const showRelayModal = ref(false)
 const showNovelaiRelayModal = ref(false)
 const relayStations = [
-  { name: '词元跳动', keysUrl: 'https://tokendance.space/keys', url: 'https://tokendance.space/gateway/v1', desc: '仍然提供v4-flash-preview，超低价格，文风优秀' },
-  { name: '基元律动', keysUrl: 'https://tokenrhythm.studio/i/rf_tr_8BNBDW?share_id=3a6de008-4004-4711-8060-791aa9f4fd1a', url: 'https://tokenrhythm.studio/v1', desc: '有18元注册奖励，deepseek最新多模态模型全天谷价' },
+  {
+    name: '硅基流动',
+    keysUrl: 'https://cloud.siliconflow.cn/i/L6YTJmLk',
+    url: 'https://api.siliconflow.cn/v1',
+    model: 'deepseek-ai/DeepSeek-V4-Flash',
+    desc: '首选是DeepSeek V4 Flash或者deepseek-ai/DeepSeek-V3.2，相较于1017活人感强化很多。缺点是无法读图，推荐magpie创建路由用1017兜底识图',
+  },
+  {
+    name: '基元律动',
+    keysUrl: 'https://tokenrhythm.studio/i/rf_tr_8BNBDW?share_id=3a6de008-4004-4711-8060-791aa9f4fd1a',
+    url: 'https://tokenrhythm.studio/v1',
+    model: 'deepseek-flash',
+    desc: '首充双倍，同时也还有deepseek flash 0731',
+  },
 ]
 
 const relayConfigBusy = ref(false)
@@ -1831,7 +1941,7 @@ async function applyRelayConfig(station) {
   try {
     isCustomBaseURL.value = true
     llmBaseURL.value = station.url
-    llmModel.value = 'deepseek-flash'
+    llmModel.value = station.model
     clearLlmModels()
     fillLlmMaxTokens()
     llmThinkingMode.value = 'disabled'
@@ -1844,7 +1954,7 @@ async function applyRelayConfig(station) {
       connectionType: 'openai',
       apiKey: '',
       baseURL: station.url,
-      model: 'deepseek-flash',
+      model: station.model,
       thinkingMode: 'disabled',
       headers: {},
       extraBody: {},
@@ -1951,6 +2061,10 @@ async function toggleFreeEgg() {
     const result = await setLlmFreeEgg(freeEgg.value)
     if (result.ok) {
       llmPreview.value = { ...result }
+      if (!freeEgg.value && result.connectionType === 'magpie') {
+        llmThinkingMode.value = result.thinkingMode
+        restoreLlmMaxTokens(result)
+      }
       settingsStore.setHasApiKey(result.hasApiKey)
       llmApiKey.value = ''
       llmApiKeyTouched.value = false
@@ -2586,6 +2700,7 @@ async function fetchNovelaiModels() {
 }
 
 function buildLlmPayload() {
+  if (isMagpie.value) return { connectionType: 'magpie', thinkingMode: llmThinkingMode.value }
   const payload = { connectionType: llmConnectionType.value }
   if (llmConnectionType.value === 'vertexai') {
     payload.vertexRegion = vertexRegion.value.trim() || 'global'
@@ -2622,7 +2737,7 @@ async function runLlmConnectionTest() {
   try {
     const result = await testLlmConnection(buildLlmPayload())
     const parts = ['LLM 连接成功']
-    if (result.model) parts.push(result.model)
+    if (!isMagpie.value && result.model) parts.push(result.model)
     if (result.latencyMs != null) parts.push(`${result.latencyMs}ms`)
     toastFn?.(parts.join(' · '), 'success')
   } catch (err) {
@@ -2655,13 +2770,13 @@ async function saveLlmConfig() {
       llmApiKeyTouched.value = false
 
       // 保存后台 LLM 任务队列设置（仅自定义 API 时有效，否则强制关闭）
-      if (isCustomBaseURL.value) {
+      if (!isMagpie.value && isCustomBaseURL.value) {
         await updateFeatureFlag('serializeBackgroundLLM', features.serializeBackgroundLLM)
         if (features.serializeBackgroundLLM) {
           await updateBackgroundConcurrency(backgroundConcurrency.value)
         }
         await updateFeatureFlag('mergeMessages', features.mergeMessages)
-      } else {
+      } else if (!isMagpie.value) {
         features.serializeBackgroundLLM = false
         backgroundConcurrency.value = 3
         await updateFeatureFlag('serializeBackgroundLLM', false)
@@ -2671,6 +2786,9 @@ async function saveLlmConfig() {
 
       await syncActiveLlmProfile()
 
+      llmProfiles.value = llmProfiles.value.map(profile => profile.id === activeLlmProfileId.value
+        ? { ...profile, connectionType: result.connectionType, model: result.model, baseURL: result.baseURL }
+        : profile)
       llmDirty.value = false
       llmSaved.value = true
       setTimeout(() => llmSaved.value = false, 2000)
@@ -2916,8 +3034,13 @@ const customWorkflowLoading = ref(false)
 const wfResetting = ref(false)
 const wfSaving = ref(false)
 const showWfModeDialog = ref(false)
+const showWfResetDialog = ref(false)
 
 const workflowModeOptions = computed(() => [...BASE_WORKFLOW_MODE_OPTIONS, CUSTOM_WORKFLOW_MODE_OPTION])
+const currentWorkflowModeLabel = computed(() => {
+  if (workflowMode.value === 'hybrid') return 'Hybrid'
+  return workflowModeOptions.value.find(mode => mode.value === workflowMode.value)?.label ?? workflowMode.value
+})
 const customWorkflowOptions = computed(() =>
   customWorkflowList.value.map(w => ({ value: w.filename, label: w.label }))
 )
@@ -2970,17 +3093,18 @@ async function saveWfModeDialog() {
   } catch {} finally { wfSaving.value = false }
 }
 
-async function doWorkflowReset2() {
-  const ok = await confirmFn({
-    title: '重置工作流',
-    message: '将用内置模板覆盖现有的\n制图工作流.json 和 制图工作流-pro.json',
-    okText: '重置',
-  })
-  if (!ok) return
+async function resetWorkflow() {
+  if (wfResetting.value) return
   wfResetting.value = true
   try {
     await restoreWorkflow()
-  } catch {} finally { wfResetting.value = false }
+    showWfResetDialog.value = false
+    toastFn?.('工作流已重置', 'success')
+  } catch (err) {
+    toastFn?.(err.message || '重置工作流失败', 'error')
+  } finally {
+    wfResetting.value = false
+  }
 }
 
 // Lightbox
@@ -3257,19 +3381,11 @@ function resetTestPrompts() {
   overflow: hidden;
   position: relative;
 }
-/* ── Tab 切换过渡：0.25s 纯淡入淡出 ── */
-.tab-slide-forward-enter-active,
-.tab-slide-forward-leave-active,
-.tab-slide-back-enter-active,
-.tab-slide-back-leave-active {
-  transition: opacity 0.25s ease;
+.comfy-tab-enter-active, .comfy-tab-leave-active {
+  transition: opacity var(--dur-interaction) var(--ease-standard);
 }
-.tab-slide-forward-enter-from,
-.tab-slide-forward-leave-to,
-.tab-slide-back-enter-from,
-.tab-slide-back-leave-to {
-  opacity: 0;
-}
+.comfy-tab-leave-active { pointer-events: none; }
+.comfy-tab-enter-from, .comfy-tab-leave-to { opacity: 0; }
 
 .gen-error { margin-top: 6px; font-size: 12px; color: var(--danger, #ff4d4f); }
 .fr { display: flex; gap: 12px; }
@@ -3289,51 +3405,21 @@ function resetTestPrompts() {
 .resolution-hint {
   font-size: 12px; color: var(--text-secondary);
 }
-/* ── 全局细化 / HiresFix 独立层级 ── */
-.hiresfix-section {
-  margin: 8px 0 0; padding: 16px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+.comfy-advanced { margin-bottom: 16px; border-bottom: 1px solid var(--glass-border); }
+.comfy-advanced-body { display: grid; gap: 12px; }
+.comfy-advanced-row {
+  display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+  align-items: center; gap: 10px;
 }
-.hiresfix-header {
-  display: flex; align-items: baseline;
-  justify-content: space-between; margin-bottom: 10px;
+.comfy-advanced-row:last-child { margin-bottom: 12px; }
+.comfy-advanced-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-bright); }
+.comfy-advanced-summary {
+  justify-self: end; min-width: 0; max-width: 100%; text-align: right;
+  font-size: var(--fs-xs); color: var(--text-secondary);
 }
-.hiresfix-title {
-  font-size: 14px; font-weight: 600; color: var(--text-bright);
-}
-.hiresfix-tag {
-  font-size: 12px; font-weight: 500; color: var(--text-secondary);
-  background: var(--bg-tertiary); border-radius: 8px; padding: 3px 9px;
-}
-.hiresfix-row {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-}
-.hiresfix-copy { flex: 1; min-width: 200px; }
-.hiresfix-desc {
-  font-size: 12px; color: var(--text-secondary); margin-top: 2px;
-}
-.hiresfix-summary { font-size: 12px; color: var(--text-secondary); }
-.hiresfix-link, .quality-link {
-  font-size: 13px;
-}
-/* ── 质量提示词 ── */
-.quality-section {
-  margin: 0 0 20px; padding: 16px 0;
-  border-bottom: 1px solid var(--border);
-}
-.quality-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.quality-row + .quality-row { margin-top: 14px; }
-.quality-copy { flex: 1; min-width: 180px; }
-.quality-subtitle { font-size: 13px; font-weight: 700; color: var(--text-bright); }
-.quality-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
-.quality-summary {
-  font-size: 12px; color: var(--text-secondary);
-  /* 桌面端压缩摘要宽度：flex 换行按 max-width 参与分配，太宽会把摘要挤到第二行 */
-  max-width: 200px; min-width: 0;
+.comfy-advanced-summary.is-prompt {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.quality-summary.is-default { color: var(--text-secondary); }
 .pl { font-size: 12px; color: var(--text-secondary); margin-right: 2px; }
 .pbtn {
   display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
@@ -3355,7 +3441,7 @@ function resetTestPrompts() {
 /* ── 画师串收藏夹：输入框一体 + 轻量文字标签 ── */
 .fav-input-row {
   display: flex; align-items: center; gap: 2px;
-  padding: 0 4px 0 12px; margin-bottom: 8px;
+  padding: 0 4px 0 12px; margin-block: 8px;
   background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -3368,30 +3454,37 @@ function resetTestPrompts() {
   font-size: 13px; background: transparent; border: none; box-shadow: none;
 }
 .fav-input:focus { box-shadow: none; }
-.fav-star-btn {
-  width: 34px; height: 34px; flex-shrink: 0; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--text-secondary);
-  font-size: 16px; line-height: 1; cursor: pointer;
-  transition: color 0.15s ease;
-  user-select: none;
-}
-.fav-star-btn:hover:not(.is-disabled) { color: #E2A83E; }
-.fav-star-btn.is-disabled { opacity: 0.35; cursor: not-allowed; }
+.fav-star-btn { width: 34px; height: 34px; flex-shrink: 0; }
+.fav-star-filled { color: var(--fun-gold); }
 .fav-section-title {
   font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;
 }
+.fav-collection {
+  --fav-chip-height: 28px;
+  display: flex; align-items: flex-start; gap: 6px; margin-bottom: 16px;
+}
+.fav-viewport {
+  display: grid; flex: 1; min-width: 0;
+  grid-template-rows: minmax(calc(var(--fav-chip-height) + 4px), 0fr);
+  transition: grid-template-rows var(--dur-interaction) var(--ease-standard);
+}
+.fav-viewport.is-expanded { grid-template-rows: minmax(calc(var(--fav-chip-height) + 4px), 1fr); }
 .fav-chips {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px;
+  position: relative;
+  display: flex; flex-wrap: wrap; align-content: start; gap: 6px;
+  min-height: 0; overflow: clip; padding: 2px;
 }
-.fav-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 28px; padding: 0 10px; font-size: 14px;
+.fav-chip-item {
+  position: relative; display: flex; max-width: 100%;
+  height: var(--fav-chip-height);
 }
-.fav-chip-x {
-  font-size: 12px; line-height: 1; color: var(--text-secondary);
+.fav-chip { max-width: 100%; }
+.fav-chip-label {
+  margin-inline-end: 12px;
+  overflow: hidden; text-overflow: ellipsis;
 }
-.fav-chip-x:hover { color: var(--accent); }
+.fav-chip-remove { position: absolute; inset-block: 0; inset-inline-end: 4px; width: 20px; }
+.fav-more { flex: none; height: calc(var(--fav-chip-height) + 4px); }
 
 .sa { display: flex; align-items: center; gap: 12px; margin-top: auto; }
 .sa-spacer { flex: 1; }
@@ -3629,6 +3722,7 @@ function resetTestPrompts() {
 .relay-station-desc {
   font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0 0 10px;
 }
+.llm-relay-desc { max-inline-size: 600px; overflow-wrap: anywhere; }
 .relay-station-line {
   font-size: 12px; color: var(--text-secondary); margin: 4px 0; line-height: 1.6;
   overflow-wrap: anywhere;
@@ -3742,9 +3836,9 @@ function resetTestPrompts() {
 .llm-connection-enter-from, .llm-connection-leave-to { opacity: 0; }
 .vertex-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .vertex-status { font-size: var(--fs-xs); line-height: 1.5; color: var(--text-secondary); overflow-wrap: anywhere; }
-.llm-advanced-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-top: 1px solid var(--glass-border); }
-.llm-advanced-chevron { flex-shrink: 0; transition: transform 0.3s var(--ease-standard); }
-.llm-advanced-chevron.open { transform: rotate(180deg); }
+.settings-advanced-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 0; border-top: 1px solid var(--glass-border); }
+.settings-advanced-chevron { flex-shrink: 0; transition: transform var(--dur-interaction) var(--ease-standard); }
+.settings-advanced-chevron.open { transform: rotate(180deg); }
 .llm-advanced-body { padding-bottom: 12px; }
 .llm-custom-toggle, .llm-option-row { border-bottom: none; }
 .llm-custom-editor { padding: 4px 0 2px; }
@@ -3756,12 +3850,57 @@ function resetTestPrompts() {
 .llm-help-section h4 { margin-bottom: 10px; }
 .llm-inline-help .llm-help-copy { margin: 0; line-height: 1.6; }
 .llm-inline-help .ext-link { margin-left: 6px; font-size: var(--fs-sm); }
+.llm-magpie { gap: 14px; }
+.llm-magpie-thinking {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.llm-magpie-thinking .llm-field-hint { flex-basis: 100%; }
+.llm-magpie-tabs { inline-size: min(100%, 16rem); }
+.llm-magpie-help {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--bg-secondary) 96%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--border) 84%, var(--accent));
+  border-radius: var(--radius-md);
+  font-size: var(--fs-base);
+  line-height: 1.6;
+}
+.llm-magpie-download {
+  color: color-mix(in srgb, var(--accent-hover) 74%, var(--text-primary));
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+.llm-magpie-download:hover { color: color-mix(in srgb, var(--accent-hover) 58%, var(--text-primary)); }
+.llm-magpie-platform { white-space: nowrap; }
+.llm-magpie-guide p {
+  margin: 6px 0 0;
+  color: color-mix(in srgb, var(--text-primary) 68%, var(--text-secondary));
+  text-wrap: pretty;
+}
+.llm-magpie-guide strong { color: var(--text-primary); font-weight: 600; white-space: nowrap; }
+.llm-magpie-preset { padding-inline-start: 18px; border-inline-start: 1px solid var(--border); }
+.llm-magpie-preset h5 { margin: 0 0 6px; color: var(--text-primary); font-size: var(--fs-base); font-weight: 600; }
+.llm-magpie-values { display: grid; gap: 2px; margin: 0; }
+.llm-magpie-values > div { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 8px; }
+.llm-magpie-values dt { color: color-mix(in srgb, var(--text-primary) 58%, var(--text-secondary)); }
+.llm-magpie-values dd { margin: 0; color: var(--text-primary); }
+.llm-magpie-help code { overflow-wrap: anywhere; }
+@container (max-width: 620px) {
+  .llm-magpie-help { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .llm-magpie-preset { padding: 10px 0 0; border-inline-start: 0; border-block-start: 1px solid var(--border); }
+}
 @container (max-width: 480px) {
+  .llm-magpie-tabs { inline-size: 100%; }
   .llm-endpoint-row, .llm-parameter-grid { grid-template-columns: minmax(0, 1fr); }
   .llm-key-row { flex-wrap: wrap; }
   .llm-key-row > :first-child { flex-basis: 100%; }
   .llm-key-row > .llm-inline-actions { margin-left: auto; }
   .llm-parameter-grid { gap: 10px; }
+}
+@container (max-width: 290px) {
+  .llm-magpie-help { padding-inline: 12px; }
+  .llm-magpie-values > div:first-child { grid-template-columns: minmax(0, 1fr); gap: 0; }
 }
 
 /* ── 测试画风 ── */
@@ -3850,6 +3989,10 @@ function resetTestPrompts() {
 }
 
 /* ── 工作流模式弹窗 ── */
+.wf-mode-footer, .wf-mode-footer-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+}
+.wf-mode-footer { width: 100%; justify-content: space-between; }
 .wf-mode-options {
   display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;
 }

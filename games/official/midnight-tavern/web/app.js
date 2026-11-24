@@ -9,6 +9,9 @@
   const station = window.TavernStation;
   const audio = window.TavernAudio;
   const ui = { busy: '连接中…', error: '', target: '', reply: '', sessionId: '', reportId: '', guestPhotos: new Map() };
+  ui.mediaRequests = new Set();
+  ui.mediaErrors = new Map();
+  const photoVersions = new Map();
   let recipe = mix.empty();
   let identifyingPotion = false;
   const potionDrafts = new WeakMap();
@@ -93,6 +96,7 @@
   let toastTimer;
   let returnFocus;
   let photoSeat;
+  let drinkPhotoTrigger;
   let leaving = false;
   let drinkAttempt;
   let readingPosition;
@@ -116,12 +120,24 @@
   const id = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
   const post = (path, body = {}, sessionId = ui.sessionId) => sdk.ext.request(path, { method: 'POST', body: { sessionId, ...body } });
 
-  function notice(message) {
+  function hideNotice() {
     const node = el('notice');
-    node.textContent = message;
+    clearTimeout(toastTimer);
+    node.classList.remove('shown');
+    node.inert = true;
+  }
+  function notice(message, actions = [], { persistent = false } = {}) {
+    const node = el('notice');
+    node.innerHTML = `<span>${view.esc(message)}</span>${actions.map(({ name, label, key }) =>
+      view.button(name, label, { id: key, css: 'notice-action' })).join('')}`;
+    node.inert = false;
     node.classList.add('shown');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => node.classList.remove('shown'), 2700);
+    const expire = () => {
+      if (actions.length && (node.matches(':hover') || node.contains(document.activeElement))) toastTimer = setTimeout(expire, 1000);
+      else hideNotice();
+    };
+    if (!persistent) toastTimer = setTimeout(expire, actions.length ? 6500 : 2700);
   }
   function serial(work) {
     const next = writes.then(work);
@@ -165,19 +181,76 @@
     });
   }
 
-  function syncMedia(sessionId) {
+  async function syncMedia(sessionId) {
+    if (leaving) return;
     return serial(async () => {
-      if (sessionId !== ui.sessionId) return;
+      if (leaving || sessionId !== ui.sessionId) return;
       const latest = await sdk.save.load(sessionId);
       if (sessionId !== ui.sessionId || leaving) return;
       if (latest.revision > save.revision && latest.state.editVersion === current().editVersion) {
+        const previous = current();
         const failed = Object.entries(latest.state.media).some(([key, entry]) =>
-          entry.status === 'failed' && current().media[key]?.status !== 'failed');
+          entry.status === 'failed' && previous.media[key]?.status !== 'failed');
         adopt(latest);
         render();
         if (failed) notice('图片生成失败，可在招牌酒单中重试。');
+        announceStanding(previous, latest.state);
       }
     });
+  }
+  function stageIsVisible() {
+    return !document.querySelector('dialog[open]') && el('night-transition').hidden && !leaving;
+  }
+  function announceStanding(previous, next) {
+    if (!stageIsVisible()) return;
+    const seat = el('seats').querySelector('.seat.is-featured');
+    const sprite = seat?.querySelector('.portrait img:not(.previous-sprite)');
+    const key = seat && next.standingByGuest[seat.dataset.guest];
+    const picture = key && next.media[key];
+    if (picture?.kind !== 'standing') return;
+    const before = previous.media[key];
+    const title = `${picture.guestName} · ${view.tipsyLabel(picture.tipsy)}`;
+    if (picture.redraw?.status === 'ready' && before?.redraw?.status === 'pending') {
+      notice(`${title}新立绘已画好`, [{ name: 'standing-result', key, label: '比较' }]);
+    } else if (picture.status === 'ready' && before?.status === 'pending' && sprite?.getAttribute('src') === picture.url) {
+      sprite.decode().then(() => {
+        if (sprite.isConnected && stageIsVisible() && current().media[key]?.url === picture.url && !current().media[key].redraw) {
+          notice(`${title}立绘已完成`, [{ name: 'media-redraw', key, label: '重画' }]);
+        }
+      }).catch(() => {});
+    }
+  }
+  async function mediaOperation(key, path, payload = {}) {
+    const entry = current()?.media[key];
+    if (!entry || ui.mediaRequests.has(key)) return;
+    const sessionId = ui.sessionId;
+    ui.mediaRequests.add(key);
+    ui.mediaErrors.delete(key);
+    if (el('notice').querySelector('button')?.dataset.id === key) hideNotice();
+    renderMediaControls();
+    try {
+      await post(path, { key, ...payload }, sessionId);
+      await syncMedia(sessionId);
+    } catch (error) {
+      if (sessionId !== ui.sessionId || leaving) return;
+      ui.mediaErrors.set(key, error.message || '图片操作失败，请再试一次。');
+      if (ui.standingTrial?.key === key) {
+        ui.standingTrial = null;
+        renderConversation(current());
+      }
+      if (!document.querySelector('dialog[open]')) notice(ui.mediaErrors.get(key));
+    } finally {
+      ui.mediaRequests.delete(key);
+      if (sessionId === ui.sessionId && !leaving) renderMediaControls();
+    }
+  }
+  function renderMediaControls() {
+    renderPhotoEdits(current());
+    if (drawer === 'people') renderOverlay();
+  }
+  function resolveRedraw(key, apply) {
+    const job = current()?.media[key]?.redraw;
+    if (job?.status === 'ready') return mediaOperation(key, '/media/redraw/resolve', { token: job.token, apply });
   }
   function setContent(node, html) {
     if (node.renderedHtml === html) return;
@@ -231,6 +304,7 @@
       if (url) ui.guestPhotos.set(drink.guestName, { drinkId: drink.id, url });
     }
     if (ui.previewDrinkId) renderPhotoDetails(state);
+    renderPhotoEdits(state);
     const card = tonight.at(-1);
     const photo = card && state.media[card.id];
     const cardUrl = view.image(photo?.url);
@@ -238,7 +312,7 @@
       view.button('special', '<img src="'+view.esc(cardUrl)+'" alt=""><span>当前特调<strong>'+view.esc(photo.drinkName || '特调')+'</strong></span>',{id:card.id})+
       view.button('stow','收进酒单',{id:card.id}) : '');
     clearTimeout(mediaTimer);
-    if (!leaving && Object.values(state.media).some(entry => entry.status === 'pending')) {
+    if (!leaving && Object.values(state.media).some(entry => entry.status === 'pending' || entry.redraw?.status === 'pending')) {
       const session = ui.sessionId;
       mediaTimer = setTimeout(async () => {
         try { await syncMedia(session); } catch { /* SDK events and the next poll can still deliver the image. */ }
@@ -259,6 +333,45 @@
     setContent(el('cg-wall-action'), photo ? view.button('pin', state.wall.includes(ui.previewDrinkId) ? '已钉上纪念墙' : '钉上纪念墙', {
         id: ui.previewDrinkId, css: 'album-slip', disabled: state.wall.includes(ui.previewDrinkId),
       }) : '');
+  }
+  function renderPhotoEdits(state) {
+    if (ui.previewDrinkId) renderPhotoEdit(state, 'tipsy-' + ui.previewDrinkId, 'cg-preview', 'cg-frame', 'cg-redraw');
+    if (ui.drinkPreviewId) renderPhotoEdit(state, ui.drinkPreviewId, 'drink-preview', 'drink-frame', 'drink-redraw');
+  }
+  function renderPhotoEdit(state, key, dialogId, frameId, actionsId) {
+    const dialog = el(dialogId), frame = el(frameId);
+    if (!dialog.open || dialog.classList.contains('closing')) return;
+    const entry = state.media[key];
+    const candidate = entry?.redraw;
+    const showingNew = candidate?.status === 'ready' && photoVersions.get(key) === candidate.token;
+    const url = view.image(showingNew ? candidate.url : entry?.url);
+    const img = frame.querySelector(':scope > img');
+    if (url && img && frame.photoTarget !== url) {
+      frame.photoTarget = url;
+      frame.photoError = false;
+      if (img.getAttribute('src') !== url) {
+        const next = new Image();
+        next.alt = img.alt;
+        next.draggable = false;
+        const currentTarget = () => dialog.open && !dialog.classList.contains('closing') &&
+          frame.photoTarget === url && img.parentElement === frame;
+        next.onload = () => {
+          if (!currentTarget()) return;
+          img.replaceWith(next);
+          if (!reducedMotion.matches) next.animate([{ opacity: 0.45 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' });
+          renderPhotoEdits(current());
+        };
+        next.onerror = () => {
+          if (!currentTarget()) return;
+          frame.photoError = true;
+          renderPhotoEdits(current());
+        };
+        next.src = url;
+      }
+    }
+    setContent(el(actionsId), view.redrawControls(entry, key, ui, {
+      showingNew, canApply: !img?.hidden && img?.getAttribute('src') === candidate?.url, imageError: frame.photoError,
+    }));
   }
   function drawDrinkThumbnail(img) {
     const canvas = img.nextElementSibling;
@@ -299,11 +412,14 @@
     return photoOrigin(img, source);
   }
   function drinkPhotoOrigin(img) {
-    return photoOrigin(img, el('cg-drink').querySelector('.cg-drink-print'), {
+    const nested = el('cg-preview').open;
+    const source = nested ? el('cg-drink').querySelector('.cg-drink-print') :
+      el('overlay-panel').querySelector(`.drink-print[data-id="${CSS.escape(ui.drinkPreviewId)}"]`);
+    return photoOrigin(img, source, nested ? {
       rotation: drinkPaper.angle + 'deg',
       widthFactor: drinkPaper.width / drinkPaper.canvasWidth,
       heightFactor: drinkPaper.height / drinkPaper.canvasHeight,
-    });
+    } : {});
   }
   function animatePhoto(img, transform, opacity, ease) {
     const easing = getComputedStyle(img).getPropertyValue(ease).trim();
@@ -342,6 +458,7 @@
       img.hidden = false;
       photoSeat?.setAttribute('data-photo-open', '');
       if (!reducedMotion.matches) animatePhoto(img, [guestPhotoOrigin(img), 'none'], [.75, 1, 1], '--settle');
+      renderPhotoEdits(current());
     };
     img.onerror = () => {
       if (!preview.open || img.parentElement !== frame) return;
@@ -355,6 +472,7 @@
     renderPhotoDetails(current());
     preview.showModal();
     img.src = photo.url;
+    renderPhotoEdits(current());
     audio?.play('scene');
   }
   async function closeGuestPhoto() {
@@ -373,36 +491,46 @@
     preview.close();
     preview.classList.remove('closing', 'loading');
     img?.remove();
+    el('cg-frame').photoTarget = '';
+    photoVersions.delete('tipsy-' + ui.previewDrinkId);
     setContent(el('cg-drink'), '');
     photoSeat?.removeAttribute('data-photo-open');
     if (!photoSeat && ['menu', 'wall'].includes(drawer)) menuPhotoButton(ui.previewDrinkId)?.focus({ preventScroll: true });
     photoSeat = null;
     ui.previewDrinkId = '';
   }
-  function openDrinkPhoto(drinkId) {
+  function openDrinkPhoto(drinkId, trigger) {
     const preview = el('drink-preview');
     const guestPreview = el('cg-preview');
     const media = current()?.media[drinkId];
     const url = view.image(media?.url);
-    if (!url || preview.open || !guestPreview.open || guestPreview.classList.contains('closing')) return;
+    if (!url || preview.open || guestPreview.classList.contains('closing') || el('station').open) return;
+    const frame = el('drink-frame');
+    ui.drinkPreviewId = drinkId;
+    drinkPhotoTrigger = trigger;
+    preview.classList.add('loading');
+    preview.classList.toggle('nested', guestPreview.open);
     const img = new Image();
     img.alt = (media.drinkName || '特调') + '成品照';
     img.draggable = false;
     img.hidden = true;
     img.onload = () => {
-      if (!preview.open || preview.classList.contains('closing') || img.parentElement !== preview) return;
+      if (!preview.open || preview.classList.contains('closing') || img.parentElement !== frame) return;
       img.hidden = false;
-      el('cg-drink').classList.add('expanded');
+      preview.classList.remove('loading');
+      if (guestPreview.open) el('cg-drink').classList.add('expanded');
       if (!reducedMotion.matches) animatePhoto(img, [drinkPhotoOrigin(img), 'none'], [1, 1], '--settle');
+      renderPhotoEdits(current());
     };
     img.onerror = () => {
-      if (!preview.open || img.parentElement !== preview) return;
+      if (!preview.open || img.parentElement !== frame) return;
       void closeDrinkPhoto();
       notice('这张酒照暂时无法打开。');
     };
-    preview.append(img);
+    frame.append(img);
     preview.showModal();
     img.src = url;
+    renderPhotoEdits(current());
     audio?.play('scene');
   }
   async function closeDrinkPhoto() {
@@ -410,15 +538,26 @@
     if (!preview.open || preview.classList.contains('closing')) return;
     preview.classList.add('closing');
     audio?.play('close');
-    const img = preview.querySelector('img');
+    const frame = el('drink-frame');
+    const img = frame.querySelector(':scope > img');
     if (img && !img.hidden && !reducedMotion.matches) {
       await returnPhoto(img, drinkPhotoOrigin).finished.catch(() => {});
+    } else if (!reducedMotion.matches) {
+      const fade = preview.getAnimations().find(animation => animation.animationName === 'conceal');
+      await fade?.finished.catch(() => {});
     }
     el('cg-drink').classList.remove('expanded');
     preview.close();
-    preview.classList.remove('closing');
+    preview.classList.remove('closing', 'loading', 'nested');
     img?.remove();
-    el('cg-drink').querySelector('.cg-drink-print')?.focus({ preventScroll: true });
+    frame.photoTarget = '';
+    photoVersions.delete(ui.drinkPreviewId);
+    const trigger = drinkPhotoTrigger?.isConnected ? drinkPhotoTrigger : el('cg-preview').open ?
+      el('cg-drink').querySelector('.cg-drink-print') :
+      el('overlay-panel').querySelector(`.drink-print[data-id="${CSS.escape(ui.drinkPreviewId)}"]`);
+    trigger?.focus({ preventScroll: true });
+    drinkPhotoTrigger = null;
+    ui.drinkPreviewId = '';
   }
   function renderSeats(state) {
     const seats = el('seats'), html = view.seats(state,ui);
@@ -446,7 +585,11 @@
             image.decode().then(() => outgoing.isConnected && outgoing.animate([{opacity:1},{opacity:0}],
               {duration:300, easing:'ease-out', fill:'forwards'}).finished).then(() => outgoing.remove()).catch(() => {});
           }
-        } else portrait.className = nextPortrait.className;
+        } else {
+          portrait.className = nextPortrait.className;
+          if (image?.dataset.standingKey) previous.dataset.standingKey = image.dataset.standingKey;
+          else if (previous) delete previous.dataset.standingKey;
+        }
         for (const selector of ['.seat-photo', '.seat-spell', '.seat-hit', '.seat-label']) {
           const before = node.querySelector(selector), after = incoming.querySelector(selector);
           if (before.outerHTML === after.outerHTML) continue;
@@ -474,6 +617,13 @@
       ? `<span>${view.esc(ui.busy.replace(/…$/, ''))}<span class="wait-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>`
       : '继续闲聊' + view.icon('advance'));
     renderSeats(visible);
+    ui.visibleStandings = new Set([...el('seats').querySelectorAll('.portrait img[data-standing-key]:not(.previous-sprite)')]
+      .map(img => img.dataset.standingKey));
+    if (ui.standingTrial && (!ui.visibleStandings.has(ui.standingTrial.key) ||
+      state.media[ui.standingTrial.key]?.redraw?.token !== ui.standingTrial.token)) {
+      ui.standingTrial = null;
+      if (el('notice').querySelector('[data-action="trial-back"]')) hideNotice();
+    }
     const dialogue = el('dialogue');
     const page = `${ui.sessionId}/${state.night}/${state.turn}/${cursor}`;
     const previousPage = dialogue.dataset.page;
@@ -503,7 +653,7 @@
     showPage(state, next);
     cursorWrite ??= (async () => {
       try {
-        while (readingPosition.cursor !== current().cursor || (readingPosition.openingRead && !current().openingRead)) {
+        while (!leaving && (readingPosition.cursor !== current().cursor || (readingPosition.openingRead && !current().openingRead))) {
           const position = readingPosition;
           await commit(state => Object.assign(state, position));
         }
@@ -600,7 +750,7 @@
     overlay.querySelector('.close')?.focus();
     if (kind === 'people') void refreshGuestRoster();
   }
-  function closeDrawer() {
+  function closeDrawer(afterClose) {
     const overlay = el('overlay');
     if (!overlay.open || overlay.classList.contains('closing')) return;
     overlay.classList.add('closing');
@@ -611,7 +761,30 @@
       drawer = '';
       returnFocus?.focus({ preventScroll: true });
       syncSound();
+      afterClose?.();
     }, reducedMotion.matches ? 1 : 300);
+  }
+  function trialStanding(key) {
+    const entry = current()?.media[key];
+    if (entry?.redraw?.status !== 'ready' || !ui.visibleStandings?.has(key)) return;
+    const { token, url } = entry.redraw;
+    const sample = new Image();
+    sample.src = view.image(url);
+    sample.decode().then(() => {
+      if (drawer !== 'people' || current()?.media[key]?.redraw?.token !== token) return;
+      closeDrawer(() => {
+        if (!ui.visibleStandings?.has(key) || current()?.media[key]?.redraw?.token !== token) return;
+        ui.standingTrial = { key, token };
+        renderConversation(current());
+        notice(`${entry.guestName} · ${view.tipsyLabel(entry.tipsy)}新立绘`, [
+          { name: 'media-apply', key, label: '使用新图' }, { name: 'trial-back', key, label: '返回比较' },
+        ], { persistent: true });
+        el('notice').querySelector('[data-action="trial-back"]')?.focus({ preventScroll: true });
+      });
+    }).catch(() => {
+      ui.mediaErrors.set(key, '新立绘暂时无法加载。');
+      renderMediaControls();
+    });
   }
 
   const narrator = async (label, action) => {
@@ -756,8 +929,9 @@
     counter.inert = true;
     el('night-status').textContent = '正在准备下一夜';
     mask.hidden = false;
+    const doorArrival = afterMotion(mask);
     try {
-      await Promise.all([cursorWrite, afterMotion(mask)]);
+      await cursorWrite;
       await serial(async () => {
         const previous = save;
         const { editVersion, reservedGuestName } = previous.state;
@@ -777,6 +951,7 @@
     } finally {
       ui.busy = '';
       render();
+      await doorArrival;
       if (current().night !== night) {
         mask.classList.add('reopening');
         el('night-status').textContent = '营业中';
@@ -810,10 +985,26 @@
     }
   }
   async function exit() {
-    if (leaving || ui.busy || !sdk) return;
+    if (leaving) return;
+    if (!sdk) {
+      notice('请从邻舍游戏馆打开酒馆。');
+      return;
+    }
     leaving = true;
-    try { clearTimeout(mediaTimer); await cursorWrite; await writes; await sdk.ui.exit(); station.dispose(); audio?.close(); }
-    catch (error) { leaving = false; notice(error.message); }
+    clearTimeout(mediaTimer);
+    if (cursorWrite && readingPosition) {
+      const { night, turn, editVersion } = current();
+      void post('/progress/position', { night, turn, editVersion, ...readingPosition }).catch(() => {});
+    }
+    try {
+      await sdk.ui.exit();
+      station.dispose();
+      audio?.close();
+    } catch (error) {
+      leaving = false;
+      if (save) renderStageMedia(current());
+      notice(error.message);
+    }
   }
 
   async function selectIngredient(action, key) {
@@ -847,13 +1038,12 @@
   const actions = {
     retry: () => location.reload(),
     drawer: openDrawer,
-    close: closeDrawer,
+    close: () => closeDrawer(),
     'guest-roster': refreshGuestRoster,
     reserve: guestName => narrator('安排留座…', () => commit(state => {
       if (state.reservedGuestName === guestName) delete state.reservedGuestName;
       else if (ui.guestRoster?.some(guest => guest.name === guestName)) state.reservedGuestName = guestName;
     })),
-    exit,
     bgm: toggleMusic,
     guest: chooseGuest,
     station: focusStation,
@@ -864,16 +1054,43 @@
     ice: key => { station.setIce(recipe,Number(key)); renderMix(); },
     stir: () => station.stir(recipe,renderMix),
     'guest-photo': openGuestPhoto,
-    'media-retry': async key => {
-      try {
-        await post('/media/retry', { key });
-        await syncMedia(ui.sessionId);
-      } catch (error) { notice(error.message); }
+    'media-retry': key => mediaOperation(key, '/media/retry'),
+    'media-redraw': key => mediaOperation(key, '/media/redraw', { url: current()?.media[key]?.url }),
+    'media-compare': key => {
+      const token = current()?.media[key]?.redraw?.token;
+      if (photoVersions.get(key) === token) photoVersions.delete(key);
+      else photoVersions.set(key, token);
+      renderPhotoEdits(current());
+    },
+    'media-apply': key => resolveRedraw(key, true),
+    'media-keep': key => resolveRedraw(key, false),
+    'standing-list': name => {
+      ui.standingGuest = ui.standingGuest === name ? '' : name;
+      renderOverlay();
+      const list = el('overlay-panel').querySelector('.standing-list');
+      if (list && !reducedMotion.matches) list.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 });
+    },
+    'standing-result': key => {
+      const entry = current()?.media[key];
+      if (entry?.kind !== 'standing') return;
+      hideNotice();
+      ui.standingGuest = entry.guestName;
+      openDrawer('people');
+      const focus = [...el('overlay-panel').querySelectorAll('[data-action="standing-list"]')]
+        .find(button => button.dataset.id === entry.guestName);
+      focus?.focus();
+    },
+    'standing-trial': trialStanding,
+    'trial-back': key => {
+      ui.standingTrial = null;
+      renderConversation(current());
+      actions['standing-result'](key);
     },
     'menu-photo': openMenuPhoto,
     'photo-close': closeGuestPhoto,
     special: drinkId => { ui.cardId=drinkId; openDrawer('special'); },
     'drink-photo': openDrinkPhoto,
+    'drink-photo-close': closeDrinkPhoto,
     stow: drinkId => narrator('收进酒单…',()=>commit(state=>{state.media[drinkId].stowed=true;})),
     previous: () => readBy(-1),
     next: () => readBy(1),
@@ -908,15 +1125,21 @@
     }),
   };
   const ownSound = new Set(['drawer', 'close', 'show-report', 'special', 'station', 'station-close',
-    'guest-photo', 'menu-photo', 'photo-close', 'drink-photo', 'step', 'step-next', 'previous', 'next', 'listen', 'reply', 'speak']);
+    'guest-photo', 'menu-photo', 'photo-close', 'drink-photo', 'drink-photo-close', 'step', 'step-next', 'previous', 'next', 'listen', 'reply', 'speak']);
+  const availableDuringDialogue = new Set(['bgm', 'close', 'drawer', 'show-report', 'guest-photo', 'menu-photo', 'photo-close',
+    'drink-photo', 'drink-photo-close', 'special', 'media-retry', 'media-redraw', 'media-compare', 'media-apply', 'media-keep',
+    'standing-list', 'standing-result', 'standing-trial', 'trial-back']);
   const confirmActions = new Set(['pin', 'stow', 'next-night']);
   const availableWhileMixing = new Set(['step', 'step-next', 'station-close']);
+  for (const button of document.querySelectorAll('button[data-action="exit"]')) {
+    button.addEventListener('click', exit);
+  }
   document.addEventListener('click', event => { if (event.isTrusted) audio?.open(); }, true);
   document.addEventListener('click', event => {
     const button = event.target.closest('button[data-action]');
-    if (!button || button.disabled) return;
+    if (!button || button.disabled || leaving) return;
     const { action, id: key } = button.dataset;
-    if (ui.busy && !['bgm', 'close', 'drawer', 'show-report', 'guest-photo', 'menu-photo', 'photo-close', 'drink-photo', 'special'].includes(action)) return;
+    if (ui.busy && !availableDuringDialogue.has(action)) return;
     if (station.locked && !availableWhileMixing.has(action)) return;
     if (!ownSound.has(action)) audio?.play(confirmActions.has(action) ? 'confirm' : 'click');
     actions[action]?.(key, button);
@@ -940,7 +1163,7 @@
   }, true);
   el('cg-preview').addEventListener('cancel', event => { event.preventDefault(); closeGuestPhoto(); });
   el('cg-preview').addEventListener('click', event => {
-    if (!event.target.closest('img,button')) closeGuestPhoto();
+    if (event.target === event.currentTarget) closeGuestPhoto();
   });
   el('drink-preview').addEventListener('cancel', event => { event.preventDefault(); void closeDrinkPhoto(); });
   el('drink-preview').addEventListener('click', event => {

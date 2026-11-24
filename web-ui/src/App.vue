@@ -23,18 +23,21 @@
         <div
           v-if="!isMobile && route.path !== '/god-says' && route.path !== '/photo-studio' && !route.path.startsWith('/games')"
           class="sidebar-handle"
+          :class="{ 'is-hover-paused': sidebarHandleHoverPaused }"
           role="button"
           tabindex="0"
-          :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :aria-expanded="!sidebarCollapsed"
+          @pointermove="sidebarHandleHoverPaused = false"
           @click="toggleSidebar"
           @keydown.enter.prevent="toggleSidebar"
           @keydown.space.prevent="toggleSidebar"
         >
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="15,6 9,12 15,18" />
-          </svg>
+          <span class="sidebar-handle-face" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15,6 9,12 15,18" />
+            </svg>
+          </span>
         </div>
       </div>
     </div>
@@ -222,7 +225,10 @@ const SIDEBAR_COLLAPSED_KEY = 'linshe.sidebar.collapsed'
 const sidebarCollapsed = ref((() => {
   try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1' } catch { return false }
 })())
+const sidebarHandleHoverPaused = ref(false)
 function toggleSidebar() {
+  // 侧栏移动时，浏览器可能保留原位置的 hover，直到鼠标再次移动。
+  sidebarHandleHoverPaused.value = true
   sidebarCollapsed.value = !sidebarCollapsed.value
   try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch {}
 }
@@ -387,28 +393,48 @@ onUnmounted(() => {
   .app-layout.sidebar-collapsed > .page-host { margin-left: 0; }
 }
 
-/* ── 侧边栏收纳手柄（桌面端，贴在侧栏右缘） ── */
+/* ── 侧边栏收纳手柄（桌面端，热区随侧栏移动，只有外观弹出） ── */
 .sidebar-handle {
   position: absolute;
   top: 50%;
   left: 100%;
   transform: translateY(-50%);
   width: 15px; height: 58px;
-  display: flex; align-items: center; justify-content: center;
   border-radius: 0 9px 9px 0;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 30;
+  user-select: none;
+}
+.sidebar-handle-face {
+  position: absolute;
+  inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: inherit;
   border: 1px solid var(--glass-border);
   border-left: none;
   background: var(--glass-bg);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   color: var(--text-secondary);
-  cursor: pointer;
-  pointer-events: auto;
-  z-index: 30;
-  user-select: none;
-  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.35, 0.94);
+  transform-origin: left center;
+  transition: opacity var(--dur-interaction) var(--ease-standard),
+    transform var(--dur-interaction) var(--ease-standard);
 }
-.sidebar-handle:hover { color: var(--accent); }
+.sidebar-handle:not(.is-hover-paused):hover .sidebar-handle-face,
+.sidebar-handle:focus-visible .sidebar-handle-face {
+  opacity: 1;
+  color: var(--accent);
+  transform: scale(1);
+  transition-timing-function: var(--ease-standard), var(--ease-spring);
+}
+.sidebar-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .sidebar-handle svg { transition: transform var(--dur-interaction) var(--ease-spring); }
 /* 折叠后箭头翻向另一边，提示可以再点开 */
 .app-layout.sidebar-collapsed .sidebar-handle svg { transform: rotate(180deg); }

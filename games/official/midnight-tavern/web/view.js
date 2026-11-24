@@ -30,7 +30,7 @@
       sprites.find(slot => slot.name && (normalized.includes(slot.name.toLowerCase()) || slot.name.toLowerCase().includes(normalized))) ||
       sprites.find(slot => family?.test(slot.name));
   }
-  function avatar(guest, large = false, mood = '', standing = '') {
+  function avatar(guest, large = false, mood = '', standing = '', standingKey = '') {
     const sprites = (guest.expressions || []).filter(slot => image(slot.url));
     const expression = matchSprite(sprites, mood);
     const sprite = (expression || sprites.find(slot => slot.id === 'normal') || sprites[0])?.url;
@@ -40,7 +40,7 @@
     const single = esc([...guest.name][0]);
     const style = large && (defaultStanding || sprite ? 'portrait-expression' : !image(guest.portrait) ? 'portrait-avatar' :
       usual.startsWith('./') ? 'portrait-illustrated' : '');
-    return `<span class="portrait${style ? ' ' + style : ''}" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" draggable="false">` : ''}<span>${single}</span></span>`;
+    return `<span class="portrait${style ? ' ' + style : ''}" aria-hidden="true">${url ? `<img src="${esc(url)}" alt="" draggable="false"${defaultStanding ? ` data-standing-key="${esc(standingKey)}"` : ''}>` : ''}<span>${single}</span></span>`;
   }
   const potionShapes = {
     relax: '<path d="M9 58c13-2 17-17 27-21 13-5 18 9 8 14-9 5-17-7-7-18 12-14 26-7 36-15m-36 19c10-10 25-9 39 1m-35 0c-8 10-3 22 3 26"/>',
@@ -74,7 +74,8 @@
       const degree = mix.intoxication(latest ? now : spoken?.tipsy ?? now);
       const standingKey = latest && Object.hasOwn(state.standingByGuest, guest.name) ? state.standingByGuest[guest.name] : spoken?.standing;
       const entry = state.media?.[standingKey];
-      const standing = entry?.kind === 'standing' && entry.status === 'ready' ? image(entry.url) : '';
+      const trial = ui.standingTrial && ui.standingTrial.key === standingKey && entry?.redraw?.token === ui.standingTrial.token;
+      const standing = entry?.kind === 'standing' && entry.status === 'ready' ? image(trial ? entry.redraw.url : entry.url) : '';
       const recordedMood = spoken?.mood || '';
       const useDialogueExpression = talking && line.explicitMood && !(latest && line.potionReaction);
       const mood = standing ? (useDialogueExpression ? recordedMood : '') : recordedMood || degree.mood;
@@ -89,7 +90,7 @@
         <img src="${esc(photo.url)}" alt="" decoding="async" draggable="false">${icon('wall')}
       </span></span>` : '<span class="seat-photo" hidden></span>';
       const label = `<strong>${esc(guest.name)}</strong><span class="seat-status"><span>${status}</span><span class="seat-value">${now}<small>/100</small></span></span>`;
-      return `<div class="${css}" data-guest="${esc(guest.name)}"><div class="seat-scene">${avatar(guest, true, mood, standing)}${print}${potionSign(talking ? line : null, state.cursor)}${hit}</div>
+      return `<div class="${css}" data-guest="${esc(guest.name)}"><div class="seat-scene">${avatar(guest, true, mood, standing, standingKey)}${print}${potionSign(talking ? line : null, state.cursor)}${hit}</div>
         <div class="seat-plaque">
           ${button('guest', label, { ...select, css: 'seat-label' })}
           <span class="tipsy-track" role="meter" aria-label="${esc(guest.name)}的醉酒度" aria-valuenow="${now}" aria-valuetext="${status}，${now}/100" aria-valuemin="0" aria-valuemax="100"><i style="--amount:${now / 100}"></i></span>
@@ -127,7 +128,8 @@
     const address = guest ? esc(`向${guest.name}搭话`) : '搭话';
     const speaker = line?.role === 'assistant' ? line.speaker : undefined;
     const currentStanding = speaker && Object.hasOwn(state.standingByGuest, speaker) ? state.standingByGuest[speaker] : undefined;
-    const drawing = [currentStanding, line?.standing].some(key => state.media[key]?.status === 'pending');
+    const drawing = [currentStanding, line?.standing].some(key =>
+      state.media[key]?.status === 'pending' || state.media[key]?.redraw?.status === 'pending');
     const developing = state.drinks.some(drink => drink.night === state.night && drink.guestName === speaker &&
       [state.media[drink.id], state.media['tipsy-' + drink.id]].some(entry => entry?.status === 'pending' && entry.illustrations));
     const status = [drawing && '正在绘制立绘', developing && '正在显影照片'].filter(Boolean);
@@ -388,6 +390,34 @@
     return `<p class="drink-meta" role="status">${esc(label)} · ${esc(entry.error || '生成失败')}
       ${button('media-retry', '重试', { id: key, css: 'quiet', attrs: `aria-label="重新生成${esc(label)}"` })}</p>`;
   }
+  function redrawControls(entry, key, ui, { standing = false, showingNew = false, canApply = true, imageError = false } = {}) {
+    const job = entry?.redraw;
+    const busy = ui.mediaRequests.has(key);
+    const errors = ui.mediaErrors.get(key) || (imageError && '新图加载失败，请切回原图后再试。') ||
+      (job?.status === 'failed' && job.error);
+    const action = (name, label, disabled = false) => button(name, label, { id: key, css: 'quiet redraw-button', disabled });
+    let controls = '';
+    if (job?.status === 'ready' && image(job.url)) {
+      controls = (standing ? '' : action('media-compare', showingNew ? '看原图' : '看新图', busy)) +
+        action('media-apply', '使用新图', busy || !canApply) + action('media-keep', '保留原图', busy);
+    } else if (job?.status === 'pending' || entry?.status === 'pending' || busy) {
+      controls = `<span class="redraw-status" role="status">${standing ? '绘制中…' : '显影中…'}</span>`;
+    } else if (entry?.status === 'ready' && image(entry.url)) {
+      controls = action('media-redraw', job?.status === 'failed' ? '重试' : standing ? '重画' : '重新生成');
+    } else if (['failed', 'fallback'].includes(entry?.status)) {
+      controls = action('media-retry', '重试');
+    }
+    const error = errors || (['failed', 'fallback'].includes(entry?.status) && entry.error);
+    return `${controls}${error ? `<span class="redraw-error" role="status">${esc(error)}</span>` : ''}`;
+  }
+  function drinkPrint(drink, media) {
+    const url = image(media?.url);
+    if (!url) return printArt(drink, media, 'drink');
+    return button('drink-photo', `<img src="${esc(url)}" alt="" draggable="false">`, {
+      id: drink.id, css: 'print-image drink-print',
+      attrs: `aria-label="查看${esc(media.drinkName || '特调')}成品照" aria-haspopup="dialog" aria-controls="drink-preview"`,
+    });
+  }
   function report(state, item) {
     const media = state.media[item.questId], outcome = item.outcome;
     const drink = state.drinks.find(row => row.id === item.quest.drinkId);
@@ -402,6 +432,14 @@
     const roster = new Map((ui.guestRoster || []).map(guest => [guest.name, guest]));
     const people = { ...state.people, ...Object.fromEntries(roster) };
     const seated = new Set(state.guests.map(guest => guest.name));
+    const standingByGuest = new Map();
+    for (const [key, picture] of Object.entries(state.media)) {
+      if (picture.kind !== 'standing' || picture.status === 'skipped') continue;
+      if (!standingByGuest.has(picture.guestName)) standingByGuest.set(picture.guestName, new Map());
+      const tiers = standingByGuest.get(picture.guestName);
+      const priority = picture.redraw ? 2 : state.standingByGuest[picture.guestName] === key ? 1 : 0;
+      if ((tiers.get(picture.tier)?.priority ?? -1) <= priority) tiers.set(picture.tier, { key, picture, priority });
+    }
     const status = ui.guestRosterPending ? '<p class="empty" role="status">正在读取角色状态…</p>' :
       ui.guestRosterError ? `<p class="empty" role="status">${esc(ui.guestRosterError)} ${button('guest-roster', '重试', { css: 'quiet' })}</p>` : '';
     const entry = (guest, present) => {
@@ -420,9 +458,28 @@
         <span>${condition}</span><span>${value}/100</span>
         <meter min="0" max="100" low="20" high="80" optimum="0" value="${value}" aria-label="${esc(guest.name)}的醉酒度"></meter>
       </div>` : '';
+      const tiers = standingByGuest.get(guest.name);
+      const expanded = ui.standingGuest === guest.name;
+      const entries = tiers && [...tiers.values()].sort((a, b) => a.picture.tipsy - b.picture.tipsy);
+      const gallery = entries?.length ? button('standing-list', '醉酒立绘' + icon(expanded ? 'prev' : 'next'), {
+        id: guest.name, css: 'quiet standing-list-toggle',
+        attrs: `aria-expanded="${expanded}" aria-label="${esc(guest.name)}的醉酒立绘"`,
+      }) : '';
+      const standing = expanded && entries?.length ? `<ul class="standing-list">${entries.map(({ key, picture }) => {
+        const thumbnail = image(picture.url);
+        const candidate = picture.redraw?.status === 'ready' && image(picture.redraw.url);
+        const trial = candidate && ui.visibleStandings?.has(key) ? button('standing-trial', '在舞台试看', { id: key, css: 'quiet' }) : '';
+        return `<li><div class="standing-row"><div class="standing-label">
+          ${thumbnail ? `<img class="standing-thumbnail" src="${esc(thumbnail)}" alt="当前立绘" loading="lazy" decoding="async">` : ''}
+          <strong>${esc(tipsyLabel(picture.tipsy))}</strong></div>
+          <div class="redraw-controls">${trial}${redrawControls(picture, key, ui, { standing: true })}</div></div>
+          ${candidate ? `<div class="standing-comparison">${[[picture.url, '原图'], [candidate, '新图']].map(([url, title]) =>
+            `<figure><img src="${esc(image(url))}" alt="" decoding="async"><figcaption>${title}</figcaption></figure>`).join('')}</div>` : ''}</li>`;
+      }).join('')}</ul>` : '';
       return `<article>${avatar(known ? { ...known, ...guest } : guest)}
         <div class="directory-name"><strong>${esc(guest.name)}</strong>${description ? `<small>${esc(description)}</small>` : ''}
-        ${meter}${preference ? `<small>${preference.preference === 'likes' ? '偏爱' : '不爱'} · ${esc(preference.flavor)}</small>` : ''}</div>${reserve}</article>`;
+        ${meter}${preference ? `<small>${preference.preference === 'likes' ? '偏爱' : '不爱'} · ${esc(preference.flavor)}</small>` : ''}</div>
+        ${reserve}${gallery}${standing}</article>`;
     };
     const entries = Object.values(people);
     const groups = [
@@ -441,7 +498,7 @@
       const media = state.media[item.id];
       const guest = item.guestName;
       const tasting = image(state.media['tipsy-' + item.id]?.url);
-      return `<article class="album-card"><div class="drink-photos">${printArt(item, media, 'drink')}
+      return `<article class="album-card"><div class="drink-photos">${drinkPrint(item, media)}
         ${tasting ? button('menu-photo', `<img src="${esc(tasting)}" alt="" draggable="false">`, {
           id: item.id, css: 'print-image tasting-print',
           attrs: `aria-label="查看${esc(guest || '饮用者')}品尝时的照片" aria-haspopup="dialog" aria-controls="cg-preview"`,
@@ -453,7 +510,7 @@
     }).join('') || '<p class="empty">酒单空着，等第一杯特调。</p>'}</div>`;
     if (kind === 'special') {
       const drink = state.drinks.find(item => item.id === ui.cardId);
-      if (drink) content = `<figure class="card-closeup">${printArt(drink,state.media[drink.id],'drink')}<figcaption><strong>${esc(state.media[drink.id]?.drinkName || '特调')}</strong><p>${esc(mix.recipeLabel(drink.recipe))}</p>${chip(drink.recipe)}</figcaption></figure>`;
+      if (drink) content = `<figure class="card-closeup">${drinkPrint(drink, state.media[drink.id])}<figcaption><strong>${esc(state.media[drink.id]?.drinkName || '特调')}</strong><p>${esc(mix.recipeLabel(drink.recipe))}</p>${chip(drink.recipe)}</figcaption></figure>`;
     }
     if (kind === 'wall') {
       const photos = [...state.wall].reverse().flatMap(id => {
@@ -484,5 +541,5 @@
       <div class="overlay-content${drawerIcon ? ' drawer-content drawer-' + kind : ''}">${content}</div>`;
   }
 
-  window.TavernView = { icon, image, esc, button, avatar, featuredGuest, seats, dialogue, hasReadOpening, replyGuest, ingredients, glass, potionEffect, potionProgress, potionLibrary, animatePotionDials, meters, drawer, tipsyLabel };
+  window.TavernView = { icon, image, esc, button, avatar, featuredGuest, seats, dialogue, hasReadOpening, replyGuest, ingredients, glass, potionEffect, potionProgress, potionLibrary, animatePotionDials, meters, drawer, tipsyLabel, redrawControls };
 })();

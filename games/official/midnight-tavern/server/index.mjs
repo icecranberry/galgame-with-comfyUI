@@ -396,7 +396,7 @@ export default function registerGamePlugin(ctx) {
     try {
       const saved = await runOnce('progress/open', openProgress);
       for (const [key, entry] of Object.entries(saved.state.media)) {
-        if (entry.status === 'pending' && (entry.kind === 'standing' || saved.state.drinks.some(drink => key === drink.id || key === 'tipsy-' + drink.id))) {
+        if (canDraw(saved.state, key) && (entry.status === 'pending' || entry.redraw?.status === 'pending')) {
           startMedia(saved.sessionId, key, saved.state).catch(() => {});
         }
       }
@@ -411,6 +411,17 @@ export default function registerGamePlugin(ctx) {
       if (saved?.state?.schema !== SCHEMA) throw fail('没有找到酒馆进度。', 404);
       res.json(await handler(input, saved.state, saved));
     } catch (error) { next(error); }
+  });
+  route('/progress/position', (input, state, saved) => {
+    const { night, turn, editVersion, cursor, openingRead } = input;
+    if (state.night !== night || state.turn !== turn || state.editVersion !== editVersion) return saved;
+    const line = Number.isInteger(cursor) && state.history[cursor];
+    if (!line || (line.role === 'user' && state.history[cursor + 1]?.role === 'assistant') || typeof openingRead !== 'boolean') {
+      throw fail('无法识别当前的对白页。');
+    }
+    const hasReadOpening = state.openingRead || openingRead;
+    if (state.cursor === cursor && state.openingRead === hasReadOpening) return saved;
+    return ctx.db.write(saved.sessionId, saved.title, { ...state, cursor, openingRead: hasReadOpening, editVersion: editVersion + 1 }, saved.revision);
   });
   async function narrate(scope, rules, task, {
     personas = [], data = '', turnData = '', scanData, history = [], includeWorldSetting,
@@ -695,14 +706,24 @@ ${available.join('\n')}
   });
 
   // Patch only the reserved media slot in the latest save, even after the iframe exits.
-  function patchMedia(sessionId, id, patch, expected = 'pending') {
+  function updateMedia(sessionId, id, update) {
     if (lifetime.signal.aborted) return;
     const saved = ctx.db.load(sessionId);
-    if (saved?.state?.media?.[id]?.status !== expected) return;
-    const entry = Object.assign(saved.state.media[id], patch);
+    const entry = saved && Object.hasOwn(saved.state.media, id) && saved.state.media[id];
+    if (!entry || !update(entry)) return;
     ctx.db.write(sessionId, saved.title, saved.state, saved.revision);
     ctx.events.emit('tavern-media', { sessionId, id });
     return entry;
+  }
+  function patchMedia(sessionId, key, patch, expected = 'pending') {
+    return updateMedia(sessionId, key, entry => entry.status === expected && Object.assign(entry, patch));
+  }
+  function canDraw(state, key) {
+    return typeof key === 'string' && Object.hasOwn(state.media, key) && (state.media[key].kind === 'standing' ||
+      state.drinks.some(drink => key === drink.id || key === 'tipsy-' + drink.id));
+  }
+  function patchRedraw(sessionId, key, token, update) {
+    return updateMedia(sessionId, key, entry => entry.redraw?.token === token && update(entry));
   }
   function runOnce(key, work) {
     if (jobs.has(key)) return jobs.get(key);
@@ -722,20 +743,35 @@ ${available.join('\n')}
   }
   function startMedia(sessionId, key, state) {
     const entry = state.media[key];
+    const redraw = entry.redraw?.status === 'pending' ? entry.redraw : null;
     return runOnce('media/' + sessionId + '/' + key, async () => {
       try {
-        if (entry.kind === 'standing') return await generateStanding(sessionId, key, entry);
-        if (!entry.illustrations) return patchMedia(sessionId, key, { status: 'skipped' });
-        if (key.startsWith('tipsy-')) return await generateTipsy({ sessionId, drinkId: key.slice(6) }, state);
-        return await generateDrinkCard({ sessionId, drinkId: key }, state);
+        if (redraw) {
+          const replay = await ctx.imageService.replayTavernImage({ sessionId, key });
+          const result = replay || await drawMedia(sessionId, key, state, redraw);
+          if (!GAME_IMAGE_URL.test(result?.url)) throw invalidResult('图片服务返回的地址无效');
+          return patchRedraw(sessionId, key, redraw.token, current =>
+            Object.assign(current.redraw, { url: result.url, ...(result.prompt ? { prompt: result.prompt } : {}), status: 'ready' }));
+        }
+        if (entry.kind !== 'standing' && !entry.illustrations) return patchMedia(sessionId, key, { status: 'skipped' });
+        const result = await drawMedia(sessionId, key, state);
+        return patchMedia(sessionId, key, { ...result, status: 'ready', error: '' });
       } catch (error) {
         const message = error.gameMessage || '图片生成失败，请再试一次。';
-        patchMedia(sessionId, key, { status: 'failed', error: message });
+        if (redraw) patchRedraw(sessionId, key, redraw.token, current =>
+          Object.assign(current.redraw, { status: 'failed', error: message }));
+        else patchMedia(sessionId, key, { status: 'failed', error: message });
         throw error;
       }
     });
   }
-  async function generateStanding(sessionId, key, entry) {
+  function drawMedia(sessionId, key, state, redraw) {
+    const entry = state.media[key];
+    if (entry.kind === 'standing') return generateStanding(sessionId, key, entry, redraw);
+    if (key.startsWith('tipsy-')) return generateTipsy({ sessionId, drinkId: key.slice(6) }, state);
+    return generateDrinkCard({ sessionId, drinkId: key }, state);
+  }
+  async function generateStanding(sessionId, key, entry, redraw) {
     lifetime.signal.throwIfAborted();
     const tier = INTOXICATION.find(item => item.id === entry.tier);
     if (!tier) throw fail('不支持的醉酒档位');
@@ -743,10 +779,13 @@ ${available.join('\n')}
     const localPersona = local && `${local.name}\n${local.persona}\n${localAppearance[local.name]}`;
     const result = await ctx.imageService.generateTavernStanding({
       sessionId, key, label: tier.label, direction: tier.pose, localPersona,
-      onPrompt: prompt => patchMedia(sessionId, key, { prompt }),
+      onPrompt: prompt => {
+        if (redraw) patchRedraw(sessionId, key, redraw.token, current => Object.assign(current.redraw, { prompt }));
+        else patchMedia(sessionId, key, { prompt });
+      },
     });
     if (!GAME_IMAGE_URL.test(result?.url)) throw fail('临时立绘地址无效');
-    return patchMedia(sessionId, key, { status: 'ready', url: result.url });
+    return { url: result.url };
   }
   async function renderImage(sessionId, id, prompt, imageOptions, details = {}) {
     lifetime.signal.throwIfAborted();
@@ -756,15 +795,18 @@ ${available.join('\n')}
       negativePrompt: 'text, lettering, logo, signature, watermark',
     });
     if (!GAME_IMAGE_URL.test(result?.url)) throw invalidResult('图片服务返回的地址无效');
-    return patchMedia(sessionId, id, { ...details, url: result.url, status: 'ready' });
+    return { ...details, prompt, url: result.url };
   }
 
+  const tipsyImageOptions = { width: 1280, height: 720, normalizeComfyCountTags: false };
+  const drinkImageOptions = { width: 800, height: 1000, requireComfyUI: true, normalizeComfyCountTags: false };
   async function generateTipsy({ sessionId, drinkId }, state) {
     const drink = state.drinks.find(item => item.id === drinkId);
     const guest = drink && state.people[drink.guestName];
     const key = 'tipsy-' + drinkId;
     const media = state.media[key];
     if (!guest || !media) throw fail('找不到这次递酒的记录。', 404);
+    if (media.prompt) return renderImage(sessionId, key, media.prompt, tipsyImageOptions);
     validateRecipe(drink.recipe);
     const { recipe } = drink;
     const tipsy = drink.tipsyAfter ?? media.tipsy;
@@ -794,14 +836,14 @@ ${available.join('\n')}
     });
     requireFields(raw, ['imagePrompt'], '饮后照片');
     const description = imageDescription(raw.imagePrompt);
-    return renderImage(sessionId, key, [POV, degree, imageAppearance, description].join(', '),
-      { width: 1280, height: 720, normalizeComfyCountTags: false });
+    return renderImage(sessionId, key, [POV, degree, imageAppearance, description].join(', '), tipsyImageOptions);
   }
 
   async function generateDrinkCard({ sessionId, drinkId }, state) {
     const drink = state.drinks.find(item => item.id === drinkId);
     const media = state.media[drinkId];
     if (!drink || !media) throw fail('请先把这杯特调记入酒单。', 404);
+    if (media.prompt) return renderImage(sessionId, drinkId, media.prompt, drinkImageOptions);
     const recipe = drink.recipe;
     validateRecipe(recipe);
     const [, glass] = BASES[recipe.baseLiquor];
@@ -817,8 +859,7 @@ ${available.join('\n')}
     const generatedName = responseText(raw.drinkName, Infinity, '酒名');
     const drinkName = media.drinkName || generatedName;
     const prompt = imageAppearance + ' ' + imageDescription(raw.imagePrompt);
-    return renderImage(sessionId, drinkId, prompt,
-      { width: 800, height: 1000, requireComfyUI: true, normalizeComfyCountTags: false }, { drinkName });
+    return renderImage(sessionId, drinkId, prompt, drinkImageOptions, { drinkName });
   }
 
   async function requestMedia(sessionId, key, state) {
@@ -841,17 +882,40 @@ ${available.join('\n')}
     return { status: entry.status, drinkName: entry.drinkName, imagePath: entry.url || '' };
   });
   route('/media/retry', ({ sessionId, key }, state) => {
-    if (!Object.hasOwn(state.media, key)) throw fail('找不到这次生成记录。', 404);
+    if (!canDraw(state, key)) throw fail('找不到可重试的图片记录。', 404);
     const entry = state.media[key];
-    if (entry.kind !== 'standing' && !state.drinks.some(drink => key === drink.id || key === 'tipsy-' + drink.id)) {
-      throw fail('这项记录不支持重新生成。');
-    }
     if (['failed', 'fallback'].includes(entry.status)) {
       patchMedia(sessionId, key, { status: 'pending', error: '' }, entry.status);
       startMedia(sessionId, key, state).catch(() => {});
       return { status: 'pending' };
     }
     return { status: entry.status };
+  });
+  route('/media/redraw', ({ sessionId, key, url }, state) => {
+    if (!canDraw(state, key)) throw fail('找不到可重画的图片记录。', 404);
+    const entry = state.media[key];
+    if (entry.status !== 'ready' || !entry.url || entry.url !== url) throw fail('图片已更新，请重新查看。', 409);
+    if (['pending', 'ready'].includes(entry.redraw?.status)) return entry.redraw;
+    const redraw = { status: 'pending', token: randomUUID(), ...(entry.redraw?.prompt ? { prompt: entry.redraw.prompt } : {}) };
+    const updated = patchMedia(sessionId, key, { redraw }, 'ready');
+    if (!updated) throw fail('图片已更新，请重新查看。', 409);
+    startMedia(sessionId, key, { ...state, media: { ...state.media, [key]: updated } }).catch(() => {});
+    return redraw;
+  });
+  route('/media/redraw/resolve', ({ sessionId, key, token, apply }, state) => {
+    if (!canDraw(state, key) || typeof token !== 'string' || typeof apply !== 'boolean') throw fail('无效的图片替换请求。');
+    const entry = patchRedraw(sessionId, key, token, current => {
+      const candidate = current.redraw;
+      if (candidate.status !== 'ready' || !GAME_IMAGE_URL.test(candidate.url)) return false;
+      if (apply) {
+        current.url = candidate.url;
+        if (candidate.prompt) current.prompt = candidate.prompt;
+      }
+      delete current.redraw;
+      return true;
+    });
+    if (!entry) throw fail('待确认的图片已更新，请重新查看。', 409);
+    return entry;
   });
 
   return { onUnload() { lifetime.abort(); jobs.clear(); } };

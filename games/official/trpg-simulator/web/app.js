@@ -1,7 +1,7 @@
 /* Independent game frontend. Campaign state lives in SDK saves. */
 (() => {
   const sdk = window.LinSheGameSDK, root = document.getElementById('app'), dialog = document.getElementById('drawer');
-  const picturePreview = document.getElementById('picture-preview');
+  let pictureTriggerId = '';
   const audio = new window.TrpgAudioManager(sdk?.trpgAudio);
   let closeAudioControls;
   let catalog = { scenarios: [], skills: [] }, characters = [], saves = [], state = null, pendingAction = '', advanceFlight;
@@ -154,32 +154,36 @@
       `data-target="${esc(actor.name)}" data-network`) : '';
     modal(title, back + content);
   }
-  function closeModal(target = dialog) {
-    if (!target.open || target.classList.contains('closing')) return;
-    target.classList.add('closing');
+  function closeModal() {
+    if (!dialog.open || dialog.classList.contains('closing')) return;
+    dialog.classList.add('closing');
     setTimeout(() => {
-      target.close();
-      target.classList.remove('closing');
-      document.getElementById(target.dataset.returnFocus)?.focus({ preventScroll: true });
+      dialog.close();
+      dialog.classList.remove('closing');
+      document.getElementById(dialog.dataset.returnFocus)?.focus({ preventScroll: true });
     }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 300);
   }
-  for (const target of [dialog, picturePreview]) {
-    target.addEventListener('cancel', event => { event.preventDefault(); closeModal(target); });
-    target.addEventListener('close', playReadyFrame);
-    target.addEventListener('click', event => {
-      if (event.target !== target) return;
-      const rect = target.getBoundingClientRect();
-      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeModal(target);
-    });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); closeModal(); });
+  dialog.addEventListener('close', playReadyFrame);
+  dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeModal();
+  });
+  function restorePictureFocus() {
+    document.getElementById(pictureTriggerId)?.focus({ preventScroll: true });
+    pictureTriggerId = '';
+    playReadyFrame();
   }
-  function openPicture(trigger) {
-    if (picturePreview.open || dialog.classList.contains('closing')) return;
-    const thumbnail = trigger.querySelector('img');
-    const full = picturePreview.querySelector('img');
-    full.src = thumbnail.getAttribute('src');
-    full.alt = thumbnail.alt;
-    picturePreview.dataset.returnFocus = trigger.id;
-    picturePreview.showModal();
+  async function openPicture(trigger) {
+    if (pictureTriggerId || dialog.classList.contains('closing')) return;
+    pictureTriggerId = trigger.id;
+    try {
+      await sdk.ui.previewTrpgPicture(trigger.querySelector('img').getAttribute('src'));
+    } catch (error) {
+      restorePictureFocus();
+      notice(error.message, true);
+    }
   }
   function wireChoices() { document.querySelectorAll('[data-picker]').forEach(group => { group.value = group.dataset.value; }); }
   function lobbyData() {
@@ -573,7 +577,7 @@
     if (firstNewFrame !== undefined || checkReady || state.reactionReady) advanceFrame();
   }
   function advanceFrame() {
-    if (!state?.playbackRemaining || advanceFlight || diceAnimating || dialog.open || picturePreview.open) return;
+    if (!state?.playbackRemaining || advanceFlight || diceAnimating || dialog.open || pictureTriggerId) return;
     const { sessionId, publicLog } = state;
     const after = publicLog.length;
     activeTab = 'narrative';
@@ -883,7 +887,6 @@
     }
     if (action === 'evidence') { const clue = state.clues.find(c => c.id === el.dataset.id); if (clue) modal(clue.title, `<article class="evidence-detail"><span class="evidence-label">${clue.isSecret ? '私密证物' : '公开证物'}</span><p>${view.highlight(clue)}</p></article>`); return; }
     if (action === 'preview-picture') { openPicture(el); return; }
-    if (action === 'close-picture') { closeModal(picturePreview); return; }
     if (action === 'close') { closeModal(); return; }
     if (action === 'choose-scenario') {
       if (scenarioId !== el.dataset.id) { scenarioId = el.dataset.id; updateLobby('scenarioList', 'briefing', 'partyStatus', 'roster', 'launch'); }
@@ -1039,6 +1042,8 @@
           animateParty();
         }
       });
+      sdk.on('trpg:picture-closed', restorePictureFocus);
+      sdk.on('trpg:picture-updated', view.refreshPicture);
       const sync = event => syncState(event.sessionId).catch(error => notice(error.message, true));
       sdk.on?.('turn-progress', sync);
       sdk.on?.('media', sync);

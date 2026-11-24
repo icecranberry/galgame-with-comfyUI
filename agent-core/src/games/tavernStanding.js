@@ -6,9 +6,11 @@ import { captureStandingImageConfig } from '../services/expressionStandingServic
 import { saveGameOutput } from './gameMedia.js';
 import { bad } from './gamePaths.js';
 
-export async function renderTavernStanding({ gameId, sessionId, character, prompt, tier, sessionExists }) {
-  const generation = captureStandingImageConfig(character, 'game');
-  const result = await generateImageRaw(frameStandingPrompt(prompt), {
+export async function renderTavernStanding({ gameId, sessionId, character, prompt, tier, sessionExists, sourceWorkflow }) {
+  const generation = sourceWorkflow ? null : captureStandingImageConfig(character, 'game');
+  const result = await generateImageRaw(sourceWorkflow ? '' : frameStandingPrompt(prompt), sourceWorkflow ? {
+    sourceWorkflow, globalLoraSnapshot: sourceWorkflow.generation?.globals,
+  } : {
     ...generation, imageProvider: 'comfyui', scene: 'game', workflowScene: null, promptScene: 'avatar',
     alreadyPrepared: true, disableRAG: true, normalizeComfyCountTags: false,
     negativePrompt: [

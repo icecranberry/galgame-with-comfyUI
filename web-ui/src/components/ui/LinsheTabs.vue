@@ -253,14 +253,18 @@ function navigate(event, option) {
 
 /* 文件夹页签：选中项以同色底边接到正文面板。 */
 .ls-tabs--folder {
+  --folder-tab-surface: color-mix(in srgb, var(--bg-primary), var(--border-strong) 35%);
   display: flex;
   align-items: flex-end;
-  gap: 2px;
-  padding: 3px 0 0;
+  gap: 8px;
+  padding: 4px 2px 0;
   overflow-x: auto;
   scrollbar-width: thin;
   background: transparent;
   border-radius: 0;
+}
+:global([data-theme="dark"] .ls-tabs--folder) {
+  --folder-tab-surface: color-mix(in srgb, var(--bg-tertiary), var(--bg-primary) 60%);
 }
 .ls-tabs--folder .ls-tabs__entry {
   position: relative;
@@ -274,10 +278,14 @@ function navigate(event, option) {
   min-height: 38px;
   justify-content: flex-start;
   padding: 8px 14px;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--border), transparent 30%);
   border-bottom: 0;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
-  transition: background-color var(--dur-interaction) ease, border-color var(--dur-interaction) ease, color var(--dur-interaction) ease;
+  background: var(--folder-tab-surface);
+  transition: background-color var(--dur-interaction) ease, border-color var(--dur-interaction) ease, color var(--dur-interaction) ease, box-shadow var(--dur-interaction) ease;
+}
+.ls-tabs--folder .ls-tabs__item:hover:not(.ls-tabs__item--active) {
+  background: color-mix(in srgb, var(--folder-tab-surface), var(--bg-secondary) 28%);
 }
 .ls-tabs--folder .ls-tabs__entry--closable .ls-tabs__item { padding-inline-end: 34px; }
 .ls-tabs__close {
@@ -293,6 +301,7 @@ function navigate(event, option) {
   border-color: var(--border);
   color: var(--accent-hover);
   font-weight: 700;
+  box-shadow: 0 -2px 6px color-mix(in srgb, var(--cel-outline) 12%, transparent);
 }
 .ls-tabs--folder .ls-tabs__item--active::after { display: none; }
 .ls-tabs--folder .ls-tabs__item:focus-visible {
@@ -300,11 +309,12 @@ function navigate(event, option) {
   outline-offset: -3px;
 }
 @media (max-width: 767px) {
-  .ls-tabs--folder { scrollbar-width: none; }
+  .ls-tabs--folder { gap: 6px; scrollbar-width: none; }
   .ls-tabs--folder .ls-tabs__entry {
     flex: 0 0 auto;
     max-width: min(12rem, 100%);
   }
+  .ls-tabs--folder .ls-tabs__entry--closable { min-width: min(6rem, 100%); }
   .ls-tabs--folder .ls-tabs__item {
     min-height: 44px;
     padding-inline: 12px;

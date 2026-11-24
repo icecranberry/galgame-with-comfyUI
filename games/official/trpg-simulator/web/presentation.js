@@ -1,7 +1,20 @@
 /* Rendering only. Game state, persistence and RPC remain in app.js. */
 (() => {
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=& -]+$/.test(value || '') ? value : '';
+  const pictureVersions = new Map();
+  const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=& -]+$/.test(value || '')
+    ? pictureVersions.get(value.split('?')[0]) || value : '';
+  function refreshPicture({ base, url }) {
+    if (!url || url.split('?')[0] !== base || !image(url)) return;
+    pictureVersions.set(base, url);
+    for (const img of document.images) {
+      if (img.getAttribute('src')?.split('?')[0] === base) img.src = url;
+    }
+    for (const backdrop of document.querySelectorAll('.stage-backdrop.has-image')) {
+      const scene = backdrop.style.getPropertyValue('--scene').slice(5, -2);
+      if (scene.split('?')[0] === base) backdrop.style.setProperty('--scene', `url('${url}')`);
+    }
+  }
   const colors = ['#b2424b', '#3266a5', '#a36d20', '#477b66', '#795391', '#a85535'];
   const ranks = { critical: '大成功', extreme: '极难成功', hard: '困难成功', regular: '普通成功', failure: '失败', fumble: '大失败' };
   const difficultyLabels = { regular: '普通', hard: '困难', extreme: '极难' };
@@ -827,5 +840,5 @@
     }
   }
   document.addEventListener('error', event => { const el = event.target; if (el instanceof HTMLImageElement && el.hasAttribute('data-portrait-fallback') && !el.src.endsWith('/portrait-placeholder.svg')) el.src = './portrait-placeholder.svg'; }, true);
-  window.TrpgPresentation = { avatar, choices, logs, isKeeperLine, table, updateCast, lobby, creatorForm, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, checkForm, rollCard, rollKey, animateDice, highlight, itemPresets, imageCollection, mountAudioControls, keeperDialog, keeperActorPanel, actorStats, turnButton, playerTurnLabel };
+  window.TrpgPresentation = { avatar, choices, logs, isKeeperLine, table, updateCast, lobby, creatorForm, scenarioList, briefing, partyMode, partyStatus, roster, orderCharacters, launch, consoleMarkup, checkForm, rollCard, rollKey, animateDice, highlight, itemPresets, imageCollection, refreshPicture, mountAudioControls, keeperDialog, keeperActorPanel, actorStats, turnButton, playerTurnLabel };
 })();

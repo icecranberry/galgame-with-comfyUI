@@ -18,7 +18,7 @@
 .bar-status,.bar-nav { display:flex; align-items:center; gap:8px; }
 .bar-status,.bar-nav { pointer-events:auto; }
 .bar-status {
-  min-height:44px; padding:2px clamp(12px,1.6vw,24px) 2px 6px;
+  min-height:44px; padding-right:clamp(12px,1.6vw,24px);
   color:#f9dfb9; border:3px double #bd8d62; border-radius:3px 8px 4px 5px;
   background:repeating-linear-gradient(3deg,#93644d30 0 1px,transparent 2px 5px),linear-gradient(95deg,#523226,#362218 80%);
   box-shadow:0 2px #130807,1px 4px 10px #1b0c08b0,inset 0 0 0 2px #271610;
@@ -28,6 +28,13 @@
   display:grid; place-items:center; width:38px; min-height:36px; padding:0;
   border:0; border-radius:3px; background:none; color:#f2d1a2; font-size:20px;
 }
+.topbar .exit {
+  /* Include the plaque border and the gap before the clock in the hit area. */
+  flex:none; width:55px; min-height:46px; margin:-3px -8px -3px -3px; padding-inline:9px 8px;
+  touch-action:manipulation;
+}
+.topbar .bar-status .exit:active { translate:none; }
+.topbar .exit .ink-icon { pointer-events:none; }
 .topbar :is(.exit,.bgm):enabled:hover { color:#fff3de; background:#ffdfa51a; }
 .topbar .bgm[aria-pressed="false"] { color:#d3ab85; }
 .clock { color:#fae0b7; font:700 clamp(15px,1.5vw,25px)/1.2 Georgia,serif; letter-spacing:.04em; white-space:nowrap; }
@@ -353,6 +360,7 @@
   animation:reveal var(--transition) ease both;
 }
 .night-transition.closing { animation:conceal var(--transition) var(--depart) both; }
+.topbar.night-topbar { position:absolute; height:auto; background:none; border:0; }
 .night-door {
   width:min(78vw,23rem,70svh); display:grid; justify-items:center; perspective:800px;
 }
@@ -455,7 +463,7 @@
   }
   .bar-status { min-width:0; min-height:44px; gap:2px; border:0; padding:0; background:none; box-shadow:none; transform:none; }
   .topbar :is(.exit,.bgm) { flex:none; }
-  .topbar .exit { width:32px; min-height:44px; font-size:19px; }
+  .topbar .exit { width:44px; min-height:44px; margin:0; padding:0; font-size:19px; }
   .topbar .bgm { width:34px; min-height:44px; font-size:17px; }
   .clock { min-width:0; overflow:hidden; text-overflow:ellipsis; font-size:12px; }
   .bar-nav { flex:1 1 auto; gap:3px; align-self:end; width:auto; max-width:224px; height:44px; }
@@ -483,7 +491,6 @@
 }
 @media (max-width:360px) {
   .topbar { gap:3px; }
-  .topbar .exit { width:28px; }
   .clock { font-size:11px; letter-spacing:0; }
   .bar-nav button { min-width:34px; }
 }

@@ -5,7 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { config, GROUP_SUMMARY_MAX_ROUNDS, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile, updateWeatherConfig, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays,
-  getGlobalLoraSettings, updateGlobalLora, addGlobalLoraPreset, activateGlobalLoraPreset, deleteGlobalLoraPreset, updateGlobalLoraLibrary,
+  getGlobalLoraSettings, updateGlobalLora, addGlobalLoraPreset, activateGlobalLoraPreset, deleteGlobalLoraPreset, updateGlobalLoraLibrary, getDraftLlmApiKey,
 } from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { normalizeModelCapabilities } from '../llm/modelCapabilities.js';
@@ -472,12 +472,13 @@ router.post('/llm/vertex/validate', async (req, res) => {
 
 router.post('/llm/test', async (req, res) => {
   try {
+    const baseURL = req.body?.baseURL || config.llm.baseURL;
     const result = await testLlmConnection({
       connectionType: req.body?.connectionType ?? config.llm.connectionType,
       vertexRegion: req.body?.vertexRegion ?? config.llm.vertexRegion,
       vertexServiceAccount: req.body?.vertexServiceAccount || config.llm.vertexServiceAccount,
-      baseURL: req.body?.baseURL || config.llm.baseURL,
-      apiKey: req.body?.apiKey || config.llm.apiKey,
+      baseURL,
+      apiKey: req.body?.apiKey || getDraftLlmApiKey(baseURL),
       model: req.body?.model || config.llm.model,
       maxTokens: req.body?.maxTokens ?? config.llm.maxTokens,
       thinkingMode: req.body?.thinkingMode ?? config.llm.thinkingMode,
@@ -516,7 +517,7 @@ router.post('/llm/models', async (req, res) => {
     return res.status(400).json({ error: 'API 地址格式无效' });
   }
 
-  const apiKey = String(req.body?.apiKey || config.llm.apiKey || '').trim();
+  const apiKey = String(req.body?.apiKey || getDraftLlmApiKey(baseURL) || '').trim();
   const customHeaders = req.body?.headers && typeof req.body.headers === 'object' && !Array.isArray(req.body.headers)
     ? req.body.headers
     : {};

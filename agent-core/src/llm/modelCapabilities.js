@@ -1,6 +1,12 @@
 // Pure helpers shared by settings UI and server. No credentials, I/O or runtime config.
 export const DEEPSEEK_MAX_TOKENS = 393216;
 export const FALLBACK_MAX_TOKENS = 8192;
+export const MAGPIE_PRESET = Object.freeze({
+  baseURL: 'http://127.0.0.1:3425/v1',
+  apiKey: 'magpie',
+  model: 'group/never-stuck',
+  maxTokens: 384000,
+});
 
 export function isValidMaxTokens(value) {
   return Number.isSafeInteger(value) && value > 0;

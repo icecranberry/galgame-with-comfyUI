@@ -1,3 +1,5 @@
+import { applyThinking } from './thinkingMode.js';
+
 // 原生工具调用流；普通聊天的 string generator 契约保持不变。
 export function buildAgentRequest(messages, tools, llm, { forceThinking = true, temperature = 0.72, toolChoice = 'auto' } = {}) {
   const params = { ...llm.extraBody, model: llm.model, messages, stream: true };
@@ -7,7 +9,8 @@ export function buildAgentRequest(messages, tools, llm, { forceThinking = true, 
   if (tools?.length) { params.tools = tools; params.tool_choice = toolChoice; }
   if (!forceThinking) {
     const normal = { model: llm.model, messages, temperature, stream: true };
-    if (llm.thinkingMode !== 'omit') normal.thinking = { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+    const thinking = llm.thinkingMode === 'omit' ? null : { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+    applyThinking(normal, thinking, llm.connectionType);
     Object.assign(normal, llm.extraBody);
     delete normal.tools; delete normal.tool_choice; delete normal.response_format;
     if (tools?.length) { normal.tools = tools; normal.tool_choice = toolChoice; }
@@ -15,7 +18,9 @@ export function buildAgentRequest(messages, tools, llm, { forceThinking = true, 
   }
   // 神说的思考不可被全局开关或 extraBody 关闭。按服务商协议设置，不靠 prompt 伪造思考。
   const model = String(llm.model || '').toLowerCase();
-  if (llm.connectionType === 'vertexai' || /gemini/.test(model)) {
+  if (llm.connectionType === 'magpie') {
+    applyThinking(params, { type: 'enabled' }, llm.connectionType);
+  } else if (llm.connectionType === 'vertexai' || /gemini/.test(model)) {
     params.thinking = { type: 'enabled' };
     if (llm.connectionType === 'vertexai') {
       params.generationConfig = { ...params.generationConfig, thinkingConfig: {

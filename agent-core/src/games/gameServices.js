@@ -1,4 +1,6 @@
-import { bad } from './gamePaths.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { bad, MEDIA_DIR, regularFile } from './gamePaths.js';
 import { createHash } from 'node:crypto';
 import { estimateTokens } from '../services/lorebook/engine.js';
 import { getTimeTag } from '../services/timeLight.js';
@@ -317,13 +319,79 @@ export function createGameServices(gameId, repo, assertPermission) {
     return { url: result.url, urls: result.urls };
   }
 
+  async function replayTavernImage({ sessionId, key }) {
+    active(); assertPermission('image:generate');
+    if (gameId !== 'midnight-tavern' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法重画酒馆图片', 403);
+    const entry = repo.session(gameId, sessionId)?.state?.media?.[key];
+    if (entry?.status !== 'ready' || entry.redraw?.status !== 'pending') throw bad('没有已触发的酒馆重画任务', 404);
+    const album = /^\/images\/game\/([\w-]+\.(?:png|avif))$/.exec(entry.url);
+    const oldPath = /^\/game-media\/midnight-tavern\/([\w-]+)\/([\w-]+\.png)$/.exec(entry.url);
+    const legacy = oldPath?.[1] === sessionId ? oldPath[2] : null;
+    if (!album && !legacy) return null;
+    const { getImageDir } = await import('../services/imagePaths.js');
+    const root = legacy ? MEDIA_DIR : getImageDir('game');
+    let name = legacy ? `${gameId}/${sessionId}/${legacy}` : album[1];
+    if (album && name.endsWith('.png') && !fs.existsSync(path.join(root, name))) name = name.replace(/\.png$/, '.avif');
+    if (!fs.existsSync(path.join(root, name))) return null;
+    const { readImageWorkflow } = await import('../services/imageWorkflowMetadata.js');
+    const sourceWorkflow = await readImageWorkflow(regularFile(root, name));
+    if (!sourceWorkflow) return null;
+    controller.signal.throwIfAborted();
+    if (entry.kind === 'standing') {
+      const { renderTavernStanding } = await import('./tavernStanding.js');
+      return renderTavernStanding({ gameId, sessionId, sourceWorkflow, tier: entry.tier,
+        sessionExists: () => !controller.signal.aborted && !!repo.session(gameId, sessionId) });
+    }
+    const { generateImageRaw } = await import('../services/imageSkill.js');
+    const result = await generateImageRaw('', { sourceWorkflow, globalLoraSnapshot: sourceWorkflow.generation?.globals,
+      outputScope: 'game', gameId, sessionId });
+    if (!result.success || !result.url) throw bad(result.error || '酒馆照片重画失败', 502);
+    return { url: result.url };
+  }
+
+  async function prepareTrpgScene({ sessionId, description, characters, playerName, speakerName, style, background }) {
+    active(); assertPermission('image:generate'); assertPermission('llm:chat');
+    if (gameId !== 'trpg-simulator' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用跑团画面工具', 403);
+    const session = repo.session(gameId, sessionId);
+    if (!session) throw bad('跑团存档不存在', 404);
+    if (typeof description !== 'string' || !description.trim() || description.length > 3000) throw bad('画面描述为空或过长');
+    const { generateStudioScenePrompt } = await import('../services/imageStudioScene.js');
+    const { RAG_TIMEOUT_FAST_MS } = await import('../services/imagePromptKnowledge.js');
+    const { config } = await import('../config.js');
+    const explicitCast = characters?.length > 0;
+    let names = background ? [] : characters;
+    if (!background && !explicitCast) {
+      const { investigators = [], keeper } = session.state;
+      const participants = new Set([keeper?.name, ...investigators.map(card => card.name)]);
+      names = listNamedGameCharacters(repo.db).filter(({ name }) =>
+        (name === speakerName && participants.has(name)) ||
+        ((name.length >= 2 || participants.has(name)) && description.includes(name))
+      ).map(({ name }) => name);
+    }
+    const explicitCharacters = names.filter(name => name !== playerName).map(name => {
+      const character = findCharacterByDisplayName(repo.db, name);
+      if (!character) throw bad(`无法唯一识别入镜角色「${name}」`);
+      return character;
+    });
+    const includeUser = background ? false : explicitCast ? characters.includes(playerName) : undefined;
+    const hints = [style, background ? '纯环境空镜，不画人物，不添加文字。' : '表现角色的动作和当前状态，不添加文字。'].filter(Boolean).join('\n');
+    const { prompt, loras } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
+      roleplay: false, scope: `image:trpg:${sessionId}`, signal: controller.signal });
+    controller.signal.throwIfAborted();
+    const { eventArtist, eventWidth, eventHeight } = config.comfyui;
+    return { prompt, options: {
+      scene: 'game', workflowScene: 'events', promptScene: 'events',
+      artist: eventArtist, width: eventWidth, height: eventHeight, loras, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS } };
+  }
+
   return { llm, dispose: () => controller.abort(new Error('游戏已停用或卸载')),
-    imageService: { generate: options => generateGameImage(options),
+    imageService: { generate: options => generateGameImage(options), replayTavernImage,
     async generateTavernTipsy({ key, ...options }) {
       if (gameId !== 'midnight-tavern' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用酒馆饮后照片工具', 403);
       return generateGameImage({ ...options, requireComfyUI: true }, state => {
         const drink = state.drinks?.find(item => `tipsy-${item.id}` === key);
-        if (!drink || state.media?.[key]?.status !== 'pending') throw bad('没有已触发的酒馆饮后照片任务', 404);
+        const entry = state.media?.[key];
+        if (!drink || (entry?.status !== 'pending' && entry?.redraw?.status !== 'pending')) throw bad('没有已触发的酒馆饮后照片任务', 404);
         const guest = state.people?.[drink.guestName];
         if (guest?.local) return [];
         const character = findCharacterByDisplayName(repo.db, drink.guestName);
@@ -335,7 +403,7 @@ export function createGameServices(gameId, repo, assertPermission) {
       const game = repo.game(gameId);
       if (gameId !== 'midnight-tavern' || game.source !== 'official') throw bad('该游戏无法调用酒馆立绘工具', 403);
       const entry = repo.session(gameId, sessionId)?.state?.media?.[key];
-      if (entry?.kind !== 'standing' || entry.status !== 'pending') {
+      if (entry?.kind !== 'standing' || (entry.status !== 'pending' && entry.redraw?.status !== 'pending')) {
         throw bad('没有已触发的酒馆立绘任务', 404);
       }
       if (typeof label !== 'string' || !label.trim() || label.length > 20 ||
@@ -346,7 +414,8 @@ export function createGameServices(gameId, repo, assertPermission) {
       const character = hasLocalPersona ? null : findCharacterByDisplayName(repo.db, entry.guestName);
       if (!character && !hasLocalPersona) throw bad('客人缺少立绘所需的角色资料', 404);
       const sessionExists = () => !controller.signal.aborted && !!repo.session(gameId, sessionId);
-      let prompt = typeof entry.prompt === 'string' ? entry.prompt.trim() : '';
+      const savedPrompt = entry.redraw?.prompt ?? entry.prompt;
+      let prompt = typeof savedPrompt === 'string' ? savedPrompt.trim() : '';
       if (!prompt) {
         const { generateStandingPrompts } = await import('../services/expressionStandingService.js');
         const { buildCharacterPersona } = await import('../services/characterPersona.js');
@@ -368,40 +437,11 @@ export function createGameServices(gameId, repo, assertPermission) {
       return renderTavernStanding({
         gameId, sessionId, character, prompt, tier: entry.tier, sessionExists,
       });
-    }, async generateScene({ sessionId, description, characters, playerName, speakerName, style, background }) {
-      active(); assertPermission('image:generate'); assertPermission('llm:chat');
-      if (gameId !== 'trpg-simulator' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用跑团画面工具', 403);
-      const session = repo.session(gameId, sessionId);
-      if (!session) throw bad('跑团存档不存在', 404);
-      if (typeof description !== 'string' || !description.trim() || description.length > 3000) throw bad('画面描述为空或过长');
-      const { generateStudioScenePrompt } = await import('../services/imageStudioScene.js');
+    }, prepareTrpgScene,
+    async generateScene(input) {
+      const { prompt, options } = await prepareTrpgScene(input);
       const { generateImageRaw } = await import('../services/imageSkill.js');
-      const { RAG_TIMEOUT_FAST_MS } = await import('../services/imagePromptKnowledge.js');
-      const { config } = await import('../config.js');
-      const explicitCast = characters?.length > 0;
-      let names = background ? [] : characters;
-      if (!background && !explicitCast) {
-        const { investigators = [], keeper } = session.state;
-        const participants = new Set([keeper?.name, ...investigators.map(card => card.name)]);
-        names = listNamedGameCharacters(repo.db).filter(({ name }) =>
-          (name === speakerName && participants.has(name)) ||
-          ((name.length >= 2 || participants.has(name)) && description.includes(name))
-        ).map(({ name }) => name);
-      }
-      const explicitCharacters = names.filter(name => name !== playerName).map(name => {
-        const character = findCharacterByDisplayName(repo.db, name);
-        if (!character) throw bad(`无法唯一识别入镜角色「${name}」`);
-        return character;
-      });
-      const includeUser = background ? false : explicitCast ? characters.includes(playerName) : undefined;
-      const hints = [style, background ? '纯环境空镜，不画人物，不添加文字。' : '表现角色的动作和当前状态，不添加文字。'].filter(Boolean).join('\n');
-      const { prompt, loras } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
-        roleplay: false, scope: `image:trpg:${sessionId}`, signal: controller.signal });
-      controller.signal.throwIfAborted();
-      const { eventArtist, eventWidth, eventHeight } = config.comfyui;
-      const result = await generateImageRaw(prompt, { outputScope: 'game', gameId, sessionId,
-        scene: 'game', workflowScene: 'events', promptScene: 'events',
-        artist: eventArtist, width: eventWidth, height: eventHeight, loras, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS });
+      const result = await generateImageRaw(prompt, { ...options, outputScope: 'game', gameId, sessionId: input.sessionId });
       if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
       return { url: result.url };
     } },

@@ -107,6 +107,7 @@ import LinsheCloseButton from './ui/LinsheCloseButton.vue'
 import { stopBackfillMoments } from '../api/index.js'
 
 const store = useImageEditTasksStore()
+const props = defineProps({ gameId: { type: String, default: '' } })
 const diaryStore = useDiaryStore()
 const toastFn = inject('toast', null)
 const stoppingTaskId = ref(null)
@@ -165,7 +166,9 @@ function ringAria(task) {
   return `${cardTitleLabel(task)}：${state}，点按查看详情`
 }
 
-const visibleTasks = computed(() => store.tasks)
+const visibleTasks = computed(() => props.gameId
+  ? store.tasks.filter(task => task.meta?.gameId === props.gameId)
+  : store.tasks)
 const modalTask = computed(() => {
   if (activeTaskId.value) {
     const t = visibleTasks.value.find(x => x.id === activeTaskId.value && x.status === 'pending_confirm')

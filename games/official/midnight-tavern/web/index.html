@@ -96,14 +96,17 @@
       </div>
     </section>
   </main>
-  <div id="night-transition" class="night-transition" role="status" hidden>
+  <div id="night-transition" class="night-transition" hidden>
+    <div class="topbar night-topbar">
+      <div class="bar-status"><button type="button" class="exit" data-action="exit" aria-label="返回游戏馆"><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-back"/></svg></button></div>
+    </div>
     <div class="night-door">
       <div class="night-lamp" aria-hidden="true"><img src="./assets/props/night-oil-lamp.webp" alt=""></div>
       <div class="night-sign" aria-hidden="true">
         <span class="night-sign-face">营业中</span>
         <span class="night-sign-face night-sign-closed">打烊</span>
       </div>
-      <div class="night-wait">
+      <div class="night-wait" role="status">
         <span id="night-status">正在准备下一夜</span>
         <span class="wait-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       </div>
@@ -115,11 +118,18 @@
       <span id="cg-drink" class="cg-drink"></span>
     </figure>
     <div class="cg-tools">
+      <div id="cg-redraw" class="redraw-controls"></div>
       <div id="cg-wall-action"></div>
       <button type="button" class="cg-close" data-action="photo-close" aria-label="关闭照片" autofocus><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-close"/></svg></button>
     </div>
   </dialog>
-  <dialog id="drink-preview" aria-label="特调成品照"></dialog>
+  <dialog id="drink-preview" aria-label="特调成品照">
+    <figure id="drink-frame" class="cg-frame"><span class="cg-loading" role="status">照片加载中…</span></figure>
+    <div class="cg-tools">
+      <div id="drink-redraw" class="redraw-controls"></div>
+      <button type="button" class="cg-close" data-action="drink-photo-close" aria-label="关闭特调照片" autofocus><svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-close"/></svg></button>
+    </div>
+  </dialog>
   <dialog id="station" aria-labelledby="station-title">
     <button type="button" class="station-return" data-action="station-close">
       <svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-back"/></svg>返回吧台
@@ -172,6 +182,6 @@
     </section>
   </dialog>
   <dialog id="overlay" class="overlay" aria-labelledby="overlay-title"><section class="overlay-panel" id="overlay-panel"></section></dialog>
-  <div id="notice" class="notice" role="status"></div>
+  <div id="notice" class="notice" role="status" inert></div>
 </body>
 </html>

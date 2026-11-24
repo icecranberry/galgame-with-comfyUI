@@ -450,26 +450,6 @@ button.picture-open { display: block; width: 100%; min-height: 0; padding: 0; ba
 button.picture-open:active { transform: none; }
 button.picture-open img { margin: 0; }
 .image-proof button.picture-open { margin-bottom: 14px; }
-dialog.picture-preview {
-  width: fit-content;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
-  background: var(--table-night);
-  color: var(--table-ivory);
-}
-.picture-preview img {
-  display: block;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
-  object-fit: contain;
-}
-button.picture-preview-close {
-  position: absolute;
-  inset: 8px 8px auto auto;
-  min-height: 44px;
-  background: #121417d9;
-}
-button.picture-preview-close:hover { background: var(--table-night); }
 .picture-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; color: var(--story-muted); font: 12px/1.5 var(--sans); }
 .picture-description { margin-top: 8px; color: var(--story-muted); font: 12px/1.65 var(--sans); }
 .picture-description summary { cursor: pointer; }

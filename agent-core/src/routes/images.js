@@ -19,6 +19,7 @@ import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { studioDimensions, saveStudioChatImages } from '../services/studioChatImages.js';
 import { collectCharacterLoras } from '../services/groupImageLoraMatcher.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW } from '../services/workflowTemplates.js';
+import { startTrpgPictureEdit } from '../games/trpgPictureEdit.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -669,6 +670,10 @@ export function dataUriExt(dataUri) {
 async function startImageEditTask(action, url) {
   if (!url) throw taskHttpError('url is required', 400);
   const cleanUrl = String(url).replace(/\?.*$/, '');
+  if (cleanUrl.startsWith('/images/game/') || cleanUrl.startsWith('/game-media/trpg-simulator/')) {
+    const task = startTrpgPictureEdit(action, cleanUrl);
+    if (task) return task;
+  }
   const target = parseImageTarget(cleanUrl);
   if (!target) throw taskHttpError(`invalid image url format: ${url}`, 400);
   const { category, filename } = target;
