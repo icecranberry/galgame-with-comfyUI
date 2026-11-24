@@ -2667,12 +2667,12 @@ onMounted(async () => {
 
 /* ── 扫描动画覆盖层 ── */
 .scan-overlay {
-  /* 盖住底部按钮超出内容区的立体底边。 */
-  position: absolute; inset: 0 0 -12px;
+  /* 铺满整个白色内衬（含内边距），模糊才不会在内容区边上截出一道硬边。 */
+  position: absolute; inset: calc(-1 * var(--modal-lining-pad));
   background: transparent;
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  border-radius: 0 0 18px 18px;
+  border-radius: var(--modal-lining-radius);
   display: flex; align-items: center; justify-content: center;
   z-index: 10; overflow: hidden;
 }
