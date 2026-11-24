@@ -1,10 +1,12 @@
 import dotenv from 'dotenv';
+import { randomUUID } from 'node:crypto';
 import { normalizeNovelaiFormat, normalizeNovelaiKey } from './services/novelaiClient.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 // 设置读写走独立的 db/settings 模块（不经过 db/index.js，避免形成 config ↔ db 循环依赖）
-import { setSetting, getSetting } from './db/settings.js';
+import { setSetting, setSettings, getSetting, GLOBAL_LORA_PRESETS_KEY, GLOBAL_LORA_LIBRARY_KEY } from './db/settings.js';
+import { enabledGlobalLoras, loraLibraryFields, loraModelFields, loraPathKey } from './utils/globalLora.js';
 import { notifyWeatherSourceChange } from './services/weatherSource.js';
 import { defaultMaxTokens, isValidMaxTokens } from './llm/modelCapabilities.js';
 import { parseServiceAccount, normalizeVertexRegion } from './llm/vertex-client.js';
@@ -484,18 +486,93 @@ export function updateComfyConfig({ artist, width, height, url, momentsArtist, m
   console.log('[config] Image generation settings saved');
 }
 
-export function updateGlobalLora(loras) {
-  if (!Array.isArray(loras)) loras = [];
-  const cleaned = loras.filter(l => l.path && typeof l.path === 'string').map(l => ({
-    path: l.path,
-    weight: typeof l.weight === 'number' ? l.weight : 0.6,
-    triggerWord: l.triggerWord || '',
-    enabled: l.enabled !== false,
-    scenes: Array.isArray(l.scenes) ? l.scenes : [],
+function normalizeGlobalLoras(loras) {
+  return enabledGlobalLoras(loras).map(item => ({
+    ...loraModelFields(item),
+    enabled: true,
+    scenes: Array.isArray(item.scenes) ? [...item.scenes] : null,
   }));
-  config.comfyui.globalLora = cleaned;
-  persistSettingSync('comfy_global_lora', JSON.stringify(cleaned));
-  console.log(`[config] Global lora updated: ${cleaned.length} item(s)`);
+}
+
+function readGlobalLoraPresets() {
+  const raw = getSetting(GLOBAL_LORA_PRESETS_KEY);
+  return raw ? JSON.parse(raw) : { activePresetId: null, presets: [] };
+}
+
+export function getGlobalLoraSettings() {
+  const { activePresetId, presets } = readGlobalLoraPresets();
+  return {
+    globalLora: config.comfyui.globalLora,
+    activePresetId,
+    presets: presets.map(({ id, name }) => ({ id, name })),
+    library: getGlobalLoraLibrary(),
+  };
+}
+
+function getGlobalLoraLibrary() {
+  const raw = getSetting(GLOBAL_LORA_LIBRARY_KEY);
+  return raw ? JSON.parse(raw) : { loras: [], revision: 0 };
+}
+
+export function updateGlobalLoraLibrary(loras, revision) {
+  const current = getGlobalLoraLibrary();
+  if (revision !== current.revision) return { status: 409, error: 'LoRA 库已有更新，请重新打开全局 LoRA 设置后再编辑' };
+  const entries = loras.map(loraLibraryFields);
+  if (entries.some(item => !item.path)) return { status: 400, error: '请填写每项 LoRA 的文件路径' };
+  if (new Set(entries.map(item => loraPathKey(item.path))).size !== entries.length) {
+    return { status: 400, error: 'LoRA 库里有重复的文件路径' };
+  }
+  const library = { loras: entries, revision: current.revision + 1 };
+  setSetting(GLOBAL_LORA_LIBRARY_KEY, JSON.stringify(library));
+  return { library };
+}
+
+function applyGlobalLora(loras, settings) {
+  setSettings({
+    comfy_global_lora: JSON.stringify(loras),
+    [GLOBAL_LORA_PRESETS_KEY]: JSON.stringify(settings),
+  });
+  config.comfyui.globalLora = loras;
+}
+
+export function updateGlobalLora(loras, expectedPresetId) {
+  const settings = readGlobalLoraPresets();
+  const preset = settings.presets.find(item => item.id === settings.activePresetId);
+  const activePresetId = preset?.id ?? null;
+  if (expectedPresetId !== undefined && activePresetId !== expectedPresetId) return false;
+  const cleaned = normalizeGlobalLoras(loras);
+  if (preset) preset.loras = cleaned;
+  settings.activePresetId = activePresetId;
+  applyGlobalLora(cleaned, settings);
+  return true;
+}
+
+export function addGlobalLoraPreset(name, loras) {
+  const settings = readGlobalLoraPresets();
+  if (settings.presets.some(preset => preset.name === name)) return false;
+  settings.presets.push({ id: randomUUID(), name, loras: normalizeGlobalLoras(loras) });
+  setSetting(GLOBAL_LORA_PRESETS_KEY, JSON.stringify(settings));
+  return true;
+}
+
+export function activateGlobalLoraPreset(id) {
+  const settings = readGlobalLoraPresets();
+  const preset = settings.presets.find(item => item.id === id);
+  if (!preset) return false;
+  settings.activePresetId = id;
+  preset.loras = enabledGlobalLoras(preset.loras);
+  applyGlobalLora(preset.loras, settings);
+  return true;
+}
+
+export function deleteGlobalLoraPreset(id) {
+  const settings = readGlobalLoraPresets();
+  const index = settings.presets.findIndex(item => item.id === id);
+  if (index < 0) return false;
+  settings.presets.splice(index, 1);
+  if (settings.activePresetId === id) settings.activePresetId = null;
+  setSetting(GLOBAL_LORA_PRESETS_KEY, JSON.stringify(settings));
+  return true;
 }
 
 /**

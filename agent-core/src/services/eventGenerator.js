@@ -593,9 +593,10 @@ ${customKeyUnderstanding}
     if (db.prepare("SELECT 1 FROM character_events WHERE character_id=? AND status IN ('pending','open','engaged') LIMIT 1").get(character.id)) {
       throw new Error('ALREADY_ACTIVE_EVENT');
     }
+    initialChoiceEntry[0].occurredAt = new Date().toISOString();
     const insertResult = db.prepare(`
-    INSERT INTO character_events (character_id, event_type_key, status, title, description, image, prompt, style, resolution, choice_a, choice_b, choice_c_label, current_branch, max_branches, choice_history, expires_at)
-    VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+    INSERT INTO character_events (character_id, event_type_key, status, title, description, image, prompt, style, resolution, choice_a, choice_b, choice_c_label, current_branch, max_branches, choice_history, created_at, expires_at)
+    VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
   `).run(
     character.id,
     eventType.key,
@@ -609,6 +610,7 @@ ${customKeyUnderstanding}
     eventData.choiceB,
     eventData.choiceCLabel || '自由行动',
     JSON.stringify(initialChoiceEntry),
+    toSQLite(initialChoiceEntry[0].occurredAt),
     toSQLite(expiresAt)
   );
     const id = Number(insertResult.lastInsertRowid);
@@ -975,6 +977,7 @@ ${timeTag2}${weatherHint}${multiPersonImageNote2}
     choice_label: choice.label,
     choice_text: choice.customText || '',
     summary: branchData.description,
+    occurredAt: new Date().toISOString(),
     image: imageUrl,
     prev_choice_a: event.choice_a,
     prev_choice_b: event.choice_b,
@@ -1143,8 +1146,8 @@ ${historyText}
 
   // 3. 移到 event_history（保留原始 ID，确保分享卡片等引用不失效）
   db.prepare(`
-    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, conclusion, choice_history, total_branches, engaged, outcome, referenced_character_ids)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO event_history (id, character_id, event_type_key, title, description, final_image, summary, conclusion, choice_history, total_branches, engaged, outcome, referenced_character_ids, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.id,
     character.id, event.event_type_key,
@@ -1153,7 +1156,7 @@ ${historyText}
     conclusionData.conclusion || null,
     event.choice_history, event.current_branch || 0,
     event.engaged, outcome,
-    event.referenced_character_ids || '[]'
+    event.referenced_character_ids || '[]', event.created_at
   );
 
   // 4. 删除活跃事件

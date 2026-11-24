@@ -28,6 +28,7 @@ import { fileURLToPath } from 'url';
 import { submitWorkflow, uploadImage, apiToGui } from './comfyClient.js';
 import sharp from 'sharp';
 import { config } from '../config.js';
+import { matchesGlobalLoraScene } from '../utils/globalLora.js';
 import {
   HIRES_WORKFLOW, HIRES_ADVANCED_WORKFLOW, ACTIVE_WORKFLOW, PRO_WORKFLOW, autoRestoreMissing,
   resolveCustomWorkflowPath,
@@ -153,9 +154,7 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
   const globalLoras = (config.comfyui.globalLora || []).filter(l => {
     if (!l.path || typeof l.path !== 'string') return false;
     if (l.enabled === false) return false;
-    if (!currentScene) return true;
-    if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
-    return l.scenes.includes(currentScene);
+    return matchesGlobalLoraScene(l, currentScene);
   });
   const charLoras = (overrides.loras || []).filter(l => l.path && typeof l.path === 'string');
   const hiresLoras = (config.comfyui.hiresLora || []).filter(

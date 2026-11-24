@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-const GAME = 'midnight-tavern';
 const GAME_IMAGE_URL = /^\/images\/game\/[\w-]+\.png$/;
 const SCHEMA = 3;
 const BLACKOUT_CHAT_LIMIT = 32;
@@ -751,8 +750,9 @@ ${available.join('\n')}
   }
   async function renderImage(sessionId, id, prompt, imageOptions, details = {}) {
     lifetime.signal.throwIfAborted();
-    const result = await ctx.imageService.generate({
-      outputScope: 'game', gameId: GAME, sessionId, prompt, ...imageOptions,
+    const generate = id.startsWith('tipsy-') ? ctx.imageService.generateTavernTipsy : ctx.imageService.generate;
+    const result = await generate({
+      sessionId, key: id, prompt, ...imageOptions,
       negativePrompt: 'text, lettering, logo, signature, watermark',
     });
     if (!GAME_IMAGE_URL.test(result?.url)) throw invalidResult('图片服务返回的地址无效');
@@ -795,7 +795,7 @@ ${available.join('\n')}
     requireFields(raw, ['imagePrompt'], '饮后照片');
     const description = imageDescription(raw.imagePrompt);
     return renderImage(sessionId, key, [POV, degree, imageAppearance, description].join(', '),
-      { width: 1280, height: 720, requireComfyUI: true, normalizeComfyCountTags: false });
+      { width: 1280, height: 720, normalizeComfyCountTags: false });
   }
 
   async function generateDrinkCard({ sessionId, drinkId }, state) {

@@ -116,8 +116,8 @@ export function listExpressionStandings(id) {
   };
 }
 
-export function captureStandingImageConfig(char) {
-  return structuredClone({ ...captureImageGenerationConfig('portrait'), artist: charArtistOverride(char) ?? config.comfyui.momentsArtist,
+export function captureStandingImageConfig(char, scene = 'portrait') {
+  return structuredClone({ ...captureImageGenerationConfig(scene), artist: charArtistOverride(char) ?? config.comfyui.momentsArtist,
     loras: char ? parseCharacterLoras(char) : [], ...(char?.custom_workflow ? { customWorkflow: char.custom_workflow } : {}), width: 768, height: 1536 });
 }
 /** One snapshot for the tavern manager, including characters with no saved slots. */

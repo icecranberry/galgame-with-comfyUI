@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="tabList"
     class="ls-tabs"
     :class="[
       `ls-tabs--${size}`,
@@ -12,33 +13,54 @@
     <div
       v-for="option in options"
       :key="option.value"
-      class="ls-tabs__item"
-      :class="{ 'ls-tabs__item--active': option.value === modelValue }"
-      role="tab"
-      :tabindex="disabled || option.disabled || option.value !== modelValue ? -1 : 0"
-      :aria-selected="option.value === modelValue"
-      :aria-disabled="disabled || option.disabled || undefined"
-      :title="option.title"
-      @click="select(option)"
-      @keydown="navigate($event, option)"
-      @keydown.enter.prevent="select(option)"
-      @keydown.space.prevent="select(option)"
+      class="ls-tabs__entry"
+      :class="{ 'ls-tabs__entry--closable': variant === 'folder' && option.closeLabel }"
+      role="presentation"
     >
-      <span
-        v-if="variant === 'comic' && option.eyebrow"
-        class="ls-tabs__eyebrow"
-        aria-hidden="true"
+      <div
+        class="ls-tabs__item"
+        :class="{ 'ls-tabs__item--active': option.value === modelValue }"
+        role="tab"
+        :tabindex="!disabled && !option.disabled && option.value === focusableValue ? 0 : -1"
+        :aria-selected="option.value === modelValue"
+        :aria-disabled="disabled || option.disabled || undefined"
+        :title="option.title"
+        @click="select(option)"
+        @keydown="navigate($event, option)"
+        @keydown.enter.prevent="select(option)"
+        @keydown.space.prevent="select(option)"
       >
-        {{ option.eyebrow }}
-      </span>
-      <slot name="option" :option="option" :selected="option.value === modelValue">{{ option.label }}</slot>
-      <span v-if="variant === 'filter' && option.count != null" class="ls-tabs__count">{{ option.count }}</span>
-      <span v-if="option.badge" class="ls-tabs__badge">{{ option.badge }}</span>
+        <span
+          v-if="variant === 'comic' && option.eyebrow"
+          class="ls-tabs__eyebrow"
+          aria-hidden="true"
+        >
+          {{ option.eyebrow }}
+        </span>
+        <slot name="option" :option="option" :selected="option.value === modelValue">{{ option.label }}</slot>
+        <span v-if="variant === 'filter' && option.count != null" class="ls-tabs__count">{{ option.count }}</span>
+        <span v-if="option.badge" class="ls-tabs__badge">{{ option.badge }}</span>
+      </div>
+      <linshe-button
+        v-if="variant === 'folder' && option.closeLabel"
+        class="ls-tabs__close"
+        variant="link"
+        tone="muted"
+        size="sm"
+        :disabled="disabled || option.disabled"
+        :aria-label="option.closeLabel"
+        @click="emit('close', option.value)"
+      >
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </linshe-button>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed, ref, watchPostEffect } from 'vue'
+import LinsheButton from './LinsheButton.vue'
+
 defineOptions({ name: 'LinsheTabs' })
 
 const props = defineProps({
@@ -50,12 +72,28 @@ const props = defineProps({
   disabled: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'close'])
+const tabList = ref(null)
+const focusableValue = computed(() => (props.options.find(option => !option.disabled && option.value === props.modelValue)
+  ?? props.options.find(option => !option.disabled))?.value)
+
+watchPostEffect(() => {
+  if (props.variant !== 'folder' || !tabList.value) return
+  const index = props.options.findIndex(option => option.value === props.modelValue)
+  tabList.value.children[index]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+})
 
 function select(option) {
   if (props.disabled || option.disabled) return
   emit('update:modelValue', option.value)
 }
+
+function focusTab() {
+  tabList.value?.querySelector('.ls-tabs__item[tabindex="0"]')?.focus()
+}
+
+defineExpose({ focusTab })
+
 function navigate(event, option) {
   if (props.disabled) return
   const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End']
@@ -72,9 +110,7 @@ function navigate(event, option) {
         : (index + (event.key === 'ArrowRight' ? 1 : -1) + enabled.length) %
           enabled.length
   const target = enabled[next]
-  const tabs =
-    event.currentTarget.parentElement.querySelectorAll('[role="tab"]')
-  tabs[props.options.indexOf(target)]?.focus()
+  tabList.value?.children[props.options.indexOf(target)]?.querySelector('.ls-tabs__item')?.focus()
   select(target)
 }
 </script>
@@ -93,6 +129,7 @@ function navigate(event, option) {
   background: var(--bg-sunken);
   border-radius: var(--radius-md);
 }
+.ls-tabs__entry { display: contents; }
 
 .ls-tabs__item {
   position: relative;
@@ -214,9 +251,72 @@ function navigate(event, option) {
   .ls-tabs--filter .ls-tabs__item { min-height: 40px; padding: 9px 8px; }
 }
 
+/* 文件夹页签：选中项以同色底边接到正文面板。 */
+.ls-tabs--folder {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 3px 0 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  background: transparent;
+  border-radius: 0;
+}
+.ls-tabs--folder .ls-tabs__entry {
+  position: relative;
+  display: flex;
+  flex: 1 0 clamp(8rem, 22%, 12rem);
+  min-width: 0;
+  max-width: 12rem;
+}
+.ls-tabs--folder .ls-tabs__item {
+  flex: 1;
+  min-height: 38px;
+  justify-content: flex-start;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  transition: background-color var(--dur-interaction) ease, border-color var(--dur-interaction) ease, color var(--dur-interaction) ease;
+}
+.ls-tabs--folder .ls-tabs__entry--closable .ls-tabs__item { padding-inline-end: 34px; }
+.ls-tabs__close {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 4px;
+  margin-block: auto;
+  width: 28px;
+  height: 28px;
+}
+.ls-tabs--folder .ls-tabs__item--active {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+  color: var(--accent-hover);
+  font-weight: 700;
+}
+.ls-tabs--folder .ls-tabs__item--active::after { display: none; }
+.ls-tabs--folder .ls-tabs__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+@media (max-width: 767px) {
+  .ls-tabs--folder { scrollbar-width: none; }
+  .ls-tabs--folder .ls-tabs__entry {
+    flex: 0 0 auto;
+    max-width: min(12rem, 100%);
+  }
+  .ls-tabs--folder .ls-tabs__item {
+    min-height: 44px;
+    padding-inline: 12px;
+  }
+  .ls-tabs--folder .ls-tabs__entry--closable .ls-tabs__item { padding-inline-end: 44px; }
+  .ls-tabs__close { inset-inline-end: 0; width: 44px; height: 44px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ls-tabs__item,
-  .ls-tabs--filter .ls-tabs__item {
+  .ls-tabs--filter .ls-tabs__item,
+  .ls-tabs--folder .ls-tabs__item {
     transition: none;
   }
 }

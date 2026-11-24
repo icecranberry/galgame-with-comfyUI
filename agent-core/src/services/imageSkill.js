@@ -22,6 +22,7 @@ import { submitWorkflow, apiToGui, guiToApi } from './comfyClient.js';
 import { randomizeWorkflowSeeds } from './imageWorkflowMetadata.js';
 import { markLoraWorkflow, recomposeLoraWorkflow } from './imageLoraProvenance.js';
 import { config, getNovelaiApiKey } from '../config.js';
+import { matchesGlobalLoraScene } from '../utils/globalLora.js';
 import { generateNovelaiImage } from './novelaiClient.js';
 import { acquireSlot, releaseSlot } from './llmConcurrency.js';
 import { prepareImagePrompt } from './imagePromptPreparer.js';
@@ -150,7 +151,7 @@ async function submitNovelaiImage(promptText, { onProgress, width, height, negat
 
 /**
  * 按场景过滤全局 LoRA。
- * scenes 缺失或空数组 = 所有场景生效；currentScene 为空 = 不过滤。
+ * scenes 缺失或为 null 时匹配所有场景；currentScene 为空时不按场景过滤。
  * @param {Array} loras - config.comfyui.globalLora
  * @param {string} [currentScene]
  * @returns {Array} 已归一化 path 的生效 LoRA
@@ -161,9 +162,7 @@ export function filterGlobalLoras(loras, currentScene) {
     .filter(l => {
       if (!l.path || typeof l.path !== 'string') return false;
       if (l.enabled === false) return false;
-      if (!currentScene) return true;
-      if (!Array.isArray(l.scenes) || l.scenes.length === 0) return true;
-      return l.scenes.includes(currentScene);
+      return matchesGlobalLoraScene(l, currentScene);
     });
 }
 

@@ -776,10 +776,12 @@ export default function registerGamePlugin(ctx) {
     const { id, logId, attempt, characters, mood } = job;
     const sessionId = s.sessionId;
     const setting = s.scenario.scenes.find(item => item.id === job.sceneId);
-    const description = s.publicLog.find(log => log.id === logId)?.description;
+    const log = s.publicLog.find(log => log.id === logId);
+    const description = log?.description;
+    const speakerName = log?.kind === 'dialogue' ? log.speaker : undefined;
     effects.push(() => {
       mediaJobs.set(id, attempt);
-      Promise.resolve().then(() => description ? imageService.generateScene({ sessionId, description, characters, playerName: s.player.name,
+      Promise.resolve().then(() => description ? imageService.generateScene({ sessionId, description, characters, playerName: s.player.name, speakerName,
         style: s.scenario.meta.stylePrompt, background: job.kind === 'scene' }) :
         imageService.generate({ sessionId, prompt: [s.scenario.meta.stylePrompt, setting.imagePrompt || setting.publicDesc, mood,
           'wide environment establishing shot, no people, no text'].filter(Boolean).join(', ') }))

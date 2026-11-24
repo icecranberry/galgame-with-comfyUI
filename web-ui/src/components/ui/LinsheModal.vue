@@ -12,7 +12,8 @@
             </slot>
           </div>
           <!-- 白色内衬：浮于暖纸外壳之上，标题栏留在外壳上（与 LoRA 设置窗一致） -->
-          <div class="linshe-modal-lining" :class="{ 'has-footer': !!$slots.footer }">
+          <div class="linshe-modal-lining" :class="{ 'has-footer': !!$slots.footer, 'has-body-header': !!$slots['body-header'] }">
+            <slot name="body-header" />
             <div class="modal-body" :class="bodyClass">
               <slot />
             </div>
@@ -188,6 +189,7 @@ onBeforeUnmount(() => {
   border: var(--modal-lining-border);
   border-radius: var(--modal-lining-radius);
 }
+.linshe-modal-lining.has-body-header { background: var(--bg-secondary); }
 
 /* 留白交给 body（对齐 LoRA 设置窗的 .lora-body-card 内边距），页面 body-class 可安全覆盖 */
 .linshe-modal .modal-body {

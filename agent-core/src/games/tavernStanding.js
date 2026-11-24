@@ -7,9 +7,9 @@ import { saveGameOutput } from './gameMedia.js';
 import { bad } from './gamePaths.js';
 
 export async function renderTavernStanding({ gameId, sessionId, character, prompt, tier, sessionExists }) {
-  const generation = captureStandingImageConfig(character);
+  const generation = captureStandingImageConfig(character, 'game');
   const result = await generateImageRaw(frameStandingPrompt(prompt), {
-    ...generation, imageProvider: 'comfyui', scene: 'portrait', workflowScene: null, promptScene: 'avatar',
+    ...generation, imageProvider: 'comfyui', scene: 'game', workflowScene: null, promptScene: 'avatar',
     alreadyPrepared: true, disableRAG: true, normalizeComfyCountTags: false,
     negativePrompt: [
       generation.negativePrompt,
@@ -23,5 +23,5 @@ export async function renderTavernStanding({ gameId, sessionId, character, promp
   const { output, bounds } = await prepareStandingImage(png);
   if (!bounds || (await sharp(output).stats()).isOpaque) throw bad('临时立绘没有可用的透明轮廓', 502);
   return saveGameOutput({ success: true, images: [output.toString('base64')] },
-    { outputScope: 'game', gameId, sessionId }, { sessionExists });
+    { outputScope: 'game', gameId, sessionId }, { sessionExists, workflowSource: png });
 }

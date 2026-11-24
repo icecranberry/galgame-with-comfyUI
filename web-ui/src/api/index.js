@@ -676,8 +676,28 @@ export async function fetchLorasFiles() {
   return request(`/config/loras-files`)
 }
 
-export async function updateGlobalLora(loras) {
-  await request(`/config/global-lora`, { method: 'PUT', body: { loras } })
+export function fetchGlobalLoraSettings({ signal } = {}) {
+  return request('/config/global-lora', { signal })
+}
+
+export function updateGlobalLora(loras, activePresetId) {
+  return request('/config/global-lora', { method: 'PUT', body: { loras, activePresetId } })
+}
+
+export function updateGlobalLoraLibrary(loras, revision) {
+  return request('/config/global-lora/library', { method: 'PUT', body: { loras, revision } })
+}
+
+export function addGlobalLoraPreset(name, loras) {
+  return request('/config/global-lora/presets', { method: 'POST', body: { name, loras } })
+}
+
+export function activateGlobalLoraPreset(id) {
+  return request(`/config/global-lora/presets/${encodeURIComponent(id)}/activate`, { method: 'POST' })
+}
+
+export function deleteGlobalLoraPreset(id) {
+  return request(`/config/global-lora/presets/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 /** 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流） */

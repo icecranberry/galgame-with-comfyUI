@@ -112,7 +112,7 @@
         </div>
       </div>
 
-      <GlobalLoraModal v-model="globalLoraModalVisible" :initial-loras="globalLoras" @saved="onGlobalLoraSaved" />
+      <GlobalLoraModal v-model="globalLoraModalVisible" @applied="onGlobalLoraApplied" />
       <HiresFixModal v-if="imageProvider !== 'novelai'" v-model="hiresFixModalVisible" :initial-sampling-mode="hiresSamplingMode" :initial-global-lora-scale="hiresGlobalLoraScale" :initial-source-blend="hiresSourceBlend" :initial-upscale-model="hiresUpscaleModel" :initial-workflow-mode="hiresWorkflowMode" :initial-loras="hiresLoras" :initial-steps="hiresSteps" :initial-cfg="hiresCfg" :initial-denoise="hiresDenoise" :initial-max-size="hiresMaxSize" :initial-artist-mode="hiresArtistMode" :initial-artist="hiresArtist" @saved="onHiresFixSaved" />
 
 
@@ -2427,7 +2427,7 @@ async function saveComfy() {
   setTimeout(() => saved.value = false, 2000)
 }
 
-function onGlobalLoraSaved(globalList) {
+function onGlobalLoraApplied(globalList) {
   if (Array.isArray(globalList)) globalLoras.value = globalList
 }
 

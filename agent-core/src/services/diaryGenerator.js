@@ -1,7 +1,7 @@
 /**
  * 角色日记 —— 后台生成一篇「今天」的日记（文字 + 三张配图）。
  *
- * 输入：角色本人 + 角色当天的完整日程（daily_schedules 当日快照）。
+ * 输入：角色本人 + 角色当天的日程快照和奇遇记录。
  * 输出：一篇以角色口吻写的第一人称日记，配三张今日场景插图。
  *
  * 一天一篇：character_diaries 以 (character_id, diary_date) 唯一，同日多次生成覆盖当日那一篇，
@@ -12,9 +12,9 @@
  *   system1 = 世界观强化（有世界观才有）  （getWorldIntegrationRule('moments')，静态）
  *   system2 = 日记任务身份 + 口吻要求 + 输出 JSON 结构 + 生图提示词规范（静态）
  *   system3 = 角色完整人格               （buildCharacterPersona full，随角色变化）
- *   system4 = 今天的日期 + 今天的完整日程 （随日期变化）
+ *   system4 = 日期 + 当天日程与奇遇       （动态材料）
  *   user    = 本次执行强调
- * 静态层逐字节稳定（无日期 / 用户名内插），同一角色跨天的请求共享 system0~3 前缀缓存。
+ * 静态层不插入日期或用户名。完整人格可能含实时着装，世界书缓存边界截止任务规范。
  *
  * 生图参数与朋友圈一致（scene='moments' → 朋友圈画师串 / 全局 LoRA / 工作流），
  * 分辨率取朋友圈宽高并随机横竖，逐图独立随机，priority 固定 high。
@@ -47,7 +47,7 @@ const inflight = new Map();
 // ══════════════════════════════════════════════════════════════
 
 const DIARY_TASK_REQUIREMENTS = `【任务身份】
-你是一个日记执笔人。你会拿到一个角色的人设，以及这个角色今天的完整日程。你要以「这个角色本人」的第一人称口吻，把今天的一天写成一篇日记。
+你是一个日记执笔人。你会拿到一个角色的人设、当天的日程，以及有记录时的当天奇遇。你要以「这个角色本人」的第一人称口吻，把这一天写成一篇日记。
 
 【日记口吻要求】
 1. 这是角色在一天结束时写给自己看的私人日记。以第一人称写，但不必句句以「我」开头，也不招呼读者、介绍自己的身份或解释熟人的背景。写下的是此刻还惦记着的事，不是给旁人展示的一篇好文章。
@@ -58,27 +58,32 @@ const DIARY_TASK_REQUIREMENTS = `【任务身份】
 6. 叙述可以有轻重和停顿，顺着一个念头想起另一件事，也可以临时改口、补一句或就此打住。长短句和段落自然交替，不追求每段一样整齐。口语词、括号、省略号、感叹号只是偶尔需要时才用，不靠满篇「嗯」「唉」「算了」、故意写错字或硬塞网络梗制造随手感。上述写法都是可选的，不要逐项表演。
 7. 以给定的人设、世界观和当天活动为事实边界，可以补充合理的日常动作与感受，不为增加戏剧性擅自编造重要人物关系、重大遭遇或他人的承诺。角色只能写自己知道的事，对别人的心思可以猜，但不能当成事实。平淡的一天也值得记，不必硬添波折，更不必把每件事都牵到恋爱或某个人身上。
 8. 从最想记的地方直接写起，不必固定用「今天是……的一天」开场。写到没什么想说的地方就停，可以停在一件小事、一个未解决的念头或接下来想做的事上，不强行升华、感恩、励志或期待明天。少用套话和漂亮比喻，不要把日记写成散文、心理咨询记录或每日成长报告。
-9. 日记正文只保留角色实际写下的文字，不写任务说明、写作分析或自我评价；整体仍按下方 JSON 结构输出。`;
+9. 日记正文只保留角色实际写下的文字，不写任务说明、写作分析或自我评价；整体仍按下方 JSON 结构输出。
+10. 奇遇是角色已经经历的事，按对角色的重要程度自然取舍。进行中的只使用已记录的情节，不续写后续，不把未选的选项当成事实。已结束的可写已记录的结局，结案摘要回顾的往事不要写成当天发生。只有记录表明玩家实际参与的情节才写成共同经历。配图也遵守同样的事实边界。`;
 
 const DIARY_OUTPUT_STRUCTURE = `【输出格式】
-严格按下面这个 JSON 结构输出（字段名固定，值按注释里的要求填）：
+只返回一个合法的 JSON 对象。五个字段均必填，按以下约束填写：
+- title 为 6~14 个字的字符串，像随手写在页首的一句话，口语、有画面感，能看出今天的心情。
+- mood 为 2~6 个字的字符串，直接写此刻的心境。
+- weather 为 2~6 个字的字符串，写角色感知到的天气或光线。
+- content 为 300~400 字的第一人称正文字符串，分 3~5 段，段落之间用 \\n\\n 分隔。从最惦记的事直接写起，用少量相关动作或物件写出感受，顺着念头自然停笔。
+- imagePrompts 为恰好含 3 条英文字符串的数组，取正文中三个不同的画面。写明可见的环境、光线和镜头构图；有人物时写清姿势、动作和表情。至少两幅要有角色本人，沿用人设中的外貌、发型、发色和服饰，视线避开镜头。
+
+【完整示例】
 
 {
-  "title": "被雨淋了一路（标题：6~14 个字，像随手写在页首的一句话，口语、有画面感，能看出今天的心情）",
-  "mood": "又累又饿（心情：2~6 个字，直接写此刻的心境）",
-  "weather": "阴了一整天（天气：2~6 个字，写你感知到的天气或光线）",
-  "content": "第一段（正文：300~400 字，第一人称，分 3~5 段，段与段之间用 \\n\\n 分隔，段落长短可以不同。从今天最惦记的小事直接写起，不复述日程表，不为凑字数重复感想）\\n\\n第二段（按角色自己的口吻展开，用少量与事情相关的动作或物件带出当时的反应、此刻还在意的地方；不堆砌感官描写，不解释人设）\\n\\n第三段（顺着念头自然停笔，不必解决情绪或总结道理，不刻意用断句、口头禅或抒情句收尾）",
+  "title": "被雨淋了一路",
+  "mood": "又累又饿",
+  "weather": "阴雨绵绵",
+  "content": "走到桥中央才发现，手里一直攥着两枚硬币。早上出门时想着买面包，店门口那块木牌倒还挂着，纸上却写着今天歇业。我站在檐下多等了一会儿，够雨水顺着伞柄淌进袖口。回来的路上经过三家店，谁家都能买到面包。我还是空着手回来了，假装自己本来就没打算在外面花钱。\\n\\n锅里还有一点昨晚的汤，热开以后，闻着比昨晚好。我弯腰去够碗，才看见桌腿底下夹着一张超市小票，蹲下来抽的时候，袖口滴了一滴水在纸上，正好把末尾那个零晕开。汤喝了一半，发现自己一直站在灶台边，椅子明明就在身后，于是把碗端过去坐着喝完。\\n\\n晾衣绳上那双袜子恐怕到明早也干不了。我本来想把它们挂到炉边，伸手碰了一下，又觉得湿漉漉地走这一趟不值当。两枚硬币现在搁在窗台上。明早出门如果还记得带，就去看一眼那块木牌。",
   "imagePrompts": [
-    "第一张配图的英文画面描述：从正文里挑一个具体的场景或瞬间，写清人物状态、表情、姿势、动作、所处环境、光线氛围与镜头感；若画面中有『我』，必须使用你的人设里的外貌特征，眼睛不看镜头。只写英文关键词与短句，不要写中文。",
-    "第二张配图的英文画面描述：取正文里另一处不同的场景、物件特写或情绪画面，与第一张的场面明显区分。只写英文。",
-    "第三张配图的英文画面描述：再取正文里第三处不同的画面（可以是空镜、静物、远景），与前面两张都不重复。只写英文。"
+    "Wide shot of a short-haired woman in a navy raincoat under a bakery awning, brow furrowed, reading the notice on the door, rain running off her umbrella, overcast afternoon",
+    "Side view of the same short-haired woman in a gray sweater, crouching to reach a damp receipt beneath a kitchen table, eyes on the paper, warm light from the stove",
+    "Close-up of two coins on a wooden windowsill, rain-speckled glass and a blurred clothesline beyond, cool evening light"
   ]
 }
 
-【硬性约束】
-- imagePrompts 必须是 3 个元素，三张图对应今天里三个不同的场面，不要重复同一处场景。
-- imagePrompts 里至少两张画面上要有「我」本人（用你人设里的外貌、发型、发色、服饰特征，不要被其他内容干扰），姿势与表情符合当时的处境。
-- 必须严格按示例格式输出，只输出 JSON，不要输出任何解释或 JSON 以外的文字。`;
+必须严格按示例格式输出，只输出 JSON，禁止代码围栏、解释或额外字段。`;
 
 // ══════════════════════════════════════════════════════════════
 //  prompt 组装
@@ -103,9 +108,10 @@ export function formatScheduleForDiary(activities = []) {
  * @param {object} p.character  - characters 表行（含 id / base_prompt / short_prompt）
  * @param {string} p.dateKey    - 本地日期键 YYYY-MM-DD
  * @param {string} p.scheduleText - formatScheduleForDiary 的结果
+ * @param {string} [p.eventText] - 目标日期内有记录的奇遇情节
  * @returns {Array<{role:string, content:string}>}
  */
-export function buildDiaryMessages({ character, dateKey, scheduleText }) {
+export function buildDiaryMessages({ character, dateKey, scheduleText, eventText = '' }) {
   const msgs = [];
 
   // system0：破甲词 + 世界观
@@ -113,7 +119,8 @@ export function buildDiaryMessages({ character, dateKey, scheduleText }) {
   if (stage0) msgs.push({ role: 'system', content: stage0 });
 
   // system1：世界观强化（没有世界观就不要这一层）
-  if (getWorldSetting()) {
+  const hasWorld = Boolean(getWorldSetting());
+  if (hasWorld) {
     msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });
   }
 
@@ -134,17 +141,18 @@ export function buildDiaryMessages({ character, dateKey, scheduleText }) {
     ),
   });
 
-  // system4：今天的日期 + 今天的完整日程（随日期变化）
+  // system4：日期、日程和奇遇都在稳定前缀之后
   const weekday = WEEKDAYS[new Date(`${dateKey}T12:00:00`).getDay()] || '';
+  const eventBlock = eventText ? `\n\n【今天已发生的奇遇】\n${eventText}` : '';
   msgs.push({
     role: 'system',
-    content: `【今天】${dateKey}${weekday ? `（${weekday}）` : ''}\n\n【今天的日程】\n${scheduleText}`,
+    content: `【今天】${dateKey}${weekday ? `（${weekday}）` : ''}\n\n【今天的日程】\n${scheduleText}${eventBlock}`,
   });
 
   // user：只强调本次执行与输出格式
   msgs.push({
     role: 'user',
-    content: '请从今天的日程里挑出值得记录的部分，以你自己的口吻写一篇今天的日记，严格按上面的 JSON 结构只返回 JSON。',
+    content: `请从今天的日程和已有的奇遇记录中挑出值得记下的事，以你自己的口吻写一篇日记，并为正文选三个配图场景。${hasWorld ? '请遵循 <world_setting> 中的世界观设定。' : ''}严格按上面的 JSON 结构只返回 JSON。`,
   });
 
   return msgs;
@@ -364,16 +372,94 @@ function diaryActivities(characterId,dateKey,readOnly=false) {
     || (dateKey===getLocalDateKey()?db.prepare('SELECT schedule_json FROM schedule_templates WHERE character_id=?').get(characterId):null);
   try { const parsed=JSON.parse(row?.schedule_json||'[]'); return Array.isArray(parsed)?parsed:parsed.activities||[]; } catch {return [];}
 }
+
+function diaryEventTime(value) {
+  if (typeof value !== 'string' || !value) return NaN;
+  return Date.parse(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+}
+
+function diaryEventText(characterId, dateKey) {
+  const dayStart = new Date(`${dateKey}T00:00:00`);
+  if (!Number.isFinite(dayStart.getTime())) return '';
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  const inDay = time => time >= dayStart.getTime() && time < dayEnd.getTime();
+  const records = getDb().prepare(`
+    SELECT title, description, choice_history, created_at, current_branch AS branch_count,
+      last_interaction_at, NULL AS ended_at, NULL AS outcome, NULL AS summary, NULL AS conclusion
+    FROM character_events
+    WHERE character_id = @characterId AND status IN ('open', 'engaged') AND created_at < datetime(@end)
+    UNION ALL
+    SELECT title, description, choice_history, created_at, total_branches AS branch_count,
+      NULL AS last_interaction_at, ended_at, outcome, summary, conclusion
+    FROM event_history
+    WHERE character_id = @characterId AND created_at < datetime(@end) AND ended_at >= datetime(@start)
+    ORDER BY created_at
+  `).all({ characterId, start: dayStart.toISOString(), end: dayEnd.toISOString() });
+
+  return records.flatMap(event => {
+    let history = [];
+    try {
+      const parsed = JSON.parse(event.choice_history || '[]');
+      if (Array.isArray(parsed)) history = parsed;
+    } catch { /* 仍可使用有日期的开场或结案字段 */ }
+
+    const opening = history.find(step => step?.branch === 0);
+    // 旧归档的 created_at 用的是归档时间，等于 ended_at 时不能据此判断开场或未标时的分支日期。
+    const openingTime = diaryEventTime(opening?.occurredAt || (event.created_at !== event.ended_at ? event.created_at : null));
+    const closingTime = diaryEventTime(event.ended_at);
+    const lastKnownTime = diaryEventTime(event.ended_at || event.last_interaction_at) || Date.now();
+    const allStepsOnDate = inDay(openingTime) && inDay(lastKnownTime);
+    const scenes = [];
+
+    const openingText = opening?.summary || (!event.branch_count ? event.description : '');
+    if (inDay(openingTime) && openingText) scenes.push(`开场：${openingText}`);
+    for (const step of history) {
+      if (!(step?.branch > 0) || !step.summary) continue;
+      if (step.occurredAt ? !inDay(diaryEventTime(step.occurredAt)) : !allStepsOnDate) continue;
+      const choice = step.choice_label ? `「${step.choice_label}」` : '';
+      scenes.push(`玩家作出选择${choice}后的情节：${step.summary}`);
+    }
+
+    const closedThatDay = inDay(closingTime);
+    if (closedThatDay) {
+      if (event.outcome === 'cancelled') scenes.push('奇遇在此中止。');
+      else if (event.conclusion) scenes.push(`已记录的结局：${event.conclusion}`);
+      else if (event.summary) scenes.push(`结案摘要（可能包含此前的经过）：${event.summary}`);
+    }
+    if (!scenes.length) return [];
+    return [`「${event.title}」（${closedThatDay ? '当天结束' : '截至当天未结案'}）\n${scenes.join('\n')}`];
+  }).join('\n\n');
+}
+
+function requestDiaryText({ character, dateKey, scheduleText, label, chat = chatWithPreset }) {
+  const eventText = diaryEventText(character.id, dateKey);
+  const messages = buildDiaryMessages({ character, dateKey, scheduleText, eventText });
+  const personaIndex = messages.length - 3;
+  const persona = messages[personaIndex].content;
+  const fixedRules = messages[personaIndex - 1].content;
+  return chat(messages, {
+    temperature: 0.9,
+    response_format: { type: 'json_object' },
+    label,
+    lorebook: {
+      personaTexts: [persona],
+      staticTexts: messages.slice(0, personaIndex).map(message => message.content),
+      cacheBoundary: { index: personaIndex - 1, offset: fixedRules.length },
+      history: messages.slice(personaIndex + 1),
+      characterName: character.display_name,
+      characterDescription: persona,
+      scenario: [scheduleText, eventText].filter(Boolean).join('\n\n'),
+    },
+  });
+}
+
 export async function generateDiaryDraft(characterId, {date} = {}) {
   const character=getDb().prepare('SELECT * FROM characters WHERE id=?').get(characterId);
   if (!character) throw Object.assign(new Error('角色不存在'),{status:404});
   const dateKey=date || getLocalDateKey();
   const scheduleText=formatScheduleForDiary(diaryActivities(characterId,dateKey,true));
-  const messages=buildDiaryMessages({character,dateKey,scheduleText});
-  const raw=await chatWithPreset(messages,{temperature:0.9,response_format:{type:'json_object'},label:'日记草稿',
-    lorebook:{personaTexts:[messages.at(-3).content],staticTexts:messages.slice(0,-3).map(message=>message.content),
-      cacheBoundary:{index:messages.length-4,offset:messages.at(-4).content.length},history:messages.slice(-2),
-      characterName:character.display_name,characterDescription:messages.at(-3).content,scenario:scheduleText}});
+  const raw = await requestDiaryText({ character, dateKey, scheduleText, label: '日记草稿' });
   const draft=parseDiaryJSON(raw);
   if (!draft) throw new Error('日记草稿无法解析');
   return {date:dateKey,draft};
@@ -451,12 +537,8 @@ async function runDiaryGeneration({ db, character, dateKey, name, task, approved
     }
 
     // ── 步骤3：LLM 生成日记文字 + 3 段生图 prompt ──
-    const messages = buildDiaryMessages({ character, dateKey, scheduleText });
-    const raw = approvedDraft ? JSON.stringify(approvedDraft) : await (dependencies.chat||chatWithPreset)(messages, {
-      temperature: 0.9,
-      response_format: { type: 'json_object' },
-      label: '日记助手',
-      lorebook:{personaTexts:[messages.at(-3).content],staticTexts:[messages.at(-4).content],characterName:character.display_name,scenario:scheduleText},
+    const raw = approvedDraft ? JSON.stringify(approvedDraft) : await requestDiaryText({
+      character, dateKey, scheduleText, label: '日记助手', chat: dependencies.chat,
     });
     const diary = parseDiaryJSON(raw);
     if (!diary) throw new Error('日记生成返回内容无法解析');

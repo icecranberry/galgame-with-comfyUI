@@ -5,6 +5,7 @@
 //   config.js  → settings.js（读写系统设置）
 //   settings.js → （无内部依赖，db 句柄由 initSettingsHandle 注入）
 import { config, GROUP_SUMMARY_MAX_ROUNDS } from '../config.js';
+import { enabledGlobalLoras, loraLibraryFields, loraPathKey } from '../utils/globalLora.js';
 
 let _db = null;
 
@@ -22,6 +23,11 @@ function handle() {
 export function getSetting(key) {
   return handle().prepare(`SELECT setting_value FROM system_settings WHERE setting_key = ?`).pluck().get(key) ?? null;
 }
+
+export const GLOBAL_LORA_PRESETS_KEY = 'comfy_global_lora_presets';
+export const GLOBAL_LORA_LIBRARY_KEY = 'comfy_global_lora_library';
+const GLOBAL_LORA_DEFAULT_PRESET_MIGRATED = 'global_lora_default_preset_migrated';
+const GLOBAL_LORA_GAME_MIGRATED = 'global_lora_game_migrated';
 
 // 有意不纳入 SETTING_TO_CONFIG 的 DB-only 键（用于存储时间戳等运行时状态，不走 config 加载路径）
 const DB_ONLY_KEYS = new Set([
@@ -48,6 +54,11 @@ const DB_ONLY_KEYS = new Set([
   'emoji_style_mode',
   'standing_prompt_mode',
   'novelai_api_key',
+  GLOBAL_LORA_PRESETS_KEY,
+  GLOBAL_LORA_LIBRARY_KEY,
+  GLOBAL_LORA_DEFAULT_PRESET_MIGRATED,
+  GLOBAL_LORA_GAME_MIGRATED,
+  'global_lora_scene_defaults_migrated',
   'global_lora_town_portrait_migrated',
 ]);
 
@@ -59,6 +70,12 @@ export function setSetting(key, value) {
   if (!(key in SETTING_TO_CONFIG) && !key.startsWith('disturb_') && !DB_ONLY_KEYS.has(key)) {
     console.warn(`[config] setSetting("${key}"): key is not registered in SETTING_TO_CONFIG — value will NOT survive restart. Add it to the mapping in db/settings.js.`);
   }
+}
+
+export function setSettings(values) {
+  handle().transaction(() => {
+    for (const [key, value] of Object.entries(values)) setSetting(key, value);
+  })();
 }
 
 // 需要从 DB 迁移到 config 的字段映射
@@ -182,27 +199,110 @@ export function migrateGlobalLoraScenes(loras) {
   });
 }
 
+function addGameScene(loras) {
+  if (!Array.isArray(loras)) return loras;
+  return loras.map(lora => {
+    if (!Array.isArray(lora?.scenes) || lora.scenes.includes('game')) return lora;
+    // 旧空数组代表全部场景。改存 null，允许新配置用空数组表示取消全部勾选。
+    return { ...lora, scenes: lora.scenes.length ? [...lora.scenes, 'game'] : null };
+  });
+}
+
+function migrateGlobalLoraGameScene(db, rows) {
+  if (rows.some(row => row.setting_key === GLOBAL_LORA_GAME_MIGRATED)) return;
+  const activeRow = rows.find(row => row.setting_key === 'comfy_global_lora');
+  const active = castValue(activeRow?.setting_value, 'json');
+  const activeValue = Array.isArray(active) ? JSON.stringify(addGameScene(active)) : undefined;
+  db.transaction(() => {
+    const read = db.prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?');
+    const write = db.prepare('INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)');
+    const presetsRow = read.get(GLOBAL_LORA_PRESETS_KEY);
+    const settings = castValue(presetsRow?.setting_value, 'json');
+    if (Array.isArray(settings?.presets)) {
+      const presets = settings.presets.map(preset => Array.isArray(preset?.loras)
+        ? { ...preset, loras: addGameScene(preset.loras) }
+        : preset);
+      const value = JSON.stringify({ ...settings, presets });
+      if (value !== presetsRow.setting_value) write.run(GLOBAL_LORA_PRESETS_KEY, value);
+    }
+    if (activeValue !== undefined && activeValue !== activeRow.setting_value) write.run('comfy_global_lora', activeValue);
+    write.run(GLOBAL_LORA_GAME_MIGRATED, '1');
+  })();
+  if (activeValue !== undefined) activeRow.setting_value = activeValue;
+}
+
+function migrateGlobalLoraLibrary(db, rows) {
+  if (rows.some(row => row.setting_key === GLOBAL_LORA_LIBRARY_KEY)) return;
+  const activeRow = rows.find(row => row.setting_key === 'comfy_global_lora');
+  const active = castValue(activeRow?.setting_value, 'json');
+  const presetRow = db.prepare('SELECT setting_value FROM system_settings WHERE setting_key = ?').get(GLOBAL_LORA_PRESETS_KEY);
+  const settings = castValue(presetRow?.setting_value, 'json');
+  const presets = Array.isArray(settings?.presets) ? settings.presets : [];
+  const library = new Map();
+  // 当前配置的参数优先作为库的默认值。各预设保留自己的权重、触发词和适用范围。
+  for (const list of [active, ...presets.map(preset => preset?.loras)]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      const entry = loraLibraryFields(item);
+      if (!entry.path) continue;
+      const key = loraPathKey(entry.path);
+      if (!library.has(key)) library.set(key, entry);
+    }
+  }
+
+  const activeValue = JSON.stringify(enabledGlobalLoras(active));
+  const write = db.prepare('INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)');
+  db.transaction(() => {
+    if (activeRow && activeValue !== activeRow.setting_value) write.run('comfy_global_lora', activeValue);
+    if (presets.length) {
+      const cleaned = presets.filter(Boolean).map(preset => ({ ...preset, loras: enabledGlobalLoras(preset.loras) }));
+      write.run(GLOBAL_LORA_PRESETS_KEY, JSON.stringify({ ...settings, presets: cleaned }));
+    }
+    write.run(GLOBAL_LORA_LIBRARY_KEY, JSON.stringify({ loras: [...library.values()], revision: 0 }));
+  })();
+  if (activeRow) activeRow.setting_value = activeValue;
+}
+
 // 从 DB 读取 system_settings 覆盖 config 内存（DB 优先于代码默认值）
 export function loadSystemSettings(db) {
   const rows = db.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
   // 新范围对存量 LoRA 默认开启，迁移只运行一次，避免重启撤销用户之后的关闭操作。
-  if (!rows.some(row => row.setting_key === 'global_lora_town_portrait_migrated')) {
+  const needsSceneDefaults = !rows.some(row => row.setting_key === 'global_lora_scene_defaults_migrated');
+  const needsTownPortrait = !rows.some(row => row.setting_key === 'global_lora_town_portrait_migrated');
+  const needsDefaultPreset = !rows.some(row => row.setting_key === GLOBAL_LORA_DEFAULT_PRESET_MIGRATED);
+  if (needsSceneDefaults || needsTownPortrait || needsDefaultPreset) {
     const row = rows.find(row => row.setting_key === 'comfy_global_lora');
-    const loras = row ? castValue(row.setting_value, 'json') : undefined;
+    let loras = castValue(row?.setting_value, 'json');
     db.transaction(() => {
-      if (Array.isArray(loras)) {
-        const migrated = migrateGlobalLoraScenes(loras).map(l => {
+      if (Array.isArray(loras) && (needsSceneDefaults || needsTownPortrait)) {
+        if (needsSceneDefaults) loras = migrateGlobalLoraScenes(loras);
+        if (needsTownPortrait) loras = loras.map(l => {
           // 缺失 / 空范围原本代表全部生效，保留其语义。
           if (!l || !Array.isArray(l.scenes) || !l.scenes.length || l.scenes.includes('town_portrait')) return l;
           return { ...l, scenes: [...l.scenes, 'town_portrait'] };
         });
-        const value = JSON.stringify(migrated);
+        const value = JSON.stringify(loras);
         db.prepare(`UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = 'comfy_global_lora'`).run(value);
         row.setting_value = value;
       }
-      db.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES ('global_lora_town_portrait_migrated', '1')`).run();
+      const markMigrated = db.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES (?, '1')`);
+      if (needsSceneDefaults) markMigrated.run('global_lora_scene_defaults_migrated');
+      if (needsTownPortrait) markMigrated.run('global_lora_town_portrait_migrated');
+      if (needsDefaultPreset) {
+        const saved = rows.find(row => row.setting_key === GLOBAL_LORA_PRESETS_KEY);
+        const settings = castValue(saved?.setting_value, 'json');
+        if (!Array.isArray(settings?.presets) || !settings.presets.length) {
+          const preset = { id: 'default', name: '默认', loras: Array.isArray(loras) ? loras : [] };
+          db.prepare(`INSERT OR REPLACE INTO system_settings (setting_key, setting_value) VALUES (?, ?)`)
+            .run(GLOBAL_LORA_PRESETS_KEY, JSON.stringify({ activePresetId: preset.id, presets: [preset] }));
+        }
+        // 用户之后主动删掉最后一组，重启时也要保留这一选择。
+        markMigrated.run(GLOBAL_LORA_DEFAULT_PRESET_MIGRATED);
+      }
     })();
   }
+  migrateGlobalLoraGameScene(db, rows);
+  migrateGlobalLoraLibrary(db, rows);
   // 老客户已经明确保存过采样参数时，升级不能静默改成“跟随源工作流”。
   if (!rows.some(row => row.setting_key === 'comfy_hires_sampling_mode')
     && rows.some(row => ['comfy_hires_steps', 'comfy_hires_cfg'].includes(row.setting_key))) {
@@ -216,7 +316,6 @@ export function loadSystemSettings(db) {
       if (value !== undefined) {
         // 群聊记忆轮数历史遗留值收敛到支持范围
         if (row.setting_key === 'group_summary_interval') value = Math.max(2, Math.min(GROUP_SUMMARY_MAX_ROUNDS, value));
-        if (row.setting_key === 'comfy_global_lora') value = migrateGlobalLoraScenes(value);
         config[mapping.obj][mapping.key] = value;
         applied++;
       }

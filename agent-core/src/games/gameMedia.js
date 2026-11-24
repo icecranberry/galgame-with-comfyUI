@@ -3,9 +3,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { buildImageUrl, getImageDir } from '../services/imagePaths.js';
 import { invalidateGalleryCache } from '../services/galleryCache.js';
+import { encodeImageWithWorkflow } from '../services/imageWorkflowMetadata.js';
 import { validId, bad } from './gamePaths.js';
 
-export async function saveGameOutput(result, opts, { sessionExists } = {}) {
+export async function saveGameOutput(result, opts, { sessionExists, workflowSource } = {}) {
   if (opts.outputScope !== 'game' || !result.success) return result;
   const gameId = validId(opts.gameId), sessionId = validId(opts.sessionId);
   if (!sessionExists) {
@@ -28,7 +29,7 @@ export async function saveGameOutput(result, opts, { sessionExists } = {}) {
       const file = path.join(albumDir, filename);
       const temp = path.join(albumDir, `.${filename}.tmp`);
       staged.push({ filename, file, temp });
-      await sharp(data).png().toFile(temp);
+      await fs.promises.writeFile(temp, await encodeImageWithWorkflow(sharp(data).png(), workflowSource ?? data, 'png'));
     }
     // Recheck because conversion yields to deletion/uninstall operations.
     if (!sessionExists()) throw bad('存档已删除或游戏已停用', 409);

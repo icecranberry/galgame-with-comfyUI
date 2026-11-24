@@ -4,7 +4,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
-import { config, GROUP_SUMMARY_MAX_ROUNDS, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile, updateWeatherConfig, updateGlobalLora, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays } from '../config.js';
+import { config, GROUP_SUMMARY_MAX_ROUNDS, updateComfyConfig, getNovelaiApiKey, updateFeatureFlag, getLlmConfig, getLlmApiKey, updateLlmConfig, updateFreeEggEnabled, updateUserConfig, getUserConfig, updateProactiveFreq, updateEventFreq, updateMomentFreq, updateBackgroundConcurrency, updateDisturbMode, updateDisturbSettings, updateWorkflowMode, updateWorkflowScene, updateWorkflowCustomTemplate, getWorkflowConfig, getLlmProfiles, getActiveProfileId, addLlmProfile, deleteLlmProfile, activateLlmProfile, syncActiveLlmProfile, getNovelaiProfiles, getActiveNovelaiProfileId, addNovelaiProfile, deleteNovelaiProfile, activateNovelaiProfile, updateWeatherConfig, updateHiresSettings, updateHiresLora, updateGroupSummaryInterval, updateGroupTemperature, updateGroupActivity, updateScheduleRefreshDays,
+  getGlobalLoraSettings, updateGlobalLora, addGlobalLoraPreset, activateGlobalLoraPreset, deleteGlobalLoraPreset, updateGlobalLoraLibrary,
+} from '../config.js';
 import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } from '../llm/llm-client.js';
 import { normalizeModelCapabilities } from '../llm/modelCapabilities.js';
 import { parseServiceAccount, getVertexAccessToken, listVertexModels } from '../llm/vertex-client.js';
@@ -255,14 +257,44 @@ router.post('/novelai/profiles/:id/activate', (req, res) => {
   res.json({ ok: true, ...novelaiConfigPayload(), profiles: getNovelaiProfiles(), activeProfileId: getActiveNovelaiProfileId() });
 });
 
-// PUT /api/config/global-lora — 更新全局 LoRA
-router.put('/global-lora', (req, res) => {
-  const { loras } = req.body;
-  if (loras === undefined) {
-    return res.status(400).json({ error: 'loras is required' });
+router.get('/global-lora', (req, res) => {
+  res.json(getGlobalLoraSettings());
+});
+
+router.put('/global-lora/library', (req, res) => {
+  const { loras, revision } = req.body || {};
+  if (!Array.isArray(loras) || !Number.isInteger(revision)) return res.status(400).json({ error: 'LoRA 库配置不完整' });
+  const result = updateGlobalLoraLibrary(loras, revision);
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, library: result.library });
+});
+
+router.put(['/global-lora', '/global-lora/presets/:id'], (req, res) => {
+  const { loras, activePresetId } = req.body || {};
+  if (!Array.isArray(loras)) return res.status(400).json({ error: 'LoRA 配置必须是列表' });
+  if (!updateGlobalLora(loras, req.params.id ?? activePresetId)) {
+    return res.status(409).json({ error: '当前生效的预设已变化，请重新打开全局 LoRA 设置' });
   }
-  updateGlobalLora(loras);
-  res.json({ ok: true, globalLora: config.comfyui.globalLora });
+  res.json({ ok: true, ...getGlobalLoraSettings() });
+});
+
+router.post('/global-lora/presets', (req, res) => {
+  const { name, loras } = req.body || {};
+  const label = typeof name === 'string' ? name.trim() : '';
+  if (!label || label.length > 50) return res.status(400).json({ error: '请输入 1–50 字的预设名称' });
+  if (!Array.isArray(loras)) return res.status(400).json({ error: 'LoRA 配置必须是列表' });
+  if (!addGlobalLoraPreset(label, loras)) return res.status(409).json({ error: '已有同名预设，请换个名称' });
+  res.status(201).json({ ok: true, ...getGlobalLoraSettings() });
+});
+
+router.post('/global-lora/presets/:id/activate', (req, res) => {
+  if (!activateGlobalLoraPreset(req.params.id)) return res.status(404).json({ error: '预设不存在' });
+  res.json({ ok: true, ...getGlobalLoraSettings() });
+});
+
+router.delete('/global-lora/presets/:id', (req, res) => {
+  if (!deleteGlobalLoraPreset(req.params.id)) return res.status(404).json({ error: '预设不存在' });
+  res.json({ ok: true, ...getGlobalLoraSettings() });
 });
 
 // PUT /api/config/hires-lora — 更新 HiresFix 细化专用 LoRA（仅作用于放大细化工作流）

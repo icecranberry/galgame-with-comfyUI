@@ -5,7 +5,8 @@ import { getTimeTag } from '../services/timeLight.js';
 import { appendWorldLanguageStyle } from '../services/worldLanguageStyle.js';
 import { appendReplay, fitNativeReplay, GAME_REPLAY_RULE } from './trpgReplay.js';
 import { assertPromptFits, promptTokens, trpgPromptBudget } from './trpgPromptBudget.js';
-import { findCharacterByDisplayName } from './gameBridge.js';
+import { findCharacterByDisplayName, listNamedGameCharacters } from './gameBridge.js';
+import { parseCharacterLoras } from '../services/groupImageLoraMatcher.js';
 
 const JSON_OBJECT = { type: 'json_object' };
 
@@ -295,24 +296,40 @@ export function createGameServices(gameId, repo, assertPermission) {
       }
     },
   };
+  async function generateGameImage(options = {}, resolveLoras) {
+    active(); assertPermission('image:generate');
+    const session = repo.session(gameId, options.sessionId);
+    if (!session) throw bad('请先创建当前游戏的存档', 404);
+    if (typeof options.prompt !== 'string' || !options.prompt.trim() || options.prompt.length > 12000) throw bad('图片提示词为空或过长');
+    const comfyOnly = options.requireComfyUI === true;
+    if (comfyOnly && (await import('../config.js')).config.comfyui.imageProvider !== 'comfyui') {
+      throw bad('当前未启用 ComfyUI', 409);
+    }
+    const loras = resolveLoras?.(session.state);
+    const dimension = n => Math.round(Math.max(256, Math.min(2048, Number(n) || 1024)) / 8) * 8;
+    const { generateImageRaw } = await import('../services/imageSkill.js');
+    const result = await generateImageRaw(options.prompt, { outputScope: 'game', gameId, sessionId: options.sessionId,
+      ...(comfyOnly ? { imageProvider: 'comfyui' } : {}), loras,
+      width: dimension(options.width), height: dimension(options.height || 576), negativePrompt: String(options.negativePrompt || '').slice(0, 4000),
+      normalizeComfyCountTags: options.normalizeComfyCountTags !== false,
+      alreadyPrepared: true, disableRAG: true, scene: 'game', workflowScene: 'events', promptScene: 'events' });
+    if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
+    return { url: result.url, urls: result.urls };
+  }
+
   return { llm, dispose: () => controller.abort(new Error('游戏已停用或卸载')),
-    imageService: { async generate(options = {}) {
-      active(); assertPermission('image:generate');
-      if (!repo.session(gameId, options.sessionId)) throw bad('请先创建当前游戏的存档', 404);
-      if (typeof options.prompt !== 'string' || !options.prompt.trim() || options.prompt.length > 12000) throw bad('图片提示词为空或过长');
-      const comfyOnly = options.requireComfyUI === true;
-      if (comfyOnly && (await import('../config.js')).config.comfyui.imageProvider !== 'comfyui') {
-        throw bad('当前未启用 ComfyUI', 409);
-      }
-      const dimension = n => Math.round(Math.max(256, Math.min(2048, Number(n) || 1024)) / 8) * 8;
-      const { generateImageRaw } = await import('../services/imageSkill.js');
-      const result = await generateImageRaw(options.prompt, { outputScope: 'game', gameId, sessionId: options.sessionId,
-        ...(comfyOnly ? { imageProvider: 'comfyui' } : {}),
-        width: dimension(options.width), height: dimension(options.height || 576), negativePrompt: String(options.negativePrompt || '').slice(0, 4000),
-        normalizeComfyCountTags: options.normalizeComfyCountTags !== false,
-        alreadyPrepared: true, disableRAG: true, scene: 'events', promptScene: 'events' });
-      if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
-      return { url: result.url, urls: result.urls };
+    imageService: { generate: options => generateGameImage(options),
+    async generateTavernTipsy({ key, ...options }) {
+      if (gameId !== 'midnight-tavern' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用酒馆饮后照片工具', 403);
+      return generateGameImage({ ...options, requireComfyUI: true }, state => {
+        const drink = state.drinks?.find(item => `tipsy-${item.id}` === key);
+        if (!drink || state.media?.[key]?.status !== 'pending') throw bad('没有已触发的酒馆饮后照片任务', 404);
+        const guest = state.people?.[drink.guestName];
+        if (guest?.local) return [];
+        const character = findCharacterByDisplayName(repo.db, drink.guestName);
+        if (!character) throw bad('客人缺少饮后照片所需的角色资料', 404);
+        return parseCharacterLoras(character);
+      });
     }, async generateTavernStanding({ sessionId, key, label, direction, localPersona, onPrompt }) {
       active(); assertPermission('image:generate'); assertPermission('llm:chat');
       const game = repo.game(gameId);
@@ -351,30 +368,39 @@ export function createGameServices(gameId, repo, assertPermission) {
       return renderTavernStanding({
         gameId, sessionId, character, prompt, tier: entry.tier, sessionExists,
       });
-    }, async generateScene({ sessionId, description, characters, playerName, style, background }) {
+    }, async generateScene({ sessionId, description, characters, playerName, speakerName, style, background }) {
       active(); assertPermission('image:generate'); assertPermission('llm:chat');
       if (gameId !== 'trpg-simulator' || repo.game(gameId)?.source !== 'official') throw bad('该游戏无法调用跑团画面工具', 403);
-      if (!repo.session(gameId, sessionId)) throw bad('跑团存档不存在', 404);
+      const session = repo.session(gameId, sessionId);
+      if (!session) throw bad('跑团存档不存在', 404);
       if (typeof description !== 'string' || !description.trim() || description.length > 3000) throw bad('画面描述为空或过长');
       const { generateStudioScenePrompt } = await import('../services/imageStudioScene.js');
       const { generateImageRaw } = await import('../services/imageSkill.js');
       const { RAG_TIMEOUT_FAST_MS } = await import('../services/imagePromptKnowledge.js');
       const { config } = await import('../config.js');
-      let explicitCharacters = null;
-      if (background || characters !== undefined) {
-        explicitCharacters = (background ? [] : characters.filter(name => name !== playerName)).map(name => {
-          const character = findCharacterByDisplayName(repo.db, name);
-          if (!character) throw bad(`无法唯一识别入镜角色「${name}」`);
-          return character;
-        });
+      const explicitCast = characters?.length > 0;
+      let names = background ? [] : characters;
+      if (!background && !explicitCast) {
+        const { investigators = [], keeper } = session.state;
+        const participants = new Set([keeper?.name, ...investigators.map(card => card.name)]);
+        names = listNamedGameCharacters(repo.db).filter(({ name }) =>
+          (name === speakerName && participants.has(name)) ||
+          ((name.length >= 2 || participants.has(name)) && description.includes(name))
+        ).map(({ name }) => name);
       }
-      const includeUser = background ? false : characters?.includes(playerName);
+      const explicitCharacters = names.filter(name => name !== playerName).map(name => {
+        const character = findCharacterByDisplayName(repo.db, name);
+        if (!character) throw bad(`无法唯一识别入镜角色「${name}」`);
+        return character;
+      });
+      const includeUser = background ? false : explicitCast ? characters.includes(playerName) : undefined;
       const hints = [style, background ? '纯环境空镜，不画人物，不添加文字。' : '表现角色的动作和当前状态，不添加文字。'].filter(Boolean).join('\n');
       const { prompt, loras } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
         roleplay: false, scope: `image:trpg:${sessionId}`, signal: controller.signal });
       controller.signal.throwIfAborted();
       const { eventArtist, eventWidth, eventHeight } = config.comfyui;
-      const result = await generateImageRaw(prompt, { outputScope: 'game', gameId, sessionId, scene: 'events', promptScene: 'events',
+      const result = await generateImageRaw(prompt, { outputScope: 'game', gameId, sessionId,
+        scene: 'game', workflowScene: 'events', promptScene: 'events',
         artist: eventArtist, width: eventWidth, height: eventHeight, loras, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS });
       if (!result.success || !result.url) throw bad(result.error || '游戏图片生成失败', 502);
       return { url: result.url };
