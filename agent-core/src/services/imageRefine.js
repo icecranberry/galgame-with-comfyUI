@@ -34,6 +34,8 @@ import {
   resolveCustomWorkflowPath,
 } from './workflowTemplates.js';
 import { injectLoraNodes, NODE_TITLES, findNegativeEncodeNode } from './imageSkill.js';
+import { attachPngWorkflow, readImageWorkflow } from './imageWorkflowMetadata.js';
+import { loraTriggerEntries } from './imageLoraProvenance.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW_DIR = path.join(__dirname, '..', '..', '..', 'workflow');
@@ -110,6 +112,12 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
     scene: workflowScene,
   });
   const src = overrides.sourceWorkflow?.workflow || apiToGui(overrides.sourceWorkflow?.prompt) || srcResult.wf;
+  const generation = overrides.sourceWorkflow?.generation;
+  const sharedCharacterTriggers = generation?.sharedCharacterTriggers;
+  const savedPrompt = generation?.characterTriggersInPrompt || sharedCharacterTriggers?.length
+    ? src?.nodes.find(node => node.title === NODE_TITLES.prompt)?.widgets_values?.[0] : undefined;
+  const useSavedCharacters = typeof savedPrompt === 'string' && savedPrompt.length > 0;
+  if (useSavedCharacters) promptText = savedPrompt;
   const profile = [3, 4, 5].includes(wf.extra?.linsheHires?.version) ? wf.extra.linsheHires : null;
   if (profile?.version >= 4) {
     const upscaleModel = config.comfyui.hiresUpscaleModel;
@@ -157,14 +165,28 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
     if (l.enabled === false) return false;
     return matchesGlobalLoraScene(l, currentScene);
   });
-  const charLoras = (overrides.loras || []).filter(l => l.path && typeof l.path === 'string');
+  const seenSourcePaths = new Set();
+  const charLoras = ((useSavedCharacters ? generation.characters : overrides.loras) || []).filter(l => {
+    if (!l.path || typeof l.path !== 'string') return false;
+    if (!useSavedCharacters) return true;
+    // The saved source list can contain both owners. Restore its winning entry.
+    if (seenSourcePaths.has(l.path)) return false;
+    seenSourcePaths.add(l.path);
+    return true;
+  });
   const hiresLoras = (config.comfyui.hiresLora || []).filter(
     l => l.path && typeof l.path === 'string' && l.enabled !== false
   );
   const loraChain = new Map();
-  for (const l of [...globalLoras.map(l => ({ ...l, weight: (l.weight ?? 0.6) * globalLoraScale })), ...charLoras, ...hiresLoras]) {
-    loraChain.delete(l.path);
-    loraChain.set(l.path, l);
+  for (const [source, entries] of [
+    ['global', globalLoras.map(lora => ({ ...lora, weight: (lora.weight ?? 0.6) * globalLoraScale }))],
+    ['character', charLoras],
+    ['hires', hiresLoras],
+  ]) {
+    for (const lora of entries) {
+      loraChain.delete(lora.path);
+      loraChain.set(lora.path, { ...lora, source });
+    }
   }
   const loras = [...loraChain.values()];
   // 零权重在合并后移除：同时移除独立触发词，也允许专用配置覆盖全局禁用。
@@ -238,7 +260,8 @@ export function buildHiresWorkflow(promptText, overrides = {}) {
 
     // lora触发词节点：注入所有 lora 的 triggerWord 拼接
     if (node.title === NODE_TITLES.loraTrigger) {
-      const triggerWords = activeLoras.map(l => l.triggerWord || '').filter(Boolean).join(', ');
+      const triggerWords = loraTriggerEntries(activeLoras, sharedCharacterTriggers)
+        .map(l => l.triggerWord || '').filter(Boolean).join(', ');
       node.widgets_values[0] = triggerWords;
       continue;
     }
@@ -322,6 +345,9 @@ export async function refineImage({
 }) {
   const sourceBuf = buffer || (filePath ? fs.readFileSync(filePath) : null);
   if (!sourceBuf) throw new Error('filePath or buffer is required');
+  const embedded = sourceWorkflow ?? await readImageWorkflow(sourceBuf);
+  const generation = embedded?.generation;
+  const sharedSource = generation?.characterTriggersInPrompt || generation?.sharedCharacterTriggers?.length ? embedded : null;
   const fileExt = (ext || (filePath ? path.extname(filePath) : '') || '.png').toLowerCase();
   const uploadBuf = await flattenTransparentOnWhite(sourceBuf);
   const uploadExt = uploadBuf === sourceBuf ? fileExt : '.png'; // 垫白后是 PNG 字节，扩展名跟着换
@@ -329,7 +355,7 @@ export async function refineImage({
   console.log(`[imageRefine] Uploaded source image to ComfyUI: ${uploadFilename} (${(uploadBuf.length / 1024).toFixed(0)}KB)`);
 
   const { wf } = buildHiresWorkflow(promptText, {
-    uploadFilename, artist, loras, customWorkflow, sourceMode, sourceWorkflow, scene, workflowScene,
+    uploadFilename, artist, loras, customWorkflow, sourceMode, sourceWorkflow: sharedSource || sourceWorkflow, scene, workflowScene,
   });
 
   if (onProgress) onProgress({ stage: 'submitting' });
@@ -341,14 +367,16 @@ export async function refineImage({
   const img = result.images[0];
   const rawBase64 = img.base64.replace(/^data:image\/\w+;base64,/, '');
   const refinedBuf = Buffer.from(rawBase64, 'base64');
+  const pixels = sharedSource ? attachPngWorkflow(refinedBuf, sharedSource) : refinedBuf;
 
   if (output === 'buffer') {
     console.log('[imageRefine] Refined image returned in memory (not saved)');
-    return { success: true, wfPath: hiresPath(), filename: img.filename, base64: img.base64 };
+    const base64 = sharedSource ? `data:image/png;base64,${pixels.toString('base64')}` : img.base64;
+    return { success: true, wfPath: hiresPath(), filename: img.filename, base64 };
   }
   const target = outPath || filePath;
   const tmpPath = target + '.refining';
-  fs.writeFileSync(tmpPath, refinedBuf);
+  fs.writeFileSync(tmpPath, pixels);
   fs.renameSync(tmpPath, target);
 
   console.log(`[imageRefine] Refined image saved (overwrote): ${target}`);

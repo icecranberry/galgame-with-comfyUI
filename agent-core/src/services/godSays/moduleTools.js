@@ -1,5 +1,6 @@
 import { executeStudioPhoto, buildStudioPhotoBody, studioPhotoResult } from './studioPhotos.js';
 import { isPairPose } from '../photoStudioWorkflow.js';
+import { DEFAULT_PHOTO_STUDIO_DIMENSIONS } from '../../shared/photoStudioDimensions.js';
 
 // 每个工具固定绑定已有业务接口；模型不能提供任意 URL、HTTP 方法或请求体。
 const text = (description, maxLength = 2000) => ({ type: 'string', description, minLength: 1, maxLength });
@@ -91,7 +92,8 @@ export const GOD_MODULE_TOOLS = [
     outfit_scene: { type: 'string', enum: ['work', 'casual', 'home', 'sleep'], description: '主角本次服装；work 默认，其他槽位读取该居民或天使已保存的服装' },
     second_outfit_scene: { type: 'string', enum: ['work', 'casual', 'home', 'sleep'], description: '搭档本次服装，直接读取对应居民或天使的衣柜，默认 work' },
     instruction: text('少量补充要求，不改写姿势和背景', 1000), polish_prompt: bool('是否使用照相馆 AI 润色，默认 false'),
-    width: integer('本次宽度：512–2048 且为8的倍数，默认1152', 512, 2048), height: integer('本次高度：512–2048 且为8的倍数，默认2048', 512, 2048),
+    width: integer(`本次宽度：512–2048 且为8的倍数，默认${DEFAULT_PHOTO_STUDIO_DIMENSIONS.width}`, 512, 2048),
+    height: integer(`本次高度：512–2048 且为8的倍数，默认${DEFAULT_PHOTO_STUDIO_DIMENSIONS.height}`, 512, 2048),
   }, [], 'POST', '/api/photo-studio/jobs', { body: buildStudioPhotoBody, href: '/photo-studio' }),
   tool('read_studio_photo', '照相馆', '查看照相馆拍摄结果', '用 generate_studio_photo 返回的 job_id 查询真实状态。完成后 images 直接展示到本条回复，失败如实说明，不重复拍摄。', { job_id: text('工具返回的拍摄记录 job_id', 100) }, ['job_id'], 'GET', '/api/photo-studio/jobs/:job_id', { select: studioPhotoResult, href: '/photo-studio' }),
   tool('list_outfits', '角色', '查看角色外观', '读取专属外观列表及启用状态。', char, ['character_id'], 'GET', '/api/characters/:character_id/outfits', { href: '/tavern' }),

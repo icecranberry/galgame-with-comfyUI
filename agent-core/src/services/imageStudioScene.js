@@ -1,7 +1,8 @@
 import { getDb, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { IMAGE_PROMPT_RULE, getWorldIntegrationRule } from '../builtinRules.js';
 import { parseLoras } from '../maibot-bridge/generate.js';
-import { buildImageCrossRefInfo, buildUserImageCrossRefInfo } from './characterPersona.js';
+import { characterLoraActor } from './characterLoraPrompt.js';
+import { buildImageCrossRefInfo, buildUserImageCrossRefInfo, extractCharacterEnglishName } from './characterPersona.js';
 import { matchAll } from './characterSearch.js';
 import { getUserName, matchUser } from './userSearch.js';
 import { chatSync } from './lorebook/runtime.js';
@@ -18,17 +19,22 @@ export async function generateStudioScenePrompt(desc, { explicitCharacters = nul
   const cacheBoundary = { index: msgs.length - 1, offset: msgs.at(-1).content.length };
 
   const loras = [];
+  const characterLoraActors = [];
   const crossBlocks = [];
   const characterNames = [];
   const matched = explicitCharacters === null ? matchAll(desc) : [];
   if (explicitCharacters !== null || matched.length > 0) {
     const db = getDb();
     const chars = explicitCharacters ?? matched.map(m =>
-      db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
+      db.prepare('SELECT id, name, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
     ).filter(Boolean);
-    crossBlocks.push(...chars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
+    crossBlocks.push(...chars.map(c => {
+      const name = extractCharacterEnglishName(c);
+      return `[${c.display_name}${name ? ` / ${name}` : ''}]\n${buildImageCrossRefInfo(c)}`;
+    }));
     characterNames.push(...chars.map(c => c.display_name));
     loras.push(...chars.flatMap(c => parseLoras(c)));
+    characterLoraActors.push(...chars.map(c => characterLoraActor(c, { required: explicitCharacters !== null })));
   }
   if (angelReference) {
     crossBlocks.push(angelReference.text);
@@ -41,7 +47,7 @@ export async function generateStudioScenePrompt(desc, { explicitCharacters = nul
   if (crossBlocks.length > 0) {
     msgs.push({
       role: 'system',
-      content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`,
+      content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}${characterNames.length > 1 ? '\n\n入镜角色若在资料中有英文名，用该名字开始该人物的外观和动作描述。' : ''}`,
     });
   }
 
@@ -56,5 +62,5 @@ export async function generateStudioScenePrompt(desc, { explicitCharacters = nul
   } });
   const prompt = extractImagePromptResponse(raw);
   if (!prompt) throw new Error('模型未返回有效的提示词');
-  return { prompt, loras };
+  return { prompt, loras, characterLoraActors };
 }

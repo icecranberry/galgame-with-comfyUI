@@ -567,14 +567,14 @@ test('studio sends the composed prompt and exact dimensions to the existing Anim
     const job = await waitForJob(f.service, request.id);
     assert.equal(job.status, 'done');
     assert.equal(job.output_url, '/images/photo_studio/test.avif');
-    assert.equal(job.width, 1152);
-    assert.equal(job.height, 2048);
+    assert.equal(job.width, 720);
+    assert.equal(job.height, 1280);
     assert.equal(f.calls.length, 1);
     assert.match(f.calls[0].prompt, /seated on the floor/);
     assert.match(f.calls[0].prompt, /appearance of A/);
     assert.equal(f.calls[0].options.alreadyPrepared, true);
     assert.equal(f.calls[0].options.promptScene, 'standalone');
-    assert.deepEqual([f.calls[0].options.width, f.calls[0].options.height], [1152, 2048]);
+    assert.deepEqual([f.calls[0].options.width, f.calls[0].options.height], [720, 1280]);
     assert.equal(f.db.prepare('SELECT count(*) AS n FROM image_tasks').get().n, 1);
     const task = f.db.prepare('SELECT status, workflow_template FROM image_tasks').get();
     assert.equal(task.status, 'done');

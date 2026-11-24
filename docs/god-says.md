@@ -64,7 +64,7 @@ Agent 的主流程、后台投递与设计思路见[神说 Agent 流程与设计
 
 神说照相馆默认随机姿势和随机背景：省略 `pose_id` / `background_id`（或传 `random`），由后端按实际人数从已校准姿势库和背景库抽取。用户明确选择照相馆并指定姿势、角度或背景时，才通过 `search_photo_studio_poses` / `search_photo_studio_backgrounds` 查询真实 ID；只指定其中一项时，另一项继续随机，不为套用库条目而忽略用户情境。选定条目与最终提示词随拍摄任务保存，同一请求重试不重抽、不重拍。
 
-主角身份使用 `character_id` 或 `special_character: "angel"`，搭档使用 `second_character_id` 或 `second_special_character: "angel"`；同一位置互斥，禁止重复同一角色或静默补随机搭档。天使外观来自当前 `god_angel.persona`，默认／私服／居家／睡衣服装直接复用天使原衣柜读取与 characterPersona 外观组装，不借用普通居民的编号、服装或 LoRA，不创建隐藏居民。`outfit_scene` / `second_outfit_scene` 仅影响本次；缺少指定服装或可用外观时在生图前报错，不自动编写替代服装。拍摄记录以 `character_kind / character2_kind` 区分天使和居民，天使的居民编号为 NULL；旧记录迁移保留内容和排序。默认1152×2048，宽高分别允许512–2048且须为8的倍数，AI润色默认关闭。
+主角身份使用 `character_id` 或 `special_character: "angel"`，搭档使用 `second_character_id` 或 `second_special_character: "angel"`；同一位置互斥，禁止重复同一角色或静默补随机搭档。天使外观来自当前 `god_angel.persona`，默认／私服／居家／睡衣服装直接复用天使原衣柜读取与 characterPersona 外观组装，不借用普通居民的编号、服装或 LoRA，不创建隐藏居民。`outfit_scene` / `second_outfit_scene` 仅影响本次；缺少指定服装或可用外观时在生图前报错，不自动编写替代服装。拍摄记录以 `character_kind / character2_kind` 区分天使和居民，天使的居民编号为 NULL；旧记录迁移保留内容和排序。默认720×1280，宽高分别允许512–2048且须为8的倍数，AI润色默认关闭。
 
 目录查询固定使用精简分页（默认20、最多50条），按关键词、分类、角度、体系及人数筛选，不将完整提示词库送入神说上下文；返回 `total / offset / limit / has_more`。照相馆页面不传查询参数时仍获得原完整目录。拍摄请求 ID 由神说操作键稳定派生，沿用业务任务幂等；工具最多等待8分钟，查询断线或超时返回 `accepted` 和真实 `job_id`，通过 `read_studio_photo` 继续查询，不重复拍摄。停止等待不取消已受理的后台任务。照片沿用 `/images/photo_studio/`、拍摄记录与图片任务原存储，完成后才返回成功的 `images`；生成与查询结果均在对应回复内复用 `GodMessageImages`、原灯箱和300ms过渡，支持历史回看。
 

@@ -17,6 +17,7 @@ import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlo
 import { appendOathRing } from './oathUtils.js';
 import { chatWithPreset } from './presets/narrative.js';
 import { generateImageRaw } from './imageSkill.js';
+import { characterLoraActor } from './characterLoraPrompt.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -530,7 +531,7 @@ ${customKeyUnderstanding}
   const selfLoras = _parseCharLoras(character.loras);
   let otherChars = [];
   if (multiPerson) {
-    const otherChar = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(multiPerson.otherId);
+    const otherChar = db.prepare('SELECT id, name, display_name, base_prompt, loras, artist_override FROM characters WHERE id = ?').get(multiPerson.otherId);
     if (otherChar) otherChars = [otherChar];
   }
   const otherLoras = otherChars.flatMap(c => _parseCharLoras(c.loras));
@@ -548,6 +549,7 @@ ${customKeyUnderstanding}
       scene: 'events',
       priority: options.manual ? 'high' : 'low',
       loras: allLoras,
+      characterLoraActors: [character, ...otherChars].map(actor => characterLoraActor(actor, { required: true })),
       ...(!multiPerson && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {
@@ -916,14 +918,14 @@ ${timeTag2}${weatherHint}${multiPersonImageNote2}
   const branchOtherChars = [];
   let branchOtherLoras = [];
   if (multiPerson2) {
-    const otherChar = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(multiPerson2.otherId);
+    const otherChar = db.prepare('SELECT id, name, display_name, base_prompt, loras, artist_override FROM characters WHERE id = ?').get(multiPerson2.otherId);
     if (otherChar) { branchOtherChars.push(otherChar); branchOtherLoras = _parseCharLoras(otherChar.loras); }
   }
   let branchCrossRefLoras = [];
   const crossRefIdsForLora = JSON.parse(event.referenced_character_ids || '[]');
   if (crossRefIdsForLora.length > 0) {
     branchCrossRefLoras = crossRefIdsForLora.flatMap(id => {
-      const c = db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id);
+      const c = db.prepare('SELECT id, name, display_name, base_prompt, loras, artist_override FROM characters WHERE id = ?').get(id);
       if (c) branchOtherChars.push(c);
       return c ? _parseCharLoras(c.loras) : [];
     });
@@ -947,6 +949,9 @@ ${timeTag2}${weatherHint}${multiPersonImageNote2}
       height: config.comfyui.eventHeight, scene: 'events',
       priority: 'high',
       loras: branchAllLoras,
+      characterLoraActors: [character, ...branchOtherChars].map(actor => characterLoraActor(actor, {
+        required: actor.id === character.id || actor.id === multiPerson2?.otherId || crossRefIds.includes(actor.id),
+      })),
       ...(!multiPerson2 && character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}),
     });
     if (genResult.success && genResult.images.length > 0) {

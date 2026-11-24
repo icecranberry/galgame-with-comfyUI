@@ -1,6 +1,6 @@
-export const DEFAULT_PHOTO_STUDIO_DIMENSIONS = Object.freeze({ width: 1152, height: 2048 });
+import { DEFAULT_PHOTO_STUDIO_DIMENSIONS, PHOTO_STUDIO_DIMENSION_LIMITS } from '../shared/photoStudioDimensions.js';
 
-export const PHOTO_STUDIO_DIMENSION_LIMITS = Object.freeze({ min: 512, max: 2048, step: 8 });
+export { DEFAULT_PHOTO_STUDIO_DIMENSIONS, PHOTO_STUDIO_DIMENSION_LIMITS };
 
 export function isPairPose(pose) {
   return /双人|pair/i.test(`${pose?.system || ''} ${pose?.id || ''}`);

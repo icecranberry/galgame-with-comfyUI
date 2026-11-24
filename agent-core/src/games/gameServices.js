@@ -375,13 +375,13 @@ export function createGameServices(gameId, repo, assertPermission) {
     });
     const includeUser = background ? false : explicitCast ? characters.includes(playerName) : undefined;
     const hints = [style, background ? '纯环境空镜，不画人物，不添加文字。' : '表现角色的动作和当前状态，不添加文字。'].filter(Boolean).join('\n');
-    const { prompt, loras } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
+    const { prompt, loras, characterLoraActors } = await generateStudioScenePrompt(description, { explicitCharacters, includeUser, userName: playerName, style: hints,
       roleplay: false, scope: `image:trpg:${sessionId}`, signal: controller.signal });
     controller.signal.throwIfAborted();
     const { eventArtist, eventWidth, eventHeight } = config.comfyui;
     return { prompt, options: {
       scene: 'game', workflowScene: 'events', promptScene: 'events',
-      artist: eventArtist, width: eventWidth, height: eventHeight, loras, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS } };
+      artist: eventArtist, width: eventWidth, height: eventHeight, loras, characterLoraActors, ragQuery: description, ragTimeoutMs: RAG_TIMEOUT_FAST_MS } };
   }
 
   return { llm, dispose: () => controller.abort(new Error('游戏已停用或卸载')),

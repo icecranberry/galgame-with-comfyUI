@@ -3,6 +3,7 @@ import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getDb } from '../db/index.js';
 import { generateImage, generateImageRaw, getLastWorkflowMode } from '../services/imageSkill.js';
+import { characterLoraActor } from '../services/characterLoraPrompt.js';
 import { refineImage } from '../services/imageRefine.js';
 import { readImageWorkflow, encodeImageWithWorkflow } from '../services/imageWorkflowMetadata.js';
 import sharp from 'sharp';
@@ -17,6 +18,7 @@ import { getAllImageDirs, IMAGE_CATEGORIES, LEGACY_CATEGORY, saveBase64Image, ge
 import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { studioDimensions, saveStudioChatImages } from '../services/studioChatImages.js';
+import { DEFAULT_PHOTO_STUDIO_DIMENSIONS } from '../shared/photoStudioDimensions.js';
 import { collectCharacterLoras } from '../services/groupImageLoraMatcher.js';
 import { ACTIVE_WORKFLOW, PRO_WORKFLOW } from '../services/workflowTemplates.js';
 import { startTrpgPictureEdit } from '../games/trpgPictureEdit.js';
@@ -211,7 +213,7 @@ router.post('/test-style', async (req, res) => {
     if (typeof req.body.sceneDesc !== 'string' || !req.body.sceneDesc.trim()) {
       return res.status(400).json({ error: '指定入镜角色时必须提供 sceneDesc 画面描述' });
     }
-    const lookup = getDb().prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?');
+    const lookup = getDb().prepare('SELECT id, name, display_name, base_prompt, loras FROM characters WHERE id = ?');
     explicitCharacters = ids.map(id => lookup.get(id));
     const missing = ids.filter((_, index) => !explicitCharacters[index]);
     if (missing.length) return res.status(400).json({ error: `入镜角色不存在：${missing.join('、')}` });
@@ -263,10 +265,11 @@ router.post('/test-style', async (req, res) => {
   let prompt;
   let generatedPrompt = null;
   let sceneLoras = [];
+  let characterLoraActors = [];
   if (freeScene) {
     const tPrompt = performance.now();
     try {
-      ({ prompt, loras: sceneLoras } = await generateStudioScenePrompt(freeScene, { explicitCharacters, angelReference }));
+      ({ prompt, loras: sceneLoras, characterLoraActors } = await generateStudioScenePrompt(freeScene, { explicitCharacters, angelReference }));
     } catch (err) {
       console.error('[test-style] scene prompt generation error:', err.message);
       return finish({ success: false, error: '提示词生成失败: ' + err.message }, 500);
@@ -280,6 +283,7 @@ router.post('/test-style', async (req, res) => {
     // 复用提示词重测（前端拿已生成的 prompt 再点发送测试）→ 上次匹配到的角色 lora 继续生效
     if (reuseSceneLoras && Array.isArray(lastStyleTest?.sceneLoras)) {
       sceneLoras = lastStyleTest.sceneLoras;
+      characterLoraActors = lastStyleTest.characterLoraActors;
       if (sceneLoras.length > 0) console.log(`[test-style] reusing ${sceneLoras.length} scene lora(s) from last test`);
     }
   }
@@ -304,7 +308,7 @@ router.post('/test-style', async (req, res) => {
         generatedPrompt = preparedPrompt;
         send('prompt', { generatedPrompt, stage: 'generating' });
       },
-      ...(sceneLoras.length > 0 ? { loras: sceneLoras } : {}),
+      ...(sceneLoras.length > 0 ? { loras: sceneLoras, characterLoraActors } : {}),
       onProgress: (p) => {
         // 捕获各阶段时间戳用于 timing breakdown
         if (p.stage === 'submitting') timing.submitting = performance.now();
@@ -345,6 +349,7 @@ router.post('/test-style', async (req, res) => {
         mode,
         wfMode: result.wfMode,
         sceneLoras,
+        characterLoraActors,
       };
       const saved = req.body.saveToChat === true ? saveStudioChatImages(getDb(), result, {
         prompt: result.promptRefined || prompt, originalPrompt: freeScene || customPrompt || prompt,
@@ -562,9 +567,10 @@ function lookupImageGenerationParams(filename, category) {
     if (photo) {
       params.promptText ||= photo.prompt;
       params.taskResolution ||= `${photo.width}x${photo.height}`;
-      const actors = [photo.character_id, photo.character2_id].filter(id => id != null)
-        .map(id => db.prepare('SELECT loras FROM characters WHERE id = ?').get(id)).filter(Boolean);
-      params.charLoras = collectCharacterLoras(actors);
+      const lookup = db.prepare('SELECT id, name, display_name, base_prompt, loras FROM characters WHERE id = ?');
+      const actors = [photo.character_id, photo.character2_id].map(id => id == null ? null : lookup.get(id));
+      params.charLoras = collectCharacterLoras(actors.filter(Boolean));
+      params.characterLoraActors = actors.filter(Boolean).map(actor => characterLoraActor(actor, { required: true }));
     }
     params.taskWorkflowTemplate = params.taskWorkflowTemplate?.replace(/^photo-studio-anima-/, '') || null;
   }
@@ -628,7 +634,7 @@ function categoryGenConfig(category) {
     gifts:     { artist: config.comfyui.artist,         width: config.comfyui.width,         height: config.comfyui.height },
     avatargen: { artist: config.comfyui.momentsArtist,  width: 768,                         height: 768 },
     standing:  { artist: config.comfyui.momentsArtist,  width: 768,                         height: 1536 },
-    photo_studio: { artist: config.comfyui.momentsArtist ?? config.comfyui.artist, width: 1152, height: 2048 },
+    photo_studio: { artist: config.comfyui.momentsArtist ?? config.comfyui.artist, ...DEFAULT_PHOTO_STUDIO_DIMENSIONS },
   };
   return map[category] || { artist: config.comfyui.artist, width: 1024, height: 1024 };
 }
@@ -717,6 +723,7 @@ async function startImageEditTask(action, url) {
           onProgress,
         };
         if (params.charLoras?.length > 0) genOpts.loras = params.charLoras;
+        if (params.characterLoraActors) genOpts.characterLoraActors = params.characterLoraActors;
         if (params.charCustomWorkflow) genOpts.customWorkflow = params.charCustomWorkflow;
         else if (category === 'photo_studio' && params.taskWorkflowTemplate) {
           genOpts.customWorkflow = params.taskWorkflowTemplate === 'base' ? PRO_WORKFLOW

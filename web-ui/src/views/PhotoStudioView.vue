@@ -198,7 +198,7 @@ import LinsheTabs from '../components/ui/LinsheTabs.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import { isImageFile, normalizeImage } from '../utils/imageUpload.js'
-import { PHOTO_ASPECT_RATIOS, initialPhotoStudioFrame, clampPhotoDimension, photoDimensionControls, resizePhoto } from '../utils/photoStudioDimensions.js'
+import { PHOTO_ASPECT_RATIOS, PHOTO_STUDIO_FRAME_VERSION, initialPhotoStudioFrame, clampPhotoDimension, photoDimensionControls, resizePhoto } from '../utils/photoStudioDimensions.js'
 
 const toggleMobileSidebar = inject('toggleMobileSidebar', () => {})
 const posePanel = ref(null), characterPanel = ref(null)
@@ -474,8 +474,8 @@ function syncAspect(anchor) {
 }
 function setWidth(value) { width.value = clampPhotoDimension(value); syncAspect('width') }
 function setHeight(value) { height.value = clampPhotoDimension(value); syncAspect('height') }
-watch(aspectRatio, value => { if (value !== 'custom') syncAspect('width') })
-function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ burstCount: burstCount.value, poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: 2, background: background.value, polishInstruction: polishInstruction.value, clothingBinding: 'slot', slotOutfits: slotOutfits.value, customOutfits: customOutfits.value, clothingDrafts: clothingDrafts.value })) }
+watch(aspectRatio, value => { if (value !== 'custom') syncAspect('average') }, { flush: 'sync' })
+function persistSelection() { sessionStorage.setItem('photo-studio-selection', JSON.stringify({ burstCount: burstCount.value, poseId: poseId.value, characterId: characterId.value, secondCharacterId: secondCharacterId.value, width: width.value, height: height.value, aspectRatio: aspectRatio.value, frameVersion: PHOTO_STUDIO_FRAME_VERSION, background: background.value, polishInstruction: polishInstruction.value, clothingBinding: 'slot', slotOutfits: slotOutfits.value, customOutfits: customOutfits.value, clothingDrafts: clothingDrafts.value })) }
 watch([burstCount, poseId, characterId, secondCharacterId, width, height, aspectRatio, background, polishInstruction], persistSelection)
 watch([slotOutfits, customOutfits, clothingDrafts], persistSelection, { deep: true, flush: 'sync' })
 watch(systemFilter, () => {
@@ -681,7 +681,7 @@ async function refreshSavedBackground() {
 onMounted(refreshSavedBackground)
 onMounted(() => { globalThis.document?.addEventListener('paste', pastePose) })
 onBeforeUnmount(() => { globalThis.document?.removeEventListener('paste', pastePose) })
-onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (saved.characterId !== '' && saved.characterId !== null && !sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; syncAspect('width'); await Promise.resolve(); if (disposed) return; persistSelection() })
+onMounted(async () => { await load(); if (disposed) return; if (!(poseId.value === 'custom-upload' && customPose.value) && !recognizedPoses.value.some(item => item.id === poseId.value)) poseId.value = recognizedPoses.value[0]?.id || ''; if (saved.characterId !== '' && saved.characterId !== null && !sortedCharacters.value.some(item => Number(item.id) === Number(characterId.value))) characterId.value = sortedCharacters.value[0]?.id || ''; if (Number(secondCharacterId.value) === Number(characterId.value)) secondCharacterId.value = ''; await Promise.resolve(); if (disposed) return; persistSelection() })
 onBeforeUnmount(() => { detachPresentation(); finishPresentation(); disposed = true; poseRequest?.abort(); stopFakeProgress(); clearTimeout(flashTimer); clearTimeout(shutterFlashTimer); clearTimeout(shutterTimer); promptRevision++ })
 </script>
 

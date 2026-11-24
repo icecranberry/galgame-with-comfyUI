@@ -20,7 +20,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { submitWorkflow, apiToGui, guiToApi } from './comfyClient.js';
 import { randomizeWorkflowSeeds } from './imageWorkflowMetadata.js';
-import { markLoraWorkflow, recomposeLoraWorkflow } from './imageLoraProvenance.js';
+import { loraTriggerEntries, markLoraWorkflow, recomposeLoraWorkflow } from './imageLoraProvenance.js';
+import { collectSharedLoraTriggers } from './characterLoraPrompt.js';
 import { config, getNovelaiApiKey } from '../config.js';
 import { matchesGlobalLoraScene } from '../utils/globalLora.js';
 import { generateNovelaiImage } from './novelaiClient.js';
@@ -246,7 +247,10 @@ function buildWorkflow(promptText, overrides = {}) {
 
     // lora触发词节点：注入所有 lora 的 triggerWord 拼接
     if (node.title === NODE_TITLES.loraTrigger && hasLoras) {
-      const triggerWords = loras.map(l => l.triggerWord || '').filter(Boolean).join(', ');
+      const entries = overrides.sharedCharacterTriggers?.length
+        ? loraTriggerEntries(loras.map(lora => ({ ...lora, source: globalLoras.includes(lora) ? 'global' : 'character' })), overrides.sharedCharacterTriggers)
+        : loras;
+      const triggerWords = entries.map(l => l.triggerWord || '').filter(Boolean).join(', ');
       if (triggerWords) {
         node.widgets_values[0] = triggerWords;
       }
@@ -290,7 +294,10 @@ function buildWorkflow(promptText, overrides = {}) {
   const loraIds = wf.nodes.filter(n => !originalIds.has(n.id)).map(n => n.id);
   // 无有效模型链/触发词入口的自定义模板继续保留原行为，不声明可分类重生。
   if (!hasLoras || loraIds.length === loras.length) {
-    markLoraWorkflow(wf, { globals: globalLoras, characters: providedLoras, scene: overrides.scene, loraIds });
+    markLoraWorkflow(wf, {
+      globals: globalLoras, characters: providedLoras, scene: overrides.scene, loraIds,
+      sharedCharacterTriggers: overrides.sharedCharacterTriggers,
+    });
   }
 
   console.log(`[imageSkill] Workflow built: ${path.basename(wfPath)} (${pathToMode(wfPath)})${hasLoras ? ` (${loras.length} lora(s))` : ''}`);
@@ -461,7 +468,7 @@ const MAX_SUBMIT_RETRIES = 2;
  */
 async function submitWithRetry(rawPrompt, {
   artist, width, height, onProgress, submitRetries = MAX_SUBMIT_RETRIES,
-  loras, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
+  loras, characterLoraActors, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
   sourceWorkflow,
   imageProvider = config.comfyui.imageProvider,
   outputScope,
@@ -476,6 +483,9 @@ async function submitWithRetry(rawPrompt, {
 
   // 1. 汇总数量标签。需要保留原料原文的自然语言提示词会显式跳过此步。
   const finalPrompt = sourceWorkflow || !normalizeComfyCountTags ? rawPrompt : finalizeCountTags(rawPrompt);
+  const sharedCharacterTriggers = !sourceWorkflow && characterLoraActors?.length > 1
+    ? collectSharedLoraTriggers(finalPrompt, loras || [], characterLoraActors, normalizeLoraValue)
+    : undefined;
   console.log(`[imageSkill] Final prompt: ${finalPrompt}`);
 
   // 2. 构建 workflow
@@ -487,7 +497,8 @@ async function submitWithRetry(rawPrompt, {
     wf: randomizeWorkflowSeeds(recomposed.prompt),
     wfMode: 'original',
   } : buildWorkflow(finalPrompt, {
-    artist, width, height, loras, customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
+    artist, width, height, loras, sharedCharacterTriggers,
+    customWorkflow, scene, workflowScene, globalLoraSnapshot, qualityPrompt, negativePrompt,
   });
   if (onProgress) onProgress({ stage: 'submitting' });
 

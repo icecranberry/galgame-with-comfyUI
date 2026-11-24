@@ -10,6 +10,7 @@ import { resolveStudioBackground, getStudioBackgrounds } from './photoStudioBack
 import { angelOutfits } from './godSays/angelWardrobe.js';
 import { resolveCustomStudioPose } from './photoStudioPose.js';
 import { collectCharacterLoras } from './groupImageLoraMatcher.js';
+import { characterLoraActor } from './characterLoraPrompt.js';
 import { polishStudioPrompt, getStudioPolishContext, generateStudioClothing, splitStudioTags, studioPoseTags } from './photoStudioPolish.js';
 import { generateImage, getLastWorkflowMode } from './imageSkill.js';
 import { saveBase64Image } from './imagePaths.js';
@@ -221,8 +222,11 @@ export function createPhotoStudioService({
       ...outfits.flatMap(outfit => [...outfit.tags.flatMap(splitStudioTags), ...splitStudioTags(outfit.custom)]),
       ...studioPoseTags(poseText),
     ])];
-    const loras = collectCharacterLoras([first, ...(second ? [second] : [])].filter(character => !character.angel));
-    return { first, second, pose, backgroundId, prompt, dimensions, personas, loras, requiredTags, polishInstruction };
+    const cast = second ? [first, second] : [first];
+    const loras = collectCharacterLoras(cast.filter(character => !character.angel));
+    const characterLoraActors = cast.filter(character => !character.angel)
+      .map(character => characterLoraActor(character, { required: true }));
+    return { first, second, pose, backgroundId, prompt, dimensions, personas, loras, characterLoraActors, requiredTags, polishInstruction };
   }
 
   async function preview(input) {
@@ -244,7 +248,7 @@ export function createPhotoStudioService({
       } else if (active) throw Object.assign(new Error('已有连拍任务，请等待完成或停止后续拍摄'), { status: 409 });
     }
     checkBatch();
-    const { first, second, pose, backgroundId, prompt, dimensions, personas, loras, requiredTags, polishInstruction } = await prepare(input);
+    const { first, second, pose, backgroundId, prompt, dimensions, personas, loras, characterLoraActors, requiredTags, polishInstruction } = await prepare(input);
     const supported = await capability();
     if (!supported.available) throw Object.assign(new Error(supported.error), { status: 503 });
     const firstName = first.display_name || first.name;
@@ -266,12 +270,12 @@ export function createPhotoStudioService({
     })();
     if (created) {
       notify(id);
-      void execute(job(id), { polishPrompt: input.polishPrompt === true, personas, loras, requiredTags, polishInstruction });
+      void execute(job(id), { polishPrompt: input.polishPrompt === true, personas, loras, characterLoraActors, requiredTags, polishInstruction });
     }
     return job(id);
   }
 
-  async function execute(snapshot, { polishPrompt, personas, loras, requiredTags, polishInstruction }) {
+  async function execute(snapshot, { polishPrompt, personas, loras, characterLoraActors, requiredTags, polishInstruction }) {
     const database = db();
     try {
       if (polishPrompt) {
@@ -300,9 +304,9 @@ export function createPhotoStudioService({
         promptScene: 'standalone',
         alreadyPrepared: true,
         artist: config.comfyui.momentsArtist ?? config.comfyui.artist,
-        // Keep LoRA triggers out of AI rewriting; the shared workflow adds them
-        // to its dedicated trigger node and loads the models with their saved weights.
+        // The workflow merges shared triggers independently of AI rewriting.
         loras,
+        characterLoraActors,
         width: snapshot.width,
         height: snapshot.height,
         onProgress: event => {

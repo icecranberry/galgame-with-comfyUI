@@ -7,6 +7,8 @@ import { chatWithPreset } from '../services/presets/narrative.js';
 import { config } from '../config.js';
 import { getMomentDelay } from '../services/momentTiming.js';
 import { generateImageRaw } from '../services/imageSkill.js';
+import { characterLoraActor } from '../services/characterLoraPrompt.js';
+import { matchCharactersInImagePrompt } from '../services/groupImageLoraMatcher.js';
 import { charArtistOverrideWithFallback } from '../services/characterImageOpts.js';
 import { buildCharacterPersona, ensureImagePromptIdentity } from '../services/characterPersona.js';
 import { getGodWorldContext } from '../services/godSays/worldContext.js';
@@ -412,6 +414,10 @@ router.post('/:id/regenerate-image', async (req, res) => {
 
   // 落库的 prompt 多图时用分隔线拼接，按同一分隔线拆回逐张提示词
   const imagePrompts = splitMomentImagePrompts(post.prompt);
+  const candidates = isNpcPost ? [] : db.prepare(`
+    SELECT id, name, display_name, base_prompt, loras FROM characters
+    WHERE id != ? AND loras IS NOT NULL AND loras != '[]'
+  `).all(author.id);
   // 宽高沿用发帖时记录的尺寸，解析失败再退回当前配置
   const { width, height } = parseMomentResolution(post.resolution);
 
@@ -426,7 +432,7 @@ router.post('/:id/regenerate-image', async (req, res) => {
       : generateMomentImages(author, imagePrompts, {
           text: post.content || '',
           manual: true,
-          otherChars: [],
+          loraCandidates: candidates,
           width,
           height,
           postId: post.id,
@@ -464,6 +470,7 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
     text = '',
     manual = false,
     otherChars = [],
+    loraCandidates = [],
     width = config.comfyui.momentsWidth,
     height = config.comfyui.momentsHeight,
     postId = null,
@@ -488,6 +495,7 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
       loraOpts = {
         customWorkflow: otherChars.length > 0 ? null : (character.custom_workflow || null),
         loras: uniqueLoras,
+        characterLoraActors: [character, ...otherChars].map(actor => characterLoraActor(actor, { required: true })),
       };
       console.log(`[moments] Lora: self=${selfLoras.length} others=${otherLoras.length} total=${uniqueLoras.length}`);
     }
@@ -502,6 +510,7 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
         if (promptWithIdentity !== imagePrompts[i]) {
           console.log(`[moments] restored character identity tag for image ${i + 1}/${imagePrompts.length}: ${promptWithIdentity.slice(0, 80)}`);
         }
+        const matched = loraCandidates.length ? matchCharactersInImagePrompt(promptWithIdentity, loraCandidates) : [];
         const genResult = await generateImageRaw(promptWithIdentity, {
           ragQuery: text,
           artist: charArtist !== null ? charArtist : config.comfyui.momentsArtist,
@@ -510,6 +519,7 @@ async function generateMomentImages(character, imagePrompts, opts = {}) {
           scene: 'moments',
           priority: manual ? 'high' : 'low',
           ...loraOpts,
+          ...(matched.length ? { characterLoraActors: [character, ...matched].map(actor => characterLoraActor(actor, { required: true })) } : {}),
         });
 
         if (!genResult.success || genResult.images.length === 0) continue;
@@ -1031,7 +1041,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
 
   // 3. 生成配图
   const otherChars = multiPersons
-    .map(mp => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(mp.otherId))
+    .map(mp => db.prepare('SELECT id, name, display_name, base_prompt, loras, artist_override FROM characters WHERE id = ?').get(mp.otherId))
     .filter(Boolean);
   const { imageUrls: genImageUrls, usedPrompts } = await generateMomentImages(character, imagePrompts, {
     text,

@@ -2,6 +2,7 @@ import { getDb } from '../db/index.js';
 import { matchAll } from './characterSearch.js';
 import { buildCharacterPersona, buildImageCrossRefInfo } from './characterPersona.js';
 import { charArtistOverrideWithFallback } from './characterImageOpts.js';
+import { characterLoraActor } from './characterLoraPrompt.js';
 
 /** 新日程以ID为准；旧日程复用画风测试的姓名检测，不扫描角色人格和关系全文。 */
 export function resolveScheduleParticipants(characterId, activity, { db = getDb(), detect = matchAll } = {}) {
@@ -30,12 +31,13 @@ export function parseCharacterLoras(value) {
 
 export function scheduleImageContext(character, activity, options = {}) {
   const others = resolveScheduleParticipants(character.id, activity, options);
-  const loras = [...new Map([character, ...others].flatMap(c => parseCharacterLoras(c.loras)).map(l => [l.name || l.filename || JSON.stringify(l), l])).values()];
+  const cast = [character, ...others];
+  const loras = [...new Map(cast.flatMap(c => parseCharacterLoras(c.loras)).map(l => [l.name || l.filename || JSON.stringify(l), l])).values()];
   const artist = charArtistOverrideWithFallback(character, others);
   return {
     others, participantIds: [Number(character.id), ...others.map(c => c.id)],
     crossReference: others.length ? `【此刻实际在场的同行者】\n${others.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`).join('\n\n')}\n画面包含主角与以上同行者，分别描述每个人的外观与动作，人数准确。` : '',
     imageOptions: { ...(loras.length ? { loras } : {}), ...(artist !== null ? { artist } : {}),
-      ...(others.length ? { customWorkflow: null } : character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}) },
+      ...(others.length ? { characterLoraActors: cast.map(actor => characterLoraActor(actor, { required: true })), customWorkflow: null } : character.custom_workflow ? { customWorkflow: character.custom_workflow } : {}) },
   };
 }

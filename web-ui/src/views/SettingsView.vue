@@ -402,8 +402,8 @@
               </div>
               <div class="llm-magpie-help">
                 <div class="llm-magpie-guide">
-                  <a href="https://github.com/yetone/magpie/releases/download/v0.1.4740/magpie-windows-amd64.exe" target="_blank" rel="noopener" class="ext-link llm-magpie-download">下载 Magpie <span class="llm-magpie-platform">Windows x64 <span aria-hidden="true">↗</span></span></a>
-                  <p>下载后运行 <code>magpie.exe</code>，在 Magpie 左侧栏打开<strong>「路由 → 永不卡住」</strong>，配置多个 Token 来源。</p>
+                  <a href="https://usemagpie.ai/download/windows-amd64" target="_blank" rel="noopener" class="ext-link llm-magpie-download">下载 Magpie <span class="llm-magpie-platform">Windows x64 <span aria-hidden="true">↗</span></span></a>
+                  <p>下载后运行 <code>magpie.exe</code>，在 Magpie 左侧栏打开<strong>「路由组 → 永不卡住」</strong>，配置多个 Token 来源。</p>
                 </div>
                 <div class="llm-magpie-preset">
                   <h5>邻舍已默认配置</h5>

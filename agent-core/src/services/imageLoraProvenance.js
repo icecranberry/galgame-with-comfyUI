@@ -1,5 +1,16 @@
+export function loraTriggerEntries(active, sharedCharacterTriggers = []) {
+  if (!sharedCharacterTriggers.length) return active;
+  const shared = new Map(sharedCharacterTriggers.map(lora => [lora.path, lora.triggerWord]));
+  return active.flatMap(lora => {
+    const triggerWord = shared.get(lora.path);
+    if (!triggerWord) return [lora];
+    const character = { source: 'character', triggerWord };
+    return lora.source === 'character' ? [character] : [lora, character];
+  });
+}
+
 // 只管理本程序生成的节点；模板内手工挂载的 LoRA 保持原样。
-export function markLoraWorkflow(wf, { globals, characters, scene, loraIds }) {
+export function markLoraWorkflow(wf, { globals, characters, scene, loraIds, sharedCharacterTriggers }) {
   const trigger = wf.nodes.find(n => n.title === 'lora触发词' && n.type === 'PrimitiveString');
   const unet = wf.nodes.find(n => n.type === 'UNETLoader');
   if (!trigger || !unet) return null;
@@ -14,6 +25,7 @@ export function markLoraWorkflow(wf, { globals, characters, scene, loraIds }) {
     node.title = `${lora.source === 'global' ? '全局' : '角色'} LoRA`;
     node.properties.linsheSource = lora.source;
   }
+  const triggers = loraTriggerEntries(active, sharedCharacterTriggers);
   const strings = ['global', 'character'].map(source => {
     const nodeId = ++id;
     const linkId = ++link;
@@ -24,7 +36,7 @@ export function markLoraWorkflow(wf, { globals, characters, scene, loraIds }) {
       inputs: [{ name: 'value', type: 'STRING', widget: { name: 'value' }, link: null }],
       outputs: [{ name: 'STRING', type: 'STRING', links: [linkId] }],
       properties: { 'Node name for S&R': 'PrimitiveString', linsheSource: source },
-      widgets_values: [active.filter(l => l.source === source).map(l => l.triggerWord || '').filter(Boolean).join(', ')],
+      widgets_values: [triggers.filter(l => l.source === source).map(l => l.triggerWord || '').filter(Boolean).join(', ')],
     };
     wf.nodes.push(node);
     wf.links.push([linkId, nodeId, 0, trigger.id, source === 'global' ? 0 : 1, 'STRING']);
@@ -51,6 +63,7 @@ export function markLoraWorkflow(wf, { globals, characters, scene, loraIds }) {
     version: 1, scene: scene || null, globals: structuredClone(globals), characters: structuredClone(characters),
     loraIds: loraIds.map(String), modelSource: [String(unet.id), 0],
     modelTargets,
+    ...(sharedCharacterTriggers?.length ? { sharedCharacterTriggers: structuredClone(sharedCharacterTriggers) } : {}),
     globalTriggerId: String(strings[0].nodeId), characterTriggerId: String(strings[1].nodeId),
   };
   wf.extra = { ...wf.extra, linsheGeneration: record };
@@ -94,8 +107,9 @@ export function recomposeLoraWorkflow(prompt, record, globals) {
     loraIds.push(nodeId);
   }
   for (const [node, key] of targets) node.inputs[key] = [...source];
+  const triggers = loraTriggerEntries(active, record.sharedCharacterTriggers);
   for (const [source, nodeId] of [['global', record.globalTriggerId], ['character', record.characterTriggerId]]) {
-    copy[nodeId].inputs.value = active.filter(l => l.source === source).map(l => l.triggerWord || '').filter(Boolean).join(', ');
+    copy[nodeId].inputs.value = triggers.filter(l => l.source === source).map(l => l.triggerWord || '').filter(Boolean).join(', ');
   }
   return { prompt: copy, generation: { ...structuredClone(record), globals: structuredClone(globals), loraIds } };
 }

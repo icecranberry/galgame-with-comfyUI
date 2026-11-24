@@ -209,7 +209,7 @@ router.post('/:characterId/peek/retake', async (req, res) => {
     }
 
     const db = getDb();
-    const character = db.prepare('SELECT id, display_name, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
+    const character = db.prepare('SELECT id, name, display_name, base_prompt, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
     if (!character) {
       return res.status(404).json({ error: 'character not found' });
     }
@@ -294,7 +294,7 @@ router.post('/:characterId/peek', async (req, res) => {
     }
 
     const db = getDb();
-    const character = db.prepare('SELECT id, display_name, base_prompt, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
+    const character = db.prepare('SELECT id, name, display_name, base_prompt, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(characterId);
     if (!character) {
       return res.status(404).json({ error: 'character not found' });
     }

@@ -27,8 +27,9 @@ import {
   loadAffinity, saveAffinity, evolveAffinity, getCompositeEmotion,
 } from '../services/emotionEngine.js';
 import { generateImage, getLastWorkflowMode, captureImageGenerationConfig } from '../services/imageSkill.js';
+import { characterLoraActor } from '../services/characterLoraPrompt.js';
 import { charArtistOverride } from '../services/characterImageOpts.js';
-import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo } from '../services/characterPersona.js';
+import { buildCharacterPersona, buildImageCrossRefInfo, buildUserImageCrossRefInfo, extractCharacterEnglishName } from '../services/characterPersona.js';
 import { getActiveBuffBlock } from '../services/itemService.js';
 import { getWorldStateBlock, takePrivateNewspaperBlockFor } from '../services/newspaperService.js';
 import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
@@ -1167,7 +1168,7 @@ ${coreRules}
         width: config.comfyui.width, height: config.comfyui.height,
         artist: config.comfyui.imageProvider === 'novelai' ? config.comfyui.novelaiArtist : config.comfyui.artist,
       } };
-      snapshot.crossCharacters = snapshot.crossRefCharIdsForImage.map(id => db.prepare('SELECT loras,artist_override FROM characters WHERE id=?').get(id)).filter(Boolean);
+      snapshot.crossCharacters = snapshot.crossRefCharIdsForImage.map(id => db.prepare('SELECT id,name,display_name,base_prompt,loras,artist_override FROM characters WHERE id=?').get(id)).filter(Boolean);
       return queuePrivateImage(db, { conversationId, userRawId: userRawMsgId, scene, snapshot, ...binding, notify: notifyImage,
         execute: async ({ taskId, rawId, messageId }, frozen) => {
           const output = await requestNonEmptyImagePrompt(() => chatWithLorebook(frozen.msgs, { temperature: 0.7, label: '私聊生图', lorebook: frozen.lorebook }), { emptyRetries: 1 });
@@ -1647,12 +1648,14 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   // 查找角色 lora 设置
   let loraOpts = {};
+  const characterLoraActors = [];
   try {
     const charId = parseInt(String(conversationId).replace(/^char_/, ''), 10);
     if (!Number.isNaN(charId)) {
-      const char = frozenCharacter || db.prepare('SELECT custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(charId);
+      const char = frozenCharacter || db.prepare('SELECT id, name, display_name, base_prompt, custom_workflow, loras, artist_override FROM characters WHERE id = ?').get(charId);
       if (char) {
         const loras = includeCharacter ? _parseLoras(char) : [];
+        if (loras.length) characterLoraActors.push(characterLoraActor(char, { required: true }));
         if (loras.length > 0 || (includeCharacter && char.custom_workflow) || charArtistOverride(char) !== null) {
           const opts = {};
           if (includeCharacter && char.custom_workflow) opts.customWorkflow = char.custom_workflow;
@@ -1670,7 +1673,8 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
 
   // 合并交叉引用角色 LoRA（去重，主角色优先）
   if (crossRefCharIds.length > 0) {
-    const crossChars = frozenCrossCharacters || crossRefCharIds.map(id => db.prepare('SELECT loras, artist_override FROM characters WHERE id = ?').get(id)).filter(Boolean);
+    const crossChars = frozenCrossCharacters || crossRefCharIds.map(id => db.prepare('SELECT id, name, display_name, base_prompt, loras, artist_override FROM characters WHERE id = ?').get(id)).filter(Boolean);
+    characterLoraActors.push(...crossChars.map(char => characterLoraActor(char)));
     const crossLoras = crossChars.flatMap(c => _parseLoras(c));
     if (crossLoras.length > 0) {
       const allLoras = [...(loraOpts.loras || []), ...crossLoras];
@@ -1703,6 +1707,7 @@ async function triggerImageGeneration(conversationId, prompt, assistantMsgId, ta
       },
       ...frozenImageConfig,
       ...loraOpts,
+      characterLoraActors,
     });
     if (result.success && result.images.length > 0) {
       const urls = [];
@@ -1781,10 +1786,13 @@ function buildImagePromptMessages(conversationId, character, source = { kind: 'd
   const crossBlocks = [];
   if (crossMatches.length > 0) {
     const crossChars = crossMatches.map(m =>
-      db.prepare('SELECT id, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
+      db.prepare('SELECT id, name, display_name, base_prompt, loras FROM characters WHERE id = ?').get(m.id)
     ).filter(Boolean);
 
-    crossBlocks.push(...crossChars.map(c => `[${c.display_name}]\n${buildImageCrossRefInfo(c)}`));
+    crossBlocks.push(...crossChars.map(c => {
+      const name = extractCharacterEnglishName(c);
+      return `[${c.display_name}${name ? ` / ${name}` : ''}]\n${buildImageCrossRefInfo(c)}`;
+    }));
 
     crossRefCharIdsForImage = crossChars.map(c => c.id);
   }
@@ -1797,7 +1805,7 @@ function buildImagePromptMessages(conversationId, character, source = { kind: 'd
   if (crossBlocks.length > 0) {
     crossRefImageMsgs.push({
       role: 'system',
-      content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}`
+      content: `【画面交叉参考】以下角色/用户的身份与外观信息必须体现在生成的画面中：\n\n${crossBlocks.join('\n\n')}${crossRefCharIdsForImage.length ? '\n\n入镜角色若在资料中有英文名，用该名字开始该人物的外观和动作描述。' : ''}`
     });
   }
 

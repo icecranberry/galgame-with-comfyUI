@@ -45,6 +45,7 @@ import { stripImagePromptLines, stripBracePromptBlocks, extractUnbracedGroupImag
 import { getCurrentActivity } from './scheduleManager.js';
 import { detectAndApplyAppointment } from './appointmentDetector.js';
 import { resolveGroupImageLoras, parseCharacterLoras } from './groupImageLoraMatcher.js';
+import { characterLoraActor } from './characterLoraPrompt.js';
 import { invalidateGalleryCache } from './galleryCache.js';
 import { buildGroupEmojiNote, getCharacterEmojiMap, parseGroupEmojiText, getEmojiCategories, parseEmojiText } from './emojiService.js';
 import { refreshMentionDossiers, buildMentionDossierBlock } from './groupMentionDossier.js';
@@ -679,6 +680,7 @@ async function generateGroupImage(group, speaker, prompt, targetMsgId, emit, opt
       },
       ...resolutionOverrides,
       ...loraOpts,
+      characterLoraActors: matchedCharacters.map(character => characterLoraActor(character.id === speaker.id ? speaker : character, { required: true })),
     });
     if (result.promptRefined) {
       db.prepare(`UPDATE image_tasks SET prompt_refined = ? WHERE id = ?`).run(result.promptRefined, taskId);
