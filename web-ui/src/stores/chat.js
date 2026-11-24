@@ -73,6 +73,7 @@ export const useChatStore = defineStore('chat', () => {
   }
   const characters = ref([])
   const activeCharId = ref(null)
+  const historyLoadedFor = ref(null)
   const messages = ref([])       // unified: { id, role, type, content, images, genId, genStatus, genStartTime, created_at }
   const queuedReplies = ref({}) // presentation only; authoritative delayed replies still use the original queue/SSE
   const streaming = ref(false)
@@ -171,6 +172,7 @@ export const useChatStore = defineStore('chat', () => {
         lastSendError.value = recovery.error
       }
       messages.value = result;
+      historyLoadedFor.value = charId
       for (const task of d.imageTasks || []) applyImageEvent({ characterId: charId, taskId: task.id,
         messageId: task.message_id, userRawId: task.user_raw_id, created_at: task.created_at,
         event: task.status === 'failed' ? 'generate_error' : 'generate_start', error: task.error_message })
@@ -1050,6 +1052,6 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  return { characters, activeCharId, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, guessSourceRawId, dialogueRevision, responseComplete, lastSendError, failedTurn, retryFailedMessage, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
+  return { characters, activeCharId, historyLoadedFor, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, guessSourceRawId, dialogueRevision, responseComplete, lastSendError, failedTurn, retryFailedMessage, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
     loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
 })

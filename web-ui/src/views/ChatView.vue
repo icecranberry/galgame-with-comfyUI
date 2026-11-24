@@ -69,6 +69,13 @@
         <!-- 加载指示器置于列表顶部 → 用户上滚到顶部时自动展开更早消息 -->
         <div v-if="chat.hasMoreOlder" class="load-older load-older-hint">↑ 向上滚动加载更多</div>
 
+        <div v-if="showHistoryEmpty" class="history-empty">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" />
+          </svg>
+          <span>还没有聊过天</span>
+          <span class="history-empty-hint">跟{{ chat.activeChar?.display_name || "TA" }}打个招呼吧</span>
+        </div>
         <div ref="msgListInner" class="msg-list-inner">
           <template v-for="item in flatItems" :key="item.id">
             <!-- 时间分隔符 -->
@@ -1476,6 +1483,8 @@ return groups
 })
 
 // 扁平化列表（时间正序：最旧在上，最新在下）
+const showHistoryEmpty = computed(() => chat.historyLoadedFor === chat.activeCharId
+  && !flatItems.value.length && !chat.streaming && !chat.showTypingDots)
 const flatItems = computed(() => {
 const items = []
 for (const group of messageGroups.value) {
@@ -1888,6 +1897,12 @@ function renderContent(text) {
 }
 /* 内容层抬到背景层之上（同为定位元素后按 DOM 顺序绘制） */
 .chat-header, .message-list, .guesses-row, .input-area { position: relative; }
+.history-empty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  color: var(--text-secondary); font-size: 15px; pointer-events: none;
+}
+.history-empty-hint { font-size: 13px; opacity: 0.5; }
 .empty-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
 .empty-icon { font-size:56px; }
 .empty-state h2 { font-size:18px; color:var(--text-secondary); font-weight:400; }
