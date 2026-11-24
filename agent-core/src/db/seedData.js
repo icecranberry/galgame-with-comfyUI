@@ -99,7 +99,7 @@ export const DEFAULT_CHARACTERS = [
     moments_disabled: 1,
     proactive_disabled: 1,
     events_disabled: 1,
-    avatar_path: '/avatars/default_assistant_header.png',
+    avatar_path: '/default_assistant_header.png',
   },
 ];
 

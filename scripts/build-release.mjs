@@ -811,18 +811,6 @@ async function main() {
   writeFileSync(resolve(RELEASE_DIR, "VERSION"), VERSION + "\n", "utf-8");
   ok("VERSION");
 
-  // 默认头像：从 assets 源复制到 avatars 目录
-  const defaultAvatar = resolve(AGENT_CORE, "assets", "default_assistant_header.png");
-  if (existsSync(defaultAvatar)) {
-    const avatarDst = resolve(RELEASE_DIR, "agent-core", "data", "avatars");
-    ensureDir(avatarDst);
-    const { copyFileSync } = await import("node:fs");
-    copyFileSync(defaultAvatar, resolve(avatarDst, "default_assistant_header.png"));
-    ok("默认头像 → agent-core\\data\\avatars\\");
-  } else {
-    warn("默认头像不存在: agent-core/assets/default_assistant_header.png");
-  }
-
   // ═══════════════════════════════════════════
   // 打包 zip
   // ═══════════════════════════════════════════
