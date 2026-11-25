@@ -472,7 +472,8 @@ ${listing}
     llmCalls++;
     let resolutions = [];
     try {
-      const raw = await chatSync([{ role: 'user', content: prompt }], LLM_OPTS);
+      // 跨天记忆冲突消解/泛化归纳（T1/T2）使用 medium 思考强度，T5 回填保留默认 low。
+      const raw = await chatSync([{ role: 'user', content: prompt }], { ...LLM_OPTS, thinkingEffort: 'medium' });
       resolutions = parseJsonObject(raw).resolutions || [];
     } catch (error) {
       // 调用失败不记账：下一轮自然重试（与"模型判定无关"区分开）
@@ -574,7 +575,8 @@ ${listing}
     llmCalls++;
     let generalization = null;
     try {
-      const raw = await chatSync([{ role: 'user', content: prompt }], LLM_OPTS);
+      // 跨天记忆冲突消解/泛化归纳（T1/T2）使用 medium 思考强度，T5 回填保留默认 low。
+      const raw = await chatSync([{ role: 'user', content: prompt }], { ...LLM_OPTS, thinkingEffort: 'medium' });
       generalization = parseJsonObject(raw).generalization;
     } catch (error) {
       console.warn('[memory-consolidation] T2 LLM failed:', error.message);

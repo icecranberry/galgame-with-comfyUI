@@ -1,46 +1,34 @@
-import { applyThinking } from './thinkingMode.js';
+import { applyThinking, applyForcedThinking, normalizeThinkingEffort } from './thinkingMode.js';
 
 // 原生工具调用流；普通聊天的 string generator 契约保持不变。
-export function buildAgentRequest(messages, tools, llm, { forceThinking = true, temperature = 0.72, toolChoice = 'auto' } = {}) {
+export function buildAgentRequest(
+  messages,
+  tools,
+  llm,
+  { forceThinking = true, thinkingEffort = 'low', temperature = 0.72, toolChoice = 'auto' } = {},
+) {
+  const effort = normalizeThinkingEffort(thinkingEffort, 'low');
+  if (!forceThinking || effort === 'off') {
+    const normal = { model: llm.model, messages, temperature, stream: true };
+    const thinking = effort === 'off'
+      ? { type: 'disabled' }
+      : llm.thinkingMode === 'omit'
+        ? null
+        : { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
+    applyThinking(normal, thinking, llm.connectionType, effort, llm);
+    Object.assign(normal, llm.extraBody);
+    if (effort === 'off') applyForcedThinking(normal, 'disabled', llm, 'off');
+    delete normal.tools; delete normal.tool_choice; delete normal.response_format;
+    if (tools?.length) { normal.tools = tools; normal.tool_choice = toolChoice; }
+    return normal;
+  }
   const params = { ...llm.extraBody, model: llm.model, messages, stream: true };
   delete params.response_format;
   delete params.tools;
   delete params.tool_choice;
   if (tools?.length) { params.tools = tools; params.tool_choice = toolChoice; }
-  if (!forceThinking) {
-    const normal = { model: llm.model, messages, temperature, stream: true };
-    const thinking = llm.thinkingMode === 'omit' ? null : { type: llm.thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
-    applyThinking(normal, thinking, llm.connectionType);
-    Object.assign(normal, llm.extraBody);
-    delete normal.tools; delete normal.tool_choice; delete normal.response_format;
-    if (tools?.length) { normal.tools = tools; normal.tool_choice = toolChoice; }
-    return normal;
-  }
   // 神说的思考不可被全局开关或 extraBody 关闭。按服务商协议设置，不靠 prompt 伪造思考。
-  const model = String(llm.model || '').toLowerCase();
-  if (llm.connectionType === 'magpie') {
-    applyThinking(params, { type: 'enabled' }, llm.connectionType);
-  } else if (llm.connectionType === 'vertexai' || /gemini/.test(model)) {
-    params.thinking = { type: 'enabled' };
-    if (llm.connectionType === 'vertexai') {
-      params.generationConfig = { ...params.generationConfig, thinkingConfig: {
-        ...(/gemini-3/.test(model) ? { thinkingLevel: 'HIGH' } : { thinkingBudget: -1 }), includeThoughts: true,
-      } };
-    } else params.reasoning_effort = 'high';
-  } else if (/^(o[134](?:-|$)|gpt-[56])/.test(model)) {
-    delete params.thinking;
-    delete params.temperature;
-    params.reasoning_effort = 'high';
-    params.max_completion_tokens = llm.maxTokens;
-  } else {
-    params.thinking = { ...(params.thinking || {}), type: 'enabled' };
-    if (/claude/.test(model)) params.thinking.budget_tokens = Math.max(1024, Math.min(4096, Number(llm.maxTokens || 8192) - 1));
-    if (/qwen/.test(model)) { params.enable_thinking = true; params.chat_template_kwargs = { ...params.chat_template_kwargs, enable_thinking: true }; }
-  }
-  if (params.reasoning) params.reasoning = { ...params.reasoning, enabled: true, effort: 'high', exclude: false };
-  if ('enable_thinking' in params) params.enable_thinking = true;
-  if (params.chat_template_kwargs) params.chat_template_kwargs = { ...params.chat_template_kwargs, enable_thinking: true };
-  if ('reasoning_effort' in params) params.reasoning_effort = 'high';
+  applyForcedThinking(params, 'enabled', llm, effort, { includeThoughts: true, includeExclude: true });
   return params;
 }
 

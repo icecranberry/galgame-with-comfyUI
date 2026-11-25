@@ -39,7 +39,7 @@ export async function probeLorebookCache(worldId) {
       const started=Date.now();
       let commonMessages=0;
       if(previous) while(commonMessages<Math.min(previous.length,prepared.messages.length)&&JSON.stringify(previous[commonMessages])===JSON.stringify(prepared.messages[commonMessages]))commonMessages++;
-      const result=await chatSync(prepared.messages,{returnMeta:true,temperature:0,thinking:{type:'disabled'},label:`世界书缓存实测:${name}`,timeout:45000,maxRetries:0,retries:0,freeEggFailover:false});
+      const result=await chatSync(prepared.messages,{returnMeta:true,temperature:0,thinking:{type:'disabled'},thinkingEffort:'off',label:`世界书缓存实测:${name}`,timeout:45000,maxRetries:0,retries:0,freeEggFailover:false});
       const usage=result.usage;
       const prompt=usage?.prompt_tokens??usage?.input_tokens??null;
       const cached=usage?.prompt_cache_hit_tokens??usage?.prompt_tokens_details?.cached_tokens??usage?.input_tokens_details?.cached_tokens??usage?.cache_read_input_tokens??null;

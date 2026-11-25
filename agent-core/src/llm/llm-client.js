@@ -7,17 +7,62 @@ import { acquireSlot, releaseSlot } from '../services/llmConcurrency.js';
 import { recordLlmCall } from '../services/llmTelemetry.js';
 import { defaultMaxTokens, isValidMaxTokens, MAGPIE_PRESET } from './modelCapabilities.js';
 import { buildAgentRequest, readAgentResponse } from './agentStream.js';
-import { applyThinking, applyForcedThinking, isThinkingModeRejected } from './thinkingMode.js';
+import { applyThinking, applyForcedThinking, isThinkingModeRejected, normalizeThinkingEffort, stripRejectedThinkingParams } from './thinkingMode.js';
 
 const _limitEnabled = () => config.features.serializeBackgroundLLM;
 
+function isThinkingActiveInParams(params) {
+  return Boolean(
+    params?.thinking?.type === 'enabled'
+    || (params?.reasoning_effort && params.reasoning_effort !== 'none')
+    || params?.enable_thinking === true
+    || params?.reasoning?.enabled === true
+    || (params?.generationConfig?.thinkingConfig && params.generationConfig.thinkingConfig.thinkingBudget !== 0),
+  );
+}
+
+async function createWithThinkingFallback(
+  createFn,
+  params,
+  { extraBody = {}, forced = false, label, signal, canFallbackToConfigured = false, configuredParams = null, applyLimits = null, onFallbackParams = null } = {},
+) {
+  let activeParams = params;
+  let canUseConfigured = canFallbackToConfigured && Boolean(configuredParams);
+  let thinkingEnabled = isThinkingActiveInParams(activeParams);
+  for (let pass = 0; pass < 3; pass++) {
+    try {
+      return await createFn(activeParams);
+    } catch (err) {
+      throwIfSyncAborted(signal, err);
+      if (canUseConfigured && isThinkingModeRejected(err)) {
+        canUseConfigured = false;
+        activeParams = { ...configuredParams };
+        applyLimits?.(activeParams);
+        thinkingEnabled = isThinkingActiveInParams(activeParams);
+        onFallbackParams?.(activeParams);
+        console.warn(`[${providerLabel()} → ${label}] 强制开启思考失败，按 LLM 设置重试：${err.message}`);
+        continue;
+      }
+      const next = stripRejectedThinkingParams(activeParams, err, { extraBody, forced, thinkingEnabled });
+      if (!next) throw err;
+      activeParams = next;
+      thinkingEnabled = isThinkingActiveInParams(activeParams);
+      onFallbackParams?.(activeParams);
+      console.warn(`[${providerLabel()} → ${label}] 兼容接口拒绝思考参数，已自动降级重试：${err.message}`);
+    }
+  }
+}
+
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, forceThinkingMode, temperature = 0.72, requestBudget, response_format } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, forceThinkingMode, thinkingEffort = 'low', temperature = 0.72, requestBudget, response_format } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
-  const params = buildAgentRequest(messages, tools, llm, { forceThinking, temperature, toolChoice });
-  if (forceThinkingMode === 'enabled' || forceThinkingMode === 'disabled') {
-    applyForcedThinking(params, forceThinkingMode, llm);
+  const effort = normalizeThinkingEffort(thinkingEffort, 'low');
+  const forceOn = forceThinking && effort !== 'off';
+  const params = buildAgentRequest(messages, tools, llm, { forceThinking: forceOn, thinkingEffort: effort, temperature, toolChoice });
+  const forcedMode = effort === 'off' ? 'disabled' : forceThinkingMode;
+  if (forcedMode === 'enabled' || forcedMode === 'disabled') {
+    applyForcedThinking(params, forcedMode, llm, effort, { includeThoughts: forceOn && forcedMode === 'enabled', includeExclude: forceOn && forcedMode === 'enabled' });
   }
   if (response_format) params.response_format = response_format;
   applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
@@ -41,7 +86,11 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
     }
     console.log(`[${logLabel} 可用工具] ${tools.map(tool => tool.function?.name).filter(Boolean).join(', ')}`);
     console.log('────────────────────────────────────────────────');
-    stream = await getClient().chat.completions.create(params, { signal, maxRetries: 0 });
+    stream = await createWithThinkingFallback(
+      active => getClient().chat.completions.create(active, { signal, maxRetries: 0 }),
+      params,
+      { extraBody: llm.extraBody, forced: Boolean(forceOn || forcedMode), label: logLabel, signal },
+    );
     console.log(`[${providerLabel()} ← ${logLabel} start]`);
     for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking })) {
       if (event.type === 'usage') usage = event.usage;
@@ -61,7 +110,7 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
   } finally {
     stream?.controller?.abort?.();
     console.log(`[${providerLabel()} ← ${logLabel} end] ${outcome}`);
-    logResponse(outcome === 'completed' ? logLabel : `${logLabel}（流中断，已收到的部分）`, content, reasoning, forceThinkingMode);
+    logResponse(outcome === 'completed' ? logLabel : `${logLabel}（流中断，已收到的部分）`, content, reasoning, forcedMode ?? (forceOn ? 'enabled' : undefined));
     if (response?.tool_calls?.length) {
       console.log(`[${providerLabel()} ← ${logLabel} 工具调用]`);
       console.log(JSON.stringify(response.tool_calls, null, 2));
@@ -411,12 +460,16 @@ export async function testLlmConnection({ baseURL, apiKey, model, maxTokens = co
     messages: [{ role: 'user', content: 'ping' }],
   };
   const thinking = thinkingMode === 'omit' ? null : { type: thinkingMode === 'enabled' ? 'enabled' : 'disabled' };
-  applyThinking(params, thinking, connectionType);
+  applyThinking(params, thinking, connectionType, 'low', { maxTokens });
   Object.assign(params, effectiveExtraBody);
   applyOutputTokenLimit(params, maxTokens, effectiveBaseURL);
 
   const startedAt = Date.now();
-  const response = await client.chat.completions.create(params);
+  const response = await createWithThinkingFallback(
+    active => client.chat.completions.create(active),
+    params,
+    { extraBody: effectiveExtraBody, forced: false, label: '连接测试' },
+  );
   return {
     ok: true,
     model: effectiveModel,
@@ -446,7 +499,7 @@ function compressLogMessages(messages) {
   });
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries, requestBudget } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, thinkingEffort, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries, requestBudget } = {}) {
   throwIfSyncAborted(signal);
   if (config.features.mergeMessages && !requestBudget) messages = mergeConsecutiveRoles(messages);
   const limited = _limitEnabled();
@@ -468,10 +521,12 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   if (response_format) {
     params.response_format = response_format;
   }
-  // 全局三态配置默认注入 disabled；选择“不传”时完全省略。
+  // 全局三态配置默认在开启时注入 low 强度；关闭时绝不因 thinkingEffort 开启思考；选择“不传”时完全省略。
   // 调用方显式传入 thinking/null 时仍可覆盖全局设置。
-  const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-  applyThinking(params, effectiveThinking, config.llm.connectionType);
+  const requestedEffort = normalizeThinkingEffort(thinkingEffort, 'low');
+  const explicitOff = forceDisableThinking || requestedEffort === 'off';
+  const effectiveThinking = explicitOff ? { type: 'disabled' } : (thinking === undefined ? configuredThinking() : thinking);
+  applyThinking(params, effectiveThinking, config.llm.connectionType, requestedEffort, config.llm);
   // 合并自定义请求体参数（extraBody 可覆盖上述默认值以适配自定义 API）
   const extraBody = config.llm.extraBody;
   if (extraBody && Object.keys(extraBody).length > 0) {
@@ -479,9 +534,9 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
   }
   const configuredParams = { ...params };
   // 旧业务开关也走完整的提供商参数适配，并且优先于任何开启思考的参数。
-  const forcedMode = forceDisableThinking ? 'disabled' : forceThinkingMode;
+  const forcedMode = explicitOff ? 'disabled' : forceThinkingMode;
   if (forcedMode === 'enabled' || forcedMode === 'disabled') {
-    applyForcedThinking(params, forcedMode, config.llm);
+    applyForcedThinking(params, forcedMode, config.llm, thinkingEffort ?? 'high');
   }
   applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
   let canFallbackThinking = forcedMode === 'enabled' && fallbackToConfiguredThinking;
@@ -511,19 +566,26 @@ async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-
 
       throwIfSyncAborted(signal);
       requestBudget?.validate(params, messages);
-      let res;
-      try {
-        res = await getClient().chat.completions.create(params, requestOptions);
-      } catch (err) {
-        throwIfSyncAborted(signal, err);
-        if (!canFallbackThinking || !isThinkingModeRejected(err)) throw err;
-        canFallbackThinking = false;
-        params = { ...configuredParams };
-        applyOutputTokenLimit(params, requestBudget?.maxOutputTokens);
-        requestBudget?.validate(params, messages);
-        console.warn(`[${providerLabel()} → ${label}] 强制开启思考失败，按 LLM 设置重试：${err.message}`);
-        res = await getClient().chat.completions.create(params, requestOptions);
-      }
+      const res = await createWithThinkingFallback(
+        active => getClient().chat.completions.create(active, requestOptions),
+        params,
+        {
+          extraBody,
+          forced: Boolean(forcedMode),
+          label,
+          signal,
+          canFallbackToConfigured: canFallbackThinking,
+          configuredParams,
+          applyLimits: active => {
+            applyOutputTokenLimit(active, requestBudget?.maxOutputTokens);
+            requestBudget?.validate(active, messages);
+          },
+          onFallbackParams: next => {
+            params = next;
+            canFallbackThinking = false;
+          },
+        },
+      );
       throwIfSyncAborted(signal);
       const choice = res.choices[0];
       const content = choice.message.content;
@@ -645,6 +707,9 @@ async function* _chatStreamInner(messages, {
   model = config.llm.model || 'deepseek-flash',
   temperature = 0.7,
   thinking,
+  forceDisableThinking = false,
+  forceThinkingMode,
+  thinkingEffort,
   label = 'stream',
   signal, // AbortSignal：客户端断开时中止上游请求，避免空烧 token
 } = {}) {
@@ -667,8 +732,10 @@ async function* _chatStreamInner(messages, {
       stream: true,
     };
 
-    const effectiveThinking = thinking === undefined ? configuredThinking() : thinking;
-    applyThinking(params, effectiveThinking, config.llm.connectionType);
+    const requestedEffort = normalizeThinkingEffort(thinkingEffort, 'low');
+    const explicitOff = forceDisableThinking || requestedEffort === 'off';
+    const effectiveThinking = explicitOff ? { type: 'disabled' } : (thinking === undefined ? configuredThinking() : thinking);
+    applyThinking(params, effectiveThinking, config.llm.connectionType, requestedEffort, config.llm);
 
     // 流式 usage（缓存命中率）：末尾 chunk 携带。仅对官方 API 发送，
     // 第三方渠道可能不认识 stream_options 直接报错。
@@ -681,9 +748,17 @@ async function* _chatStreamInner(messages, {
     if (extraBody && Object.keys(extraBody).length > 0) {
       Object.assign(params, extraBody);
     }
+    const forcedMode = explicitOff ? 'disabled' : forceThinkingMode;
+    if (forcedMode === 'enabled' || forcedMode === 'disabled') {
+      applyForcedThinking(params, forcedMode, config.llm, thinkingEffort ?? 'high');
+    }
     applyOutputTokenLimit(params);
 
-    const stream = await getClient().chat.completions.create(params, { signal });
+    const stream = await createWithThinkingFallback(
+      active => getClient().chat.completions.create(active, { signal }),
+      params,
+      { extraBody, forced: Boolean(forcedMode), label, signal },
+    );
 
     console.log(`[${providerLabel()} ← ${label} start]`);
 
@@ -705,7 +780,7 @@ async function* _chatStreamInner(messages, {
     }
 
     console.log(`[${providerLabel()} ← ${label} end]`);
-    logResponse(label, total || '(empty)', reasoning);
+    logResponse(label, total || '(empty)', reasoning, forcedMode ?? config.llm.thinkingMode);
     logUsage(label, usage);
     recordLlmCall(label, usage);
     console.log('═══════════════════════════════════════════════\n');

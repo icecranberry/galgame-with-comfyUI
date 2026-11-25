@@ -25,7 +25,8 @@ export async function runGodAgent(run, { repo, tools, stream, prepare, signal, m
       signal?.throwIfAborted();
       current = repo.message(run, 'assistant', '', { status: 'streaming' });
       let response;
-      for await (const event of stream(messages, { tools: allowTools ? tools.definitions : undefined, signal, requestId: `${logId}/round-${++attempt}` })) {
+      // 神说核心工具编排流：显式使用 medium 思考强度（多工具路由与状态协同，避免低档漏条件或高档过慢）。
+      for await (const event of stream(messages, { tools: allowTools ? tools.definitions : undefined, thinkingEffort: 'medium', signal, requestId: `${logId}/round-${++attempt}` })) {
         if (event.type === 'text_delta') repo.delta(current.id, 'content', event.text);
         else if (event.type === 'reasoning_delta') repo.delta(current.id, 'reasoning', event.text);
         else if (event.type === 'assistant_end') response = event.message;

@@ -420,3 +420,31 @@ test('居室待生效状态跨草稿保留，只有成功发布使用的版本�
   await run();
   assert.equal(residenceState(db).pendingChanges, false);
 });
+
+test('未启用日程强制关闭思考时，共同生活与个人日程规划均显式声明 medium 思考强度', async t => {
+  const previous = config.features.scheduleDisableThinking;
+  config.features.scheduleDisableThinking = false;
+  t.after(() => { config.features.scheduleDisableThinking = previous; });
+  const room = listResidences(db)[0];
+  const characters = db.prepare('SELECT * FROM characters').all();
+  const planOptions = [];
+  await planResidence({ room, characters, relationships: [], events: [], batchId: 'effort-medium' }, {
+    chat: async (_messages, options) => {
+      planOptions.push(options);
+      return JSON.stringify({ activities: [] });
+    },
+  });
+  assert.equal(planOptions[0].thinkingEffort, 'medium');
+  assert.equal(planOptions[0].forceDisableThinking, undefined);
+
+  const schedOptions = [];
+  await generateSchedule(characters[0], '', {
+    persist: false,
+    chat: async (_messages, options) => {
+      schedOptions.push(options);
+      return JSON.stringify({ activities: base(room) });
+    },
+  });
+  assert.equal(schedOptions[0].thinkingEffort, 'medium');
+  assert.equal(schedOptions[0].forceDisableThinking, undefined);
+});

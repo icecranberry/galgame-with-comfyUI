@@ -337,9 +337,11 @@ export function startInit({ worldSettingId = null, npcCount = 8, mapCols, mapRow
         { role: 'system', content: `【本次规划】世界观名称：${worldName}；居民数量：恰好 ${job.config.npcCount} 位` },
         { role: 'user', content: '请执行：输出这个小镇的初始化蓝图 JSON。' },
       ];
+      // 小镇初始化蓝图需统筹建筑、岗位、资源与居民配置一致性，使用 medium 思考强度。
       const content = await chatSync(bpMsgs, {
         temperature: 0.85,
         response_format: { type: 'json_object' },
+        thinkingEffort: 'medium',
         label: '小镇蓝图',
       });
       const parsed = safeJsonParse(content);

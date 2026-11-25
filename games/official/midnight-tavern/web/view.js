@@ -4,6 +4,7 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
   const image = value => /^\/(?:images|avatars|game-media)\/[\w./%?=&-]+$|^\.\/(?:lin|chen|su)\.svg$/.test(value || '') && !value.includes('..') ? value : '';
   const tipsyLabel = n => mix.intoxication(n).label;
+  const guestNameCollator = new Intl.Collator('zh-CN-u-co-pinyin', { sensitivity: 'base', numeric: true });
   const resultNames = { triumph: '漂亮收场', chaotic: '一夜闹剧', twist: '意外转折' };
   const trinketIcons = new Set(['key', 'star', 'moon', 'ticket', 'leaf', 'compass']);
   const icon = name => `<svg class="ink-icon" aria-hidden="true" focusable="false"><use href="#ink-${name}"/></svg>`;
@@ -481,7 +482,7 @@
         ${meter}${preference ? `<small>${preference.preference === 'likes' ? '偏爱' : '不爱'} · ${esc(preference.flavor)}</small>` : ''}</div>
         ${reserve}${gallery}${standing}</article>`;
     };
-    const entries = Object.values(people);
+    const entries = Object.values(people).sort((a, b) => guestNameCollator.compare(a.name, b.name));
     const groups = [
       ['今夜在座', entries.filter(guest => seated.has(guest.name)), true],
       ['其他角色', entries.filter(guest => !seated.has(guest.name)), false],

@@ -1097,8 +1097,8 @@ export default function registerGamePlugin(ctx) {
   function recordReceipt(s, body, type, result) {
     if (body.operationId !== undefined) (s.receipts ||= []).push({ id: body.operationId, type, result });
   }
-  async function completeScenario(input, validate, { signal, forceThinkingMode } = {}) {
-    const ask = task => llm.complete({ ...input, task }, { responseFormat: 'json', signal, forceThinkingMode });
+  async function completeScenario(input, validate, { signal, forceThinkingMode, thinkingEffort } = {}) {
+    const ask = task => llm.complete({ ...input, task }, { responseFormat: 'json', signal, forceThinkingMode, thinkingEffort });
     const raw = await ask(input.task);
     try { return validate(json(raw)); }
     catch (error) {
@@ -1127,10 +1127,11 @@ export default function registerGamePlugin(ctx) {
     task: '评估玩家的想法，返回评估与引导问题 JSON。', scope: 'creator-assess',
   }, validateAssessment, { signal }), { lock: false, disconnect: true });
   route('post', '/creator/generate', async (body, _query, signal) => {
+    // 跑团自助创作完整可执行剧本（场景/线索/规则依赖图/多结局），低频重构建使用 high 思考强度。
     const scenario = await completeScenario({ rules: CREATOR_GENERATE_RULES,
       data: JSON.stringify({ idea: creatorIdea(body.idea), answers: creatorAnswers(body.answers) }),
       task: '根据玩家的想法与问答生成完整剧本 JSON。', scope: 'creator-generate',
-    }, validateCreatedScenario, { signal, forceThinkingMode: 'enabled' });
+    }, validateCreatedScenario, { signal, forceThinkingMode: 'enabled', thinkingEffort: 'high' });
     return {
       draftId: storeScenarioDraft(scenario),
       meta: scenario.meta,
@@ -1176,9 +1177,10 @@ export default function registerGamePlugin(ctx) {
       }
     }
     if (body.edit === true) fail('请保留剧本 JSON 的标题和场景结构');
+    // 导入剧本并归并抽取为可执行规则与场景结构，使用 medium 思考强度。
     const scenario = await completeScenario({ rules: SCENARIO_IMPORT_RULES, data: content,
       task: '归纳这份剧本，按规范输出完整 JSON。', scope: 'parse',
-    }, validateScenario, { signal, forceThinkingMode: 'enabled' });
+    }, validateScenario, { signal, forceThinkingMode: 'enabled', thinkingEffort: 'medium' });
     return parsedResponse(scenario);
   }, { lock: false, disconnect: true });
   route('post', '/start', async body => {
@@ -1359,7 +1361,8 @@ export default function registerGamePlugin(ctx) {
           return name === 'roll_dice' ? promptRoll(result) : result;
       };
       // toolChoice 'required' 关闭正文收尾：在执行该参数的上游上，回合唯一出口是 narrate 工具。
-      const requestOptions = { responseFormat: 'json', signal, forceThinkingMode: 'enabled' };
+      // 实时 KP 状态机需校验检定/数值/暗线防剧透与工具协调，使用 medium 思考强度兼顾延迟与一致性。
+      const requestOptions = { responseFormat: 'json', signal, forceThinkingMode: 'enabled', thinkingEffort: 'medium' };
       const agentOptions = { ...requestOptions, checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), toolChoice: 'required' };
       const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
       signal.throwIfAborted();

@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { generateKeyPairSync } from 'node:crypto';
 import { CHAT_IMAGE_TOOLS, streamPrivateChatImages } from '../src/services/privateChatImageTools.js';
+import { runGodAgent } from '../src/services/godSays/agent.js';
+import registerTrpgPlugin from '../../games/official/trpg-simulator/server/index.mjs';
 
 const stub = source => `data:text/javascript,${encodeURIComponent(source)}`;
 const configModule = stub(`
@@ -95,7 +99,7 @@ test('招募强制思考覆盖配置，开启被拒绝才按原设置重发一�
       assert.equal(requests.length - start, 2);
       assert.deepEqual(requests[start].thinking, { type: 'enabled' });
       assert.deepEqual(requests.at(-1).thinking, extra.thinking ?? (mode === 'omit' ? undefined : { type: mode }));
-      assert.equal(requests.at(-1).reasoning_effort, extra.reasoning_effort);
+      assert.equal(requests.at(-1).reasoning_effort, extra.reasoning_effort ?? (mode === 'enabled' ? 'low' : undefined));
       assert.deepEqual(requests[start].messages, requests.at(-1).messages);
     }
   }
@@ -524,4 +528,265 @@ test('native tool stream logs requests, tool calls, usage and partial failures w
   await assert.rejects(async () => { for await (const event of client.chatAgentStream(messages, { tools, signal: aborted })) void event; }, /stopped/);
   assert.match(logs.join('\n'), /cancelled/);
   assert.equal(telemetry.calls.length - before, 4, 'each outcome is counted exactly once');
+});
+
+test('thinkingEffort 分级、全局关闭护栏、多提供商映射、关键升级点与兼容降级', async t => {
+  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'warn', () => {});
+  const requests = [];
+  let rejectRule = null;
+  const server = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const params = JSON.parse(body);
+    requests.push(params);
+    if (rejectRule && rejectRule(params)) {
+      const { status = 400, message, once = false } = rejectRule(params);
+      if (once) rejectRule = null;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: { message } }));
+    }
+    if (params.stream) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`);
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const previousLlm = { ...config.llm };
+  t.after(async () => {
+    Object.assign(config.llm, previousLlm);
+    client.resetClient();
+    await new Promise(resolve => server.close(resolve));
+  });
+  const baseURL = `http://127.0.0.1:${server.address().port}/v1`;
+  Object.assign(config.llm, {
+    connectionType: 'openai', freeEgg: false, baseURL, apiKey: 'fixture-key',
+    model: 'test-model', maxTokens: 8192, thinkingMode: 'disabled', headers: {}, extraBody: {},
+  });
+  client.resetClient();
+
+  const drainStream = async opts => {
+    let out = '';
+    for await (const chunk of client.chatStream(messages, opts)) out += chunk;
+    return out;
+  };
+  const drainAgent = async opts => {
+    const ev = [];
+    for await (const e of client.chatAgentStream(messages, { tools: [], ...opts })) ev.push(e);
+    return ev;
+  };
+
+  // 1. 开关关闭/不传时：即便局部声明 medium / high，也绝不强开思考或注入强度
+  for (const mode of ['disabled', 'omit']) {
+    config.llm.thinkingMode = mode;
+    for (const effort of [undefined, 'low', 'medium', 'high']) {
+      await client.chatSync(messages, { thinkingEffort: effort });
+      await drainStream({ thinkingEffort: effort });
+      await drainAgent({ forceThinking: false, thinkingEffort: effort });
+      for (const sent of requests.slice(-3)) {
+        if (mode === 'omit') {
+          assert.equal(sent.thinking, undefined);
+          assert.equal(sent.reasoning_effort, undefined);
+        } else {
+          assert.deepEqual(sent.thinking, { type: 'disabled' });
+          assert.equal(sent.reasoning_effort, undefined);
+        }
+        assert.equal(sent.enable_thinking, undefined);
+      }
+    }
+    config.llm.connectionType = 'magpie';
+    await client.chatSync(messages, { thinkingEffort: 'high' });
+    assert.equal(requests.at(-1).reasoning_effort, mode === 'omit' ? undefined : 'none');
+    config.llm.connectionType = 'openai';
+    config.llm.model = 'gpt-5';
+    await client.chatSync(messages, { thinkingEffort: 'high' });
+    assert.equal(requests.at(-1).reasoning_effort, mode === 'omit' ? undefined : 'none');
+    assert.equal(requests.at(-1).thinking, undefined);
+    config.llm.model = 'test-model';
+  }
+
+  // 2. 开关开启时：未指定默认 low；显式 medium/high 正确透传；off / forceDisableThinking 仍强制关闭
+  config.llm.thinkingMode = 'enabled';
+  await client.chatSync(messages);
+  await drainStream();
+  await drainAgent({ forceThinking: false });
+  await client.testLlmConnection();
+  for (const sent of requests.slice(-4)) {
+    assert.deepEqual(sent.thinking, { type: 'enabled' });
+    assert.equal(sent.reasoning_effort, 'low');
+  }
+  for (const effort of ['low', 'medium', 'high']) {
+    await client.chatSync(messages, { thinkingEffort: effort });
+    assert.equal(requests.at(-1).reasoning_effort, effort);
+    await drainStream({ thinkingEffort: effort });
+    assert.equal(requests.at(-1).reasoning_effort, effort);
+
+    config.llm.connectionType = 'magpie';
+    await client.chatSync(messages, { thinkingEffort: effort });
+    assert.equal(requests.at(-1).thinking, undefined);
+    assert.equal(requests.at(-1).reasoning_effort, effort);
+    config.llm.connectionType = 'openai';
+
+    config.llm.model = 'gpt-5';
+    await client.chatSync(messages, { thinkingEffort: effort });
+    assert.equal(requests.at(-1).thinking, undefined);
+    assert.equal(requests.at(-1).temperature, undefined);
+    assert.equal(requests.at(-1).reasoning_effort, effort);
+
+    config.llm.model = 'claude-sonnet';
+    await client.chatSync(messages, { thinkingEffort: effort });
+    assert.deepEqual(requests.at(-1).thinking, { type: 'enabled', budget_tokens: effort === 'low' ? 1024 : effort === 'medium' ? 2048 : 4096 });
+    assert.equal(requests.at(-1).reasoning_effort, undefined);
+
+    config.llm.model = 'test-model';
+  }
+  for (const offOpts of [{ thinkingEffort: 'off' }, { forceDisableThinking: true, thinkingEffort: 'high' }]) {
+    await client.chatSync(messages, offOpts);
+    assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
+    assert.equal(requests.at(-1).reasoning_effort, undefined);
+    await drainStream(offOpts);
+    assert.deepEqual(requests.at(-1).thinking, { type: 'disabled' });
+  }
+
+  // Vertex Gemini 3 & Gemini 2.5 默认 low 及显式分级映射
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const vertexCalls = [];
+  const restoreFetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (String(url).includes('oauth2')) return new Response(JSON.stringify({ access_token: 'fixture-token' }));
+    vertexCalls.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'vertex' }] }, finishReason: 'STOP' }] }));
+  });
+  Object.assign(config.llm, {
+    connectionType: 'vertexai', vertexRegion: 'global', thinkingMode: 'enabled',
+    vertexServiceAccount: JSON.stringify({ type: 'service_account', project_id: 'fixture', client_email: 'test@example.com', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }) }),
+  });
+  client.resetClient();
+  config.llm.model = 'gemini-3-flash';
+  await client.chatSync(messages, { retries: 0 });
+  assert.deepEqual(vertexCalls.at(-1).generationConfig.thinkingConfig, { thinkingLevel: 'LOW' });
+  await client.chatSync(messages, { thinkingEffort: 'medium', retries: 0 });
+  assert.deepEqual(vertexCalls.at(-1).generationConfig.thinkingConfig, { thinkingLevel: 'MEDIUM' });
+  config.llm.model = 'gemini-2.5-pro';
+  await client.chatSync(messages, { retries: 0 });
+  assert.deepEqual(vertexCalls.at(-1).generationConfig.thinkingConfig, { thinkingBudget: 1024 });
+  await client.chatSync(messages, { thinkingEffort: 'medium', retries: 0 });
+  assert.deepEqual(vertexCalls.at(-1).generationConfig.thinkingConfig, { thinkingBudget: 4096 });
+  restoreFetch.mock.restore();
+  Object.assign(config.llm, { connectionType: 'openai', model: 'test-model' });
+  client.resetClient();
+
+  // 3. 关键升级点验证：神说 (runGodAgent -> medium) 与跑团 KP/解析 (medium) / 剧本创作 (high)
+  config.llm.thinkingMode = 'disabled';
+  const godOpts = [];
+  await runGodAgent({ id: 'g1', input: 'hi' }, {
+    prepare: async () => ({ messages: [{ role: 'user', content: 'hi' }], commit() {} }),
+    repo: { message: () => ({ id: 'm1' }), updateMessage() {}, delta() {}, finish() {} },
+    tools: { definitions: [] },
+    stream: async function* (msgs, opts) {
+      godOpts.push(opts);
+      for await (const ev of client.chatAgentStream(msgs, { ...opts, tools: [] })) yield ev;
+    },
+  });
+  assert.equal(godOpts[0].thinkingEffort, 'medium');
+  assert.deepEqual(requests.at(-1).thinking, { type: 'enabled' });
+  assert.equal(requests.at(-1).reasoning_effort, 'medium');
+
+  const trpgDir = mkdtempSync(join(tmpdir(), 'trpg-thinking-'));
+  t.after(() => rmSync(trpgDir, { recursive: true, force: true }));
+  const scenarioFixture = JSON.parse(readFileSync(new URL('../../games/official/trpg-simulator/scenarios/scenario_fun_01_timeloop_store.json', import.meta.url), 'utf8'));
+  const routes = {};
+  const saves = new Map();
+  let trpgRev = 0;
+  const trpgCalls = [];
+  const noopRes = (onJson) => ({ once() {}, off() {}, set() { return this; }, json(v) { onJson?.(v); }, destroyed: false });
+  registerTrpgPlugin({
+    gameDataDir: trpgDir,
+    scenarios: () => [scenarioFixture],
+    playerProfile: () => ({ name: '玩家甲', avatar: '' }),
+    expressionSlots: () => ['normal'],
+    bridgeTools: { call: async (_tool, { characterName }) => ({ id: characterName, name: characterName, displayName: characterName, persona: '冷静', shortPrompt: '冷静' }) },
+    imageService: { generate: async () => ({ url: '/x.png' }), generateScene: async () => ({ url: '/x.png' }) },
+    events: { emit() {} },
+    router: {
+      get: (url, fn) => { routes[`GET ${url}`] = fn; },
+      post: (url, fn) => { routes[`POST ${url}`] = fn; },
+    },
+    db: {
+      load: id => saves.get(id) || null,
+      write: (id, title, state) => { const row = { id, title, state: structuredClone(state), revision: ++trpgRev }; saves.set(id, row); return row; },
+    },
+    llm: {
+      complete: async (input, opts) => {
+        trpgCalls.push({ kind: 'complete', scope: input.scope, opts });
+        if (input.scope === 'creator-generate' || input.scope === 'parse') return JSON.stringify(scenarioFixture);
+        if (input.scope === 'cards') {
+          const lineup = JSON.parse(input.data);
+          const skills = Object.fromEntries(['侦查', '图书馆', '聆听', '话术', '说服', '心理学', '格斗', '闪避', '急救', '神秘学', '锁匠', '潜行'].map(k => [k, 50]));
+          const attributes = Object.fromEntries(['STR', 'CON', 'DEX', 'INT', 'POW', 'APP', 'SIZ', 'EDU'].map(k => [k, 50]));
+          return JSON.stringify({ cards: lineup.map(c => ({ name: c.name, occupation: '职员', age: 25, attributes, skills })) });
+        }
+        if (String(input.scope).endsWith(':keeper-narration')) return JSON.stringify({ narration: '灯光轻闪。', playerExpression: 'normal', suggestions: [] });
+        return JSON.stringify({ messages: [] });
+      },
+      agent: async (input, _tools, _exec, opts) => {
+        trpgCalls.push({ kind: 'agent', scope: input.scope, opts });
+        return '';
+      },
+    },
+  });
+  await routes['POST /creator/generate']({ body: { idea: '便利店时间循环悬疑剧本，需要线索排查与协作脱出。', answers: [{ question: '氛围', answer: '紧张' }] } }, noopRes());
+  await routes['POST /parse-scenario']({ body: { content: '完整剧本正文。'.repeat(10) } }, noopRes());
+  let startedState = null;
+  await routes['POST /start']({ body: { mode: 'investigator', scenarioId: scenarioFixture.meta.id, characterNames: [], keeperName: '守秘人' } }, noopRes(v => { startedState = v; }));
+  await routes['POST /turn']({ body: { sessionId: startedState.sessionId, message: '观察收银台' } }, noopRes());
+  const byScope = scope => trpgCalls.filter(c => String(c.scope).endsWith(scope));
+  assert.equal(byScope('creator-generate')[0].opts.forceThinkingMode, 'enabled');
+  assert.equal(byScope('creator-generate')[0].opts.thinkingEffort, 'high');
+  assert.equal(byScope('parse')[0].opts.forceThinkingMode, 'enabled');
+  assert.equal(byScope('parse')[0].opts.thinkingEffort, 'medium');
+  assert.equal(byScope(':keeper')[0].opts.forceThinkingMode, 'enabled');
+  assert.equal(byScope(':keeper')[0].opts.thinkingEffort, 'medium');
+  assert.equal(byScope(':keeper-narration')[0].opts.forceThinkingMode, 'enabled');
+  assert.equal(byScope(':keeper-narration')[0].opts.thinkingEffort, 'medium');
+
+  // 4. OpenAI 兼容接口拒绝思考强度 / thinking 字段时的干净降级（sync / stream / test / agentStream）
+  config.llm.thinkingMode = 'enabled';
+  rejectRule = p => p.reasoning_effort ? { status: 400, message: "Unknown parameter: 'reasoning_effort'" } : null;
+  const syncStart = requests.length;
+  assert.equal(await client.chatSync(messages, { thinkingEffort: 'medium', retries: 0 }), 'ok');
+  assert.equal(requests.length - syncStart, 2);
+  assert.equal(requests[syncStart].reasoning_effort, 'medium');
+  assert.equal(requests.at(-1).reasoning_effort, undefined);
+  assert.deepEqual(requests.at(-1).thinking, { type: 'enabled' });
+
+  const streamStart = requests.length;
+  assert.equal(await drainStream({ thinkingEffort: 'high' }), 'ok');
+  assert.equal(requests.length - streamStart, 2);
+  assert.equal(requests[streamStart].reasoning_effort, 'high');
+  assert.equal(requests.at(-1).reasoning_effort, undefined);
+  assert.deepEqual(requests.at(-1).thinking, { type: 'enabled' });
+
+  const agentStart = requests.length;
+  await drainAgent({ thinkingEffort: 'medium' });
+  assert.equal(requests.length - agentStart, 2);
+  assert.equal(requests[agentStart].reasoning_effort, 'medium');
+  assert.equal(requests.at(-1).reasoning_effort, undefined);
+  assert.deepEqual(requests.at(-1).thinking, { type: 'enabled' });
+
+  rejectRule = p => p.thinking ? { status: 400, message: 'Unrecognized request argument supplied: thinking' } : null;
+  const openAiAliasStart = requests.length;
+  assert.equal(await client.chatSync(messages, { retries: 0 }), 'ok');
+  assert.equal(requests.length - openAiAliasStart, 2);
+  assert.equal(requests.at(-1).thinking, undefined);
+  assert.equal(requests.at(-1).reasoning_effort, 'low');
+
+  config.llm.thinkingMode = 'disabled';
+  rejectRule = () => ({ status: 400, message: 'thinking disabled not supported' });
+  const disabledStart = requests.length;
+  await assert.rejects(client.chatSync(messages, { retries: 0 }));
+  assert.equal(requests.length - disabledStart, 1);
+  rejectRule = null;
 });

@@ -133,9 +133,11 @@ export async function runPersonaGeneration({
   const referenceStart = systemPrompt.indexOf('以下是从');
   const stableTask = systemPrompt.slice(0, referenceStart < 0 ? systemPrompt.length : referenceStart);
   // 招募按实际带入的搜索资料决定思考模式（短资料也算）；导入角色卡仍沿用设置。
+  // 原创角色零参考创作使用 medium 思考强度兼顾人设闭环；导入/有资料检索保持默认或显式关闭。
   const forceThinkingMode = skipWebSearch ? undefined : (searchContext.trim() ? 'disabled' : 'enabled');
   const result = await chatSync(msgs, { model, temperature, label, signal, timeout, retries, maxRetries,
-    forceThinkingMode, fallbackToConfiguredThinking: forceThinkingMode === 'enabled',
+    forceThinkingMode, thinkingEffort: forceThinkingMode === 'enabled' ? 'medium' : 'low',
+    fallbackToConfiguredThinking: forceThinkingMode === 'enabled',
     lorebook: { personaTexts: [], staticTexts: [stableTask],
       cacheBoundary: { index: msgs.length - 2, offset: stableTask.length },
       history: [{ role: 'user', content: description.trim() }] },

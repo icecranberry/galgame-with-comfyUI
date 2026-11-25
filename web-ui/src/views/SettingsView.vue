@@ -1817,7 +1817,7 @@ function onLlmEndpointInput() {
   markLlmDirty()
 }
 const llmThinkingMode = ref('disabled')
-const llmThinkingHint = '思考模式打开会增加大约30%的消耗，但是日志会很有意思。「不传」使用服务商默认设置，一般不选。'
+const llmThinkingHint = '思考模式开启后默认使用低思考强度（神说/跑团等高逻辑场景会自动提升），日志会很有意思。「不传」使用服务商默认设置，一般不选。'
 const thinkingModeOptions = [
   { value: 'enabled', label: '开' },
   { value: 'disabled', label: '关' },

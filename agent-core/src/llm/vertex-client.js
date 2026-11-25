@@ -1,5 +1,6 @@
 import { createPrivateKey, createSign, createHash, randomUUID } from 'node:crypto';
 import { normalizeModelCapabilities } from './modelCapabilities.js';
+import { vertexThinkingConfigForEffort } from './thinkingMode.js';
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const tokens = new Map();
@@ -125,10 +126,11 @@ export function buildVertexBody(params) {
   if (params.stop) generationConfig.stopSequences = Array.isArray(params.stop) ? params.stop : [params.stop];
   if (params.response_format?.type === 'json_object') generationConfig.responseMimeType = 'application/json';
   Object.assign(generationConfig, params.generationConfig || {});
-  if (params.thinking && !generationConfig.thinkingConfig) {
-    const enabled = params.thinking.type === 'enabled';
-    if (/gemini-3/.test(params.model)) generationConfig.thinkingConfig = { thinkingLevel: enabled ? 'HIGH' : 'LOW' };
-    else if (/gemini-2\.5/.test(params.model)) generationConfig.thinkingConfig = { thinkingBudget: enabled || /-pro/.test(params.model) ? -1 : 0 };
+  if (params.thinking && !generationConfig.thinkingConfig && /gemini-(?:2\.5|3)/.test(params.model)) {
+    generationConfig.thinkingConfig = vertexThinkingConfigForEffort(params.model, params.reasoning_effort || 'high', {
+      enabled: params.thinking.type === 'enabled',
+      fallbackProToDynamic: true,
+    });
   }
   // The configured limit wins over any native extraBody override as it does for OpenAI.
   generationConfig.maxOutputTokens = params.max_completion_tokens ?? params.max_tokens;

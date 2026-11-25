@@ -194,7 +194,8 @@ ${directionMsg}`;
         label: `schedule-gen:${character.display_name}`,
         ...(config.features.scheduleDisableThinking
           ? { thinking: { type: 'disabled' }, forceDisableThinking: true }
-          : options.thinking ? { thinking: options.thinking } : {}),
+          // 多约束 24 小时日程规划（职业/睡眠/同居互斥/着装）在思考开启时使用 medium 避免时间线冲突。
+          : { ...(options.thinking ? { thinking: options.thinking } : {}), thinkingEffort: 'medium' }),
         lorebook:{personaTexts:[personaMsg],staticTexts:[scheduleInst],characterName:character.display_name,
           cacheBoundary: { index: msgs.findIndex(m => m.content === personaMsg), offset: personaMsg.length },
           history: [{ role: 'user', content: `${JSON.stringify(cohabitation)}\n${triggerContent}` }] },

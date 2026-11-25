@@ -898,3 +898,34 @@ test('runBackfillTask：一次最多补 5 条且不限制输出 token', async ()
   assert.equal(result.done, true);
   db.close();
 });
+
+test('记忆整理思考强度分级：T1/T2 显式 medium，T4 保留强制关闭，T5 回填走默认 low', async () => {
+  const db = createDb();
+  insertConflictPair(db);
+  for (const [id, days] of [['mem_g0', 30], ['mem_g1', 18], ['mem_g2', 5]]) {
+    insertFragment(db, { memoryId: id, type: 'event', judgment: `情景${id}`, eventTime: daysAgo(days), conversationId: 'char_1' });
+    linkEntity(db, id, '旅行');
+  }
+  insertFragment(db, { memoryId: 'mem_p0', type: 'knowledge', importance: 5, conversationId: 'char_7' });
+  insertFragment(db, { memoryId: 'mem_b0', judgment: '旧片段', keywords: null, createdAt: daysAgo(30) });
+
+  const recorded = {};
+  const record = key => async (_msgs, opts) => {
+    recorded[key] = opts;
+    if (key === 'T1') return JSON.stringify({ resolutions: [] });
+    if (key === 'T2') return JSON.stringify({ generalization: null });
+    if (key === 'T4') return JSON.stringify({ suggestions: [] });
+    return JSON.stringify({ items: [] });
+  };
+  await runConflictResolutionTask({ clusters: findConflictClusters(db), llmBudgetRemaining: 4, deps: { db, chatSync: record('T1'), applyMemoryActions: () => ({}) } });
+  await runGeneralizationTask({ groups: findGeneralizationGroups(db), llmBudgetRemaining: 4, deps: { db, chatSync: record('T2'), insertGeneralizedMemory: () => 'x' } });
+  await runPortraitSuggestionTask({ conversations: findPortraitSuggestionConversations(db), llmBudgetRemaining: 4, deps: { db, chatSync: record('T4') } });
+  await runBackfillTask({ candidates: findBackfillCandidates(db), llmBudgetRemaining: 4, deps: { db, chatSync: record('T5') } });
+
+  assert.equal(recorded.T1.thinkingEffort, 'medium');
+  assert.equal(recorded.T2.thinkingEffort, 'medium');
+  assert.equal(recorded.T4.forceDisableThinking, true);
+  assert.deepEqual(recorded.T4.thinking, { type: 'disabled' });
+  assert.equal(recorded.T5.thinkingEffort, undefined);
+  db.close();
+});

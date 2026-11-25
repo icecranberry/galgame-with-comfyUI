@@ -160,6 +160,27 @@ web-ui 中所有弹窗统一使用组件 `web-ui/src/components/ui/LinsheModal.v
 }
 ```
 
+## LLM 思考强度分级约定
+
+所有经 `agent-core/src/llm/llm-client.js` 发起的请求均受「全局思考开关（`config.llm.thinkingMode`：`enabled` / `disabled` / `omit`）」与「局部思考强度（`thinkingEffort`：`low` / `medium` / `high` / `off`）」协同控制：
+
+1. **全局开关与档位的生效关系**：
+   - 全局为 `enabled` 时，未指定 `thinkingEffort` 的调用**默认注入 `low`**，由统一适配层映射为对应提供商参数（OpenAI / Magpie / 中转 `reasoning_effort`、Vertex Gemini 3 `thinkingLevel` 与 2.5 `thinkingBudget`、Claude `budget_tokens`、Qwen `enable_thinking` 等）；若兼容接口因拒绝注入的思考强度字段返回 400/422/501，自动剥离对应强度字段降级重试一次。
+   - 全局为 `disabled` 或 `omit` 时，保持原不开启思考 / 不传参数行为，**绝不因为局部声明了 `thinkingEffort: 'medium' | 'high'` 而强行开启思考**（`godSays` 工具流、跑团核心生成/KP 与零参考原创新角色招募等明确契约级 `forceThinking` / `forceThinkingMode: 'enabled'` 例外）。
+   - 局部声明 `thinkingEffort: 'off'` 或 `forceDisableThinking: true`（如记忆提取、画像建议、照相馆提示词润色/姿势识别、搜索关键词抽取、缓存实测、开启「日程强制关闭思考」时）优先级最高，全局开启时仍保持关闭思考。
+
+2. **思考强度分级选型准则**：
+   - **`low`（默认，绝大多数场景）**：私聊、群聊、少量固定工具调用（如私聊生图）、反应/立绘触发、朋友圈、日记、信件、日报、日常奇遇、轻量摘要/画像抽取、各类画图 prompt 生成与润色。诉求为低延迟、活人感与自然情绪流动，避免过度思考导致说教或生硬。
+   - **`medium`（多工具编排 / 实时规则状态机 / 多约束协同）**：
+     - 高频路由大量工具、多步依赖或跨模块状态更改：如神说主循环（`services/godSays/agent.js`）。
+     - 实时规则检定、数值/物品一致与暗线防剧透：如跑团实时 KP 推进及剧本解析导入（`games/official/trpg-simulator/server/index.mjs` `runKeeper`、`/parse-scenario`）。
+     - 复杂多约束规划与跨天记忆冲突/归纳：如 24 小时日程生成（`scheduleGenerator.js`）、共同生活规划（`cohabitationPlanner.js`）、跨天记忆冲突消解/泛化升华（`memoryConsolidation.js` T1/T2）、小镇初始化蓝图与建筑功能参数生成（`townInitService.js` 蓝图、`townBuildingFeatureGenerator.js`）、无参考原创新角色卡生成（`characterGenerator.js`）。
+   - **`high`（极少数，务必克制）**：仅用于低频、离线/允许较长等待、且对全局可执行逻辑闭环要求极高的从零重型构建任务，如跑团自助创建完整可玩剧本（`games/official/trpg-simulator/server/index.mjs` `/creator/generate`）。实时聊天与交互入口不得设 `high`。
+   - **`off`（保留关闭）**：高并发轻量分类/抽取/JSON 动作、纯格式化翻译或明确禁止推理链污染的任务（`memoryExtractor.js`、`memoryConsolidation.js` T4、`photoStudioPolish.js`、`photoStudioPose.js`、`webSearch.js`、`lorebook/cacheProbe.js`、`scheduleDisableThinking` 开启时）。
+
+3. **强制文档与评审约束**：
+   - **以后在文档或代码中设计、新增或重构任何提示词与 LLM 调用点时，必须同步显式注明建议的思考强度档位（`low` / `medium` / `high` / `off`）及选择依据**（标注位置可在设计文档、函数注释或调用参数注释中）；保持 `low` 默认缺省，严禁未经论证随意拔高至 `medium` 或 `high`。
+
 ## 最少必要测试与脚本清理
 
 **核心原则：编码过程中尽量少做测试，只验证本次改动的必要风险；测试流程结束后，不保留本次生成的测试脚本。**

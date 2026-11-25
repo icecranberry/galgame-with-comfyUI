@@ -270,7 +270,8 @@ async function generateFeatureParams({ chat, source, template, feature, itemCata
   const label = `${GENERATE_LABEL}·${template.id}`;
   const messages = layeredMessages(paramsSystemPrompt(),
     paramsUserPrompt({ source, template, feature, itemCatalog, oldParams, diagnostics }));
-  let raw = await chat(messages, { label, temperature: 0.6 });
+  // 建筑功能参数须严格匹配资源 key、价格经济曲线与原文引证，使用 medium 思考强度。
+  let raw = await chat(messages, { label, temperature: 0.6, thinkingEffort: 'medium' });
   let candidate = parseCandidate(raw);
   const shapeOk = candidate && typeof candidate === 'object'
     && candidate.params && typeof candidate.params === 'object'
@@ -281,7 +282,7 @@ async function generateFeatureParams({ chat, source, template, feature, itemCata
       { role: 'assistant', content: originalText },
       { role: 'user', content: repairPrompt(originalText,
         ['输出必须是 {"params": {...}, "resources": [...]} 形状']) },
-    ], { label: `${label}修复`, temperature: 0.3 });
+    ], { label: `${label}修复`, temperature: 0.3, thinkingEffort: 'medium' });
     candidate = parseCandidate(raw);
     if (!candidate?.params || typeof candidate.params !== 'object') {
       throw Object.assign(new Error(`${featureKeyLabel}：参数输出形状非法`), { code: 'GENERATION_INVALID' });
@@ -337,7 +338,7 @@ export async function generateBuildingFeatureConfig(context, { mapId, locationKe
     // ── 第一段：选模板（最多一次修复） ──
     const selectMessages = layeredMessages(selectSystemPrompt(),
       selectUserPrompt({ source, catalog: templateCatalogForPrompt(), oldKeys }));
-    let selectRaw = await chat(selectMessages, { label: `${GENERATE_LABEL}·选择`, temperature: 0.6 });
+    let selectRaw = await chat(selectMessages, { label: `${GENERATE_LABEL}·选择`, temperature: 0.6, thinkingEffort: 'medium' });
     llmCalls += 1;
     let selection;
     try {
@@ -348,7 +349,7 @@ export async function generateBuildingFeatureConfig(context, { mapId, locationKe
       selectRaw = await chat([...selectMessages,
         { role: 'assistant', content: originalText },
         { role: 'user', content: repairPrompt(originalText, err.diagnostics || [err.message]) },
-      ], { label: `${GENERATE_LABEL}·选择修复`, temperature: 0.3 });
+      ], { label: `${GENERATE_LABEL}·选择修复`, temperature: 0.3, thinkingEffort: 'medium' });
       llmCalls += 1;
       selection = validateSelection(source, parseCandidate(selectRaw));
     }

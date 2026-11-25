@@ -87,7 +87,10 @@ export async function planResidence(input, { chat = chatSync } = {}) {
     if (error) messages.at(-1).content += `\n上次输出未通过校验：${error.message}。请修正后重新输出。`;
     try {
       const raw = await chat(messages, { temperature: 0.6, response_format: { type: 'json_object' },
-        ...(config.features.scheduleDisableThinking ? { thinking: { type: 'disabled' }, forceDisableThinking: true } : {}),
+        ...(config.features.scheduleDisableThinking
+          ? { thinking: { type: 'disabled' }, forceDisableThinking: true }
+          // 多成员关系与共同活动时间窗口协调，在思考开启时使用 medium。
+          : { thinkingEffort: 'medium' }),
         label: `cohabitation-plan:${input.room.name}`, lorebook: request.lorebook });
       return validateCohabitationResult(raw, { ...request, ...input });
     } catch (err) { error = err; }
