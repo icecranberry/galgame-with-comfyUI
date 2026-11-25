@@ -37,13 +37,15 @@ import { getClothingLibrary, resolveClothingTags, buildClothingAppearanceMessage
 
 import { extractPersonaIp, isNewPersonaFormat } from '../shared/personaSectionUtils.js';
 import { createPersonaUpgradeRouter } from './personaUpgrade.js';
+import { openPersonaEventStream } from './personaEventStream.js';
 
 const router = Router();
 router.use(createPersonaUpgradeRouter());
 
 router.post('/reference-image', async (req, res) => {
   try {
-    res.json(await fetchCharacterReferenceImage(req.body?.pageUrl));
+    const { pageUrl, name, ip } = req.body || {};
+    res.json(await fetchCharacterReferenceImage(pageUrl, { name, ip }));
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
@@ -678,10 +680,15 @@ router.post('/generate', async (req, res) => {
     return res.status(400).json({ error: 'searchContext 必须是字符串' });
   }
 
+  const stream = !shouldSave && req.accepts(['json', 'text/event-stream']) === 'text/event-stream';
+  const send = stream ? openPersonaEventStream(res) : null;
+  const controller = stream ? new AbortController() : null;
+  if (controller) res.once('close', () => controller.abort());
   try {
-    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext, referenceImage, referenceImageInfo } = await runPersonaGeneration({
+    const { displayName, charName, emotionBaseline, basePrompt, searchFound, searchContext, source, referenceImage, referenceImageInfo } = await runPersonaGeneration({
       description,
       cachedSearchContext,
+      ...(send && { signal: controller.signal, onStage: (stage, details) => send('stage', { stage, source: details?.source }) }),
     });
 
     const db = getDb();
@@ -709,6 +716,7 @@ router.post('/generate', async (req, res) => {
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
         search_context: searchContext,
+        source,
         reference_image: referenceImage,
         reference_image_info: referenceImageInfo,
       });
@@ -747,20 +755,26 @@ router.post('/generate', async (req, res) => {
     } else {
       // 预览模式：不入库，返回生成数据
       console.log(`[characters] AI-generated preview: "${displayName}" (${charName}) — not saved`);
-      res.json({
+      const draft = {
         name: charName,
         display_name: displayName,
         base_prompt: basePrompt,
         emotion_baseline: emotionBaseline,
         search_found: searchFound,
         search_context: searchContext,
+        source,
         reference_image: referenceImage,
         reference_image_info: referenceImageInfo,
-      });
+      };
+      if (send) { send('result', draft); res.end(); }
+      else res.json(draft);
     }
   } catch (err) {
+    if (res.destroyed) return;
     console.error('[characters] generate failed:', err.message);
-    res.status(500).json({ error: '生成失败: ' + err.message });
+    const data = { error: '生成失败: ' + err.message };
+    if (send) { send('error', data); res.end(); }
+    else res.status(500).json(data);
   }
 });
 
@@ -1690,6 +1704,7 @@ Cyrene (Honkai: Star Rail) has soft pastel pink hair in a fluffy shoulder-length
 - 开头固定为「角色名 (作品名)」格式（半角括号，写法与示例一致）：角色名用英文名，作品名用作品的官方英文名，均从用户消息给定的身份信息转换而来，如 宵宫（Yoimiya），来自《原神》→ Yoimiya (Genshin Impact)
 - 角色名之后直接以 has ... / wearing ... 续写，不要主语代词（she/he/they），不要再出现中文、「来自」或书名号
 - 先写脸与发型（简单发型、发色、瞳色、五官特征、可选的体型），再简单描写服装与饰品，全部以图中可见内容为准
+- 多人立绘只提取指定角色本人的特征；半身图只描述可见部位，忽略同伴、召唤物与海报文字
 - 只描述静态外观：不要表情、动作、姿势、场景、背景、画质与镜头描述
 - 一段连贯英文，不要换行、不要中文、不要 markdown、列表、引号或任何解释，严格按示例格式输出`;
 
@@ -1739,7 +1754,7 @@ router.post('/refine-appearance-draft', async (req, res) => {
           { type: 'image_url', image_url: { url: image } },
         ],
       },
-    ], { model, temperature: 0.3, label: '修正外观' });
+    ], { model, temperature: 0.3, label: '修正外观' }); // low（默认）：只提取参考图中可见的角色特征。
 
     // 剥掉代码围栏与引号包装，压成单段
     let appearance = llmResult.trim()

@@ -208,8 +208,7 @@ test('实际 HTTP 招募、预览、取消与确认替换；百科与模型使�
   assert.equal(upgraded.status, 200, JSON.stringify(result));
   assert.equal(retries, 2);
   assert.ok(requests.some(url => url.searchParams.get('titles') === '小雨'));
-  assert.ok(requests.some(url => url.searchParams.get('q')?.includes('小雨 潮声')));
-  assert.ok(requests.every(url => ['mzh.moegirl.org.cn', 'www.bing.com'].includes(url.hostname)));
+  assert.ok(requests.every(url => url.hostname === 'mzh.moegirl.org.cn'));
   assert.equal(result.persona, persona);
   assert.ok(result.source_revision);
   assert.equal(result.source, 'network');

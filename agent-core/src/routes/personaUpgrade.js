@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Router } from 'express';
+import { openPersonaEventStream } from './personaEventStream.js';
 import { getDb } from '../db/index.js';
 import { buildStructuredPersona } from '../services/characterGenerator.js';
 import { cropPersonalityForEmotion } from '../services/emotionEngine.js';
@@ -32,10 +33,7 @@ export function createPersonaUpgradeRouter({ buildPersona = buildStructuredPerso
     const release = () => { if (running.get(id) === controller) running.delete(id); };
     res.once('close', () => { controller.abort(); release(); });
     const stream = req.accepts(['json', 'text/event-stream']) === 'text/event-stream';
-    const send = (event, data) => {
-      if (!res.destroyed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    };
-    let heartbeat;
+    let send;
     try {
       const character = readCharacter(db, id);
       const body = req.body || {};
@@ -45,11 +43,7 @@ export function createPersonaUpgradeRouter({ buildPersona = buildStructuredPerso
       const name = character.display_name || character.name;
       const { persona: extraContext } = splitPersonaForUpgrade(character.base_prompt);
       const ip = extractPersonaIp(extraContext);
-      if (stream) {
-        res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
-        res.flushHeaders();
-        heartbeat = setInterval(() => { if (!res.destroyed) res.write(': keepalive\n\n'); }, 15000);
-      }
+      if (stream) send = openPersonaEventStream(res);
       const result = await buildPersona({
         name, ip, original: !ip, extraContext, signal: controller.signal,
         skipWebSearch: reuse, fetchedMaterials: ip && reuse ? body.search_context : '',
@@ -60,13 +54,12 @@ export function createPersonaUpgradeRouter({ buildPersona = buildStructuredPerso
       if (personaRevision(readCharacter(db, id)) !== revision) throw conflict();
       const data = { id, persona: result.persona, source_revision: revision, search_found: !!result.searchContext };
       if (stream) { send('result', data); res.end(); }
-      else res.json({ ...data, source: result.searchContext ? 'network' : ip ? 'not-found' : 'original', search_context: result.searchContext });
+      else res.json({ ...data, source: result.source || (result.searchContext ? 'network' : ip ? 'not-found' : 'original'), search_context: result.searchContext });
     } catch (error) {
       if (res.destroyed) return;
       if (res.headersSent) { send('error', { error: error.message }); res.end(); }
       else res.status(error.status || 502).json({ error: error.message });
     } finally {
-      clearInterval(heartbeat);
       release();
     }
   });

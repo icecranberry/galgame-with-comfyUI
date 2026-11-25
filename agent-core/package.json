@@ -10,6 +10,7 @@
     "test": "node --test \"test/*.test.js\" \"src/services/*.test.js\""
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@napi-rs/canvas": "1.1.1",
     "@zip.js/zip.js": "^2.25.0",
     "better-sqlite3": "^12.10.0",

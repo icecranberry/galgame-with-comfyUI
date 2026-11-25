@@ -107,7 +107,10 @@ async function consumeSSE(res, onEvent, terminalEvents) {
   while (true) {
     const { done, value } = await reader.read()
     if (done) return
-    buffer += decoder.decode(value, { stream: true })
+    const chunk = decoder.decode(value, { stream: true })
+    buffer += chunk
+    // 招募草稿可能携带立绘，只在收到换行时扫描累积的 JSON。
+    if (!chunk.includes('\n')) continue
     const lines = buffer.split('\n')
     buffer = lines.pop() || ''
     for (const line of lines) {
@@ -273,12 +276,18 @@ export async function generateCharacter(description) {
 }
 
 /** 预览模式生成角色：只生成不入库，由前端确认后再调 createCharacter */
-export async function generateCharacterPreview(description, { searchContext = '' } = {}) {
-  return request(`/characters/generate`, { method: 'POST', body: { description, save: false, searchContext } })
+export async function generateCharacterPreview(description, { searchContext = '', onStage, signal } = {}) {
+  const body = { description, save: false, searchContext }
+  if (onStage) return streamPersonaPreview('/characters/generate', body, onStage, signal)
+  return request('/characters/generate', { method: 'POST', body, signal })
 }
 
 export async function generatePersonaDraft(id, body, onStage, signal) {
-  const response = await fetch(BASE + '/characters/' + id + '/persona-draft', {
+  return streamPersonaPreview('/characters/' + id + '/persona-draft', body, onStage, signal)
+}
+
+async function streamPersonaPreview(path, body, onStage, signal) {
+  const response = await fetch(BASE + path, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body), signal,
   })
   if (!response.ok) throw new Error((await response.json()).error || '人设生成失败')
@@ -296,8 +305,8 @@ export async function generatePersonaDraft(id, body, onStage, signal) {
 export const applyCharacterPersona = (id, body) => request('/characters/' + id + '/apply-persona', { method: 'POST', body })
 
 /** 只重试已选百科页面的立绘，不调用角色生成、不修改角色卡。 */
-export function retryCharacterReferenceImage(pageUrl, { signal } = {}) {
-  return request('/characters/reference-image', { method: 'POST', body: { pageUrl }, signal })
+export function retryCharacterReferenceImage(pageUrl, { name, ip, signal } = {}) {
+  return request('/characters/reference-image', { method: 'POST', body: { pageUrl, name, ip }, signal })
 }
 
 /** 导入酒馆角色卡（PNG 内嵌 chara / JSON 卡），返回预览数据，直接进入招募预览步骤 */

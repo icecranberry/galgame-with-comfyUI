@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { chatSync } from './lorebook/runtime.js';
 import { searchCharacterReference } from './webSearch.js';
 import { PERSONA_RULES, cleanGeneratedPersona } from './structuredPersonaPrompt.js';
+import { cachedAkashaIdentity } from './akashaReference.js';
 
 const CREATION_RULES = `你负责新角色建档。根据用户的设定和已经定稿的人设填写角色资料；外观优先采用用户设定及百科信息框中的原作资料。
 只返回一个合法 JSON 对象，严格使用示例的三个必填字段，禁止代码围栏、解释或额外字段。
@@ -25,38 +26,42 @@ function generationRequest({ rules, persona, materials, task, hasWebMaterials })
     history: messages.slice(stable.length) } };
 }
 
-// 新建时显式 includeImage 才允许百科取图；升级使用默认的纯文本通路。
+// 智慧宫招募先随卡写出文字外观，有百科立绘时可继续识图。升级只写人设。
 export async function buildStructuredPersona({
-  name, ip, description = name, extraContext = '', fetchedMaterials = '', includeImage = false,
+  name, ip, description = name, extraContext = '', fetchedMaterials = '', recruitment = false,
   skipWebSearch = false, original = false, onStage = () => {}, label = '重写角色人设', ...options
 }, { search = searchCharacterReference, generate = chatSync } = {}) {
-  let reference = { text: fetchedMaterials.trim() };
-  if (!reference.text && !skipWebSearch && !original) {
+  let reference = { text: fetchedMaterials };
+  if (!reference.text.trim() && !skipWebSearch && !original) {
     onStage('search');
     try {
-      reference = await search(description, { name, ip, includeImage });
+      reference = await search(description, { name, ip, includeImage: recruitment, preferAkasha: true, signal: options.signal, onStage });
     } catch (error) {
       console.warn('[characters] 资料检索失败：', error.message);
     }
     if (!reference.text?.trim()) console.warn('[characters] 无可用网络文字资料，使用角色名、作品、现有设定与模型知识生成');
   }
-  const sourceIp = original ? '' : (ip || reference.ip || '');
   const materials = reference.text?.trim() || '';
+  const akasha = cachedAkashaIdentity(materials);
+  const sourceIp = original ? '' : (ip || reference.ip || akasha?.ip || '');
   const hasWebMaterials = Boolean(materials);
   options.signal?.throwIfAborted();
-  onStage('reference', { source: hasWebMaterials ? 'network' : original ? 'original' : 'not-found', search_context: materials });
+  const targetName = name || reference.name || akasha?.name;
+  const includeAppearance = recruitment && Boolean(akasha);
+  const source = akasha ? 'akasha' : hasWebMaterials ? 'network' : original ? 'original' : 'not-found';
+  onStage('reference', { source, search_context: materials });
   onStage(hasWebMaterials ? 'write' : 'write-local');
 
   // 招募有网络正文时关闭思考；只有名字、作品名或用户构想时用 medium 塑造人物。旧卡与导入资料整理用 low。
   let forceThinkingMode;
-  if (includeImage && !skipWebSearch) {
+  if (recruitment && !skipWebSearch) {
     if (hasWebMaterials) forceThinkingMode = 'disabled';
     else if (!extraContext.trim()) forceThinkingMode = 'enabled';
   }
-  const targetName = name || reference.name;
   const task = [targetName && `角色名：${targetName}`, sourceIp && `所属作品：${sourceIp}`,
     original && '这是无 IP 的原创角色。', `本次设定：${description}`,
-    '按以上角色与设定撰写首行身份句和五段 Markdown 人设。'].filter(Boolean).join('\n');
+    '按以上角色与设定撰写首行身份句和五段 Markdown 人设。',
+    includeAppearance ? '本次招募请在五段人设后一起写出「## 你的外观」，以文字资料中的默认造型为准。' : '写到「你的好恶」结束。'].filter(Boolean).join('\n');
   let correction = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     const { messages, lorebook } = generationRequest({
@@ -70,8 +75,8 @@ export async function buildStructuredPersona({
     options.signal?.throwIfAborted();
     onStage('validate');
     try {
-      const result = cleanGeneratedPersona(raw, { name, ip: sourceIp, original, sourcePersona: extraContext });
-      return { ...result, searchContext: materials,
+      const result = cleanGeneratedPersona(raw, { name: targetName, ip: sourceIp, original, sourcePersona: extraContext, includeAppearance });
+      return { ...result, source, searchContext: materials,
         referenceImage: reference.referenceImage || '', referenceImageInfo: reference.referenceImageInfo || null };
     } catch (error) {
       if (attempt) throw error;
@@ -87,7 +92,12 @@ export async function runPersonaGeneration({
   label = '创造角色', ...options
 }, deps = {}) {
   const result = await buildStructuredPersona({ ...options, name, ip, description, extraContext, skipWebSearch,
-    fetchedMaterials: cachedSearchContext, includeImage: true, label }, deps);
+    fetchedMaterials: cachedSearchContext, recruitment: true, label }, deps);
+  if (result.appearance) {
+    const english = /^\s*你是[^。\n(（]*[(（]([^()（）\n]+)[)）]/.exec(result.persona)?.[1] || result.displayName;
+    return { ...result, charName: availableCharacterName(english), basePrompt: result.persona + '\n\n## 你的外观\n' + result.appearance, searchFound: true,
+      emotionBaseline: '{"valence":0.5,"arousal":0.5,"dominance":0.5}' };
+  }
   const { messages, lorebook } = generationRequest({
     rules: CREATION_RULES, persona: result.persona, materials: [extraContext, result.searchContext].filter(Boolean).join('\n\n'),
     task: `请为${result.displayName}填写英文标识、外观与初始情绪，遵循本次设定「${description}」，只输出约定的 JSON 对象。`,
@@ -103,8 +113,12 @@ export async function runPersonaGeneration({
     !['valence', 'arousal', 'dominance'].every(key => Number.isFinite(vad?.[key]) && vad[key] >= (key === 'valence' ? -1 : 0) && vad[key] <= 1)) {
     throw new Error('新角色外观或初始情绪格式无效，请重新生成');
   }
-  let charName = meta.name.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'char_' + Date.now();
-  if (getDb().prepare('SELECT id FROM characters WHERE name = ?').get(charName)) charName += '_' + Date.now();
-  return { ...result, charName, emotionBaseline: JSON.stringify(vad), basePrompt: result.persona + '\n\n## 你的外观\n' + appearance,
+  return { ...result, charName: availableCharacterName(meta.name), emotionBaseline: JSON.stringify(vad), basePrompt: result.persona + '\n\n## 你的外观\n' + appearance,
     searchFound: Boolean(result.searchContext) };
+}
+
+function availableCharacterName(name) {
+  let charName = name.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'char_' + Date.now();
+  if (getDb().prepare('SELECT id FROM characters WHERE name = ?').get(charName)) charName += '_' + Date.now();
+  return charName;
 }

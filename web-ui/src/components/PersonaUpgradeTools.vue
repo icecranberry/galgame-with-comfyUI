@@ -11,7 +11,9 @@
 v-model="open" :title="character.display_name + ' · 重新生成人设'" wide :z-index="11000"
     :close-disabled="saving" @after-leave="clearDraft"
 >
-    <div v-if="sourceLabel" class="source-status" role="status">{{ sourceLabel }}</div>
+    <div v-if="source" class="source-status" role="status">
+      <PersonaSourceStatus :source="source" />
+    </div>
     <div class="persona-stage" :class="{ 'is-loading': generating }">
       <pre v-if="draft || generating" class="persona-preview" :aria-hidden="generating">{{ draft?.persona || originalPersona }}</pre>
       <Transition name="persona-fade">
@@ -33,6 +35,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheModal from './ui/LinsheModal.vue'
 import RecruitScanOverlay from './RecruitScanOverlay.vue'
+import PersonaSourceStatus from './PersonaSourceStatus.vue'
 import { generatePersonaDraft, applyCharacterPersona } from '../api/index.js'
 import { useChatStore } from '../stores/chat.js'
 import { isNewPersonaFormat, splitPersonaForUpgrade } from '../../../agent-core/src/shared/personaSectionUtils.js'
@@ -48,8 +51,6 @@ const draft = ref(null)
 const progress = ref('')
 const error = ref('')
 const source = ref('')
-const sourceLabels = { network: '已获取网络资料', 'not-found': '未获取到网络资料', original: '原创角色，使用已有设定' }
-const sourceLabel = computed(() => sourceLabels[source.value])
 const originalBase = ref('')
 const originalPersona = computed(() => splitPersonaForUpgrade(originalBase.value).persona)
 let searchContext = ''
@@ -88,6 +89,8 @@ function updateStage(data) {
   }
   const labels = {
     search: '正在爬取网络资料…',
+    'search-akasha': '正在查询智慧宫角色资料…',
+    'search-fallback': '智慧宫未取得资料，正在查询其他来源…',
     write: '已获得资料，正在整理网络资料…',
     'write-local': source.value === 'original' ? '正在塑造原创角色…' : '未找到网络资料，正在根据已有设定塑造角色…',
     validate: '正在校验人设格式…',

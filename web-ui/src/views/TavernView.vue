@@ -288,6 +288,12 @@
 </div>
       </template>
 
+      <Transition name="recruit-step">
+        <div v-if="recruit.loading && recruit.task" class="recruit-search-status recruit-live-status" role="status" aria-live="polite">
+          <span class="recruit-search-dot" :class="{ 'is-found': ['network', 'akasha'].includes(recruit.liveSource) }" aria-hidden="true"></span>
+          <PersonaSourceStatus :source="recruit.liveSource" :pending="recruit.lookupHint" />
+        </div>
+      </Transition>
       <Transition name="recruit-step" mode="out-in">
             <!-- 步骤 0：输入描述 -->
       <div v-if="recruit.step === 'input'" key="input" class="modal-content-section" style="position:relative">
@@ -339,7 +345,8 @@
                 </div>
                 <div class="recruit-search-status" role="status" aria-live="polite">
                   <span class="recruit-search-dot" :class="{ 'is-found': recruit.searchContext.trim() }" aria-hidden="true"></span>
-                  {{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : (recruit.result.source === 'card' ? '已使用导入的角色卡资料' : '未取得网络资料，已按设定与模型知识生成') }}
+                  <AkashaSourceCredit v-if="recruit.result.source === 'akasha'" />
+                  <template v-else>{{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : (recruit.result.source === 'card' ? '已使用导入的角色卡资料' : '未取得网络资料，已按设定与模型知识生成') }}</template>
                 </div>
                 <Transition name="recruit-step">
                   <div v-if="recruit.referenceInfo?.page_url && !recruit.referenceImage" class="recruit-image-status" role="status" aria-live="polite">
@@ -705,6 +712,8 @@
 
 <script setup>
 import RecruitScanOverlay from '../components/RecruitScanOverlay.vue'
+import PersonaSourceStatus from '../components/PersonaSourceStatus.vue'
+import AkashaSourceCredit from '../components/AkashaSourceCredit.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 
 import WorldLorebookModal from '../components/WorldLorebookModal.vue'
@@ -948,6 +957,8 @@ const recruit = reactive({
   error: '',
   result: null,    // 生成结果
   task: null,      // 'search' | 'regenerate'
+  liveSource: '',
+  lookupHint: '',
   searchContext: '', // 首次联网搜索得到的原始资料，用于重新归纳
   referenceImage: '', // 与本次搜索绑定，重新归纳时复用，不送进文本提示词
   referenceInfo: null,
@@ -955,6 +966,7 @@ const recruit = reactive({
   imageRetrySeconds: 0,
 })
 let recruitVersion = 0
+let recruitRequest
 let imageRetryController = null
 let imageRetryTimer = null
 
@@ -989,7 +1001,8 @@ async function retryRecruitImage() {
   imageRetryController = new AbortController()
   recruit.imageLoading = true
   try {
-    const result = await api.retryCharacterReferenceImage(recruit.referenceInfo.page_url, { signal: imageRetryController.signal })
+    const { page_url, name, ip } = recruit.referenceInfo
+    const result = await api.retryCharacterReferenceImage(page_url, { name, ip, signal: imageRetryController.signal })
     if (version !== recruitVersion || !recruit.show) return
     setRecruitReference(result)
     if (recruit.referenceImage) openRecruitRefine(recruit.referenceImage)
@@ -1058,6 +1071,8 @@ function openRecruit() {
 
 function closeRecruit() {
   ++recruitVersion
+  recruitRequest?.abort()
+  recruitRequest = undefined
   stopImageRetry()
   recruit.show = false
   showRecruitRefine.value = false
@@ -1082,6 +1097,26 @@ function onRecruitAppearanceRefined({ basePrompt }) {
   showToast('外观已应用到待确认的角色卡', 'success')
 }
 
+async function streamRecruitPreview(desc, version, searchContext = '') {
+  const controller = new AbortController()
+  recruitRequest = controller
+  recruit.liveSource = searchContext ? recruit.result?.source || 'network' : ''
+  recruit.lookupHint = searchContext ? '正在读取本次资料…' : '正在爬取网络资料…'
+  try {
+    return await api.generateCharacterPreview(desc, {
+      searchContext, signal: controller.signal,
+      onStage({ stage, source }) {
+        if (version !== recruitVersion) return
+        if (stage === 'search-akasha') recruit.lookupHint = '正在查询智慧宫角色资料…'
+        if (stage === 'search-fallback') recruit.lookupHint = '智慧宫未取得资料，正在查询其他来源…'
+        if (stage === 'reference-status' || stage === 'reference') recruit.liveSource = source
+      },
+    })
+  } finally {
+    if (recruitRequest === controller) recruitRequest = undefined
+  }
+}
+
 async function doGenerate() {
   const desc = recruit.desc.trim()
   if (!desc || recruit.loading || recruit.imageLoading || recruit.saving || showRecruitRefine.value) return
@@ -1093,7 +1128,7 @@ async function doGenerate() {
   startLoadingTips()
 
   try {
-    const result = await api.generateCharacterPreview(desc)
+    const result = await streamRecruitPreview(desc, version)
     if (version !== recruitVersion || !recruit.show) return
     if (result.error) {
       recruit.error = result.error
@@ -1106,7 +1141,7 @@ async function doGenerate() {
     if (recruit.referenceImage) openRecruitRefine(recruit.referenceImage)
   } catch (err) {
     if (version !== recruitVersion) return
-    recruit.error = '生成失败: ' + (err.message || '网络错误')
+    recruit.error = err.message || '生成失败，请重试'
   } finally {
     if (version === recruitVersion) {
       recruit.loading = false
@@ -1127,7 +1162,7 @@ async function regenerateFromSearchResult() {
   startLoadingTips()
 
   try {
-    const result = await api.generateCharacterPreview(desc, { searchContext: recruit.searchContext })
+    const result = await streamRecruitPreview(desc, version, recruit.searchContext)
     if (version !== recruitVersion || !recruit.show) return
     if (result.error) {
       recruit.error = result.error
@@ -1139,7 +1174,7 @@ async function regenerateFromSearchResult() {
     showToast('已根据原搜索资料重新整理角色卡', 'success')
   } catch (err) {
     if (version !== recruitVersion) return
-    recruit.error = '重新生成失败: ' + (err.message || '网络错误')
+    recruit.error = err.message || '重新生成失败，请重试'
   } finally {
     if (version === recruitVersion) {
       recruit.loading = false
@@ -2698,6 +2733,12 @@ onMounted(async () => {
   transition: background-color var(--dur-interaction) var(--ease-standard);
 }
 .recruit-search-dot.is-found { background: var(--success); }
+.recruit-live-status {
+  position: relative;
+  z-index: 11; /* 状态行位于扫描遮罩之上，智慧宫链接也可点击。 */
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
 .preview-prompt {
   padding: 12px; border-radius: 10px;
   background: var(--bg-primary); border: 1px solid var(--glass-border);

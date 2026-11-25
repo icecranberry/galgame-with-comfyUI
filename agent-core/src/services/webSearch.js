@@ -1,15 +1,19 @@
-/** 优先查询萌娘百科，使用 Bing 补充角色文字资料。 */
+/** 角色资料按作品优先查智慧宫，再依次查萌娘百科主站、镜像和 Bing。 */
 import { chatSync } from '../llm/llm-client.js';
 import { getWebSearchDispatcher } from './webSearchTransport.js';
+import { akashaWorld, fetchAkashaReference } from './akashaReference.js';
+import { findBaikePortrait, findRecruitPortrait } from './recruitPortrait.js';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT = 5000; // 萌娘百科/通用单次请求 5s 超时
 const BING_TIMEOUT = 8000;  // Bing 抓取（含 HTML 解析，给更长时间）
 
-// 出站白名单：联网抓取只允许这两个公共站点。
+const MOEGIRL_MAIN = { label: '萌娘百科主站', api: 'https://mzh.moegirl.org.cn/api.php', origin: 'https://zh.moegirl.org.cn' };
+const MOEGIRL_MIRROR = { label: '萌娘百科镜像', api: 'https://moegirl.uk/api.php', origin: 'https://moegirl.uk' };
+
 // 从 Bing 结果 HTML 里提取的链接也可能回流到抓取入口，必须统一校验，
 // 防止任何用户输入间接把请求引向内网地址（SSRF）。
-const ALLOWED_FETCH_HOSTS = /^(?:[a-z0-9-]+\.)*(?:moegirl\.org\.cn|bing\.com)$/;
+const ALLOWED_FETCH_HOSTS = /^(?:(?:[a-z0-9-]+\.)*(?:moegirl\.org\.cn|bing\.com)|moegirl\.uk)$/;
 
 function assertAllowedOutboundUrl(url) {
   let parsed;
@@ -109,7 +113,7 @@ export async function searchCharacterInfo(query) {
 }
 
 /** 图片独立于文本传递，避免 base64 进入人格生成提示词及搜索缓存。 */
-export async function searchCharacterReference(query, { name, ip, includeImage = true } = {}) {
+export async function searchCharacterReference(query, { name, ip, includeImage = true, preferAkasha = false, signal, onStage } = {}) {
   // 先用 LLM 提取核心角色名 + 作品上下文，提升萌娘百科搜索命中率
   const identity = name || (ip && /^[\p{L}\p{N}· ._-]{1,40}$/u.test(query))
     ? { name: name || query, context: '' }
@@ -123,97 +127,102 @@ export async function searchCharacterReference(query, { name, ip, includeImage =
     return { text: '', referenceImage: '' };
   }
 
+  const world = preferAkasha && akashaWorld(context);
+  if (world) {
+    onStage?.('search-akasha');
+    const portraitController = new AbortController();
+    const portraitSignal = signal ? AbortSignal.any([signal, portraitController.signal]) : portraitController.signal;
+    const portrait = includeImage ? findRecruitPortrait(searchName, world, portraitSignal) : null;
+    try {
+      const text = await fetchAkashaReference(searchName, context, signal);
+      if (text) {
+        if (includeImage) onStage?.('reference-status', { source: 'akasha' });
+        const image = await portrait;
+        signal?.throwIfAborted();
+        return { text, name: searchName, ip: context, referenceImage: '', ...image };
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
+      console.warn('[webSearch] 智慧宫查询失败：', error.message);
+    } finally {
+      portraitController.abort();
+    }
+    onStage?.('search-fallback');
+  }
+
   const matchesIdentity = result => {
     const text = (result.title + ' ' + result.content).toLowerCase();
     return text.includes(context.toLowerCase()) && text.includes(searchName.toLowerCase());
   };
   const allResults = [];
 
-  // 1. 萌娘百科（ACG 角色专业 wiki，大陆可直连）
-  try {
-    const moe = await searchMoegirl(searchName, context);
-    // 如有作品上下文，对结果排序并只保留匹配作品名的第一条（排除同名干扰）
-    if (context && moe.length > 0) {
-      const ctx = context.toLowerCase();
-      moe.sort((a, b) => {
-        const aMatch = a.title.toLowerCase().includes(ctx) || a.content.toLowerCase().includes(ctx) ? 1 : 0;
-        const bMatch = b.title.toLowerCase().includes(ctx) || b.content.toLowerCase().includes(ctx) ? 1 : 0;
-        return bMatch - aMatch;
-      });
-      const matched = moe.filter(r => r.title.toLowerCase().includes(ctx) || r.content.toLowerCase().includes(ctx));
-      if (matched.length > 0) {
-        console.log(`[webSearch] filtered ${moe.length} → 1 result by context "${context}": "${matched[0].title}"`);
-        // 深度抓取萌娘百科基本资料栏，补全外貌等关键信息
-        const best = matched[0];
-        // 深度抓取萌娘百科页面（Python 服务提取 infobox + 正文）
-        // 向前兼容：source 可能是完整 URL，也可能是"萌娘百科·Title"格式
-        const rawScrapeUrl = best.source && best.source.includes('moegirl.org.cn')
-          ? best.source
-          : `https://zh.moegirl.org.cn/${encodeURIComponent(best.title)}`;
-        const scrapeUrl = toSafeMoegirlScrapeUrl(rawScrapeUrl);
+  for (const site of [MOEGIRL_MAIN, MOEGIRL_MIRROR]) {
+    signal?.throwIfAborted();
+    try {
+      const candidates = await searchMoegirl(site, searchName, context);
+      // 角色简称可经 Wiki 重定向为全名，沿用检索结果并核对所属作品。
+      const best = candidates.find(r => r.content.trim() && (r.title + ' ' + r.content).toLowerCase().includes(context.toLowerCase()));
+      if (!best) {
+        console.log(`[webSearch] ${site.label}未取得匹配「${searchName}」和「${context}」的正文`);
+        continue;
+      }
+      if (includeImage) onStage?.('reference-status', { source: 'network' });
+      if (site === MOEGIRL_MAIN && includeImage) {
         try {
-          const pageData = includeImage ? await scrapeMoegirlPage(scrapeUrl) : null;
-          if (pageData?.reference_image) best.reference_image = pageData.reference_image;
-          if (pageData?.reference_image_info) best.reference_image_info = pageData.reference_image_info;
-          if (pageData && pageData.content) {
-            const infoboxLen = pageData.infobox?.length || 0;
-            const contentLen = pageData.content?.length || 0;
-            // 质量检查：infobox 为空且正文很短 → 可能是消歧义页或无效页，丢弃不用
-            if (infoboxLen === 0 && contentLen < 600) {
-              console.log(`[webSearch] low quality scrape (infobox=0, body=${contentLen} chars), discarding`);
-            } else {
-              best.content = pageData.content;
-              console.log(`[webSearch] scraped moegirl page (${pageData.content.length} chars) for "${best.title}"`);
-            }
-          }
+          const page = await scrapeMoegirlPage(toSafeMoegirlScrapeUrl(best.source));
+          if (page?.reference_image) best.reference_image = page.reference_image;
+          if (page?.reference_image_info) best.reference_image_info = page.reference_image_info;
+          const body = page?.content?.trim();
+          if (body && (page.infobox?.length || body.length >= 600)) best.content = body;
         } catch (err) {
           console.warn(`[webSearch] infobox scrape failed: ${err.message}`);
         }
-        // Python 深度抓取失败或内容太短时，改用 MediaWiki API 拉全文兜底
-        if (!includeImage || !best.content || best.content.length < 600) {
-          const apiFallback = await fetchFullPageExtract('https://mzh.moegirl.org.cn/api.php', best.title);
-          if (apiFallback && apiFallback.content) {
-            best.content = apiFallback.content;
-            best.source = apiFallback.source;
-            console.log(`[webSearch] API full extract fallback used for "${best.title}" (${apiFallback.content.length} chars)`);
-          }
-        }
-        moe.length = 0; moe.push(best);
-      } else {
-        console.log(`[webSearch] no results matched context "${context}", discarding ambiguous matches`);
-        moe.length = 0;
       }
+      if (site === MOEGIRL_MIRROR || !includeImage || best.content.length < 600) {
+        const full = await fetchFullPageExtract(site, best.title);
+        if (full) Object.assign(best, full);
+      }
+      allResults.push(best);
+      console.log(`[webSearch] 已获取${site.label}正文「${best.title}」`);
+      break;
+    } catch (err) {
+      console.warn(`[webSearch] ${site.label}查询失败：`, err.message);
     }
-    allResults.push(...moe);
-  } catch (err) {
-    console.warn('[webSearch] 萌娘百科查询失败：', err.message);
   }
 
-  // 2. 萌娘百科无结果时降级到 Bing
   if (allResults.length === 0) {
-    console.log('[webSearch] 未取得匹配的萌娘百科资料，改查 Bing');
+    signal?.throwIfAborted();
+    console.log('[webSearch] 主站和镜像均无可用正文，改查 Bing');
     try {
       const bing = await searchBing([searchName, context].join(" "), { deepScrape: includeImage });
       allResults.push(...bing.filter(matchesIdentity));
     } catch (err) {
       console.warn('[webSearch] Bing failed:', err.message);
     }
-  }
-
-  // 语音/对话子页面常不在百科正文前几千字里；补搜只取文本摘要。
-  try {
-    const samples = await searchBing([searchName, context, '角色语音 台词 称呼 喜好'].join(' '), { deepScrape: false });
-    allResults.push(...samples.filter(matchesIdentity).slice(0, 3));
-  } catch (err) {
-    console.warn('[webSearch] voice text search failed:', err.message);
+    const foundBeforeSamples = allResults.some(r => r.content);
+    if (includeImage && foundBeforeSamples) onStage?.('reference-status', { source: 'network' });
+    // 仅在 Bing 兜底时补搜语音和对话摘要。
+    try {
+      const samples = await searchBing([searchName, context, '角色语音 台词 称呼 喜好'].join(' '), { deepScrape: false });
+      allResults.push(...samples.filter(matchesIdentity).slice(0, 3));
+    } catch (err) {
+      console.warn('[webSearch] voice text search failed:', err.message);
+    }
+    if (includeImage && !foundBeforeSamples) {
+      onStage?.('reference-status', { source: allResults.some(r => r.content) ? 'network' : 'not-found' });
+    }
   }
 
   const text = allResults.filter(r => r.content)
     .map((r, i) => `[${i + 1}] ${r.title}\n${r.content}\n来源: ${r.source}`)
     .join('\n\n');
-  const reference = allResults.find(r => r.reference_image) || allResults.find(r => r.reference_image_info);
-  return { text, name: searchName, ip: context, referenceImage: reference?.reference_image || '',
-    ...(reference?.reference_image_info ? { referenceImageInfo: reference.reference_image_info } : {}) };
+  let image = { reference_image: '' };
+  if (includeImage) {
+    const reference = allResults.find(r => r.reference_image) || allResults.find(r => r.reference_image_info);
+    image = await completeMoegirlPortrait(reference, searchName, context, signal);
+  }
+  return { text, name: searchName, ip: context, referenceImage: image.reference_image,
+    ...(image.reference_image_info ? { referenceImageInfo: image.reference_image_info } : {}) };
 }
 
 /**
@@ -222,13 +231,13 @@ export async function searchCharacterReference(query, { name, ip, includeImage =
  * 萌娘百科有很多角色简称/别名的重定向页，如"丽娜"→"亚历山德丽娜·莎芭丝缇安"。
  * opensearch 不会跟随重定向，需要先用 action=query&redirects=1 尝试直接解析。
  *
- * @param {string} baseUrl - MediaWiki API 基地址
+ * @param {object} site - 要查询的百科站点
  * @param {string} query - 页面标题（角色名）
  * @returns {Promise<object|null>} 解析成功返回 { title, content, source }，失败返回 null
  */
-async function tryDirectPageResolve(baseUrl, query) {
+async function tryDirectPageResolve(site, query) {
   // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
-  const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*`;
+  const url = `${site.api}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*`;
 
   const data = await fetchMoegirlJson(url);
 
@@ -247,13 +256,13 @@ async function tryDirectPageResolve(baseUrl, query) {
   }
 
   const canonicalTitle = pageData.title;
-  const pageUrl = `https://zh.moegirl.org.cn/${encodeURIComponent(canonicalTitle)}`;
+  const pageUrl = `${site.origin}/${encodeURIComponent(canonicalTitle)}`;
 
   console.log(`[webSearch] direct page resolve success: "${query}" → "${canonicalTitle}" (${pageData.extract.length} chars)`);
 
   return {
     title: canonicalTitle,
-    content: pageData.extract.slice(0, 2500),
+    content: pageData.extract.trim().slice(0, 2500),
     source: pageUrl,
   };
 }
@@ -261,10 +270,10 @@ async function tryDirectPageResolve(baseUrl, query) {
 /**
  * 用 MediaWiki extracts API 拉取完整纯文本，Python 爬虫失败时的兜底
  */
-async function fetchFullPageExtract(baseUrl, query) {
+async function fetchFullPageExtract(site, query) {
   try {
     // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
-    const url = `${baseUrl}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&explaintext=1&format=json&origin=*`;
+    const url = `${site.api}?action=query&titles=${encodeURIComponent(query)}&redirects=1&prop=extracts&explaintext=1&format=json&origin=*`;
 
     const data = await fetchMoegirlJson(url, 10000);
 
@@ -275,7 +284,7 @@ async function fetchFullPageExtract(baseUrl, query) {
     }
 
     const content = pageData.extract.trim();
-    const pageUrl = `https://zh.moegirl.org.cn/${encodeURIComponent(pageData.title)}`;
+    const pageUrl = `${site.origin}/${encodeURIComponent(pageData.title)}`;
     console.log(`[webSearch] full page extract fallback: "${query}" → "${pageData.title}" (${content.length} chars)`);
     return { title: pageData.title, content: content.slice(0, 8000), source: pageUrl };
   } catch (err) {
@@ -290,16 +299,15 @@ async function fetchFullPageExtract(baseUrl, query) {
  * 1. 先尝试直接页面解析（跟随 wiki 重定向，如"丽娜"→完整页面）
  * 2. 回退到 opensearch 搜索 → prop=extracts 获取摘要
  *
+ * @param {object} site - 要查询的百科站点
  * @param {string} query - 角色名
  * @param {string} context - 作品上下文（可选，用于优化搜索关键词）
  */
-async function searchMoegirl(query, context = '') {
-  const BASE = 'https://mzh.moegirl.org.cn/api.php';
-
+async function searchMoegirl(site, query, context = '') {
   // Step 0: 先尝试将查询词作为页面标题直接解析（跟随 redirects）
   // 处理萌娘百科的角色简称/别名重定向（如"丽娜"→"亚历山德丽娜·莎芭丝缇安"）
   if (query.length >= 2) {
-    const directResult = await tryDirectPageResolve(BASE, query);
+    const directResult = await tryDirectPageResolve(site, query);
     if (directResult) {
       const isDisambig = /消歧义页|可以指|下列[^。]*条目|列出[^。]*同名/.test(directResult.content);
 
@@ -310,7 +318,7 @@ async function searchMoegirl(query, context = '') {
         if (context) {
           const specificTitle = `${directResult.title}(${context})`;
           console.log(`[webSearch] trying specific page: "${specificTitle}"`);
-          const specificResult = await tryDirectPageResolve(BASE, specificTitle);
+          const specificResult = await tryDirectPageResolve(site, specificTitle);
           if (specificResult) {
             return [specificResult];
           }
@@ -338,15 +346,13 @@ async function searchMoegirl(query, context = '') {
     : [query];
 
   let titles = [];
-  let urls = [];
 
   for (const q of searchQueries) {
     // 逐参 encodeURIComponent：查询词只进查询串，不参与主机/路径的构造
-    const searchUrl = `${BASE}?action=opensearch&search=${encodeURIComponent(q)}&format=json&limit=5`;
+    const searchUrl = `${site.api}?action=opensearch&search=${encodeURIComponent(q)}&format=json&limit=5`;
 
     const searchData = await fetchMoegirlJson(searchUrl);
     titles = Array.isArray(searchData?.[1]) ? searchData[1] : [];
-    urls = Array.isArray(searchData?.[3]) ? searchData[3] : [];
     console.log(`[webSearch] opensearch "${q}" → ${titles.length} results`);
     if (titles.length > 0) break;
   }
@@ -355,26 +361,9 @@ async function searchMoegirl(query, context = '') {
   const extracts = [];
   for (let i = 0; i < Math.min(titles.length, 3); i++) {
     const title = titles[i];
-    const pageUrl = urls[i] || '';
     try {
-      const extractUrl = `${BASE}?action=query&prop=extracts&exintro=1&explaintext=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
-
-      const extractRes = await fetchMoegirlJson(extractUrl);
-
-      const pageData = Object.values(extractRes.query?.pages || {})[0];
-      const extractText = pageData?.extract?.trim() || '';
-      if (extractText.length > 10) {
-        // 过滤消歧义页面：不把消歧义页当作角色详情返回
-        if (/消歧义页|可以指|下列[^。]{0,20}(条目|角色|人物|用语|作品)/.test(extractText)) {
-          console.log(`[webSearch] skipping disambiguation page: "${pageData.title}"`);
-          continue;
-        }
-        extracts.push({
-          title: pageData.title,
-          content: extractText.slice(0, 2500),
-          source: pageUrl || `${pageData.title}`,
-        });
-      }
+      const article = await tryDirectPageResolve(site, title);
+      if (article && !/消歧义页|可以指|下列[^。]{0,20}(条目|角色|人物|用语|作品)/.test(article.content)) extracts.push(article);
     } catch (error) {
       console.warn(`[webSearch] 萌娘百科摘要读取失败 "${title}": ${error.message}`);
     }
@@ -587,8 +576,23 @@ async function callMoegirlScraper(pageUrl, imageOnly, signal) {
   }
 }
 
-/** Retry only the already-selected article's image. No name extraction, persona generation or DB writes. */
-export async function fetchCharacterReferenceImage(rawPageUrl, { signal } = {}) {
+async function completeMoegirlPortrait(reference, name, ip, signal) {
+  const image = reference?.reference_image || '';
+  const info = reference?.reference_image_info;
+  if (image || typeof name !== 'string' || typeof ip !== 'string') {
+    return { reference_image: image, reference_image_info: info };
+  }
+  signal?.throwIfAborted();
+  const baike = await findBaikePortrait(name, ip, signal);
+  signal?.throwIfAborted();
+  if (baike.referenceImage) {
+    return { reference_image: baike.referenceImage, reference_image_info: baike.referenceImageInfo };
+  }
+  return { reference_image: '', reference_image_info: info && { ...info, name, ip } };
+}
+
+/** 重试选定角色的取图，不重新检索正文。旧客户端只传萌娘百科页面。 */
+export async function fetchCharacterReferenceImage(rawPageUrl, { name, ip, signal } = {}) {
   const pageUrl = toSafeMoegirlScrapeUrl(rawPageUrl);
   if (!pageUrl) {
     const error = new Error('请提供有效的萌娘百科页面地址');
@@ -596,5 +600,5 @@ export async function fetchCharacterReferenceImage(rawPageUrl, { signal } = {}) 
     throw error;
   }
   const result = await callMoegirlScraper(pageUrl, true, signal);
-  return { reference_image: result.reference_image, reference_image_info: result.reference_image_info };
+  return completeMoegirlPortrait(result, name, ip, signal);
 }
