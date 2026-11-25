@@ -71,7 +71,7 @@
         </div>
 
         <!-- 建筑功能模板事件：规则执行、内容预生成，由功能内容组件承载 -->
-        <div v-if="isBuildingFeature" class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel.prevent="onWheelScroll">
+        <div v-if="isBuildingFeature" class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel="pageBranchesOnWheel">
           <div class="branch-track">
             <div class="branch-card is-current">
               <div class="branch-text">
@@ -82,7 +82,7 @@
         </div>
 
         <!-- 横向滚动分支卡片 (80vh)，点击空白区域关闭，滚轮左右滑动 -->
-        <div v-else class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel.prevent="onWheelScroll">
+        <div v-else class="branch-scroll" ref="scrollEl" @click.self="closeDetail" @wheel="pageBranchesOnWheel">
           <div class="branch-track" @click.self="closeDetail">
             <!-- 所有步骤（choice_history[0]=初始场景, [1..N]=分支步骤） -->
             <div
@@ -190,6 +190,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
+import { pageOnWheel } from '../utils/horizontalScroll.js'
 import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
@@ -366,14 +367,10 @@ function formatTime(dt) {
     String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
 }
 
-function onWheelScroll(e) {
-  if (!scrollEl.value) return
+const pageBranchesOnWheel = pageOnWheel((direction) => {
   const cardWidth = 640 + 20 // card min-width + gap
-  scrollEl.value.scrollBy({
-    left: e.deltaY > 0 ? cardWidth : -cardWidth,
-    behavior: 'smooth',
-  })
-}
+  scrollEl.value?.scrollBy({ left: direction * cardWidth, behavior: 'smooth' })
+})
 
 async function onChoose(choice) {
   if (choosing.value) return

@@ -52,7 +52,7 @@ v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asse
         </div>
         <div v-if="!player" class="es-touch-row"><p class="es-touch-status" role="status">{{ touchLineText }}</p></div>
         <div class="es-strip">
-        <div class="es-grid" role="region" aria-label="立绘列表，可横向滚动" tabindex="0" @wheel="scrollStandings">
+        <div class="es-grid" role="region" aria-label="立绘列表，可横向滚动" tabindex="0" @wheel="scrollHorizontalOnWheel">
           <article v-for="slot in slots" :key="slot.id" class="es-slot">
             <div class="es-preview" role="button" tabindex="0" :aria-label="`查看${slot.name}立绘`" @click="edit(slot)" @keydown.enter="edit(slot)" @keydown.space.prevent="edit(slot)">
               <img v-if="slot.image_url" :src="slot.image_url" :alt="slot.name" loading="lazy">
@@ -87,6 +87,7 @@ v-if="editing.image_url" :key="editing.image_url" :src="editing.image_url" :asse
 
 <script setup>
 import { ref, computed, watch, onBeforeUnmount, inject } from 'vue'
+import { scrollHorizontalOnWheel } from '../utils/horizontalScroll.js'
 import StandingTouchLinesManager from './standing/StandingTouchLinesManager.vue'
 import StandingGenerationDirection from './standing/StandingGenerationDirection.vue'
 import StandingOutfitConfirmation from './standing/StandingOutfitConfirmation.vue'
@@ -213,22 +214,6 @@ async function start(ids, { reusePrompts = false, missingOnly = false } = {}) {
   }
   catch (e) { error.value = e.message }
   finally { submitting.value = '' }
-}
-let scrollTarget = 0, scrollList = null, lastWheelAt = 0
-function scrollStandings(event) {
-  if (event.ctrlKey) return
-  const list = event.currentTarget
-  if (list.scrollWidth <= list.clientWidth) return
-  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
-  if (!delta) return
-  event.preventDefault()
-  const unit = event.deltaMode === 1 ? 24 : event.deltaMode === 2 ? list.clientWidth : 1
-  const now = performance.now()
-  if (scrollList !== list || now - lastWheelAt > 500) scrollTarget = list.scrollLeft
-  scrollList = list
-  lastWheelAt = now
-  scrollTarget = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, scrollTarget + delta * unit))
-  list.scrollTo({ left: scrollTarget, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
 }
 async function savePrompt() {
   try { await api.updateExpressionStandingPrompt(subject.value, editingId.value, prompt.value, generation.value); await refresh(); showPrompt.value = false; return true }

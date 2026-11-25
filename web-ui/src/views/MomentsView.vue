@@ -49,7 +49,6 @@
       <!-- 角色筛选条 -->
       <div class="moments-filter-bar">
         <div
-          ref="filterScrollRef"
           class="filter-scroll"
           @wheel="onFilterWheel"
         >
@@ -137,6 +136,7 @@ import GearIcon from '../components/GearIcon.vue'
 
 import { useImageEditTasksStore } from '../stores/imageEditTasks.js'
 import { backfillMoments } from '../api/index.js'
+import { scrollHorizontalOnWheel } from '../utils/horizontalScroll.js'
 
 const taskStore = useImageEditTasksStore()
 const toast = inject('toast', null)
@@ -177,50 +177,12 @@ const sharePost = ref(null)
 // 分享用图：以朋友圈里摊在最前面的那张为准（分享图只出一张）
 const shareImage = ref('')
 const scrollContainer = ref(null)
-const filterScrollRef = ref(null)
 
-let filterScrollTarget = null
-let filterScrollFrame = 0
-
-function stopFilterScroll() {
-  if (filterScrollFrame) cancelAnimationFrame(filterScrollFrame)
-  filterScrollFrame = 0
-  filterScrollTarget = null
-}
-
-function animateFilterScroll() {
-  const el = filterScrollRef.value
-  if (!el || filterScrollTarget === null) {
-    filterScrollFrame = 0
-    return
-  }
-
-  const remaining = filterScrollTarget - el.scrollLeft
-  if (Math.abs(remaining) < 0.5) {
-    el.scrollLeft = filterScrollTarget
-    filterScrollTarget = null
-    filterScrollFrame = 0
-    return
-  }
-
-  el.scrollLeft += remaining * 0.3
-  filterScrollFrame = requestAnimationFrame(animateFilterScroll)
-}
-
+// 筛选条能横向滚动时，鼠标停在上面滚到两端也不带动页面
 function onFilterWheel(e) {
-  const el = filterScrollRef.value
-  if (!el) return
-  const maxScrollLeft = Math.max(0, el.scrollWidth - el.clientWidth)
-  const currentTarget = Math.min(filterScrollTarget ?? el.scrollLeft, maxScrollLeft)
-  if (maxScrollLeft <= 0) return
-  const atHorizontalEdge = (e.deltaY < 0 && currentTarget <= 0) || (e.deltaY > 0 && currentTarget >= maxScrollLeft)
-  if (atHorizontalEdge) {
-    e.preventDefault()
-    return
-  }
-  e.preventDefault()
-  filterScrollTarget = Math.max(0, Math.min(maxScrollLeft, currentTarget + e.deltaY))
-  if (!filterScrollFrame) filterScrollFrame = requestAnimationFrame(animateFilterScroll)
+  scrollHorizontalOnWheel(e)
+  const el = e.currentTarget
+  if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.ctrlKey) e.preventDefault()
 }
 
 const characters = computed(() => [...chat.characters]
@@ -256,7 +218,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopFilterScroll()
   moments.isViewingMoments = false
   moments.refreshUnreadCount()
   document.removeEventListener('click', onDocumentClick)

@@ -94,7 +94,7 @@
         <div v-if="showHistory">
           <!-- 历史奇遇筛选条 -->
           <div class="history-filter-bar">
-            <div class="filter-scroll" @wheel="onFilterWheel">
+            <div class="filter-scroll" @wheel="scrollHorizontalOnWheel">
               <div class="filter-avatar filter-all" :class="{ active: store.filterCharacterId === null && !store.filterEngaged }" @click="store.setFilter(null)">全部</div>
               <div class="filter-avatar filter-heart" :class="{ active: store.filterEngaged }" @click="store.toggleFilterEngaged()" title="只看参与过的">
                 <svg viewBox="0 0 24 24" width="18" height="18" :fill="store.filterEngaged ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -131,6 +131,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
+import { scrollHorizontalOnWheel } from '../utils/horizontalScroll.js'
 import { useRouter, useRoute } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import { useChatStore } from '../stores/chat.js'
@@ -174,15 +175,6 @@ const charactersWithEvents = computed(() => {
   }
   return Array.from(map.values())
 })
-
-function onFilterWheel(e) {
-  const el = e.currentTarget
-  const atLeft = el.scrollLeft <= 0 && e.deltaY < 0
-  const atRight = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 && e.deltaY > 0
-  if (atLeft || atRight) return
-  e.preventDefault()
-  el.scrollBy({ left: e.deltaY, behavior: 'smooth' })
-}
 
 const historyColumns = computed(() => splitColumns(store.visibleHistory, colCount.value))
 
