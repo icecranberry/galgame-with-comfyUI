@@ -3,9 +3,11 @@ import assert from "node:assert/strict"
 import { scrollHorizontalOnWheel } from "../src/utils/horizontalScroll.js"
 
 let frames = []
+let clock = 0
+globalThis.performance = { now: () => clock }
 globalThis.requestAnimationFrame = (fn) => frames.push(fn)
 globalThis.cancelAnimationFrame = () => { frames = [] }
-function flush() { while (frames.length) frames.shift()() }
+function flush(frameMs = 16) { while (frames.length) { clock += frameMs; frames.shift()(clock) } }
 
 function strip(scrollLeft = 0) {
   return { scrollLeft, scrollWidth: 1000, clientWidth: 200 }
@@ -39,6 +41,20 @@ test("mouse notches ease toward an accumulated target", () => {
   assert.ok(el.scrollLeft < 200)
   flush()
   assert.equal(el.scrollLeft, 200)
+})
+
+test("easing takes about the same time at a low frame rate", () => {
+  const fast = strip(0)
+  wheel(fast, { deltaY: 300 })
+  const start = clock
+  flush(16)
+  const fastMs = clock - start
+  const slow = strip(0)
+  wheel(slow, { deltaY: 300 })
+  const slowStart = clock
+  flush(100)
+  assert.equal(slow.scrollLeft, 300)
+  assert.ok(clock - slowStart <= fastMs + 200, `${clock - slowStart}ms at 10fps vs ${fastMs}ms at 60fps`)
 })
 
 test("line mode wheels are scaled and eased", () => {

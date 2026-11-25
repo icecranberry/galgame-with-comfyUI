@@ -1,8 +1,8 @@
 // 横向滑动（触控板左右滑、Shift+滚轮）交给浏览器原生处理，保留惯性和 scroll-snap。
-// 只把竖向滚轮转成横向：触控板的小步长直接跟手，鼠标滚轮的大步长用 rAF 缓动，
-// 连续滚动时累加到同一个目标上，不会像每次都调 scrollTo smooth 那样不停重启动画。
+// 只把竖向滚轮转成横向：触控板的小步长直接跟手，鼠标滚轮的大步长累加到同一个目标上缓动。
+// 缓动按时间衰减而不是按帧比例，页面掉帧时也在大约同样的时间内到位。
 const MOUSE_STEP = 50
-const EASE = 0.3
+const EASE_MS = 60
 const easing = new WeakMap()
 
 function stopEasing(element) {
@@ -11,17 +11,19 @@ function stopEasing(element) {
   easing.delete(element)
 }
 
-function easeTowardTarget(element) {
+function easeTowardTarget(element, now) {
   const state = easing.get(element)
   if (!state) return
+  const elapsed = now - state.last
+  state.last = now
   const remaining = state.target - element.scrollLeft
-  if (Math.abs(remaining) < 0.5) {
+  if (Math.abs(remaining) < 1) {
     element.scrollLeft = state.target
     easing.delete(element)
     return
   }
-  element.scrollLeft += remaining * EASE
-  state.frame = requestAnimationFrame(() => easeTowardTarget(element))
+  element.scrollLeft += remaining * (1 - Math.exp(-elapsed / EASE_MS))
+  state.frame = requestAnimationFrame((t) => easeTowardTarget(element, t))
 }
 
 /** Translate a vertical mouse wheel into horizontal scrolling, preserving page scroll at either end. */
@@ -47,7 +49,7 @@ export function scrollHorizontalOnWheel(event) {
   }
   if (state) state.target = next
   else {
-    easing.set(element, { target: next, frame: 0 })
-    easeTowardTarget(element)
+    const now = performance.now()
+    easing.set(element, { target: next, last: now, frame: requestAnimationFrame((t) => easeTowardTarget(element, t)) })
   }
 }
