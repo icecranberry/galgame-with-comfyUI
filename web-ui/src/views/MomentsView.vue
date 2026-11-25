@@ -50,7 +50,7 @@
       <div class="moments-filter-bar">
         <div
           class="filter-scroll"
-          @wheel="scrollHorizontalOnWheel"
+          @wheel="onFilterWheel"
         >
           <div
             class="filter-avatar filter-all"
@@ -177,6 +177,12 @@ const sharePost = ref(null)
 // 分享用图：以朋友圈里摊在最前面的那张为准（分享图只出一张）
 const shareImage = ref('')
 const scrollContainer = ref(null)
+
+// 鼠标停在筛选条上时，滚到两端也不带动页面
+function onFilterWheel(e) {
+  scrollHorizontalOnWheel(e)
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.ctrlKey) e.preventDefault()
+}
 
 const characters = computed(() => [...chat.characters]
   .sort((a, b) => (a.display_name || '').localeCompare(b.display_name || '', 'zh-CN')))
