@@ -190,6 +190,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
+import { pageOnWheel } from '../utils/horizontalScroll.js'
 import { useRouter } from 'vue-router'
 import { useEventsStore } from '../stores/events.js'
 import * as api from '../api/index.js'
@@ -366,25 +367,10 @@ function formatTime(dt) {
     String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0')
 }
 
-// 鼠标滚轮一格翻一张卡。触控板一次滑动（连同惯性）会连发几十个小步长事件，
-// 累计过阈值后只翻一张，等事件停下 250ms 才算下一次滑动。
-let branchWheelAt = 0, branchWheelSum = 0, branchSwipePaged = false
-function pageBranchesOnWheel(e) {
-  if (!scrollEl.value || e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return
-  e.preventDefault()
-  const now = performance.now()
-  if (now - branchWheelAt > 250) { branchWheelSum = 0; branchSwipePaged = false }
-  branchWheelAt = now
-  const mouseNotch = e.deltaMode !== 0 || Math.abs(e.deltaY) >= 50
-  if (!mouseNotch) {
-    if (branchSwipePaged) return
-    branchWheelSum += e.deltaY
-    if (Math.abs(branchWheelSum) < 120) return
-    branchSwipePaged = true
-  }
+const pageBranchesOnWheel = pageOnWheel((direction) => {
   const cardWidth = 640 + 20 // card min-width + gap
-  scrollEl.value.scrollBy({ left: Math.sign(mouseNotch ? e.deltaY : branchWheelSum) * cardWidth, behavior: 'smooth' })
-}
+  scrollEl.value?.scrollBy({ left: direction * cardWidth, behavior: 'smooth' })
+})
 
 async function onChoose(choice) {
   if (choosing.value) return

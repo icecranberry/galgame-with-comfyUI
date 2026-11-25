@@ -178,10 +178,11 @@ const sharePost = ref(null)
 const shareImage = ref('')
 const scrollContainer = ref(null)
 
-// 鼠标停在筛选条上时，滚到两端也不带动页面
+// 筛选条能横向滚动时，鼠标停在上面滚到两端也不带动页面
 function onFilterWheel(e) {
   scrollHorizontalOnWheel(e)
-  if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.ctrlKey) e.preventDefault()
+  const el = e.currentTarget
+  if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.ctrlKey) e.preventDefault()
 }
 
 const characters = computed(() => [...chat.characters]
