@@ -27,7 +27,7 @@ import { refresh as refreshCharSearch } from '../services/characterSearch.js';
 import { listCharacterOutfits, createCharacterOutfit, updateCharacterOutfit, deleteCharacterOutfit } from '../services/outfitService.js';
 import { listSceneOutfits, upsertSceneOutfits, generateSceneOutfits, getSceneOutfitForNow, OUTFIT_SCENES } from '../services/outfitScene.js';
 import { listSceneStandings, upsertSceneStanding, deleteSceneStanding, getSceneStandingRow, STANDING_SCENE_KEYS, STANDING_SCENE_LABELS } from '../services/characterStanding.js';
-import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange, APPEARANCE_HEADING_RE } from '../services/characterPersona.js';
+import { buildCharacterPersona, extractAppearanceIdentityCorpus, replaceAppearanceSection, splitAppearanceSection, isAppearanceOnlyPromptChange } from '../services/characterPersona.js';
 import { getWorldIntegrationRule, STANDING_IMAGE_PROMPT_RULE, STANDING_PROMPT_MODES, STANDING_ROLE_PROMPTS } from '../builtinRules.js';
 import { collectCharacterImageUrls } from '../services/characterImages.js';
 import { pickReactionMarker } from '../services/emojiService.js';
@@ -35,7 +35,11 @@ import { createCharacterBackgroundRouter } from './characterBackgrounds.js';
 import { generateDialogueBackground } from '../services/dialogueBackground.js';
 import { getClothingLibrary, resolveClothingTags, buildClothingAppearanceMessages, parseClothingAppearance } from '../services/clothingLibrary.js';
 
+import { extractPersonaIp, isNewPersonaFormat } from '../shared/personaSectionUtils.js';
+import { createPersonaUpgradeRouter } from './personaUpgrade.js';
+
 const router = Router();
+router.use(createPersonaUpgradeRouter());
 
 router.post('/reference-image', async (req, res) => {
   try {
@@ -193,7 +197,7 @@ router.post('/', (req, res) => {
     setImmediate(async () => {
       try {
         const optimized = await generateShortPromptWithLLM(base_prompt, display_name || name, name);
-        db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, newCharId);
+        db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ? AND base_prompt = ?').run(optimized, newCharId, base_prompt);
         console.log(`[char] short_prompt LLM-optimized for "${display_name || name}" (id=${newCharId})`);
         runShortPromptMigration();
       } catch (err) {
@@ -667,8 +671,8 @@ router.delete('/:id', async (req, res, next) => {
 router.post('/generate', async (req, res) => {
   const { description, save, searchContext: cachedSearchContext = '' } = req.body;
   const shouldSave = save !== false; // 默认 true，显式传 false 才跳过入库
-  if (!description || typeof description !== 'string' || description.trim().length < 2) {
-    return res.status(400).json({ error: 'description 太短，至少需要角色名称' });
+  if (!description || typeof description !== 'string' || !description.trim()) {
+    return res.status(400).json({ error: '请填写角色名或角色设定' });
   }
   if (typeof cachedSearchContext !== 'string') {
     return res.status(400).json({ error: 'searchContext 必须是字符串' });
@@ -714,7 +718,7 @@ router.post('/generate', async (req, res) => {
       setImmediate(async () => {
         try {
           const optimized = await generateShortPromptWithLLM(basePrompt, displayName, charName);
-          db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, generatedCharId);
+          db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ? AND base_prompt = ?').run(optimized, generatedCharId, basePrompt);
           console.log(`[characters] short_prompt LLM-optimized for "${displayName}" (id=${generatedCharId})`);
           runShortPromptMigration();
         } catch (err) {
@@ -829,6 +833,7 @@ function cardToContextText(card) {
     if (v != null && String(v).trim()) out.push(`【${label}】\n${String(v).trim()}`);
   };
   push('名称', src.name || (card && card.name));
+  push('角色原文', src.base_prompt);
   push('描述/设定', src.description);
   push('性格', src.personality);
   push('情境', src.scenario);
@@ -877,17 +882,30 @@ router.post('/import-card', async (req, res) => {
     }
 
     const src = (card && card.data && typeof card.data === 'object') ? card.data : card;
-    const cardName = String(src.name || (card && card.name) || '').trim();
+    const cardName = String(src.display_name || src.name || card?.name || '').trim();
     if (!cardName) return res.status(400).json({ error: '角色卡缺少 name 字段' });
+
+    // 原生卡的完整新版人设已定稿，JSON 和 PNG 的 chara 元数据共用同一预览入口。
+    // 保留原文中的换行、外观和生图标记。其他酒馆格式仍按第一手资料重新归纳。
+    const structuredCard = [src.base_prompt, src.description].find(text => typeof text === 'string' && isNewPersonaFormat(text));
+    if (structuredCard) {
+      const existing = getDb().prepare('SELECT 1 FROM characters WHERE name = ?').get(src.name || cardName);
+      const dbName = String(src.name || cardName);
+      return res.json({
+        name: existing ? dbName + '_' + Date.now() : dbName, display_name: cardName,
+        base_prompt: structuredCard, emotion_baseline: src.emotion_baseline,
+        search_found: false, source: 'card',
+      });
+    }
 
     const extraContext = cardToContextText(card);
     console.log(`[characters] importing card "${cardName}" (${extraContext.length} chars) → persona generator`);
 
     // 用邻舍自己的人格生成器整理一遍：角色卡全文作为第一手资料，联网搜索作为补充
     const { displayName, charName, emotionBaseline, basePrompt, searchFound } = await runPersonaGeneration({
-      description: cardName,
+      description: cardName, name: cardName,
+      ip: extractPersonaIp(src.base_prompt || src.description || ''),
       extraContext,
-      extraContextLabel: '角色卡',
       skipWebSearch: true,
     });
 

@@ -319,10 +319,7 @@
               </div>
 <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
               <!-- 招募加载遮罩 -->
-              <div v-if="recruit.loading" class="scan-overlay">
-                <div class="scan-line"></div>
-                <div class="scan-text">{{ loadingTip }}</div>
-              </div>
+              <RecruitScanOverlay v-if="recruit.loading" :text="loadingTip" />
             </div>
 
             <!-- 步骤 1：预览确认 -->
@@ -342,7 +339,7 @@
                 </div>
                 <div class="recruit-search-status" role="status" aria-live="polite">
                   <span class="recruit-search-dot" :class="{ 'is-found': recruit.searchContext.trim() }" aria-hidden="true"></span>
-                  {{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : '未抓取到角色资料' }}
+                  {{ recruit.searchContext.trim() ? '已从网络抓取到角色资料' : (recruit.result.source === 'card' ? '已使用导入的角色卡资料' : '未取得网络资料，已按设定与模型知识生成') }}
                 </div>
                 <Transition name="recruit-step">
                   <div v-if="recruit.referenceInfo?.page_url && !recruit.referenceImage" class="recruit-image-status" role="status" aria-live="polite">
@@ -395,10 +392,7 @@
               </div>
               <div v-if="recruit.error" class="gen-error">{{ recruit.error }}</div>
               <!-- 扫描动画覆盖层 -->
-              <div v-if="recruit.loading" class="scan-overlay">
-                <div class="scan-line"></div>
-                <div class="scan-text">{{ loadingTip }}</div>
-              </div>
+              <RecruitScanOverlay v-if="recruit.loading" :text="loadingTip" />
               <div v-if="recruit.result" class="recruit-appearance-hint">
                 检查外观描述，可以写的少但是更需要准确，可通过「修正外观」按钮用参考图修复，
                 <a :href="`https://animadex.net/?mode=characters&q=${encodeURIComponent(recruit.result.name).replaceAll('_', '+')}`" target="_blank">animadex</a>直接补充tag
@@ -710,6 +704,7 @@
 </template>
 
 <script setup>
+import RecruitScanOverlay from '../components/RecruitScanOverlay.vue'
 import LinsheModal from '../components/ui/LinsheModal.vue'
 
 import WorldLorebookModal from '../components/WorldLorebookModal.vue'
@@ -2664,41 +2659,6 @@ onMounted(async () => {
 }
 
 .gen-error { margin-top: 10px; padding: 8px 12px; border-radius: 8px; background: rgba(255,77,79,0.06); color: var(--danger); font-size: 13px; white-space: pre-wrap; line-height: 1.5; }
-
-/* ── 扫描动画覆盖层 ── */
-.scan-overlay {
-  /* 铺满整个白色内衬（含内边距），模糊才不会在内容区边上截出一道硬边。 */
-  position: absolute; inset: calc(-1 * var(--modal-lining-pad));
-  background: transparent;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border-radius: var(--modal-lining-radius);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 10; overflow: hidden;
-}
-.scan-line {
-  position: absolute; left: 10%; right: 10%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: scan-sweep 2s ease-in-out infinite;
-  box-shadow: 0 0 24px rgba(var(--accent-rgb),0.6), 0 0 8px rgba(var(--accent-rgb),0.3);
-}
-@keyframes scan-sweep {
-  0%   { top: 10%; opacity: 0.2; }
-  25%  { top: 90%; opacity: 1; }
-  50%  { top: 90%; opacity: 0.2; }
-  75%  { top: 10%; opacity: 1; }
-  100% { top: 10%; opacity: 0.2; }
-}
-.scan-text {
-  font-size: 14px; color: var(--accent); font-weight: 600;
-  animation: scan-pulse 1.2s ease-in-out infinite;
-  text-shadow: 0 0 12px rgba(var(--accent-rgb),0.3);
-}
-@keyframes scan-pulse {
-  0%, 100% { opacity: 0.4; transform: scale(0.97); }
-  50%      { opacity: 1;   transform: scale(1); }
-}
 
 /* ── 预览姓名可编辑 ── */
 .preview-name-row {

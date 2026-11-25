@@ -1193,7 +1193,7 @@ function _processNextInQueue() {
 
     try {
       const optimized = await generateShortPromptWithLLM(char.base_prompt, char.display_name || char.name, char.name);
-      db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ?').run(optimized, char.id);
+      db.prepare('UPDATE characters SET short_prompt = ? WHERE id = ? AND base_prompt = ?').run(optimized, char.id, char.base_prompt);
       console.log(`[short-prompt] 已优化 "${char.display_name}" (id=${char.id})`);
     } catch (err) {
       console.warn(`[short-prompt] 优化失败 "${char.display_name}":`, err.message);

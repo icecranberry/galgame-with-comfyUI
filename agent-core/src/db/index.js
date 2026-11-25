@@ -1002,6 +1002,7 @@ function initSchema(db) {
   migrateExpressionStandings(db);
   migrateStandingInteractions(db);
 
+  migrateCharacterPersonaSchema(db);
   // 迁移: characters 表新增 next_moment_at 列
   migrateMomentsSchema(db);
 
@@ -1606,6 +1607,25 @@ export function migrateMomentPostUserAuthors(db) {
   } finally {
     if (fkWasOn) db.pragma('foreign_keys = ON');
   }
+}
+
+export function migrateCharacterPersonaSchema(db) {
+  db.transaction(() => {
+    const columns = db.pragma('table_info(character_persona_backups)');
+    if (!columns.length) return;
+    if (columns.some(column => column.name === 'ip')) {
+      if (db.prepare('SELECT 1 FROM character_persona_backups WHERE ip IS NOT NULL LIMIT 1').get()) return;
+      if (db.pragma('table_info(characters)').some(column => column.name === 'ip')) {
+        if (db.prepare('SELECT 1 FROM characters WHERE ip IS NOT NULL LIMIT 1').get()) return;
+        db.exec('ALTER TABLE characters DROP COLUMN ip');
+      }
+      db.exec('ALTER TABLE character_persona_backups DROP COLUMN ip');
+    }
+    // 新库不建备份表。旧记录只在对应角色确认替换时清理。
+    if (!db.prepare('SELECT 1 FROM character_persona_backups LIMIT 1').get()) {
+      db.exec('DROP TABLE character_persona_backups');
+    }
+  }).immediate();
 }
 
 function migrateMomentsSchema(db) {

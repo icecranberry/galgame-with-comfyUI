@@ -99,7 +99,7 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
 // 统一 SSE 解析循环：按行解析 event:/data: 帧，每帧回调 onEvent(event, data)。
 // data 帧回调 JSON 解析后的对象；仅 event 行时 data 为 undefined。
 // 读取错误向上抛（由调用方决定静默断开还是向下游报错），流自然结束则正常返回。
-async function consumeSSE(res, onEvent) {
+async function consumeSSE(res, onEvent, terminalEvents) {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
@@ -117,6 +117,10 @@ async function consumeSSE(res, onEvent) {
       } else if (line.startsWith('data: ')) {
         try {
           onEvent(eventType, JSON.parse(line.slice(6)))
+          if (terminalEvents?.includes(eventType)) {
+            void reader.cancel().catch(() => {})
+            return
+          }
         } catch { /* ignore parse errors */ }
       }
     }
@@ -272,6 +276,24 @@ export async function generateCharacter(description) {
 export async function generateCharacterPreview(description, { searchContext = '' } = {}) {
   return request(`/characters/generate`, { method: 'POST', body: { description, save: false, searchContext } })
 }
+
+export async function generatePersonaDraft(id, body, onStage, signal) {
+  const response = await fetch(BASE + '/characters/' + id + '/persona-draft', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' }, body: JSON.stringify(body), signal,
+  })
+  if (!response.ok) throw new Error((await response.json()).error || '人设生成失败')
+  if (response.headers.get('content-type')?.includes('application/json')) return response.json()
+  let result, error
+  await consumeSSE(response, (event, data) => {
+    if (!data) return
+    if (event === 'stage') onStage(data)
+    if (event === 'result') result = data
+    if (event === 'error') error = data.error
+  }, ['result', 'error'])
+  if (!result) throw new Error(error || '生成连接中断，请重试')
+  return result
+}
+export const applyCharacterPersona = (id, body) => request('/characters/' + id + '/apply-persona', { method: 'POST', body })
 
 /** 只重试已选百科页面的立绘，不调用角色生成、不修改角色卡。 */
 export function retryCharacterReferenceImage(pageUrl, { signal } = {}) {

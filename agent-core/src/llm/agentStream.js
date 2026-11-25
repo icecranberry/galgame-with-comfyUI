@@ -32,7 +32,7 @@ export function buildAgentRequest(
   return params;
 }
 
-export async function* readAgentResponse(stream, { signal, allowEmpty = false } = {}) {
+export async function* readAgentResponse(stream, { signal, allowEmpty = false, terminalTool } = {}) {
   const message = { role: 'assistant', content: '', reasoning_content: '' };
   const calls = new Map();
   const details = new Map();
@@ -81,6 +81,8 @@ export async function* readAgentResponse(stream, { signal, allowEmpty = false } 
     for (const call of message.tool_calls) {
       if (!call.id || !call.function.name || ids.has(call.id)) throw new Error('模型返回了无效的工具调用标识');
       ids.add(call.id);
+      // 终结工具的调用方在已配对的前序工具提交后解析参数，并负责恢复格式错误。
+      if (call.function.name === terminalTool && call === message.tool_calls.at(-1)) continue;
       try { JSON.parse(call.function.arguments); } catch { throw new Error('模型返回了不完整的工具参数，未执行'); }
     }
   }

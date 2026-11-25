@@ -79,6 +79,10 @@ Outlet 在缓存模式保留原占位符，以保证命中/未命中不修改前
 
 天使场景服装草稿复用 `buildSceneOutfitRequest` 的实际索引和边界，已有目标服装仅放动态材料，不能再按 `messages.length - 3` 猜角色层。日记草稿复用原正文组装器；实际完整人格经 characterPersona 可能含生效外观，因此显式稳定边界保守截止固定任务规范末尾，`personaTexts` 指向实际发送的人格全文，扫描 history 使用日期/日程层与最终 user，不产生预发占位消息。草稿不写入原内容，确认提交冻结结果不再次调用 LLM。
 
+居民角色卡招募与升级共用五段人设规范和甘雨范本。以本次实际使用的网络正文选择提示词，复用上次检索的正文也算命中。命中时使用基础规则和原作资料，关闭当前世界观关联的世界书。缺少网络正文时，按当前生效设置注入世界观与 interaction 强化，并在末条 user 重申遵循世界观。没有生效的世界观正文时省略强化和提醒。新建角色的外观与初始情绪建档沿用同一分支。
+
+旧卡人设或导入材料按实际文本定位角色插槽，网络资料在后，末条 user 提供角色名、所属作品与本次设定。启用世界书的请求按实际消息提供 staticTexts、personaTexts、cacheBoundary 与扫描 history，稳定边界截止固定任务规范末尾。升级从老卡身份句读取所属作品，只替换首个外观标题之前的人设。招募预览取得立绘后沿用已有识图回填。招募生成正文有网络参考时关闭思考；没有网络正文或已有卡片素材可供参照时，以 medium 塑造人物，已知作品名也适用。老卡及导入卡按已有素材整理，使用 low；外观与情绪建档使用 low。
+
 新增创作类 LLM 请求或重构提示词时，遵守本节。这里的“插槽”是**原始消息中的文本边界与定位元数据**，不是必须发送给模型的占位字符串，也不是每个位置都新增一条 system。没有激活条目时，不输出空 `<worldbook>`、空消息或额外分隔符。所有插入交给共用适配器，业务层不要再手工拼一次世界书。
 
 ### 推荐结构
@@ -212,7 +216,7 @@ SillyTavern 预设仅由需要文风的业务请求显式接入 `services/preset
 | 聊天 | routes/chat.js、services/groupChatEngine.js、proactiveChatScheduler.js、replyQueueScheduler.js、wakeService.js |
 | 朋友圈 | routes/moments.js、services/momentCommentService.js、momentInteractionService.js、momentUserPostService.js、town/townNpcMomentGenerator.js |
 | 生活叙事 | services/eventGenerator.js、diaryGenerator.js、dreamService.js、mailboxScheduler.js、scheduleGenerator.js、cohabitationPlanner.js（室友 short 前后锚点，关系与已确认活动放动态尾部，固定 JSON 规范位于人设前）、itemGiftNarrative.js |
-| 图片与角色 | routes/characters.js、images.js、schedule.js；services/characterGenerator.js（居民与天使共用；参考资料前为稳定边界，保留原 system/user 结构）、characterAppearanceService.js、characterReactionService.js、characterReactionPackService.js、dialogueBackground.js、emojiService.js、expressionStandingService.js、outfitScene.js；maibot-bridge/prompt.js |
+| 图片与角色 | routes/characters.js、images.js、schedule.js；services/characterGenerator.js（居民招募与老卡升级共用五段人设生成，外观和建档字段仅招募单独生成）、characterAppearanceService.js、characterReactionService.js、characterReactionPackService.js、dialogueBackground.js、emojiService.js、expressionStandingService.js、outfitScene.js；maibot-bridge/prompt.js |
 | 世界内容 | routes/relationships.js；services/itemService.js、libraryGenerator.js、mediaAvatarDesigner.js、mediaOutletDesigner.js、mediaService.js、newspaperService.js |
 | 小镇 | services/town/townBuildingFeatureGenerator.js、townBuildingFeatureRuntime.js、townInitService.js、townLayoutAI.js、townNpcEventGenerator.js、townNpcOfferService.js、townNpcService.js、townNpcServiceRuntime.js、townNpcStockService.js、townPromptBuilder.js、townService.js |
 

@@ -54,7 +54,7 @@ async function createWithThinkingFallback(
 }
 
 /** 神说使用结构化原生工具流，不合并消息、不丢弃 tool 角色、不自动重放。 */
-export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', signal, label = '神说', requestId, forceThinking = true, forceThinkingMode, thinkingEffort = 'low', temperature = 0.72, requestBudget, response_format } = {}) {
+export async function* chatAgentStream(messages, { tools = [], toolChoice = 'auto', terminalTool, signal, label = '神说', requestId, forceThinking = true, forceThinkingMode, thinkingEffort = 'low', temperature = 0.72, requestBudget, response_format } = {}) {
   const llm = { ...config.llm, model: config.llm.freeEgg ? freeEggCandidates()[0] : config.llm.model };
   if (!llm.model) throw new Error('请先配置支持思考与工具调用的模型');
   const effort = normalizeThinkingEffort(thinkingEffort, 'low');
@@ -92,7 +92,7 @@ export async function* chatAgentStream(messages, { tools = [], toolChoice = 'aut
       { extraBody: llm.extraBody, forced: Boolean(forceOn || forcedMode), label: logLabel, signal },
     );
     console.log(`[${providerLabel()} ← ${logLabel} start]`);
-    for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking })) {
+    for await (const event of readAgentResponse(stream, { signal, allowEmpty: !forceThinking, terminalTool })) {
       if (event.type === 'usage') usage = event.usage;
       else {
         if (event.type === 'text_delta') content += event.text;

@@ -13,12 +13,12 @@
                 <span>已誓约</span>
               </div>
             </div>
-            <linshe-close-button class="modal-close" label="关闭" @click="requestClose" />
+            <linshe-close-button class="modal-close" label="关闭" :disabled="personaBusy" @click="requestClose" />
           </div>
 
           <div class="modal-body modal-body-detail">
             <!-- 头像 -->
-            <div class="detail-avatar-row" :inert="profileSaving">
+            <div class="detail-avatar-row" :inert="profileSaving || personaBusy">
               <div
                 class="detail-avatar clickable" role="button" tabindex="0" aria-label="编辑角色头像" title="点击编辑头像"
                 @click="$emit('open-avatar-editor', character)" @keydown.enter.prevent="$emit('open-avatar-editor', character)" @keydown.space.prevent="$emit('open-avatar-editor', character)"
@@ -117,7 +117,7 @@
               </div>
 
               <div class="persona-accordion">
-                <section v-for="section in editorSections" :key="section.key" class="persona-section" :class="{ 'is-open': editorSection === section.key }">
+                <section v-for="section in editorSections" :key="section.key" class="persona-section" :inert="personaBusy && section.key !== 'persona'" :class="{ 'is-open': editorSection === section.key }">
                   <h4 class="persona-section-heading">
                     <div
                       :id="`character-editor-${section.key}-toggle`"
@@ -144,7 +144,11 @@
                       <div class="persona-section-content">
                       <template v-if="section.key === 'persona'">
                         <p class="split-hint">设置角色的身份、性格与经历。外观在「外观服装」中单独编辑。</p>
-                        <linshe-input v-model="detail.editPersona" type="textarea" class="prompt-textarea" aria-label="人设提示词" @input="detail.dirty = true" />
+                        <PersonaUpgradeTools
+                          v-if="character && !profileAdapter" :key="character.id" :character="character"
+                          :disabled="detail.dirty || !!outfitGenerating || outfitBatchRunning" @busy="personaBusy = $event" @applied="applyPersonaResult"
+                        />
+                        <linshe-input :disabled="personaBusy" v-model="detail.editPersona" type="textarea" class="prompt-textarea" aria-label="人设提示词" @input="detail.dirty = true" />
                       </template>
                       <div v-else class="scene-block">
                         <div class="scene-block-head">
@@ -538,6 +542,8 @@
 <script setup>
 import LinsheCloseButton from "./ui/LinsheCloseButton.vue"
 
+import PersonaUpgradeTools from './PersonaUpgradeTools.vue'
+import { splitPersonaForEditing as splitPersona } from '../../../agent-core/src/shared/personaSectionUtils.js'
 import VoiceManagerModal from './VoiceManagerModal.vue'
 import { ttsApi } from '../api/tts.js'
 import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'
@@ -588,6 +594,23 @@ const emit = defineEmits([
   'lora-saved',
 ])
 
+const personaBusy = ref(false)
+watch(() => props.character?.id, () => { personaBusy.value = false })
+function applyPersonaResult(result) {
+  const char = props.character
+  if (char?.id !== result.id) return
+  Object.assign(char, result)
+  const split = splitPersona(result.base_prompt)
+  detail.editPersona = split.persona
+  detail.originalAppearance = split.appearance
+  detail.appearanceTail = split.tail
+  const work = detail.sceneOutfits.find(outfit => outfit.scene === 'work')
+  if (work && split.appearance && work.description === initialOutfitDescriptions.work) {
+    work.description = split.appearance
+    initialOutfitDescriptions.work = split.appearance
+  }
+  emit('saved', char)
+}
 const profileSaving = ref(false)
 const chat = useChatStore()
 const confirmFn = inject('confirm', async () => false)
@@ -629,30 +652,13 @@ const detail = reactive({
   scheduleToggling: false,
 })
 
-// ── 人格 / 外观拆分（口径与后端 services/characterPersona.js 的 splitAppearanceSection 一致）──
-// 整卡 = 人设 + 「## 你的外观」段。拆分后人设独立成框，外观段归入「外观服装 · 工装」，
-// 于是人设保持纯粹，四套造型也能统一管理。保存时再重组成整卡，后端锚点不变。
-const APPEARANCE_HEADING_RE = /##\s*你的外观/
-
-/** 整卡 → { persona, appearance, tail } */
-function splitPersona(full) {
-  const s = String(full || '')
-  const m = s.match(APPEARANCE_HEADING_RE)
-  if (!m) return { persona: s.trimEnd(), appearance: '', tail: '' }
-  const next = s.indexOf('\n## ', m.index + 1)
-  const before = s.slice(0, m.index)
-  const bodyStart = s.indexOf('\n', m.index)
-  const body = bodyStart >= 0
-    ? s.slice(bodyStart + 1, next >= 0 ? next : undefined).trim()
-    : ''
-  return { persona: before.trimEnd(), appearance: body, tail: next >= 0 ? s.slice(next) : '' }
-}
-
 /** { persona, appearanceBody, tail } → 整卡（外观正文为空时不写该段） */
 function composePersona(persona, appearanceBody, tail = '') {
   const head = String(persona || '').trimEnd()
   const body = String(appearanceBody || '').trim()
   const t = String(tail || '')
+  const saved = splitPersona(props.character?.base_prompt)
+  if (saved.suffix && body === saved.appearance && t === saved.tail) return head + saved.suffix
   if (!body) return `${head}${t}`
   return `${head}\n\n## 你的外观\n${body}${t}`
 }
@@ -707,7 +713,7 @@ const fullPrompt = computed(() => composePersona(detail.editPersona, effectiveAp
 /** 工装（常态外观）当前文本：作「按工装生成其余三套」的基准，也用于判断按钮是否可用 */
 const workOutfitText = computed(() => effectiveAppearance())
 
-async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
+async function loadSceneOutfits(characterId) {
   if (!characterId) { detail.sceneOutfits = []; return }
   try {
     const d = await api.listSceneOutfits(characterId)
@@ -719,7 +725,7 @@ async function loadSceneOutfits(characterId, fallbackWorkDesc = '') {
       const isWork = s.key === 'work'
       // 工装的外观看 base_prompt 原外观段（那是角色的常态外观）；其余场景看已存的服装
       const desc = isWork
-        ? (String(fallbackWorkDesc || '').trim() || hit?.description || '')
+        ? (detail.originalAppearance || hit?.description || '')
         : (hit?.description || '')
       return {
         scene: s.key,
@@ -936,6 +942,7 @@ function refreshRelationships() {
 
 defineExpose({ refreshRelationships, isDirty: computed(() => detail.dirty) })
 async function requestClose() {
+  if (personaBusy.value) return
   if (profileSaving.value) return
   if (props.profileAdapter && detail.dirty && !await confirmFn({ title: '放弃修改？', message: '未保存的人设与外观修改将丢失。', okText: '放弃修改', danger: true })) return
   emit('close')
@@ -970,7 +977,7 @@ function init(c) {
     detail.dirty = false
     return
   }
-  loadSceneOutfits(c.id, split.appearance)
+  loadSceneOutfits(c.id)
   loadSceneStandings(c.id)
   detail.momentsDisabled = !!c.moments_disabled
   detail.proactiveDisabled = !!c.proactive_disabled

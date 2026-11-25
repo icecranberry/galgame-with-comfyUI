@@ -21,15 +21,20 @@ const integer = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
 const validId = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value);
 function json(raw) { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')); } catch { fail('模型没有返回有效 JSON，请重试', 502); } }
 
-function parseKeeperReply(raw) {
-  // Pair structural braces while skipping braces and escaped quotes inside JSON strings.
-  const tokens = /[{}"]/g;
+function readRoundOutput(raw, validate) {
+  if (typeof raw !== 'string' || !raw.trim()) fail('模型未返回回合正文', 502);
+  let parsed;
+  try { parsed = json(raw); } catch (error) { if (!error.gameMessage) throw error; }
+  if (parsed !== undefined) return validate(parsed);
+  // Only consider outer objects; an object embedded in a list is not a round.
+  const tokens = /[{}\[\]"]/g;
   const quotedString = /"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/y;
   const starts = [];
   let response;
+  let lastError;
   for (let match; (match = tokens.exec(raw));) {
     const [token] = match;
-    if (token === '{') {
+    if (token === '{' || token === '[') {
       starts.push(match.index);
       continue;
     }
@@ -40,24 +45,22 @@ function parseKeeperReply(raw) {
       continue;
     }
     const start = starts.pop();
+    if (starts.length || raw[start] !== '{' || token !== '}') continue;
     let candidate;
     try { candidate = JSON.parse(raw.slice(start, tokens.lastIndex)); } catch { continue; }
-    if (typeof candidate.narration !== 'string' || !candidate.narration.trim() ||
-        typeof candidate.playerExpression !== 'string' || !Array.isArray(candidate.suggestions) ||
-        candidate.suggestions.some(suggestion => typeof suggestion !== 'string')) continue;
-    if (response) fail('守秘人返回了多个有效叙事对象，请续跑本轮', 502);
-    response = candidate;
+    let checked;
+    try { checked = validate(candidate); }
+    catch (error) {
+      if (!error.gameMessage) throw error;
+      lastError = error;
+      continue;
+    }
+    if (response) fail('模型返回了多个有效回合对象，请只提交一个', 502);
+    response = checked;
   }
+  if (!response && lastError) throw lastError;
+  if (!response) fail('模型没有返回有效 JSON，请重试', 502);
   return response;
-}
-
-// 叙事补全通道的输出校验：字段与 parseKeeperReply 同口径，但走严格的整体 JSON 解析。
-function readNarration(raw) {
-  const candidate = json(raw);
-  if (typeof candidate?.narration !== 'string' || !text(candidate.narration, 6000).trim() ||
-      typeof candidate?.playerExpression !== 'string' || !Array.isArray(candidate?.suggestions) ||
-      candidate.suggestions.some(suggestion => typeof suggestion !== 'string')) fail('守秘人叙事格式不合法', 502);
-  return candidate;
 }
 
 export function rollD100(skill, difficulty = 'regular', value = randomInt(1, 101)) {
@@ -377,20 +380,24 @@ function validateCreatedScenario(value) {
 const CARD_RULES = `你是轻量CoC调查员设计师。根据每位角色人设与本局公开身份一次生成全员卡，不复述角色外貌。每人选2–3项符合角色的特长（60–80），其余技能15–50。所有属性20–80整数。只输出一个 JSON 对象，不输出解释或代码围栏。cards 数组按名单每人填写一张卡，必须完整覆盖给定角色名。严格按此完整示例：
 {"cards":[{"name":"材料中的角色名，逐字照填","attributes":{"STR":50,"CON":50,"DEX":50,"INT":60,"POW":50,"APP":50,"SIZ":50,"EDU":60},"skills":{"侦查":65,"图书馆":65,"聆听":40,"话术":30,"说服":40,"心理学":30,"格斗":30,"闪避":25,"急救":30,"神秘学":20,"锁匠":20,"潜行":30}}]}
 attributes和skills字段及所有子字段不可缺失，数值为整数；不输出HP/SAN，由规则引擎计算。`;
-const INVESTIGATOR_INTRO = `你一个人扮演群聊中所有列在 actors 里的 AI 调查员。<group_info> 按名字提供成员资料，参考每人的本局身份、性格和口吻。把对话续成一次真正的多人交流，按发生顺序逐人输出。每条是一个人的发言，可以紧接上一句接话、插话、连说或暂时沉默。每位至多两条，总计最多八条。禁止代玩家、守秘人和已退场角色发言。只依据已经公开的情报推理，不替守秘人宣布行动结果，不凭空编造秘密身份或私下情报。
-illustrations 是守秘人已登记的可观察情境，按回合与场景理解并回应，无需等待图片或复述画面描述。
+const INVESTIGATOR_ROLE = `你一个人扮演群聊中所有列在 actors 里的 AI 调查员。<group_info> 按名字提供成员资料，参考每人的本局身份、性格和口吻。把对话续成一次真正的多人交流，按发生顺序写入 lines 数组，共一至八条，每位至多两条，部分角色可以沉默。禁止代玩家、守秘人和已退场角色发言。只依据已经公开的情报推理，不替守秘人宣布行动结果，不凭空编造秘密身份或私下情报。
+illustrations 是守秘人已登记的可观察情境，按回合与场景理解并回应，无需等待图片或复述画面描述。`;
+const INVESTIGATOR_INTRO = `${INVESTIGATOR_ROLE}
 如果 checkReactionActor 有值，本轮只由这个名字对应的调查员发出一条台词。根据公开日志中的 KP 裁定，立即用本人的口吻与表情回应；暗骰只依据 KP 公开描述。action 填空字符串，省略 check、suggestedSkill 和 useItemId，suggestions 填空数组。
 严格按同一 JSON 结构返回检定回应，例如 {"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"丽娜","dialogue":"原来只是风吹过门缝……我刚才还以为屋里有人。","emotion":"惊讶","action":""}]}。
-只输出 JSON 对象，不要输出解释或代码围栏。speaker 必须逐字使用 actors 中的名字。示例姓名仅用于说明格式。严格按以下字段填写：`;
+提供 narrate 工具时，必须调用一次 narrate 结束回合，下列 JSON 示例都是工具参数，整组发言放在同一次调用中，正文留空。未提供工具时，把相同的参数作为唯一的 JSON 对象返回。playerExpression 为字符串，suggestions 为字符串数组，lines 为对象数组。每条的 speaker、dialogue、emotion 和 action 都是必填字符串。speaker 逐字使用 actors 中的名字，台词写入 dialogue，action 写可观察的动作或行动意图，最多60字，纯发言填空字符串。公开卷宗用于理解剧情，其排版不作为输出示例。严格使用相应示例的字段和结构，禁止额外字段、解释、代码围栏和 JSON 对象以外的文字。示例姓名仅用于说明格式。`;
 const INVESTIGATOR_RULES = `${INVESTIGATOR_INTRO}
-{"playerExpression":"正常","suggestions":["问队友刚才看到了什么","沿着墙壁慢慢查看","先在原地听一听"],"lines":[{"speaker":"星见雅","dialogue":"[玩家:惊讶]那盏灯怎么又亮了？","emotion":"正常","action":"0–60字可观察的动作，纯对话可留空"},{"speaker":"丽娜","dialogue":"我从包里掏出撬棍来试试。","emotion":"惊讶","action":"用撬棍试着撬开卡住的门","useItemId":"逐字复制本人的 inventory 或 partyItems 中有可用次数的道具 id","check":{"skill":"锁匠","reason":"1–80字，说明正在尝试什么以及风险","difficulty":"regular","dice":"d20","mode":"normal"}}]}
-playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 中原样选一个，无原话或无法判断时填正常。suggestions 给出三条不同的、每条不超过30字、可以直接填入操作栏的下一步方向，只依据已公开情报；playerMode 为 keeper 时给主持动作，为 investigator 时给调查动作。不替玩家执行、不预判成败，遇到待裁定检定时 suggestions 填空数组。
-每条必须填写 emotion，从 expressionNames 中原样选一个，平静时选正常。dialogue 为10–100字角色台词，每句可加[表情名]改变发言者表情；有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 中原样选，此标记仅供演出，禁止代玩家说话或行动。有合适道具时可填写 useItemId，由引擎在同条 check 前使用道具。只用发言者持有或全队共享的可用道具，每条至多一件。使用工具时可配合对应技能；未使用道具时省略 useItemId。不要预写道具效果或剧情裁定。只有存在实质风险且结果不确定时才填 check，填后立即结束数组，等待守秘人裁定。其余发言省略 check。技能仅限 ${CHECK_SKILLS.join('、')}。难度仅限 regular、hard、extreme。默认 d20，理智检定默认 d100。mode 默认 normal，只有 d20 可以使用 advantage 或 disadvantage。`;
-const DECLARATION_RULES = `${INVESTIGATOR_INTRO}
-{"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"星见雅","dialogue":"你们也听到门里的声音了吗？","emotion":"惊讶","action":""},{"speaker":"丽娜","dialogue":"我想听清他们在说什么。","emotion":"正常","action":"把耳朵贴近门缝，听里面的谈话","suggestedSkill":"聆听"}]}
-playerExpression 依据 playerSpeech 选择 expressionNames 中的玩家表情，无原话或不确定填正常。每条 emotion 从 expressionNames 中选择；dialogue 为10–100字本人台词，可用[表情名]或[玩家:表情名]标记可见反应。suggestions 填空数组。
-checkReactionActor 无值时，结合眼前情境，让一位调查员用自己的话提出具体尝试，把意图写入 action（1–60字）。队友可以先接话；纯对话、点头、看向队友等表演动作的 action 填空字符串。第一项具体尝试必须是最后一条，停在行动意图，等真人守秘人描述后果。现场已有裁定时承接结果，避免重复声明同一尝试。
-可以附上 suggestedSkill 供守秘人参考，只能从 ${CHECK_SKILLS.join('、')} 中选一项；无合适技能时省略。若要使用道具，可附上 useItemId，值必须逐字取自本人 inventory 或 partyItems 的可用道具 id。不得自定检定、难度、骰型、成败或道具效果。`;
+{"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"星见雅","dialogue":"[玩家:惊讶]那盏灯怎么又亮了？","emotion":"正常","action":""},{"speaker":"丽娜","dialogue":"我从包里掏出撬棍来试试。","emotion":"惊讶","action":"用撬棍试着撬开卡住的门","useItemId":"crowbar","check":{"skill":"锁匠","reason":"试着打开卡住的门，撬动声可能惊动走廊里的人。","difficulty":"regular","dice":"d20","mode":"normal"}}]}
+playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 中原样选一个，无原话或无法判断时填正常。suggestions 给出三条不同的调查方向，每条不超过30字，可以直接填入操作栏，只依据已公开情报。不替玩家执行、不预判成败，遇到待裁定检定时 suggestions 填空数组。
+每条 emotion 从 expressionNames 中原样选一个，平静时选正常。dialogue 为10–100字角色台词，每句可加[表情名]改变发言者表情；有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 中原样选，此标记仅供演出，禁止代玩家说话或行动。可选的 useItemId 是字符串，逐字复制发言者的 inventory 或 partyItems 中的可用道具 id，由引擎在同条 check 前使用，每条至多一件。未使用道具时省略 useItemId。不要预写道具效果或剧情裁定。
+check 是可选对象，仅在有实质风险且结果不确定时填写，填写后立即结束数组，等待守秘人裁定。check.skill 为字符串，仅限 ${CHECK_SKILLS.join('、')}；check.reason 为1–80字的尝试及风险说明。check.difficulty 为 regular、hard 或 extreme，省略时为 regular。check.dice 为 d20 或 d100，省略时理智检定用 d100，其他用 d20。check.mode 为 normal、advantage 或 disadvantage，省略时为 normal，只有 d20 可以使用 advantage 或 disadvantage。`;
+const DECLARATION_RULES = `${INVESTIGATOR_ROLE}
+真人守秘人负责裁定。提供 narrate 工具时调用一次，将整个回合作为一个 JSON 对象传入，正文留空。没有工具时只返回同一个合法 JSON 对象。严格使用本轮对应的示例结构，禁止额外字段、代码围栏、解释和对象以外的文字。
+常规回合先填写顶层必填对象 declaration，声明一项具体尝试，等主持人裁定。declaration.actor 是 actors 中行动者的完整姓名，declaration.action 是1–60字的具体行动意图。可选的 suggestedSkill 是以下技能之一：${CHECK_SKILLS.join('、')}。可选的 useItemId 是行动者本人 inventory 或 partyItems 中可用道具的实际 id。两者都是字符串，不适用时省略。不要自定检定、难度、成败或道具效果。
+{"declaration":{"actor":"丽娜","action":"把听诊器贴到门板上，听里面的谈话","suggestedSkill":"聆听","useItemId":"stethoscope"},"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"丽娜","dialogue":"我来听听门后有没有人。","emotion":"正常"},{"speaker":"星见雅","dialogue":"好，我在这里替你留意走廊。","emotion":"正常"}]}
+检定回应回合（checkReactionActor 有值）只写该调查员对已公布裁定的一条反应，省略整个 declaration。暗骰只依据 KP 已公开的描述。
+{"playerExpression":"正常","suggestions":[],"lines":[{"speaker":"丽娜","dialogue":"原来是风吹过门缝，刚才我还以为有人在说话。","emotion":"惊讶"}]}
+两种回合的 lines 都只写台词。每条的 speaker、dialogue、emotion 是必填字符串。speaker 逐字使用 actors 中的姓名。dialogue 是10–100字角色台词，可用[表情名]或[玩家:表情名]标记可见反应。emotion 从 expressionNames 中选择。playerExpression 为字符串，根据 playerSpeech 选择 expressionNames 中的玩家表情，无原话或不确定填正常。suggestions 始终为空数组。示例姓名和道具 id 以本轮实际材料为准。`;
 const KEEPER_RULES = `你是本局跑团的守秘人。同条消息含「主持人口吻」时，让主持叙事自然带出该角色的用词、句式和说话节奏，随场景适度收放。角色资料用于主持表达。场景、人物和行动后果由剧本、现场与规则决定。
 完整模组和秘密仅供规划，叙事只公开调查员当前可以观察的信息。每轮80–250字，给出可行动的现场；不得一次剧透真相，不代替玩家行动。掷骰、状态变化、线索发放、切场景和密信必须调用对应工具，不能仅在正文声称执行；工具失败不能声称成功。只有结果不确定且有实际后果才需要检定，开虚掩的门、取得已给出的物品等确定性行动直接裁定。检定难度regular普通、hard困难、extreme极难。检定成功后根据模组给出线索与后果，失败也允许付出代价推进。已退场角色不能行动。遇到全员退场，提示引入替补或推进结局。遇到战斗调用trigger_encounter，再按检定与状态工具裁决。结束条件满足时提出结团，由玩家确认，不写主世界记忆。
 只在玩家本人采取需要检定的行动时，单独调用 request_check，填写具体原因、技能和难度。引擎完成掷骰并判定成败。以 request_check 回执或 checkToResolve 的 outcome 为准，结合 reason 描述行动后果，不重新计算成败或为同一行动重掷。普通技能检定优先D20，有明确情境优势或劣势时用D20的advantage或disadvantage，模组或玩家明确要求百分骰时用D100。伤害、随机表等只需要点数时用 roll_dice，按用途选骰型和数量。
@@ -403,10 +410,10 @@ imagesEnabled 为 true 时，在值得单独展示的时刻主动调用 generate
 只在引擎返回 outcome 后为有规则的剧本调用 propose_ending，结尾必须符合该结果。无结构化规则的剧本按模组条件提议结团。调用 propose_ending 后简短告知玩家可以确认结团。
 全部工具调用完成后，必须调用 narrate 工具提交本轮公开叙事与行动建议，结束本轮，之后不要再输出任何正文。
 narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。`;
-// 叙事补全通道：narrate 直呼失败时的备用链路，与调查员 batch 同构（chatSync + json 模式 + 重申）。
+// 工具已结算后的只读叙事。沿用实时 KP 的 medium，以同一裁定、人物和公开事实完成本轮。
 const NARRATION_RULES = `你是本局跑团的守秘人，根据已完成的裁定与现场写本轮公开叙事。同条消息含「主持人口吻」时，让叙事自然带出该角色的用词、句式和说话节奏。叙事只公开调查员当前可以观察的信息，不得剧透真相、密信内容或幕后设定，不代替玩家行动。
 narration 用主持人的口吻写80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]。有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，表情从 expressionNames 原样选，禁止代玩家说话或行动。playerExpression 只根据 playerSpeech 的原话推断玩家表情，从 expressionNames 原样选一个，无原话或无法判断时填正常。suggestions 是三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已经知道的内容；不得暗示未公开的真相，不代替玩家行动。
-只输出一个合法的 JSON 对象，严格按下方示例的字段和结构，不要输出解释、代码围栏或 JSON 以外的文字：
+只输出一个合法的 JSON 对象，以下三个字段均必填。narration 和 playerExpression 是字符串，suggestions 是至多三项的字符串数组。严格按示例结构填写，不要输出解释、代码围栏或 JSON 以外的文字：
 {"playerExpression":"正常","narration":"[惊讶][玩家:惊讶]车窗外，那盏红灯又亮了。\\n[正常]站台没有人影。","suggestions":["观察红灯的闪烁规律","问队友是否见过红灯","留在原地听站台的动静"]}`;
 
 function dialogueCue(dialogue, emotion, slots, { leadingTag = false, preferredSlot } = {}) {
@@ -470,11 +477,41 @@ const RANDOM_ITEM_RULES = `你为跑团守秘人生成一件当前场景里能�
 {"name":"陈旧的急救绷带","type":"consumable","desc":"纸套沾着灰，封口仍完整。","uses":1,"effect":{"hpDelta":2}}
 name 使用1–40字具体物品名，desc 用1–100字写可观察的细节。type 只能是 consumable、tool、key、gag。uses 填1–99，反复可用或被动持有填-1。consumable 的 effect 填 hpDelta 和/或 sanDelta 的非零整数，各在-100到100内。tool 的 effect 例如 {"skillBonus":{"skill":"锁匠","bonus":15}}，bonus 是1–99的整数，技能仅限 ${CHECK_SKILLS.join('、')}。key 和 gag 的 effect 严格填 {}。`;
 const investigatorName = { type: 'string', description: '<group_info> 中的调查员姓名，逐字填写。' };
+const checkProperties = {
+  skill: { type: 'string', enum: CHECK_SKILLS }, difficulty: { type: 'string', enum: Object.keys(DC) }, reason: str,
+  dice: { type: 'string', enum: CHECK_DICE }, mode: { type: 'string', enum: D20_MODES },
+};
+function investigatorNarrateTool(humanKeeper, reaction) {
+  const actorName = { type: 'string', description: humanKeeper ? '从本轮 actors 中逐字选择姓名。' : '从本轮 actors 中逐字选择发言者姓名。' };
+  const itemId = { type: 'string', description: humanKeeper ? '可选。行动者本人 inventory 或 partyItems 中可用道具的实际 id。' : '可选。本人的 inventory 或 partyItems 中可用道具的实际 id。' };
+  const fields = {
+    speaker: actorName,
+    dialogue: { type: 'string', description: '调查员本人说的台词。' },
+    emotion: { type: 'string', description: '从 expressionNames 中选择，平静时填正常。' },
+  };
+  const required = Object.keys(fields);
+  if (!humanKeeper) {
+    fields.action = reaction ? { type: 'string', enum: [''] } : { type: 'string', description: '本人的可观察动作或行动意图，纯发言填空字符串。' };
+    required.push('action');
+    if (!reaction) {
+      fields.useItemId = itemId;
+      fields.check = { type: 'object', properties: checkProperties, required: ['skill', 'reason'], additionalProperties: false };
+    }
+  }
+  const description = reaction ? '只提交刚接受裁定的调查员的一条反应台词。'
+    : humanKeeper ? '用 declaration 声明一项行动供真人守秘人裁定，用 lines 提交调查员们的台词。' : '一次提交整组调查员的公开台词与行动。';
+  return tool('narrate', description, {
+    ...(humanKeeper && !reaction && { declaration: { type: 'object', required: ['actor', 'action'], additionalProperties: false,
+      properties: { actor: actorName, action: { type: 'string', minLength: 1, maxLength: 60, description: '等待真人守秘人裁定的一项具体尝试。' },
+        suggestedSkill: checkProperties.skill, useItemId: itemId } } }),
+    playerExpression: str, suggestions: { type: 'array', maxItems: humanKeeper || reaction ? 0 : 3, items: str },
+    lines: { type: 'array', minItems: 1, maxItems: reaction ? 1 : 8, items: {
+      type: 'object', properties: fields, required, additionalProperties: false,
+    } },
+  });
+}
 export const KP_TOOLS = [
-  tool('request_check', '自动掷骰并返回玩家本人的检定结论 outcome。按引擎结论叙述后果。队友的行动由队友提出检定。请单独调用。', {
-    skill: { type: 'string', enum: CHECK_SKILLS }, difficulty: { type: 'string', enum: Object.keys(DC) }, reason: str,
-    dice: { type: 'string', enum: CHECK_DICE }, mode: { type: 'string', enum: D20_MODES },
-  }, ['skill', 'difficulty', 'reason']),
+  tool('request_check', '自动掷骰并返回玩家本人的检定结论 outcome。按引擎结论叙述后果。队友的行动由队友提出检定。请单独调用。', checkProperties, ['skill', 'difficulty', 'reason']),
   tool('roll_dice', '掷随机表、伤害等点数骰。用于不需要技能或难度的随机结果。请单独调用。', {
     sides: { type: 'integer', enum: DICE_SIDES }, count: { type: 'integer', minimum: 1, maximum: 6 }, reason: str,
   }),
@@ -497,7 +534,7 @@ export const KP_TOOLS = [
     playerExpression: { type: 'string', description: '按 playerSpeech 原话推断的玩家表情，从 expressionNames 中原样选一个，无原话或无法判断填 正常。' },
     narration: { type: 'string', description: '80–250字公开叙事，每句可另起一行并用 expressionNames 内的方括号表情前缀，平静时用[正常]；有明确可观察刺激时可加[玩家:表情名]改变玩家立绘，禁止代玩家说话或行动。' },
     suggestions: { type: 'array', maxItems: 3, items: str, description: '三条不同的调查行动，每条最多30字，可直接填进玩家操作栏，只基于玩家此时已公开的情报。' },
-  }, ['narration']),
+  }),
 ];
 
 export default function registerGamePlugin(ctx) {
@@ -977,6 +1014,24 @@ export default function registerGamePlugin(ctx) {
     delete s.turn.playerSpeechId;
   }
   const playerSpeech = s => s.publicLog.find(log => log.id === s.turn.playerSpeechId)?.dialogue;
+  async function completeRoundOutput(request, options, validate, label, correction) {
+    let accepted, reason;
+    const retry = {
+      accepts(raw) {
+        try { accepted = readRoundOutput(raw, validate); return true; }
+        catch (error) {
+          if (!error.gameMessage) throw error;
+          reason = error.gameMessage;
+          console.warn(`[游戏:trpg-simulator:${label}] 回合输出未通过校验，追加纠错指令重试一次：${reason}`);
+          return false;
+        }
+      },
+      get taskSuffix() { return `\n上次结果未通过校验（${reason}）。${correction}`; },
+    };
+    const raw = await llm.complete(request, { ...options, responseFormat: 'json', retry });
+    options.signal.throwIfAborted();
+    return accepted ?? readRoundOutput(raw, validate);
+  }
   async function generateBatch(s, slots, signal) {
     const { checkReactionActor } = s.turn;
     const actors = s.investigators.filter(c => !c.player && !c.outOfAction && (!checkReactionActor || c.name === checkReactionActor));
@@ -984,7 +1039,15 @@ export default function registerGamePlugin(ctx) {
     const byName = new Map(actors.map(card => [card.name, card]));
     const audience = 'investigators';
     const humanKeeper = s.mode === 'keeper';
-    const task = `${checkReactionActor ? '让指定调查员回应刚公布的检定裁定，按约定返回 JSON。' : '继续队伍的对话和行动，按约定返回 JSON。'} 只输出一个 JSON 对象，不要输出对话记录式文本或 JSON 以外的文字。`;
+    const continueTask = humanKeeper ? '在顶层 declaration 填写行动者 actor 和一项具体行动 action，等我裁定；lines 只写队伍的对话。'
+      : '继续队伍当前的对话和行动。';
+    const reactionTask = humanKeeper
+      ? '让指定调查员回应刚公布的检定裁定。lines 只写这个人的一条台词，suggestions 填空数组。只提交回应，不提交 declaration 或其他行动字段。'
+      : '让指定调查员回应刚公布的检定裁定。lines 只写这个人的一条台词，action 填空字符串，suggestions 填空数组，省略 check、suggestedSkill 和 useItemId。';
+    const directive = checkReactionActor ? reactionTask : continueTask;
+    const submission = humanKeeper ? '按本轮示例提交一个完整 JSON 对象' : '把 playerExpression、suggestions 和整组 lines 作为一个 JSON 对象提交';
+    const task = `${directive} 有 <world_setting> 时，请遵循其中的世界观设定。
+调用一次 narrate，${submission}。姓名写进 speaker，台词写进 dialogue。没有提供工具时，仅输出同一个 JSON 对象。禁止额外台词、解释或代码围栏。`;
     const request = { rules: humanKeeper ? DECLARATION_RULES : INVESTIGATOR_RULES,
       personas: [investigatorRoster(s)],
       stableData: JSON.stringify({ scenario: { title: s.scenario.meta.title, era: s.scenario.meta.era } }),
@@ -992,65 +1055,80 @@ export default function registerGamePlugin(ctx) {
       data: JSON.stringify({ ...investigatorContext(s), actors: [...byName.keys()], expressionNames: slots.map(slot => slot.name),
         playerMode: s.mode, playerSpeech: playerSpeech(s), checkReactionActor }),
       task, scope: `${s.sessionId}:${audience}` };
-    const readOutput = candidate => {
-      const output = json(candidate);
-      const responseLines = output?.lines;
-      if (!Array.isArray(responseLines) || responseLines.length > 8) fail('调查员发言格式不合法', 502);
+    const validateBatch = candidate => {
+      const { lines: responseLines, playerExpression, suggestions } = candidate ?? {};
+      if (!Array.isArray(responseLines) || !integer(responseLines.length, 1, 8) || typeof playerExpression !== 'string' ||
+          !Array.isArray(suggestions) || suggestions.length > (humanKeeper || checkReactionActor ? 0 : 3) ||
+          suggestions.some(suggestion => typeof suggestion !== 'string')) fail('调查员发言格式不合法', 502);
       if (checkReactionActor) {
         const line = responseLines[0];
-        if (responseLines.length !== 1 || typeof line?.speaker !== 'string' || line.speaker.trim() !== checkReactionActor
-          || !dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots).length) fail('调查员的检定回应格式不合法，请续跑本轮', 502);
+        const frames = dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots);
+        if (Object.hasOwn(candidate, 'declaration') || responseLines.length !== 1 || typeof line?.speaker !== 'string' || line.speaker.trim() !== checkReactionActor || !frames.length ||
+            typeof line.emotion !== 'string' || (humanKeeper ? line.action !== undefined : line.action !== '') || line.check != null || line.suggestedSkill != null ||
+            line.useItemId != null || suggestions.length) fail('调查员的检定回应须为指定角色的单条台词', 502);
+        return { reaction: frames };
       }
-      return output;
+      let declaration;
+      if (humanKeeper) {
+        const declared = candidate.declaration;
+        const actor = byName.get(text(declared?.actor, 100).trim());
+        const action = typeof declared?.action === 'string' ? declared.action.trim() : '';
+        if (!actor || !action || [...action].length > 60) fail('declaration 必须填写 actors 中的 actor 和 1–60 字的 action', 502);
+        const { suggestedSkill, useItemId } = declared;
+        if (suggestedSkill !== undefined && !CHECK_SKILLS.includes(suggestedSkill)) fail('declaration.suggestedSkill 须为有效技能', 502);
+        if (useItemId !== undefined && (!validId(useItemId) ||
+            ![...(actor.inventory || []), ...partyInventory(s)].some(item => item.id === useItemId && item.uses !== 0))) {
+          fail('declaration.useItemId 须为行动者或队伍的可用道具 id', 502);
+        }
+        declaration = { actor: actor.name, reason: action, ...(suggestedSkill && { suggestedSkill }), ...(useItemId && { useItemId }) };
+      }
+      const lines = [];
+      for (const line of responseLines) {
+        const actor = byName.get(typeof line?.speaker === 'string' ? line.speaker.trim() : '');
+        if (!actor) fail('调查员姓名不在本轮 actors 名单中', 502);
+        const { dialogue, action: rawAction, emotion, useItemId } = line;
+        if (typeof dialogue !== 'string' || typeof emotion !== 'string') fail('调查员台词和表情必须是字符串', 502);
+        const frames = dialogueFrames(text(dialogue, 600), emotion, slots);
+        if (humanKeeper) {
+          if (!frames.length || Object.keys(line).some(key => !['speaker', 'dialogue', 'emotion'].includes(key))) {
+            fail('lines 只填写 speaker、dialogue 和 emotion，行动单独放入 declaration', 502);
+          }
+          if (lines.filter(entry => entry.speaker === actor.name).length >= 2) fail('每位调查员至多发言两条', 502);
+          lines.push({ speaker: actor.name, frames });
+          continue;
+        }
+        if (line.suggestedSkill != null || typeof rawAction !== 'string') fail('调查员须填写字符串 action，可选检定填写 check', 502);
+        const action = text(rawAction, 300).trim();
+        if ((!frames.length && !action && !useItemId) || (useItemId != null && !validId(useItemId))) fail('调查员发言或道具编号不合法', 502);
+        if (lines.filter(entry => entry.speaker === actor.name).length >= 2) continue;
+        let check;
+        if (line.check != null) {
+          try { check = checkDetails({ ...line.check, reason: line.check.reason || action || frames.map(frame => frame.dialogue).join('') }); }
+          catch (error) {
+            if (!error.gameMessage) throw error;
+            fail('调查员检定格式不合法', 502);
+          }
+        }
+        lines.push({ speaker: actor.name, frames, action, check, emotion, useItemId });
+        if (check) break;
+      }
+      return { playerExpression, suggestions, lines, declaration };
     };
-    // 校验失败按原请求无痕重试（最多4次）：失败的输出不入档，
-    // 时间线上只会追加同一原始任务的分段，不留错误说明文本。
-    let output = null;
-    for (let attempt = 0; attempt <= 4 && !output; attempt++) {
-      try { output = readOutput(await llm.complete(request, { responseFormat: 'json', signal })); }
-      catch (error) {
-        if (!error.gameMessage) throw error;
-        if (attempt < 4) console.warn(`[游戏:trpg-simulator] 调查员输出未通过校验，按原请求重试（${attempt + 1}/4）：${error.gameMessage}`);
-        else fail(error.gameMessage, 502);
-      }
-    }
-    const responseLines = output?.lines;
-    if (checkReactionActor) {
-      const line = responseLines[0];
-      const frames = dialogueFrames(text(line?.dialogue, 600), line?.emotion, slots);
-      const actor = actors[0];
-      frames.forEach((cue, i) => {
-        const log = addLog(s, actor.name, cue.dialogue, '', 'dialogue', 'investigator', cue.expressionSlot, cue.playerExpressionSlot);
+    // 调查员对白和行动声明沿用默认 low，兼顾角色口吻与实时回合延迟。
+    const outputTool = investigatorNarrateTool(humanKeeper, Boolean(checkReactionActor));
+    const output = await completeRoundOutput(request, { signal, outputTool }, validateBatch, 'RL',
+      '重新完成本轮任务，严格按本模式的 JSON 示例填写。直接从 { 开始，到 } 结束，台词全部放进 lines[].dialogue，speaker 逐字使用 actors 名单内的名字。');
+    if (output.reaction) {
+      output.reaction.forEach((cue, i) => {
+        const log = addLog(s, checkReactionActor, cue.dialogue, '', 'dialogue', 'investigator', cue.expressionSlot, cue.playerExpressionSlot);
         if (i === 0) log.checkReaction = true;
       });
       return;
     }
-    const lines = [];
-    for (const l of responseLines) {
-      const actor = byName.get(typeof l?.speaker === 'string' ? l.speaker.trim() : '');
-      const dialogue = text(l?.dialogue, 600);
-      const frames = dialogueFrames(dialogue, l?.emotion, slots);
-      const action = text(l?.action, 300).trim();
-      const useItemId = l?.useItemId;
-      if (!actor || (!frames.length && !action && !useItemId) || (useItemId != null && !validId(useItemId))) fail('调查员发言、检定或道具编号不合法', 502);
-      if (lines.filter(line => line.speaker === actor.name).length >= 2) continue;
-      let check;
-      if (!humanKeeper && l.check != null) {
-        try { check = checkDetails({ ...l.check, reason: l.check.reason || action || frames.map(frame => frame.dialogue).join('') }); } catch { fail('调查员检定格式不合法，请续跑本轮', 502); }
-      }
-      let intent = '';
-      if (humanKeeper) {
-        intent = action || (l.check || useItemId ? frames.map(frame => frame.dialogue).join('') : '');
-        if (useItemId && !intent) fail('调查员使用道具时需要先声明行动，请续跑本轮', 502);
-      }
-      const suggestedSkill = l.suggestedSkill || l.check?.skill;
-      lines.push({ speaker: actor.name, frames, action, check, intent, suggestedSkill, emotion: l.emotion, useItemId });
-      if (check || intent) break;
-    }
     updatePlayerExpression(s, output.playerExpression, slots);
     const suggestions = actionSuggestions(output.suggestions);
     if (suggestions.length) s.suggestions = suggestions;
-    for (const { speaker, frames, action, check, intent, suggestedSkill, emotion, useItemId } of lines) {
+    for (const { speaker, frames, action, check, emotion, useItemId } of output.lines) {
       const actor = character(s, speaker);
       if (actor.outOfAction) continue;
       if (useItemId && !humanKeeper) {
@@ -1063,11 +1141,14 @@ export default function registerGamePlugin(ctx) {
       }
       if (!frames.length && action) frames.push(dialogueCue('', emotion, slots));
       frames.forEach((cue, i) => addLog(s, speaker, cue.dialogue, i === frames.length - 1 ? action : '', 'dialogue', 'investigator', cue.expressionSlot, cue.playerExpressionSlot));
-      if (intent) {
-        s.declaration = { logId: s.publicLog.at(-1).id, actor: speaker, reason: intent,
-          ...(CHECK_SKILLS.includes(suggestedSkill) ? { suggestedSkill } : {}), ...(useItemId ? { useItemId } : {}) };
-      }
       if (check && !actor.outOfAction) s.pendingCheck = { id: randomUUID(), targetChar: speaker, ...check };
+    }
+    if (output.declaration) {
+      const { actor, reason } = output.declaration;
+      let log = s.publicLog.at(-1);
+      if (log.speakerRole === 'investigator' && log.speaker === actor) log.action = reason;
+      else log = addLog(s, actor, '', reason, 'dialogue', 'investigator', NORMAL_SLOT);
+      s.declaration = { ...output.declaration, logId: log.id };
     }
   }
   const route = (method, url, handler, { lock = true, disconnect = false } = {}) => router[method](url, async (req, res) => {
@@ -1318,7 +1399,15 @@ export default function registerGamePlugin(ctx) {
       const { meta, scenes, clues, npcs, handouts, keeperSecrets, rules } = s.scenario;
       const keeperName = s.keeper.name;
       const keeperPersona = s.keeper.base_prompt || s.keeper.short_prompt;
-      let narration = null;
+      function validateNarration(candidate) {
+        const narration = text(candidate?.narration, 6000).trim();
+        if (!dialogueFrames(narration, '', slots, true).length) fail('narration 须包含可播放的叙事正文', 502);
+        if (typeof candidate.playerExpression !== 'string') fail('playerExpression 须为表情字符串', 502);
+        if (!Array.isArray(candidate.suggestions) || candidate.suggestions.length > 3 ||
+            candidate.suggestions.some(item => typeof item !== 'string')) fail('suggestions 须为至多三项的字符串数组', 502);
+        if (Object.keys(candidate).some(key => !['narration', 'playerExpression', 'suggestions'].includes(key))) fail('叙事对象含有额外字段', 502);
+        return { narration, playerExpression: candidate.playerExpression, suggestions: candidate.suggestions };
+      }
       const input = { rules: KEEPER_RULES,
         taskPersona: keeperPersona ? `## 主持人口吻\n${keeperName}\n\n${keeperPersona}` : '',
         personas: [investigatorRoster(s)],
@@ -1336,8 +1425,16 @@ export default function registerGamePlugin(ctx) {
         task: (rulingOnly ? '裁定当前已登记的检定或道具行动，按约定返回。' : '根据玩家行动主持下一段，按约定返回公开叙事和行动建议。') + ' 本轮结束时必须调用 narrate 工具提交叙事与建议；禁止以正文文本结束回合，所有叙事只能通过 narrate 提交。', scope: `${s.sessionId}:keeper` };
       const executeTool = (name, args, calls) => {
           if (name === 'narrate') {
-            if (!text(args.narration, 6000).trim()) return { error: 'narration 不能为空，请重新提交本轮叙事与行动建议' };
-            narration = args;
+            if (calls.at(-1)?.function.name !== 'narrate' || calls.filter(call => call.function.name === 'narrate').length !== 1) {
+              fail('先完成本批裁定，再在最后单独提交一次 narrate');
+            }
+            try { s.turn.keeperOutput = validateNarration(args); }
+            catch (error) {
+              if (!error.gameMessage) throw error;
+              s.turn.keeperOutput = null;
+              console.warn(`[游戏:trpg-simulator:KP] narrate 校验失败，转入叙事补全：${error.gameMessage}`);
+              return { __endTurn: true, error: error.gameMessage };
+            }
             return { __endTurn: true, accepted: true };
           }
           if (s.proposedEnding && name !== 'generate_image') fail('结尾已备好，等待玩家确认');
@@ -1360,40 +1457,42 @@ export default function registerGamePlugin(ctx) {
           const result = apply(s, name, args, effects);
           return name === 'roll_dice' ? promptRoll(result) : result;
       };
-      // toolChoice 'required' 关闭正文收尾：在执行该参数的上游上，回合唯一出口是 narrate 工具。
       // 实时 KP 状态机需校验检定/数值/暗线防剧透与工具协调，使用 medium 思考强度兼顾延迟与一致性。
       const requestOptions = { responseFormat: 'json', signal, forceThinkingMode: 'enabled', thinkingEffort: 'medium' };
-      const agentOptions = { ...requestOptions, checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), toolChoice: 'required' };
-      const content = await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
-      signal.throwIfAborted();
-      let response = null;
-      if (narration) {
-        response = { playerExpression: narration.playerExpression, narration: narration.narration, suggestions: narration.suggestions };
-      } else {
-        // narrate 未直呼：content 兜底解析（容忍正文里夹带合法 JSON）。
-        console.warn('[游戏:trpg-simulator] KP 未调用 narrate 工具，回退 content 解析');
-        const raw = (content || '').trim();
-        response = parseKeeperReply(raw);
-      }
-      if (typeof response?.narration !== 'string') {
-        // 叙事补全通道：narrate 与 content 均未取得有效叙事时，切换到与调查员 batch 同构的
-        // 结构化补全链路（json 模式 + 重申），按原任务无痕重试（最多4次）——失败的正文从不入档。
-        console.warn('[游戏:trpg-simulator] KP narrate/content 均未取得有效叙事，切换叙事补全通道');
-        const narrationInput = { rules: NARRATION_RULES, taskPersona: input.taskPersona,
-          personas: input.personas, stableData: input.stableData, publicHistory: s.publicLog,
-          timeline: promptTimeline(s, 'keeper-narration'), data: input.data,
-          task: (rulingOnly ? '根据已登记的裁定结果，生成本轮公开叙事。' : '根据现场与玩家行动，生成本轮公开叙事。') + ' 只输出一个 JSON 对象，不要输出对话记录式文本或 JSON 以外的文字。',
-          scope: `${s.sessionId}:keeper-narration` };
-        for (let attempt = 0; attempt <= 4 && !response; attempt++) {
-          try { response = readNarration(await llm.complete(narrationInput, requestOptions)); }
+      // 缺少 keeperOutput 表示仍可主持；null 是已落账、只许补叙事的断点。
+      if (!Object.hasOwn(s.turn, 'keeperOutput')) {
+        const agentOptions = { ...requestOptions, checkpoint: s.turn.agent, save: () => saveWithEffects(s, effects), toolChoice: 'required', terminalTool: 'narrate' };
+        // 旧存档可能已持久化 narrate 的成功回执，尚未推进 phase。
+        const transcript = s.turn.agent?.continuation ?? s.turn.agent?.messages;
+        const receipt = transcript?.at(-1);
+        const recordedCall = receipt?.role === 'tool' && receipt.content === '{"accepted":true}'
+          ? transcript.findLast(message => message.role === 'assistant')?.tool_calls?.find(call =>
+            call.id === receipt.tool_call_id && call.function.name === 'narrate') : undefined;
+        const content = recordedCall ? recordedCall.function.arguments : await llm.agent(input, KP_TOOLS, executeTool, agentOptions);
+        if (!Object.hasOwn(s.turn, 'keeperOutput')) {
+          try { s.turn.keeperOutput = readRoundOutput(content, validateNarration); }
           catch (error) {
             if (!error.gameMessage) throw error;
-            if (attempt < 4) console.warn(`[游戏:trpg-simulator] KP 叙事补全未通过校验，按原请求重试（${attempt + 1}/4）：${error.gameMessage}`);
-            else fail(error.gameMessage, 502);
+            s.turn.keeperOutput = null;
+            console.warn(`[游戏:trpg-simulator:KP] 未收到有效叙事，转入叙事补全：${error.gameMessage}`);
           }
+          saveWithEffects(s, effects);
         }
       }
-      if (typeof response?.narration !== 'string') fail('守秘人一时语塞了，请再试一次', 502);
+      signal.throwIfAborted();
+      let response = s.turn.keeperOutput;
+      if (response === null) {
+        const narrationInput = { rules: NARRATION_RULES, taskPersona: input.taskPersona,
+          personas: input.personas, stableData: JSON.stringify({ scenario: { title: meta.title, era: meta.era } }), publicHistory: s.publicLog,
+          timeline: promptTimeline(s, 'keeper-narration'),
+          data: JSON.stringify({ ...investigatorContext(s, true), scene: { name: scene(s).name, publicDesc: scene(s).publicDesc },
+            checkToResolve: promptRoll(s.checkToResolve || s.turn.dice), itemsToResolve: s.itemsToResolve,
+            playerSpeech: playerSpeech(s), expressionNames: slots.map(slot => slot.name) }),
+          task: '依据当前现场和本轮已落账的检定、道具与状态变化完成公开叙事，不再掷骰或结算。有 <world_setting> 时请遵循其中的世界观设定。按示例仅输出一个完整 JSON 对象。',
+          scope: `${s.sessionId}:keeper-narration` };
+        response = await completeRoundOutput(narrationInput, requestOptions, validateNarration, 'KP',
+          '请按已登记的结果重新提交 JSON 对象，完整填写 narration、playerExpression 和 suggestions。');
+      }
       updatePlayerExpression(s, response.playerExpression, slots);
       const suggestions = actionSuggestions(response.suggestions);
       if (suggestions.length) s.suggestions = suggestions;
@@ -1406,6 +1505,7 @@ export default function registerGamePlugin(ctx) {
       delete s.checkToResolve;
       delete s.itemsToResolve;
       delete s.turn.agent;
+      delete s.turn.keeperOutput;
       s.turn.phase = 'investigators';
       persist(s);
     }
