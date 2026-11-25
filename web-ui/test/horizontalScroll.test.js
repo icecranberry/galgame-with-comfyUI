@@ -148,8 +148,20 @@ function pager() {
 
 test("each mouse notch pages once", () => {
   const { pages, send } = pager()
-  send([100, 100, -100], 40)
+  send([100, 100, -100], 80)
   assert.deepEqual(pages, [1, 1, -1])
+})
+
+test("line mode notches page once each", () => {
+  const { pages, send } = pager()
+  send([3, 3], 80, { deltaMode: 1 })
+  assert.deepEqual(pages, [1, 1])
+})
+
+test("a fast touchpad flick with large samples pages once", () => {
+  const { pages, send } = pager()
+  send([30, 55, 90, 120, 90, 55, 30, ...Array(30).fill(6)])
+  assert.deepEqual(pages, [1])
 })
 
 test("a touchpad swipe with its momentum tail pages exactly once", () => {
@@ -168,7 +180,7 @@ test("a second swipe after a pause pages again", () => {
 
 test("a large sample at the start of a swipe still gives one page", () => {
   const { pages, send } = pager()
-  send([55, ...Array(10).fill(12)])
+  send([55, 55, ...Array(10).fill(12)])
   assert.deepEqual(pages, [1])
 })
 

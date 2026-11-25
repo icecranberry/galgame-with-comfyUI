@@ -61,9 +61,11 @@ export function scrollHorizontalOnWheel(event) {
   else easing.set(element, { target: next, last: performance.now(), frame: requestAnimationFrame((t) => easeTowardTarget(element, t)) })
 }
 
-// 卡片式横向列表：鼠标滚轮一格翻一页。触控板一次上下滑动（连同惯性）会连发几十个小步长事件，
-// 累计过阈值后整次滑动只翻一页，事件停下 250ms 才算下一次滑动。
+// 卡片式横向列表：鼠标滚轮一格翻一页。触控板一次上下滑动（连同惯性）每 8 到 16ms 来一个事件，
+// 快速甩动时单个事件也可能超过 50px，所以光看步长分不出鼠标。一次滑动里翻过一页之后，
+// 只有和上一个事件隔开至少 50ms 的大步长才算新的一格；事件停下 250ms 才算下一次滑动。
 const GESTURE_GAP_MS = 250
+const NOTCH_GAP_MS = 50
 const SWIPE_DISTANCE = 120
 
 /** Returns a wheel handler that calls onPage(direction) once per mouse notch or per touchpad swipe. */
@@ -73,10 +75,11 @@ export function pageOnWheel(onPage) {
     if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return
     event.preventDefault()
     const now = performance.now()
-    if (now - lastAt > GESTURE_GAP_MS) { sum = 0; pagedThisGesture = false }
+    const gap = now - lastAt
+    if (gap > GESTURE_GAP_MS) { sum = 0; pagedThisGesture = false }
     lastAt = now
     const mouseNotch = event.deltaMode !== 0 || Math.abs(event.deltaY) >= MOUSE_STEP
-    if (mouseNotch) {
+    if (mouseNotch && (!pagedThisGesture || gap >= NOTCH_GAP_MS)) {
       pagedThisGesture = true
       onPage(Math.sign(event.deltaY))
       return
