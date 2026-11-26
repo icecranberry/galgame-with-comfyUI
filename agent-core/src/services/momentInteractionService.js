@@ -116,11 +116,14 @@ ${post.content}
 
 请以你的身份（${friendName}），在${posterName}的朋友圈评论区留一条自然的评论。
 
-${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 看你的性格和你们的关系，决定是调侃、关心、吐槽，还是只起个哄`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  // 思考强度 low（默认）。同一套短评规则先于帖子、人物关系与评论历史。
+  const commentRules = appendWorldLanguageStyle(MOMENT_COMMENT_RULES);
+  const cacheBoundary = { index: msgs.length, offset: commentRules.length };
+  msgs.push({ role: 'system', content: commentRules });
   msgs.push({ role: 'system', content: friend.other_prompt });
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
@@ -131,11 +134,11 @@ ${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
   if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, friendName) });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前<world_setting>来评论朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
+    ? '请遵循 <world_setting> 中的世界观设定。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '去评论区留个言吧：' });
 
-  const result = await (deps.chatSync || chatWithPreset)(msgs, { temperature: 0.7, label: '朋友首评', lorebook:{personaTexts:[friend.other_prompt],characterName:friendName,history:[{role:'user',content:post.content}],scenario:post.content} });
+  const result = await (deps.chatSync || chatWithPreset)(msgs, { presetPlacement: 'cache', temperature: 0.7, label: '朋友首评', lorebook:{staticTexts:[commentRules],cacheBoundary,personaTexts:[friend.other_prompt],characterName:friendName,history:[{role:'user',content:post.content}],scenario:post.content} });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 
@@ -172,13 +175,14 @@ ${post.content}
 ---${buildMomentImagePromptNote(post.prompt)}
 
 ${friendName}在你的朋友圈评论了：${friendComment}${threadSection}
-请以你的身份自然回复${friendName}的评论。
-
-${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
-- 可以参考上下文，但不要重复自己说过的话`;
+请以你的身份自然回复${friendName}的评论。`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  // 思考强度 low（默认）。同一套短评规则先于帖子、人物关系与评论历史。
+  const commentRules = appendWorldLanguageStyle(MOMENT_COMMENT_RULES);
+  const cacheBoundary = { index: msgs.length, offset: commentRules.length };
+  msgs.push({ role: 'system', content: commentRules });
   msgs.push({ role: 'system', content: posterChar.base_prompt });
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
@@ -191,11 +195,11 @@ ${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
   if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, posterName) });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前<world_setting>来回复朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
+    ? '请遵循 <world_setting> 中的世界观设定。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + `回复${friendName}的最后一条评论：` });
 
-  const result = await (deps.chatSync || chatWithPreset)(msgs, { temperature: 0.7, label: '发帖人回朋友', lorebook:{personaTexts:[posterChar.base_prompt],characterName:posterName,history:[{role:'user',content:post.content},...(threadContext || []).map(c=>({role:'assistant',content:c.content})),{role:'user',content:friendComment}],scenario:post.content} });
+  const result = await (deps.chatSync || chatWithPreset)(msgs, { presetPlacement: 'cache', temperature: 0.7, label: '发帖人回朋友', lorebook:{staticTexts:[commentRules],cacheBoundary,personaTexts:[posterChar.base_prompt],characterName:posterName,history:[{role:'user',content:post.content},...(threadContext || []).map(c=>({role:'assistant',content:c.content})),{role:'user',content:friendComment}],scenario:post.content} });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 
@@ -235,12 +239,14 @@ ${threadText}
 
 现在轮到你回复了。请以你的身份（${friendName}）继续这段对话。
 
-${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
-- 看上下文，不要重复自己说过的话，也别重复对方说过的话
 - 可以顺着话题聊下去，也可以自然转移`;
 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
+  // 思考强度 low（默认）。同一套短评规则先于帖子、人物关系与评论历史。
+  const commentRules = appendWorldLanguageStyle(MOMENT_COMMENT_RULES);
+  const cacheBoundary = { index: msgs.length, offset: commentRules.length };
+  msgs.push({ role: 'system', content: commentRules });
   msgs.push({ role: 'system', content: friend.other_prompt });
   if (otherContext) msgs.push({ role: 'system', content: otherContext });
   msgs.push({ role: 'system', content: contextTask });
@@ -253,11 +259,11 @@ ${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
   if (memories.length) msgs.push({ role: 'system', content: formatMomentMemories(memories, friendName) });
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前<world_setting>来继续朋友圈评论，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
+    ? '请遵循 <world_setting> 中的世界观设定。\n\n'
     : '';
   msgs.push({ role: 'user', content: worldRulePrefix + '继续聊天：' });
 
-  const result = await (deps.chatSync || chatWithPreset)(msgs, { temperature: 0.7, label: '朋友续评', lorebook:{personaTexts:[friend.other_prompt],characterName:friendName,history:[{role:'user',content:post.content},...threadContext.map(c=>({role:c.author_type==='character'?'assistant':'user',content:c.content}))],scenario:post.content} });
+  const result = await (deps.chatSync || chatWithPreset)(msgs, { presetPlacement: 'cache', temperature: 0.7, label: '朋友续评', lorebook:{staticTexts:[commentRules],cacheBoundary,personaTexts:[friend.other_prompt],characterName:friendName,history:[{role:'user',content:post.content},...threadContext.map(c=>({role:c.author_type==='character'?'assistant':'user',content:c.content}))],scenario:post.content} });
   return result.trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 

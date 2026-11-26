@@ -1095,22 +1095,22 @@ export async function generateShortPromptWithLLM(basePrompt, characterName, char
   const prompt = `你是一个角色人格浓缩助手。你的任务是把给定的角色完整人格 prompt 浓缩成一段第三人称摘要（180字内）。
 
 要求：
-1. 格式：以"${name}${engNameSuffix}是来自《XXXX（作品名）》的XXX（身份）"开头，后面接连贯的摘要段落
+1. 格式：以"角色名是来自《XXXX（作品名）》的XXX（身份）"开头，后面接连贯的摘要段落
 2. 用第三人称（她/他），不用"你"
-3. 只保留核心性格、说话方式、价值观、身份背景等内在特质
-4. 排除外观描写（发型、瞳色、穿着、身材等一切外表信息）
+3. 按这个优先级分配篇幅：①显性性格（看得见的言行习惯）2~3条 ②说话方式与口吻——口癖、自称、称呼习惯至少各带一个 ③好恶一笔带过
+4. 语录原文一律不收（只把语气习惯融进摘要），排除外观描写（发型、瞳色、穿着、身材等一切外表信息）
 5. 使用自然口语化的连贯段落，不要列表、标题或任何标记符号
-6. 输出纯文本，不要 JSON 格式或其他包装
-
-角色完整人格：
-${basePrompt}`;
+6. 输出纯文本，不要 JSON 格式或其他包装`;
+  // 思考强度 low（默认），只从现有角色卡提取能区分声音的线索。
+  const task = `角色完整人格：
+${basePrompt}\n\n角色名为「${name}${engNameSuffix}」。按上述格式写出这份角色卡的第三人称摘要。`;
 
   const MAX_RETRIES = 3;
   let lastResult = '';
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const result = await chatSync(
-      [{ role: 'user', content: prompt }],
+      [{ role: 'system', content: prompt }, { role: 'user', content: task }],
       { temperature: attempt === 0 ? 0.3 : 0.5, label: '浓缩short_prompt' }
     );
 

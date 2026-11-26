@@ -165,7 +165,6 @@ export async function generateUserPostComment(character, post, historyComments, 
     '像刷到好友动态一样在评论区随口说话，参考群聊那种即时反应，但这里只输出一条评论：',
     appendWorldLanguageStyle(MOMENT_COMMENT_RULES),
     '- 优先抓住正文或图里的一个点给出第一反应；短、糙、随口比完整书面句更像真人。',
-    '- 可以吐槽内容、质疑细节、起哄、追问，也可以只给一个短反应；不要每条都强行幽默。',
     '- 不要用“这张图”“配图里”开场，不要解说画面；可以自然提到某个具体细节。',
     '- 不堆华丽比喻和成语套话，不为了妙语虚构不存在的事，不把短反应扩成表演型长句。',
     '- 输出单条评论文本，不要拆成多条、换行列表或另外解释。',
@@ -208,7 +207,7 @@ export async function generateUserPostComment(character, post, historyComments, 
   }
 
   const worldRulePrefix = worldSetting
-    ? '请遵循当前<world_setting>来评论朋友圈，角色人设如果和<world_setting>有冲突，则以<world_setting>最高优先级，人设会因为<world_setting>改变。\n\n'
+    ? '请遵循 <world_setting> 中的世界观设定。\n\n'
     : '';
   const imageTaskNote = imageRequest
     ? `（注意：配图里的人物不是${userName}，${userName}只是发帖分享这张图的人。请把图中角色当作图里的其他人来评论，不要把图中人物当成${userName}，也不要对${userName}本人描写图中角色的外貌或行为。）`
@@ -218,9 +217,9 @@ export async function generateUserPostComment(character, post, historyComments, 
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNote) msgs.push({ role: 'system', content: worldIntegrationNote });
   msgs.push({ role: 'system', content: commentRulesContext });
+  msgs.push({ role: 'system', content: character.base_prompt || '' });
   msgs.push({ role: 'system', content: userPostContext });
   if (imageContext) msgs.push({ role: 'system', content: imageContext });
-  msgs.push({ role: 'system', content: character.base_prompt || '' });
   if (relationContext) msgs.push({ role: 'system', content: relationContext });
   const memories = await recallMomentMemories([`char-${character.id}`], {
     postText: visibleContent,
@@ -231,7 +230,7 @@ export async function generateUserPostComment(character, post, historyComments, 
   msgs.push({ role: 'user', content: task });
 
   const chat = deps.chatSync || chatWithPreset;
-  const result = await chat(msgs, { temperature: 0.7, label: '用户朋友圈评论', lorebook:{personaTexts:[character.base_prompt],staticTexts:[commentRulesContext],characterName:displayName,history:[{role:'user',content:visibleContent},...historyComments.map(c=>({role:c.author_type==='character'?'assistant':'user',content:c.content}))],scenario:visibleContent} });
+  const result = await chat(msgs, { presetPlacement: 'cache', temperature: 0.7, label: '用户朋友圈评论', lorebook:{personaTexts:[character.base_prompt],staticTexts:[commentRulesContext],cacheBoundary:{index:msgs.findIndex(m=>m.content===commentRulesContext),offset:commentRulesContext.length},characterName:displayName,history:[{role:'user',content:visibleContent},...historyComments.map(c=>({role:c.author_type==='character'?'assistant':'user',content:c.content}))],scenario:visibleContent} });
   return String(result || '').trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 

@@ -220,17 +220,13 @@ provide('showChangelog', showChangelog)
 // ══════════════════════════════════════════════════
 const MOBILE_MAX = 767
 const isMobile = ref(false)
-// 桌面端侧边栏收纳（移动端走抽屉，这套不参与）
-const SIDEBAR_COLLAPSED_KEY = 'linshe.sidebar.collapsed'
-const sidebarCollapsed = ref((() => {
-  try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1' } catch { return false }
-})())
+// 桌面端侧栏收起状态仅在当前页面加载期间生效。
+const sidebarCollapsed = ref(false)
 const sidebarHandleHoverPaused = ref(false)
 function toggleSidebar() {
   // 侧栏移动时，浏览器可能保留原位置的 hover，直到鼠标再次移动。
   sidebarHandleHoverPaused.value = true
   sidebarCollapsed.value = !sidebarCollapsed.value
-  try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0') } catch {}
 }
 const mobileSidebarOpen = ref(false)
 

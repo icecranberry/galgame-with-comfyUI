@@ -95,7 +95,7 @@
                 {{ c.display_name }}
               </div>
               <div class="char-schedule" v-if="scheduleMap[c.id]">{{ scheduleMap[c.id] }}</div>
-              <div class="char-preview">{{ c.last_message || '点击开始对话' }}</div>
+              <div class="char-preview">{{ (settings.privateChatNarration ? c.last_message : c.last_dialogue ?? c.last_message) || '点击开始对话' }}</div>
             </div>
             <div class="char-meta">
               <span class="char-time">{{ formatTime(c.last_message_at) }}</span>
@@ -336,6 +336,7 @@ import LinsheModal from './ui/LinsheModal.vue'
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useChatStore } from '../stores/chat.js'
+import { useSettingsStore } from '../stores/settings.js'
 import { useMomentsStore } from '../stores/moments.js'
 import { useEventsStore } from '../stores/events.js'
 import { useProactiveStore } from '../stores/notifications.js'
@@ -366,6 +367,7 @@ const emit = defineEmits(['charSelected'])
 const router = useRouter()
 const route = useRoute()
 const chat = useChatStore()
+const settings = useSettingsStore()
 const godSays = useGodSaysStore()
 const godEntrySubtitle = computed(() => godSays.state?.activity?.activity || [...(godSays.state?.messages || [])].reverse().find(m => m.role === 'assistant' && m.content)?.content || '天使在云庭等候')
 const moments = useMomentsStore()

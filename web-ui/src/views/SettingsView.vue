@@ -677,28 +677,11 @@
 
         <div class="toggle-row">
           <div>
-            <div class="tl">好感度系统</div>
-            <div class="td">每轮对话后评估 AI 情绪变化，影响回复语气</div>
+            <div class="tl">私聊三段式</div>
+            <div class="td">开启后，角色会在台词前后描写动作与场景。关闭后只显示台词，历史消息也同步切换。</div>
           </div>
-          <linshe-switch v-model="features.emotion" @change="saveFeature('emotion', features.emotion)" />
+          <linshe-switch :model-value="settingsStore.privateChatNarration === true" :disabled="savingNarration || settingsStore.privateChatNarration === null" aria-label="私聊三段式" @change="saveNarration" />
         </div>
-
-        <div class="toggle-row">
-          <div>
-            <div class="tl">聊天候选词</div>
-            <div class="td">LLM回复后预测用户接下来可能说的话，在输入框上方显示快捷候选</div>
-          </div>
-          <linshe-switch v-model="features.replyGuesses" @change="saveFeature('replyGuesses', features.replyGuesses)" />
-        </div>
-
-        <div class="toggle-row">
-          <div>
-            <div class="tl">实时显示好感度</div>
-            <div class="td">在聊天顶部实时显示当前好感度数值和最近变化原因</div>
-          </div>
-          <linshe-switch v-model="features.realtimeAffinityDisplay" @change="saveFeature('realtimeAffinityDisplay', features.realtimeAffinityDisplay)" />
-        </div>
-
 
         <div class="toggle-row freq-row">
           <div>
@@ -1493,7 +1476,8 @@ watch(() => showAddNovelaiProfile.value, async (visible) => {
 })
 const connDirty = ref(false)
 const connSaved = ref(false)
-const features = reactive({ emotion: false, memory: false, replyGuesses: false, realtimeAffinityDisplay: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
+const features = reactive({ memory: false, serializeBackgroundLLM: false, backgroundLLMMaxConcurrency: 3, mergeMessages: false, weather: true })
+const savingNarration = ref(false)
 const freqSlider = ref(0.5)
 const eventFreqSlider = ref(1)
 // 仅换算显示，保留原有 0~1 参数；公式对应两个 scheduler 的现有间隔。
@@ -2353,6 +2337,7 @@ onMounted(async () => {
     imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
     applyNovelaiConfig(data.comfy)
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
+    settingsStore.privateChatNarration ??= data.features?.privateChatNarration ?? true
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1
@@ -2817,6 +2802,20 @@ function applyPreset(p, mode = 'chat') {
 
 async function saveFeature(key, val) {
   await updateFeatureFlag(key, val)
+}
+
+async function saveNarration(enabled) {
+  const previous = settingsStore.privateChatNarration
+  settingsStore.privateChatNarration = enabled
+  savingNarration.value = true
+  try {
+    await saveFeature('privateChatNarration', enabled)
+  } catch (err) {
+    settingsStore.privateChatNarration = previous
+    toastFn?.(err.message || '私聊三段式设置保存失败', 'error')
+  } finally {
+    savingNarration.value = false
+  }
 }
 
 

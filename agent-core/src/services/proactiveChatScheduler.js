@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle, hasActiveWorldLanguageStyle } from './worldLanguageStyle.js';
 /**
  * 主动对话调度器 (Proactive Chat Scheduler)
  *
@@ -29,11 +30,11 @@ import { broadcastProactiveMessage } from './notificationBus.js';
 import { generateImage } from './imageSkill.js';
 import { charArtistOverride } from './characterImageOpts.js';
 import { recordCompletedImageTask } from './imageTaskRecorder.js';
-import { splitText } from '../utils/sentenceSplitter.js';
+import { hasPrivateSpeakerLabel, privateReplyText, splitPrivateReply } from './privateChatNarration.js';
 import { getLightHint, getLightNoteWithWeather, getTimeLightInline } from './timeLight.js';
 import { saveBase64Image } from './imagePaths.js';
 import { getCurrentActivity } from './scheduleManager.js';
-import { getCoreDialogueRules } from '../builtinRules.js';
+import { getDialogueIdentityRule, getPrivateChatRules, withPrivateChatSpeaker, getWorldIntegrationRule } from '../builtinRules.js';
 import { getFreshUnsharedDream, markDreamShared } from './dreamService.js';
 
 const CHECK_INTERVAL = 5 * 60 * 1000; // 5 分钟
@@ -242,13 +243,13 @@ function pickMotive(affinity, streak = 0, isOath = false) {
 
 const STREAK_1_STRATEGIES = [
   '上一条对方还没回。这次自然带出一个新话题——假装没注意到没回这件事，像日常聊天一样继续。',
-  '上一条对方还没回。这次用一个简短的颜文字表情或动作开头——比如"（探头）""ε=ε=ε=~"——降低对话压力，像是路过打了个招呼。',
+  narration => narration ? '上一条对方还没回。这次把动作写进上方旁白（一句就够，比如探头看一眼、戳了戳屏幕），台词那边只留一句轻飘飘的话或颜文字——降低对话压力，像是路过打了个招呼。' : '上一条对方还没回。这次用一个简短的颜文字开头——比如"ε=ε=ε=~"——降低对话压力，像是路过打了个招呼。',
   '上一条对方还没回。这次轻描淡写问一句——但立刻转到别的话题，不要停留在这个问题上。',
 ];
 
 const STREAK_2_STRATEGIES = [
   '对方已经连续没回你的消息了。这次用自嘲式——拿自己的尴尬开涮。搞笑为主，不卖惨，不逼问。',
-  '对方已经连续没回你的消息了。这次用表情包式——用文字模拟一个表情/动作，比如"（探头）""（戳一戳）""（在门口徘徊）"。用行为代替语言，不给对方回复压力。',
+  narration => narration ? '对方已经连续没回你的消息了。这次用动作代替语言——把动作写进上方旁白（比如探头看一眼、戳了戳屏幕、在门口徘徊一下），台词只留很轻的一两句，不给对方回复压力。' : '对方已经连续没回你的消息了。这次只留一句轻飘飘的招呼或一个颜文字，不给对方回复压力。',
   '对方已经连续没回你的消息了。你决定把"没人回"变成一个段子。用夸张的表演式语气。要让对方看了笑出来，然后忍不住想回',
 ];
 
@@ -258,6 +259,7 @@ const STREAK_2_STRATEGIES = [
 const CONTEXT_BRIDGE_STRATEGIES = {
   // < 2 小时：热衔接 — 先承接上一轮对话，再丝滑过渡到新动机
   hot: [
+    '你们刚聊完不久，但**不要重复刚才那个场景或那件事**：上一条消息里写过的地点、正在做的事、手里的东西，这次一个都不许再写，换个新由头。承接上一轮只要一句话，重点放在这次的动机上。',
     '你们刚聊完不久，上一轮的话题还热乎着。不要像"刚上线"一样生硬切话题——先对上一轮的内容做一个简短的承接反应（接个话茬、吐槽一句、回眸一笑），再丝滑地过渡到你这次的动机。让人感觉对话从未中断。',
     '你们几分钟前还在聊，现在只是那段对话的延续。先自然地呼应一下上一轮的茬，哪怕只是一句感叹，然后轻松感切到这次的动机话题。',
     '上一轮的话题还没冷——先接住它，顺势带一笔，然后自然地转向这次的动机。不要让人觉得你"重启"了，要让切换像水流一样平滑。',
@@ -273,14 +275,10 @@ const CONTEXT_BRIDGE_STRATEGIES = {
   ],
 };
 
-function pickStreakHint(streak) {
-  if (streak >= 2) {
-    return STREAK_2_STRATEGIES[Math.floor(Math.random() * STREAK_2_STRATEGIES.length)];
-  }
-  if (streak === 1) {
-    return STREAK_1_STRATEGIES[Math.floor(Math.random() * STREAK_1_STRATEGIES.length)];
-  }
-  return '';
+function pickStreakHint(streak, narration) {
+  const options = streak >= 2 ? STREAK_2_STRATEGIES : STREAK_1_STRATEGIES;
+  const hint = options[Math.floor(Math.random() * options.length)];
+  return typeof hint === 'function' ? hint(narration) : hint;
 }
 
 // ── 关系查询 ──
@@ -429,11 +427,7 @@ async function generateGreeting(character, affinity, compositeVad, lastMessageAt
   })();
 
   // msgs[1] — 身份：角色人格 + 摘要 + 当前状态 + 日程 + 关系 + 用户画像
-  const msgIdentity = `接下来，你将扮演以下角色，主动向 "${userName}" 发起一段对话。
-
-【角色人格】
-${character.base_prompt}
-${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${scheduleCtx}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
+  const msgIdentity = `${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotionText ? `\n【角色当前状态】\n${emotionText}` : ''}${affinityText ? `\n${affinityText}` : ''}${scheduleCtx}${relationshipContext ? `\n${relationshipContext}` : ''}${userProfile ? `\n${userProfile}` : ''}`;
 
   // 上一轮对话（最近 1 轮 user+assistant），过滤掉生图 prompt JSON（可能在开头/中间/末尾）
   const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
@@ -462,36 +456,40 @@ ${recentSummary ? `\n【最近对话摘要】\n${recentSummary}\n` : ''}${emotio
   }
 
   // msgs[2] — 任务：时间 + 上一轮对话 + 衔接指令 + 动机 + 要求
-  const proactiveRules = getCoreDialogueRules({ userName });
+  const narration = config.features.privateChatNarration;
+  const rules = appendWorldLanguageStyle(getPrivateChatRules({ narration, allowNarration: hasActiveWorldLanguageStyle() }), { narration });
+  const greetingStyle = `- 像是突然想到就随手发了一条消息。
+${narration ? '- 主动开场时，上下两段旁白各写一句。\n' : ''}- 符合角色性格、当前情绪、好感度状态，以及本次聊天的动机
+- 绝对不要以\"你说\"、\"你说……如果\"、\"你知道吗\"这类句式开场——直接说你自己的话，不需要用提问/假设来起头`;
+  const identityRule = getDialogueIdentityRule(userName);
   const msgTask = `【上次聊天时间】
 ${timeDesc}
 
 【当前时间】
 ${(() => { const d = new Date(); const wd = ['周日','周一','周二','周三','周四','周五','周六'][d.getDay()]; return `${wd} ${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; })()}${prevRound}
 
-请以角色的口吻，生成一条自然的口语化开场白（15~50 字）。
-${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak)}\n` : ''}${bridgingHint}
+${streak >= 1 ? `【⚠️ 未回复提示】${pickStreakHint(streak, narration)}\n` : ''}${bridgingHint}
 你这次主动发消息的动机是「${motiveLabel}」：${motiveDesc}。请在承接上文之后，把动机自然地融入开场白中——不要生硬地说"我因为xxx来找你"，让动机成为你说话的潜台词。
-要求：
-${proactiveRules}
-- 自然口语化，像是突然想到就随手发了一条消息，不是写小作文；不要客套式收尾或总结陈词
-- 以口语短句为主，可以省略主语、用半句话或语气词（如"就……""算了""在吗""突然想起来"），不要写成工整的书面句，也不要"首先/其次"这类条理分明的结构
-- 可以拆成两三条连着发（用换行分隔，系统会自动切成多条消息），例如一条起头加一条补充；拆条后总量仍要落在这 15~50 字内
-- 符合角色性格、当前情绪、好感度状态，以及本次聊天的动机
-- 绝对不要以\"你说\"、\"你说……如果\"、\"你知道吗\"这类句式开场——直接说你自己的话，不需要用提问/假设来起头`;
+${narration ? '请以角色的口吻，发一条自然的开场消息（台词总量 15~50 字，旁白另算）。' : '请以角色的口吻，生成一条自然的口语化开场白（15~50 字）。'}`;
 
   try {
     const msgs = [];
     msgs.push({ role: 'system', content: systemRules || '你是一个角色扮演 AI。' });
-    msgs.push({ role: 'system', content: msgIdentity });
-    const worldRulePrefix = getWorldSetting()
-      ? '请遵循当前世界观来主动发起聊天，角色人设如果和世界观有冲突，则以世界观最高优先级，人设会因为世界观改变。\n\n'
-      : '';
-    msgs.push({ role: 'user', content: worldRulePrefix + msgTask });
+    const world = getWorldSetting();
+    if (world) msgs.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
+    msgs.push({ role: 'system', content: rules }, { role: 'system', content: greetingStyle });
+    const personaIndex = msgs.length;
+    const persona = character.base_prompt || character.short_prompt || character.display_name;
+    const personaBlock = withPrivateChatSpeaker(persona, character.display_name, narration);
+    msgs.push({ role: 'system', content: personaBlock });
+    msgs.push({ role: 'system', content: [identityRule, msgIdentity.trim()].filter(Boolean).join('\n\n') });
+    msgs.push({ role: 'user', content: (world ? '请遵循 <world_setting> 中的世界观设定。\n' : '') + msgTask });
 
     const lorebookTurn = await prepareNarrativePrompt(msgs, {
-      ...buildConversationLorebookContext(getDb(), {conversationId, character, kind:'proactive', userName:config.user.nickname || '用户'}), maxOutputTokens:128,
-    });
+      ...buildConversationLorebookContext(getDb(), {conversationId, character, kind:'proactive', userName:config.user.nickname || '用户'}), maxOutputTokens:narration ? 512 : 128,
+      staticTexts:[rules, greetingStyle], personaTexts:[persona], cacheBoundary:{ index:personaIndex, offset:personaBlock.length },
+    }, { presetPlacement: 'cache' });
+    // 思考强度 low（默认），让主动开场保留随手发消息的节奏。
     const result = await chatWithoutLorebook(
       lorebookTurn.messages,
       { temperature: 0.7, label: '主动聊天' }
@@ -502,7 +500,7 @@ ${proactiveRules}
     greeting = greeting.replace(/^["'「」『』]|["'「」『』]$/g, '').trim();
     // 如果太长，截取到第一个句号/感叹号/问号处
     const maxLen = 80;
-    if (greeting.length > maxLen) {
+    if (!narration && greeting.length > maxLen && !hasPrivateSpeakerLabel(greeting, character.display_name)) {
       const cutMatch = greeting.match(/^.{1,80}[。！？!?～~]/);
       if (cutMatch) greeting = cutMatch[0];
       else greeting = greeting.slice(0, maxLen) + '…';
@@ -510,7 +508,7 @@ ${proactiveRules}
     if (greeting.length < 5) {
       return {greeting:pickFallbackGreeting(userName)};
     }
-    return {greeting, lorebookTurn};
+    return {greeting, lorebookTurn, narration};
   } catch (err) {
     console.error(`⚡ generateGreeting failed for ${character.display_name}:`, err.message);
     return {greeting:pickFallbackGreeting(userName)};
@@ -524,41 +522,44 @@ ${proactiveRules}
  *
  * @param {object} character
  * @param {string} content - 消息文本
- * @returns {{ rawId: number, firstMsgId: number, lastMsgId: number, msgIds: number[] }}
+ * @returns {object|null} 已保存的正文、分句及其 ID；关闭旁白后完全没有台词时跳过。
  */
-function writeProactiveMessage(character, content) {
+function writeProactiveMessage(character, content, narration = false) {
   const db = getDb();
   const conversationId = `char_${character.id}`;
 
   // 写入 raw_messages（完整消息）
+  narration = narration && config.features.privateChatNarration;
+  const segments = splitPrivateReply(content, narration, character.display_name);
+  content = privateReplyText(content, narration, character.display_name);
+  if (!content.trim() && !segments.length) return null;
   const rawResult = db.prepare(
     `INSERT INTO raw_messages (conversation_id, role, content) VALUES (?, 'assistant', ?)`
   ).run(conversationId, content);
   const rawId = rawResult.lastInsertRowid;
 
   // 分句后逐条写入 messages，标记 is_proactive=1 以区分正常聊天
-  const segments = splitText(content);
   // 兜底：如果分句结果为空（极其罕见），整段写入
   if (segments.length === 0) {
     const msgResult = db.prepare(
       `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, 0, 1)`
     ).run(conversationId, rawId, content);
     console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msg=${msgResult.lastInsertRowid} (fallback, no segments)`);
-    return { rawId, firstMsgId: msgResult.lastInsertRowid, lastMsgId: msgResult.lastInsertRowid, msgIds: [msgResult.lastInsertRowid] };
+    return { rawId, content, firstMsgId: msgResult.lastInsertRowid, lastMsgId: msgResult.lastInsertRowid, msgIds: [msgResult.lastInsertRowid] };
   }
 
   const insertMsg = db.prepare(
-    `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive) VALUES (?, ?, 'assistant', ?, ?, 1)`
+    `INSERT INTO messages (conversation_id, raw_id, role, content, seq, is_proactive, speaker) VALUES (?, ?, 'assistant', ?, ?, 1, ?)`
   );
   const msgIds = [];
   for (let i = 0; i < segments.length; i++) {
-    const r = insertMsg.run(conversationId, rawId, segments[i], i);
+    const r = insertMsg.run(conversationId, rawId, segments[i].text, i, segments[i].speaker);
     msgIds.push(r.lastInsertRowid);
   }
 
   console.log(`⚡ Written proactive message for ${character.display_name}: raw=${rawId}, msgs=${msgIds.length} segment(s)`);
 
-  return { rawId, firstMsgId: msgIds[0], lastMsgId: msgIds[msgIds.length - 1], msgIds, segments };
+  return { rawId, content, firstMsgId: msgIds[0], lastMsgId: msgIds[msgIds.length - 1], msgIds, segments };
 }
 
 // ── 主动聊天的配图生成 ──
@@ -881,19 +882,21 @@ async function tick() {
     }
 
     // 6. 生成开场白
-    const {greeting, lorebookTurn} = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
+    const {greeting, lorebookTurn, narration} = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
     console.log(`⚡ ${candidate.display_name} greeting (motive: ${motive.name}): "${greeting}"`);
 
     // 7. 写入消息到 DB
     if (!automaticChatEnabled(generation)) return;
-    const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
+    const saved = writeProactiveMessage(candidate, greeting, narration);
+    if (!saved) { updateNextProactiveAt(candidate.id, score); return; }
+    const { rawId, firstMsgId, lastMsgId, msgIds, segments } = saved;
     lorebookTurn?.commit();
 
     // 7.5 如果该动机需要配图，先生成图片再一起推送；否则直接推送
     // 梦境动机同样走标准配图管线——现场生成全新配图，绝不复用睡中应答时用户已看过的图（防重复配图）
     let imageUrls = null;
     if (motive.imageGen) {
-      imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
+      imageUrls = await generateImageForGreeting(candidate, saved.content, motive.name, lastMsgId, rawId);
     }
 
     broadcastProactiveMessage({
@@ -901,8 +904,9 @@ async function tick() {
       display_name: candidate.display_name,
       avatar_path: candidate.avatar_path,
 
-      content: greeting,
-      segments,
+      content: segments?.map(s => s.text).join('\n') || saved.content,
+      segments: segments?.map(s => s.text),
+      speakers: segments?.map(s => s.speaker),
       msg_ids: msgIds,
       msg_id: firstMsgId,
       raw_id: rawId,
@@ -1144,10 +1148,12 @@ export async function forceProactiveNow(targetCharacterId, { automatic = false, 
       sharedDream = freshDream;
     }
   }
-  const {greeting, lorebookTurn} = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
+  const {greeting, lorebookTurn, narration} = await generateGreeting(candidate, affinity, compositeVad, lastMessageAt, recentSummary, motive, relationshipContext, userProfile, streak);
 
   if (automatic && !automaticChatEnabled(generation)) return null;
-  const { rawId, firstMsgId, lastMsgId, msgIds, segments } = writeProactiveMessage(candidate, greeting);
+  const saved = writeProactiveMessage(candidate, greeting, narration);
+  if (!saved) return null;
+  const { rawId, firstMsgId, lastMsgId, msgIds, segments } = saved;
   lorebookTurn?.commit();
 
   db.prepare('UPDATE characters SET proactive_streak = ? WHERE id = ?')
@@ -1157,7 +1163,7 @@ export async function forceProactiveNow(targetCharacterId, { automatic = false, 
   // 梦境动机同样走标准配图管线——现场生成全新配图，绝不复用睡中应答时用户已看过的图（防重复配图）
   let imageUrls = null;
   if (motive.imageGen) {
-    imageUrls = await generateImageForGreeting(candidate, greeting, motive.name, lastMsgId, rawId);
+    imageUrls = await generateImageForGreeting(candidate, saved.content, motive.name, lastMsgId, rawId);
   }
 
   broadcastProactiveMessage({
@@ -1165,8 +1171,9 @@ export async function forceProactiveNow(targetCharacterId, { automatic = false, 
     display_name: candidate.display_name,
     avatar_path: candidate.avatar_path,
 
-    content: greeting,
-    segments,
+    content: segments?.map(s => s.text).join('\n') || saved.content,
+    segments: segments?.map(s => s.text),
+    speakers: segments?.map(s => s.speaker),
     msg_ids: msgIds,
     msg_id: firstMsgId,
     raw_id: rawId,
@@ -1182,7 +1189,7 @@ export async function forceProactiveNow(targetCharacterId, { automatic = false, 
   updateNextProactiveAt(candidate.id, score);
 
     console.log(`⚡ force: done ${candidate.display_name} (motive: ${motive.name})`);
-    return { character: candidate.display_name, motive: motive.name, greeting };
+    return { character: candidate.display_name, motive: motive.name, greeting: saved.content };
   } catch (err) {
     console.error('⚡ forceProactiveNow error:', err.message);
     return null;

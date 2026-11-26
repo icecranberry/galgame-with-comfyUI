@@ -19,7 +19,7 @@ import { getTimeTag, getLightNoteWithWeather } from '../timeLight.js';
 import { getWorldIntegrationRule } from '../../builtinRules.js';
 import { createTownActorRegistry } from './townActorRegistry.js';
 import { townNpcPortraitUrl } from './townNpcEventGenerator.js';
-import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat } from '../momentForms.js';
+import { MOMENT_FORMS, weightedPick, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, MOMENT_POST_FORMAT } from '../momentForms.js';
 import { parseMomentResponse } from '../momentResponseParser.js';
 
 function toSQLite(iso) {
@@ -141,7 +141,7 @@ export async function generateTownNpcMoment(npc, opts = {}) {
 
   // 3. LLM 生成文案 + 配图提示词
   const worldSetting = getWorldSetting();
-  const permissionPrompt = worldSetting ? getSystemRulesWithWorld() : getSystemRules();
+  const permissionPrompt = worldSetting ? getSystemRulesWithWorld({ roleplay: false }) : getSystemRules({ roleplay: false });
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
   const now = new Date();
@@ -161,10 +161,9 @@ export async function generateTownNpcMoment(npc, opts = {}) {
   // 语言风格只在 <additional_writing_style> 中完整出现一次，这里只决定末条 user 是否带短指针。
   const hasLanguageStyle = hasActiveWorldLanguageStyle();
   const styleTail = hasLanguageStyle
-    ? '\n最后：本轮正文按 <additional_writing_style> 的短文本底线写：至少 1 个具体身体部位或衣物状态、1 个身体触觉细节、1 个可见结果，禁止只写一句概括或单形容词。'
+    ? '\n最后：本轮正文按 <additional_writing_style> 的规则写作。'
     : '';
   const formatPrompt = `规则：
-- 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${appendWorldLanguageStyle(`${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}`)}
@@ -172,12 +171,12 @@ ${MOMENT_IMAGE_RULES}`)}
 生图格式：
 ${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 
-${buildMomentOutputFormat({ textRequirement: '中文口语，第一人称可省略主语，只围绕一个具体中心', textLength: pickedForm.len })}
-
-本次要求：
+${MOMENT_POST_FORMAT}
+镇民帖只配一张图，只返回 text 和 imagePrompt。`;
+  const roundRules = `本次要求：
 - text 用中文，第一人称（可省略主语）；字数范围：${pickedForm.len}，不凑字，保留关键意思
-- 发布形态参考（可不用）：${pickedForm.desc}
-- ${factsRule}
+- 发布形态：${pickedForm.name}。${pickedForm.desc}
+${factsRule}
 - 你的语气要贴合你的身份（${npc.job || '镇民'}）和人格，像一个真实的小镇居民在发朋友圈，不要写成官方通告
 - text 中的事符合当前时间和天气，不用报时或报天气；只有它直接触发了这次反应才自然提及
 - **画面里只有你自己**（或你正在看的风景/物件），不要出现玩家
@@ -189,11 +188,11 @@ ${weatherHint}`;
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });
   msgs.push({ role: 'system', content: formatPrompt });
   msgs.push({ role: 'system', content: personaMsg });
-  msgs.push({ role: 'user', content: `${timeTag}${factsBlock}现在发一条朋友圈。${styleTail}` });
+  msgs.push({ role: 'user', content: `${roundRules}\n${timeTag}${factsBlock}${worldSetting ? '请遵循 <world_setting> 中的世界观设定。' : ''}现在按约定的 JSON 格式发一条朋友圈。${styleTail}` });
 
   let text = '', imagePrompt = '';
   try {
-    const result = await chatSync(msgs, { temperature: 0.8, response_format: { type: 'json_object' }, label: '镇民朋友圈', lorebook:{personaTexts:[personaMsg],characterName:npc.display_name,characterDescription:personaMsg} });
+    const result = await chatSync(msgs, { presetPlacement: 'cache', temperature: 0.8, response_format: { type: 'json_object' }, label: '镇民朋友圈', lorebook:{personaTexts:[personaMsg],staticTexts:[formatPrompt],cacheBoundary:{index:msgs.findIndex(m=>m.content===formatPrompt),offset:formatPrompt.length},history:factLines,characterName:npc.display_name,characterDescription:personaMsg} });
     const parsed = parseMomentResponse(result);
     text = parsed.text;
     imagePrompt = parsed.imagePrompt || '';

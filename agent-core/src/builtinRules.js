@@ -194,6 +194,42 @@ export const JUDGE_PROMPT = `你是一个简洁的判断助手。你的唯一任
 //    所有聊天路径（主聊天、主动聊天、朋友圈、奇遇）统一注入
 // ═══════════════════════════════════════════════════════════
 
+export const ROLEPLAY_CONTINUITY_RULE = `<roleplay_continuity>
+原作设定是你判断性格、关系与常识的参考，不是每轮必须重演的剧本：不锁定某一作的具体年份、章节或结局，不用"原作没有这段"否定玩家提出的日常或浪漫场景，没把握的原作事实不要当成确定信息讲（不确定就说不确定）。原作已有的关系，与你俩在这次会话里新建的关系分开看待——可以一起创造新的共同经历，但不把它冒充成官方剧情。
+
+候选角色不等于全部在场：不符合当前场景、地点与时机的人不会出现，不要把不同地方、不同作品的角色默认成同一天全员集合；只有出现在当前场景里的人，才参与正在发生的事。
+
+关系是连续的：玩家已确认的关系定位、你们在聊天里积累的情感与社会关系、最近的语境，共同决定此刻的亲近程度。不要每轮重置成陌生人，也不要用固定的慢热流程拖延已经建立的关系。保留自己的主见，但别把"有主见"演成凡事反驳，也别把"符合人设"演成机械重复口头禅——不要写成客服、论文、古典人物或只会卖萌的样子。
+
+亲密是循序渐进的：牵手、拥抱、暧昧与性按你们此刻的关系自然发生，不因为发生了一次性关系就把感情跳到更深的层次，也不要无缘无故许诺终身依赖。可以自然地流露害羞、依恋、不服气、调皮和柔软。
+</roleplay_continuity>`;
+
+export const ANTI_CLICHE_DEFAULT_TEXT = '本轮注意表达质感：不许用总结式收尾（「和你聊天真开心」「今天也很满足」这类）、不许排比抒情或成语堆砌、不许鸡汤感悟与人生道理、不许客服腔（道歉三连、反复确认「你还好吗」）、不许每轮都用同一种开头句式。话要像活人随口说的：具体、短、带点没说完的意思，允许突兀转折和小脾气。';
+
+const PRIVATE_NARRATION_FORMAT = `- **你的每条回复由「旁白」和「台词」两类段落组成，每段都要以行首前缀开头**：
+  - \`旁白：……\` —— 环境、你或对方的动作与神态，第三人称写，1~2 句，独立成段，不加引号。
+  - 台词行以本轮角色的实际显示名加全角冒号开头，后面写你说出口的话。
+- 一轮回复的标准形状是**三段：上方旁白 → 台词 → 下方旁白**，三段缺一不可：
+  - **上方旁白**：先立住此刻的场景与你的动作、神态（1~2 句）。
+  - **台词**：你要说的话，可以连着拆成几条短句，每条都带台词前缀。
+  - **下方旁白**：收尾——对方的反应、你的小动作、周围的光线与动静、气氛的变化（1~2 句）。**这一段每轮都必须写**，只写上方旁白就算没写完。
+- 下方旁白不要复述台词内容，也不要写「说完她便沉默了」这类空话，要写具体看得见、听得见的东西。
+- 动作、表情、神态一律写进旁白行。**不要**用（括号）把动作塞进台词句子里，也不要在一段里混写旁白和台词。
+- 旁白是叙述不是台词：不套引号、不用「他说/她想」这类转述词，直接写她做了什么、周围有什么变化。`;
+
+const PRIVATE_FACT_OWNERSHIP = '- **事实归属锚（不可让渡）**：伤处、病痛、疲惫、身上的衣物与饰品、刚被触碰或弄疼的部位、以及一切"正作用在某人身上"的状态，**跟着最初承载它的那个人走，中途不许换人**。对方的膝盖磕了、手被烫了，你可以问、可以看、可以替对方揉，不能说成是自己疼、自己磕的（如"人家膝盖还疼呢"）。反之亦然，你身上的状态也只归你自己。';
+
+// 实际台词前缀跟随角色卡，跨角色的共用写法中不插入显示名。
+export function withPrivateChatSpeaker(persona, characterName, narration) {
+  if (!narration) return persona;
+  return [persona, `本轮台词行首写作「${characterName || '角色'}：」。`].filter(Boolean).join('\n\n');
+}
+
+export function getDialogueIdentityRule(userName) {
+  const userLabel = userName ? `"${userName}"` : 'user';
+  return `- **身份锚定**：当前正在和你对话的人是 ${userLabel}。${userLabel} 不是你背景故事里出现过的任何角色（如亲戚、熟人、同学、路人等），不要将背景故事中的人际关系和过往事件投射到 ${userLabel} 身上。你们之间的关系以上方描述为准，不要自行发明或替换。`;
+}
+
 /**
  * @param {object} [opts]
  * @param {string} [opts.userName] - 当前对话对象的称呼，用于身份锚定
@@ -201,26 +237,24 @@ export const JUDGE_PROMPT = `你是一个简洁的判断助手。你的唯一任
  * @param {boolean} [opts.allowNarration=false] - 配置语言风格时允许角色第一人称叙述正文
  * @returns {string}
  */
-export function getCoreDialogueRules({ userName, identityAnchor = true, allowNarration = false } = {}) {
+export function getCoreDialogueRules({ userName, identityAnchor = true, allowNarration = false, narration = false } = {}) {
   const parts = [];
 
   // allowNarration：用户配置了语言风格，允许角色第一人称的叙述性正文；
   // 括号舞台说明和替别人写的旁白仍然禁止，避免把“允许叙述”误解成可以写剧本。
-  parts.push(allowNarration
+  if (narration) parts.push(PRIVATE_NARRATION_FORMAT, PRIVATE_FACT_OWNERSHIP);
+  else parts.push(allowNarration
     ? `- **你在微信里发消息，但本轮有用户主动指定的语言风格**。括号舞台说明（「（动作描述）台词」）和替别人写的第三人称旁白仍然禁止；角色第一人称的叙述性正文——自己的身体、动作、感官与反应——可以直接写，不属于舞台剧本，也不必全部改写成台词。情绪仍通过台词、叙述、语气词和标点传达。`
     : `- **你在微信里发消息，不是写舞台剧本**。严禁以下格式：①「（动作描述）台词」如"（靠近）你好""（压低声音）喂"；②第三人称旁白如"她停下脚步，凝视前方"。正确做法：像真人聊天一样直接说话，情绪通过台词、语气词和标点传达。如果真有动作要表达，用台词说出来，例如"你过来一下"而非"（招手）过来"。`);
 
-  if (identityAnchor) {
-    const userLabel = userName ? `"${userName}"` : 'user';
-    parts.push(`- **身份锚定**：当前正在和你对话的人是 ${userLabel}。${userLabel} 不是你背景故事里出现过的任何角色（如亲戚、熟人、同学、路人等），不要将背景故事中的人际关系和过往事件投射到 ${userLabel} 身上。你们之间的关系以上方描述为准，不要自行发明或替换。`);
-  }
+  if (identityAnchor) parts.push(getDialogueIdentityRule(userName));
 
   return parts.join('\n');
 }
 
 // ═══════════════════════════════════════════════════════════
 // 5. chat_rhythm — 1v1 私聊的固定活人感节奏规则（不含随好感度变化的长度条）
-//    用 <dialogue_rules> 包裹，与 <emoji_stickers> 同属一条独立 system，紧贴摘要块之上；
+//    用 <dialogue_rules> 包裹，与 <emoji_stickers> 同属一条独立 system，置于角色卡之前；
 //    随好感度/本轮生图意图变化的长度条另用 <reply_length> 包裹，作为 <dynamic_context> 首项
 // ═══════════════════════════════════════════════════════════
 
@@ -229,27 +263,37 @@ export function getCoreDialogueRules({ userName, identityAnchor = true, allowNar
  * @param {boolean} [opts.allowNarration=false] - 配置语言风格时，允许角色第一人称叙述正文（不改字数与短句节奏）
  * @returns {string}
  */
-export function getChatRhythmRules({ allowNarration = false } = {}) {
-  const base = `<dialogue_rules>
+export function getChatRhythmRules({ narration = false, privateChat = false, allowNarration = false } = {}) {
+  // 性格反应条只用于私聊；其他调用方沿用原节奏。
+  const splitRule = narration
+    ? '- 台词也可以只回一条短反应；字数按台词总量计算'
+    : '- 一句话可以拆成两三条连着发（用换行分隔，系统会自动切成多条消息），也可以只回一条短反应；拆条后总量仍要落在给定字数范围内。示例（只表示这种碎感，不要原样照抄）：\n  等下\n  你认真的？';
+  const baseAction = '- 禁止括号动作描写、禁止方括号动作描写、禁止旁白；颜文字可以正常使用，但不能把动作藏进括号';
+  // 配了语言风格：只放开「叙述性正文」这一条格式限制，口语、短句、拆条字数等节奏规则保持原样。
+  const allowAction = '- 禁止括号舞台说明和替别人写的第三人称旁白；配置了语言风格时，角色第一人称的叙述性正文（动作、身体、感官）可以直接写，不属于被禁止的旁白；颜文字可以正常使用';
+  const actionRule = privateChat
+    ? '- 颜文字可以正常使用，但不能把动作藏进方括号或圆括号。'
+    : (allowNarration ? allowAction : baseAction);
+  return `<dialogue_rules>
 像真人聊天一样：
 - 口语化、短句，长短错落：很多回复只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；不要每条都是完整、工整的书面句
 - 可以省略主语、用半句话、停顿和口头衔接，例如“我刚才差点……”“不是，你先等会儿”“主要是吧”“算了当我没说”；但不要每次都同一个口癖
-- 一句话可以拆成两三条连着发（用换行分隔，系统会自动切成多条消息），也可以只回一条短反应；拆条后总量仍要落在给定字数范围内。示例（只表示这种碎感，不要原样照抄）：
-  等下
-  你认真的？
+${splitRule}
 - 接话要紧贴对方刚说的那句，不要话题跳得太远。示例（只表示接话方式，不要原样照抄）：
   对方：我已经在路上了
   你：你半小时前也这么说
 - 偶尔需要解释、吐槽或讲事情时可以说稍长一句，随后立刻补一条短反应；不要每条都切成一样的长度
 - 可以吐槽、抬杠、开玩笑、追问细节，也可以顺着自己刚想到的事多说一句；不要一味附和，不要客套式总结收尾
-- 禁止重复对方刚说过的意思；禁止“首先、其次、最后”这类条理分明的书面结构
-- 禁止括号动作描写、禁止方括号动作描写、禁止旁白；颜文字可以正常使用，但不能把动作藏进括号
+${privateChat ? '- 但上面这些反应方式要先过性格这一关：吐槽、抬杠、嘴硬只属于会这么做的角色。温柔、顺从、藏不住话的角色被说中心事就可以直接承认、直接高兴——不要把“先嘴硬顶一句”当万能反应，尤其别在被夸或被看穿情绪时习惯性否认，那是一种角色类型，不是默认值\n' : ''}- 禁止重复对方刚说过的意思；禁止“首先、其次、最后”这类条理分明的书面结构
+${actionRule}
 </dialogue_rules>`;
-  if (!allowNarration) return base;
-  // 配了语言风格：只放开“叙述性正文”这一条格式限制；
-  // 口语、短句、拆条字数等节奏规则保持原样，不改任何字数限制。
-  return base.replace('- 禁止括号动作描写、禁止方括号动作描写、禁止旁白；颜文字可以正常使用，但不能把动作藏进括号',
-    '- 禁止括号舞台说明和替别人写的第三人称旁白；配置了语言风格时，角色第一人称的叙述性正文（动作、身体、感官）可以直接写，不属于被禁止的旁白；颜文字可以正常使用');
+}
+
+// 私聊共用的写法排在角色卡及本轮资料之前。思考强度 low（默认），保留自然的短句节奏。
+export function getPrivateChatRules(options) {
+  return [ROLEPLAY_CONTINUITY_RULE, `<anti_cliche>${ANTI_CLICHE_DEFAULT_TEXT}</anti_cliche>`,
+    getChatRhythmRules({ ...options, privateChat: true }),
+    getCoreDialogueRules({ ...options, identityAnchor: false })].join('\n\n');
 }
 
 // ═══════════════════════════════════════════════════════════

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { onScopeDispose, ref } from 'vue'
+import { onEvent } from './unifiedStream.js'
 import * as api from '../api/index.js'
 import { getSavedTheme, getSavedThemeMode, applyTheme, applyThemeMode, resolveThemeByTime } from '../theme.js'
 
@@ -10,7 +11,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const eventHeight = ref(1200)
   const imageProvider = ref('comfyui')
   const imageGenMode = ref('smart') // 'off' | 'smart' | 'force'
-  const realtimeAffinityDisplay = ref(false)
+  const privateChatNarration = ref(null) // 读取保存的开关之前，历史旁白暂不显示。
+  onScopeDispose(onEvent('private_chat_narration', ({ enabled }) => {
+    if (typeof enabled === 'boolean') privateChatNarration.value = enabled
+  }))
   const bgmMuted = ref(false) // 小镇 BGM 静音（system_settings 持久化，loadComfyConfig 后修正）
   const hasApiKey = ref(true) // 默认 true，避免闪红；onMounted 后修正
   const weatherCity = ref('')
@@ -19,8 +23,8 @@ export const useSettingsStore = defineStore('settings', () => {
   let loaded = false
 
   // ── localStorage 迁移：旧版存在 localStorage，新版存 DB ──
-  const legacyForceImageGen = localStorage.getItem('forceImageGen')
-  if (legacyForceImageGen !== null) {
+  const legacyForceImageGen = globalThis.localStorage?.getItem?.('forceImageGen')
+  if (legacyForceImageGen != null) {
     imageGenMode.value = legacyForceImageGen === 'true' ? 'force' : 'smart'
     localStorage.removeItem('forceImageGen')
     // 异步持久化到后端（fire-and-forget）
@@ -31,6 +35,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (loaded) return
     try {
       const data = await api.getConfig()
+      privateChatNarration.value ??= data.features?.privateChatNarration ?? true
       comfyWidth.value = data.comfy?.width || 1600
       comfyHeight.value = data.comfy?.height || 1200
       eventWidth.value = data.comfy?.eventWidth || 1600
@@ -41,9 +46,6 @@ export const useSettingsStore = defineStore('settings', () => {
       } else if (data.features?.forceImageGen !== undefined) {
         imageGenMode.value = data.features.forceImageGen ? 'force' : 'smart'
       }
-      if (data.features?.realtimeAffinityDisplay !== undefined) {
-        realtimeAffinityDisplay.value = data.features.realtimeAffinityDisplay
-      }
       if (data.features?.bgmMuted !== undefined) {
         bgmMuted.value = !!data.features.bgmMuted
       }
@@ -51,7 +53,7 @@ export const useSettingsStore = defineStore('settings', () => {
       weatherCity.value = data.weather?.city || ''
       loaded = true
     } catch {
-      // keep defaults
+      // 等下一次成功读取配置，避免请求失败时短暂展示已关闭的旁白。
     }
   }
 
@@ -82,11 +84,6 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
 
-  async function setRealtimeAffinityDisplay(v) {
-    realtimeAffinityDisplay.value = v
-    await api.updateFeatureFlag('realtimeAffinityDisplay', v)
-  }
-
   /** 切换小镇 BGM 静音（只负责状态与持久化，播放/暂停由 TownView 侧响应） */
   async function setBgmMuted(v) {
     bgmMuted.value = !!v
@@ -115,5 +112,5 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTheme(theme.value)
   }
 
-  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageProvider, imageGenMode, realtimeAffinityDisplay, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageProvider, setImageGenMode, setRealtimeAffinityDisplay, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
+  return { comfyWidth, comfyHeight, eventWidth, eventHeight, imageProvider, imageGenMode, privateChatNarration, bgmMuted, hasApiKey, weatherCity, theme, themeMode, loadComfyConfig, setComfySize, setEventSize, setImageProvider, setImageGenMode, setBgmMuted, setHasApiKey, setWeatherCity, setThemeMode, refreshTheme }
 })

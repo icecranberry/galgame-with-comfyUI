@@ -5,6 +5,7 @@ import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting, getGlobalRule, getSetting, setSetting, repairFtsIndex } from '../db/index.js';
 import { chatSync } from '../services/lorebook/runtime.js';
+import { normalizePrivateReplyRows } from '../services/privateChatNarration.js';
 import { config } from '../config.js';
 import { runPersonaGeneration } from '../services/characterGenerator.js';
 import { fetchCharacterReferenceImage } from '../services/webSearch.js';
@@ -85,12 +86,12 @@ router.get('/', (req, res) => {
 
   // 聚合查询代替每角色 4 条子查询（N+1 → 固定 4 条，规模不随角色数增长）
   const lastByConv = db.prepare(`
-    SELECT conversation_id, content, created_at FROM (
-      SELECT conversation_id, content, created_at,
-             ROW_NUMBER() OVER (PARTITION BY conversation_id ORDER BY id DESC) AS rn
-      FROM messages
-      WHERE raw_id IS NOT NULL AND conversation_id LIKE 'char_%'
-    ) WHERE rn = 1
+    WITH latest AS (
+      SELECT MAX(id) AS id FROM messages WHERE raw_id IS NOT NULL AND conversation_id LIKE 'char_%' GROUP BY conversation_id
+    )
+    SELECT m.conversation_id, m.role, m.raw_id, m.speaker, m.content, m.created_at, m.id, latest.id AS latest_id
+    FROM latest JOIN messages tail ON tail.id=latest.id JOIN messages m ON m.raw_id=tail.raw_id
+    ORDER BY m.raw_id, m.seq, m.id
   `).all();
   const countsByConv = db.prepare(`
     SELECT conversation_id, COUNT(*) AS c FROM raw_messages
@@ -107,18 +108,26 @@ router.get('/', (req, res) => {
     'SELECT character_id, affinity, is_oath FROM user_relationships'
   ).all();
 
-  const lastMap = new Map(lastByConv.map(r => [r.conversation_id, r]));
+  const lastMap = new Map();
+  for (const row of lastByConv) {
+    if (!lastMap.has(row.conversation_id)) lastMap.set(row.conversation_id, []);
+    lastMap.get(row.conversation_id).push(row);
+  }
   const countMap = new Map(countsByConv.map(r => [r.conversation_id, r.c]));
   const relMap = new Map(relCounts.map(r => [r.id, r.relationship_count]));
   const userRelMap = new Map(userRels.map(r => [r.character_id, r]));
 
   const enriched = characters.map(c => {
     const convId = `char_${c.id}`;
-    const last = lastMap.get(convId);
+    const parts = normalizePrivateReplyRows(lastMap.get(convId) || [], c.display_name);
+    const last = parts.find(row => row.id === row.latest_id);
     const userRel = userRelMap.get(c.id);
     return {
       ...c,
       last_message: last ? last.content.slice(0, 80) : null,
+      last_dialogue: last?.speaker === 'narrator'
+        ? parts.findLast(row => row.speaker !== 'narrator' && row.content)?.content.slice(0, 80) || ''
+        : last?.content.slice(0, 80),
       last_message_at: last?.created_at ? last.created_at.replace(' ', 'T') + '.000Z' : null,
       message_count: countMap.get(convId) || 0,
       relationship_count: relMap.get(c.id) || 0,

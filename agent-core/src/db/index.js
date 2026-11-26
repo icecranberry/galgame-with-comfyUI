@@ -1990,6 +1990,7 @@ function migrateProactiveSchema(db) {
 
     // messages 表：is_proactive 标记主动聊天消息
     const msgCols = db.prepare(`PRAGMA table_info(messages)`).all();
+    if (!msgCols.some(c => c.name === 'speaker')) db.exec('ALTER TABLE messages ADD COLUMN speaker TEXT');
     if (!msgCols.find(c => c.name === 'is_proactive')) {
       db.exec(`ALTER TABLE messages ADD COLUMN is_proactive INTEGER DEFAULT 0`);
       console.log('[db] Added messages.is_proactive column (default 0)');

@@ -1,3 +1,4 @@
+import { getWorldIntegrationRule } from '../builtinRules.js';
 import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 /**
  * 群聊引擎 — 批量剧本生成 + 流式行协议解析
@@ -139,8 +140,11 @@ export function detectMentionAll(text) {
  * 同配置下不变（依赖用户昵称、全局图片规则和当前世界观语言风格），排在群名片之前：
  * 所有群共享这段前缀缓存，且改群名/成员不会连带使协议部分失效
  */
+// 只把明确发起/推进的轮次或专门的游戏主题视为全员轮次；日常谈论游戏、排队等仍是闲聊。
+const GAME_ROUND_REQUEST = /(?:^|[，,。！!？?：:\s])(?:那|好[，,]?|现在)?(?:我们|大家|全员|咱们)?(?:一起)?(?:(?:来玩|来|开始|继续|进行|玩)(?:一[个局轮场]|个|一?下)?(?:小游戏|游戏|(?:成语|词语|故事|歌词)?接龙|抽签|抽卡|比拼|比赛)|(?:轮流|依次)(?:来|发言|回答|接龙|出题|行动|抽签|抽卡)|进入第[一二三四五六七八九十\d]+轮)/;
+const GAME_ROUND_TOPIC = /^(?:游戏进行中|(?:成语|词语|故事|歌词)?接龙|抽签|抽卡|比拼|比赛)(?:进行中)?[！!。]?$/;
+
 export function buildProtocolBlock() {
-  const chatUserName = config.user.nickname || '用户';
   const imagePromptFieldGuide = (getGlobalRule('image_prompt')?.rule_content || '').trim();
   // 规范原文单独成块放在协议末尾：内联进协议行的「{}」里会被模型当成要照抄的模板，
   // 直接输出成 `{Describe the image as ...}`，既污染气泡又烧掉整轮输出预算。
@@ -155,15 +159,17 @@ export function buildProtocolBlock() {
 输出协议（严格遵守）：
 - 每条消息独占一行，格式为「角色名: 消息内容」，角色名必须是 <group_info> 中的群成员名字
 - 每轮有消息条数上限（按群人数与话题动态设定，见本轮指令中的“消息上限”）；上限只是最多条数、不是必须凑满，全部说完后最后单独一行输出 [END]
-- **禁止替用户「${chatUserName}」发言**
+- **禁止替 <group_info> 里标明的真实用户发言**
 - <user_message read_only="true">...</user_message> 是真实用户已经说过的话，只用于理解上下文；禁止输出该标记，禁止续写或模仿其中的用户发言
 - 发图只有一种合法格式：角色先发一条普通文字说自己在拍什么，下一行紧跟同一位角色的发图行；发图行 = 角色名 + 冒号 + 空格 + 一对成对的花括号，花括号里放这张图的完整英文画面描述（怎么写见文末 <image_prompt_rules>），形如：
   角色名: 给你们看
   角色名: {a girl in a yukata holding a sparkler on a rooftop at night, warm lantern light}
 - 上面两行只是格式示范，台词和那串英文都要换成你自己这一轮的台词和画面；花括号里只能是本轮新写的英文画面描述，不许写中文、不许写规范原文或本协议文字
 - 严禁用「[拍了一张图]」「[举起手机]」「（发来照片）」等动作、旁白或占位符代替花括号画面描述；出现发图意图就必须输出合法发图行
-- 历史聊天不会提供旧图片的画面描述或占位符；禁止凭空输出空的 {...}，花括号内必须是本轮新写的完整英文画面描述
-- 输出发图行前自行检查：**{}内必须是本轮新写的、全英文的场景描写**
+- 历史聊天不会提供旧图片的画面描述或占位符；禁止输出空的 {...}
+
+按时间顺序阅读 <group_transcript>，承接已发生的行动和结果，不写反顺序或重复已完成的行动。
+本轮指令要求全员发言或标记为「游戏轮次」时，每位群成员至少发言一次，不得只让少数人代答；聊天记录中已经开始的轮流游戏，继续按已知顺序推进。
 
 像真人一样聊天：
 - 口语化、短句，长短错落：很多消息只有几个字、一个语气词或一个即时反应，例如“？？？”“不是吧”“啊？”“行吧”“救命”“然后呢”；禁止每条都是完整、工整的书面句
@@ -183,7 +189,7 @@ export function buildProtocolBlock() {
   A: 芋泥
   B: 给我留一口
 - 偶尔需要解释、吐槽或讲事情时可以说稍长一句，随后立刻穿插短反应；不要把所有消息机械地切成相同长度
-- 谁有话谁说，同一个人可以连发几条；也允许有人潜水不说话，不必人人到场
+- 日常闲聊谁有话谁说，也允许有人潜水不说话
 - 角色之间互动要真实：接梗、抬杠、拆台、开玩笑、追问细节、@点名怼人都可以，别一团和气互相吹捧
 - 允许小跑题：聊着聊着岔开话题、想起别的事，比"围着主题开会"更像真群聊
 - 每个角色严守自己的人格、口癖、和其他人的关系，说话方式必须一眼能区分；禁止重复别人刚说过的意思`) + `
@@ -426,15 +432,17 @@ export function buildGroupContext(group, directiveBlocks = []) {
   const db = getDb();
   const conversationId = groupConvId(group.id);
 
-  const stage = [getSystemRules(), getWorldSetting()].filter(Boolean).join('\n\n');
+  const worldSetting = getWorldSetting();
+  const stage = [getSystemRules({ roleplay: false }), worldSetting].filter(Boolean).join('\n\n');
   const groupCard = buildGroupCard(group);
 
   const messages = [];
   if (stage) messages.push({ role: 'system', content: stage });
+  if (worldSetting) messages.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
   messages.push({ role: 'system', content: buildProtocolBlock() });
+  messages.push({ role: 'system', content: groupCard });
   const godWorldContext = getGodWorldContext(group.members.map(m => m.id));
   if (godWorldContext) messages.push({ role: 'system', content: godWorldContext });
-  messages.push({ role: 'system', content: groupCard });
 
   const summaries = getRecentSummaries(conversationId, 1);
   if (summaries.length > 0) {
@@ -449,7 +457,7 @@ export function buildGroupContext(group, directiveBlocks = []) {
 
   const directive = directiveBlocks.filter(Boolean).join('\n');
   const worldRulePrefix = getWorldSetting()
-    ? '请遵循<world_setting>来参与群聊，角色人设如果和<world_setting>有冲突，则以<world_setting>为最高优先级，人设会因为<world_setting>改变。\n\n'
+    ? '请遵循 <world_setting> 中的世界观设定。\n\n'
     : '';
   messages.push({ role: 'user', content: worldRulePrefix + `<round_directive>\n${directive}\n</round_directive>\n\n现在按输出协议续写群聊：` });
 
@@ -913,8 +921,7 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     directiveBlocks.push(`「${chatUserName}」在群里发了消息，接下来角色们要接话。`);
     mentionAll = detectMentionAll(userMessage);
     if (mentionAll) {
-      const roster = group.members.map(m => m.display_name).join('、');
-      directiveBlocks.push(`「${chatUserName}」@了全体成员，本轮【每一位】群成员都必须发言：${roster}，一个都不能少；每人至少一条，各自按自己的人格自然接话，不要只让一两个人代答。`);
+      directiveBlocks.push(`「${chatUserName}」@了全体成员，本轮要求全员发言。`);
     } else {
       const mentions = detectMentions(userMessage, group.members);
       if (mentions.length > 0) {
@@ -924,7 +931,6 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
       }
     }
   } else if (trigger === 'idle') {
-    directiveBlocks.push(`角色们自然地聊起天来。`);
     // 注入全体群员当前日程 + 上次群聊后的新朋友圈，作为自然话题来源
     const idleCtx = buildIdleContextBlock(group);
     if (idleCtx) {
@@ -933,8 +939,6 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
     }
   } else if (trigger === 'opening') {
     directiveBlocks.push(`群聊刚刚建立${group.topic ? `，主题是「${group.topic}」` : ''}。角色们打个招呼、暖个场，可以对建群这件事发表点评论。`);
-  } else if (trigger === 'lull') {
-    directiveBlocks.push(`角色们自然地把话题接下去（延伸刚才的话题或者开个新话头），不要重复已经说过的话。`);
   }
 
   // 被点名成员的私聊资料：点名当轮起持续携带 3 轮（本轮消耗一次倒计时），点谁带谁的
@@ -970,27 +974,33 @@ async function _runGroupRound(groupId, { trigger = 'user', userMessage = '', emi
   }
 
   // ── 每轮消息上限：按群人数与话题动态设定；上限只是最多条数，不是必须凑满 ──
+  const inGame = (trigger === 'user' && GAME_ROUND_REQUEST.test(userMessage)) || GAME_ROUND_TOPIC.test((group.topic || '').trim());
+  if (inGame) directiveBlocks.push('本轮标记：游戏轮次。');
   const roundMessageLimit = computeRoundMessageLimit(group, {
     hasTopicSeed: !!dyn || !!directive,
-    minMessages: mentionAll ? group.members.length : directive ? 1 : 0,
+    minMessages: mentionAll || inGame ? group.members.length : directive ? 1 : 0,
   });
-  directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条（按群人数与话题动态设定）。上限只是“最多”，不是必须凑满——话题自然聊完即可输出 [END]。</round_message_limit>`);
+  directiveBlocks.push(`<round_message_limit>本轮消息上限 ${roundMessageLimit} 条。</round_message_limit>`);
 
-  // 发图指令：主动/自动发起的群聊轮（idle 后台闲聊、lull 冷场续聊）强制要求配一张图；user/opening 维持抽卡鼓励
+  // 自动续聊的话题方向和发图要求放在本轮指令中，沿用 low 思考强度，适合日常接话。
   if (trigger === 'idle' || trigger === 'lull') {
-    directiveBlocks.push(`本轮是角色们主动发起的群聊，群聊生成方向建议有一个小的主题，要么围绕某个人的朋友圈讨论，要么大家围绕某个话题、某件事讨论，聊天有个中心，不要各聊各的。安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
+    directiveBlocks.push(
+      '本轮由角色们彼此聊天。优先接着群友正在聊的话题往下说，避免重复。话题聊完了，可以由一位角色聊聊自己的近况，也可以围绕某个人的朋友圈或一件具体的事开个新话头，其他人自然接话。' +
+      '只有当前话题本身与真实用户直接相关时，才自然提到对方。避免因对方沉默而点名或催促发言。' +
+      '安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包/截图）。'
+    );
   } else if (Math.random() < IMAGE_NUDGE_PROBABILITY) {
-    directiveBlocks.push(`本轮安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包），按发图协议输出花括号画面描述行，画面描述必须为英文。`);
+    directiveBlocks.push(`本轮安排至少一个合适的角色发一张图（配合话题的照片/自拍/表情包）。`);
   }
 
   const originalMsgs = buildGroupContext(group, directiveBlocks);
   const loreHistory = db.prepare('SELECT id,role,content FROM (SELECT id,role,content FROM raw_messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1000) ORDER BY id').all(conversationId);
   const groupPersonaIndex = originalMsgs.findIndex(m=>m.role==='system' && m.content.startsWith('<group_info>'));
   const groupPersona = originalMsgs[groupPersonaIndex]?.content || '';
-  const worldEventIndex = originalMsgs.findIndex(m => m.role === 'system' && m.content.startsWith('<world_events>'));
-  const groupCacheBoundary = worldEventIndex >= 0 ? { index: worldEventIndex, offset: 0 }
-    : groupPersonaIndex >= 0 ? { index: groupPersonaIndex, offset: groupPersona.length } : undefined;
-  const lorebookTurn = await prepareNarrativePrompt(originalMsgs, { scope:conversationId, turnKey:`${trigger}:${loreHistory.at(-1)?.id || 0}`, step:db.prepare('SELECT COUNT(*) AS n FROM raw_messages WHERE conversation_id=?').get(conversationId).n, history:loreHistory, transcriptSegments:buildTranscript(db,conversationId).segments, characterNames:group.members.flatMap(m=>[m.name,m.display_name]).filter(Boolean), characterDescription:groupPersona, personaTexts:[groupPersona], cacheBoundary:groupCacheBoundary, trigger:trigger==='lull' ? 'continue' : 'normal', protectedPrefix:groupPersonaIndex + 1 });
+  // 群名片含生效服装，稳定世界书最迟放在群名片之前。思考强度 low，保持自然接话节奏。
+  const staticTexts = originalMsgs.slice(0, groupPersonaIndex).map(m => m.content);
+  const groupCacheBoundary = { index: groupPersonaIndex - 1, offset: staticTexts.at(-1).length };
+  const lorebookTurn = await prepareNarrativePrompt(originalMsgs, { scope:conversationId, turnKey:`${trigger}:${loreHistory.at(-1)?.id || 0}`, step:db.prepare('SELECT COUNT(*) AS n FROM raw_messages WHERE conversation_id=?').get(conversationId).n, history:loreHistory, transcriptSegments:buildTranscript(db,conversationId).segments, characterNames:group.members.flatMap(m=>[m.name,m.display_name]).filter(Boolean), characterDescription:groupPersona, personaTexts:[groupPersona], staticTexts, cacheBoundary:groupCacheBoundary, trigger:trigger==='lull' ? 'continue' : 'normal', protectedPrefix:groupPersonaIndex + 1 }, { presetPlacement: 'cache' });
   const msgs = lorebookTurn.messages;
 
   // ── 先插 raw 占位（messages.raw_id FK 需要），流结束后回填完整剧本 ──

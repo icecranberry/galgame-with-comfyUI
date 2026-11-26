@@ -119,12 +119,13 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     hiresArtist: '',     // HiresFix 指定模式下的画师串
   },
   features: {
-    emotion: process.env.FEATURE_EMOTION !== 'false',
+    privateChatNarration: true,
+    emotion: true,
     memory: process.env.FEATURE_MEMORY !== 'false',
-    replyGuesses: process.env.FEATURE_REPLY_GUESSES === 'true', // 默认关
+    replyGuesses: true,
     forceImageGen: process.env.FEATURE_FORCE_IMAGE_GEN === 'true', // 默认关：灵性生图
     imageGenMode: process.env.FEATURE_FORCE_IMAGE_GEN === 'true' ? 'force' : 'smart', // 'off' | 'smart' | 'force'
-    realtimeAffinityDisplay: process.env.FEATURE_REALTIME_AFFINITY_DISPLAY === 'true', // 默认关：好感度实时显示
+    realtimeAffinityDisplay: true,
     proactiveChat: process.env.FEATURE_PROACTIVE_CHAT !== 'false', // 默认开：主动发起对话
     proactiveChatFreq: parseFloat(process.env.PROACTIVE_CHAT_FREQ) || 0.5, // 主动聊天频率 0~1
     events: process.env.FEATURE_EVENTS !== 'false', // 默认开：奇遇系统
@@ -667,6 +668,8 @@ export function updateHiresLora(loras) {
 }
 
 export function updateFeatureFlag(key, value) {
+  // 兼容旧客户端：三个常开功能忽略旧开关写入。
+  if (['emotion', 'replyGuesses', 'realtimeAffinityDisplay'].includes(key)) return;
   // 三态字符串开关：'off' | 'smart' | 'force'，不走布尔强转
   if (key === 'imageGenMode') {
     const mode = ['off', 'smart', 'force'].includes(value) ? value : 'smart';

@@ -70,6 +70,7 @@ function _connect() {
   _conn = api.connectUnifiedStream({
     private_chat_image: d => _dispatch('private_chat_image', d),
     private_chat_aux: d => _dispatch('private_chat_aux', d),
+    private_chat_narration: d => _dispatch('private_chat_narration', d),
     speech_cache_cleared: d => _dispatch('speech_cache_cleared', d),
     speech_update: d => _dispatch('speech_update', d),
     speech_preparing: d => _dispatch('speech_preparing', d),

@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref, computed, onScopeDispose } from 'vue'
+import { ref, computed, onScopeDispose, watch } from 'vue'
 import * as api from '../api/index.js'
 import { useMessageWindow } from '../composables/useMessageWindow.js'
 import { useProactiveStore } from './notifications.js'
+import { useSettingsStore } from './settings.js'
 import { emitCharacterAvatarChanged } from '../utils/characterReactionProducers.js'
 import { chatSpeechAutoPlay } from '../utils/speechAutoPlay.js'
 import { onEvent } from './unifiedStream.js'
@@ -10,6 +11,11 @@ import { readChatRecovery, writeChatRecovery } from '../utils/chatRecovery.js'
 
 let _seq = Date.now()
 function uid() { return ++_seq }
+function recoveredMessages(recovery) {
+  const parts = recovery.segments?.filter(part => part?.content) ?? []
+  if (!parts.length && recovery.partial) parts.push({ content: recovery.partial })
+  return parts.map(part => ({ id: uid(), role: 'assistant', type: 'text', ...part, interrupted: true, recoveryKey: recovery.clientMsgId }))
+}
 function isEmojiImageUrl(url) {
   return typeof url === 'string' && url.includes('/images/emoji/')
 }
@@ -129,9 +135,21 @@ export const useChatStore = defineStore('chat', () => {
     else if (activeCharId.value) loadMessages(activeCharId.value)
   })
 
-  // 客户端渲染窗口：messages 已全量加载，窗口策略统一由 useMessageWindow 提供
+  // 先按开关选出可见消息，再分页和合并头像；原消息保留以支持即时切回。
+  const settings = useSettingsStore()
+  const displayMessages = computed(() => {
+    if (settings.privateChatNarration) return messages.value
+    const visible = messages.value.filter(m => m.speaker !== 'narrator')
+    const last = messages.value.at(-1)
+    if (streaming.value && !responseComplete.value && last?.speaker === 'narrator' && last.recoveryKey
+      && visible.at(-1)?.role === 'user') {
+      visible.push({ ...last, content: '', speaker: 'character', sticker_images: [], waitingForDialogue: true })
+    }
+    return visible
+  })
   const { visibleMessages, hasMoreOlder, expandOlder, resetToLatest, anchorToLatest, keepTailPinned } =
-    useMessageWindow(messages)
+    useMessageWindow(displayMessages)
+  watch(() => settings.privateChatNarration, keepTailPinned, { flush: 'sync' })
 
   async function loadCharacters() {
     try { const d = await api.listCharacters(); characters.value = d.characters || [] } catch {}
@@ -168,7 +186,7 @@ export const useChatStore = defineStore('chat', () => {
         const user = result.find(m => m.role === 'user' && (m.client_msg_id === recovery.clientMsgId || m.id === recovery.userMessageId))
         if (!user) result.push({ id: uid(), role: 'user', type: 'text', content: recovery.content, clientMsgId: recovery.clientMsgId })
         else user.clientMsgId = recovery.clientMsgId
-        if (recovery.partial) result.push({ id: uid(), role: 'assistant', type: 'text', content: recovery.partial, interrupted: true, recoveryKey: recovery.clientMsgId })
+        result.push(...recoveredMessages(recovery))
         lastSendError.value = recovery.error
       }
       messages.value = result;
@@ -439,7 +457,7 @@ export const useChatStore = defineStore('chat', () => {
     failedTurn.value = null
     let dialogueSaved = false
     const previousRecovery = retryClientMsgId ? readChatRecovery(charId) : null
-    const recovery = { clientMsgId, content, imageMode, options: { townContext, galgameMode }, partial: previousRecovery?.partial || '', error: '上次回应中断，可以重试' }
+    const recovery = { clientMsgId, content, imageMode, options: { townContext, galgameMode }, partial: previousRecovery?.partial || '', segments: previousRecovery?.segments || [], error: '上次回应中断，可以重试' }
     function checkpoint() {
       if (dialogueSaved) return
       const user = messages.value.find(m => m.role === 'user' && (m.clientMsgId || m.client_msg_id) === clientMsgId)
@@ -621,15 +639,18 @@ export const useChatStore = defineStore('chat', () => {
                if (d.content) {
                  fullResponse += d.content
                  recovery.partial = stripPromptBlock(fullResponse)
-                 checkpoint()
                  bubbleText += d.content
+                 recovery.segments.length = bubbleIds.length
+                 recovery.segments[bubbleIds.length - 1] = { content: stripPromptBlock(bubbleText), speaker: d.speaker || 'character' }
+                 checkpoint()
                }
                const curId = bubbleIds[bubbleIds.length - 1]
                let m = messages.value.find(x => x.id === curId)
                if (!m) {
-                 m = { id: curId, role: 'assistant', type: 'text', content: '', recoveryKey: clientMsgId, created_at: new Date().toISOString() }
-                 messages.value.push(m)
+                 messages.value.push({ id: curId, role: 'assistant', type: 'text', content: '', recoveryKey: clientMsgId, created_at: new Date().toISOString() })
+                 m = messages.value.at(-1)
                }
+                if (d.speaker) m.speaker = d.speaker
                 const hasImages = Array.isArray(d.images) && d.images.length
                 const leadingSticker = hasImages && !!d.leadingSticker
                 if (d.content) {
@@ -666,23 +687,24 @@ export const useChatStore = defineStore('chat', () => {
             if (lastEvent === 'context_update' && d.content !== undefined && d.content !== null) {
               fullResponse = d.content
               recovery.partial = stripPromptBlock(fullResponse)
-              checkpoint()
                if (_bufTimer) { clearTimeout(_bufTimer); _bufTimer = null }
                clearPendingEmojiTimers()
-               const parts = d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean)
+               const parts = d.segments ?? d.content.split(/\n{2,}/).map(s => s.trim()).filter(Boolean).map(content => ({ content }))
+              recovery.segments = parts
+              checkpoint()
               for (let i = 0; i < parts.length; i++) {
                 if (i < bubbleIds.length) {
                   let m = messages.value.find(x => x.id === bubbleIds[i])
                   if (!m) {
-                    m = { id: bubbleIds[i], role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() }
+                    m = { id: bubbleIds[i], role: 'assistant', type: 'text', ...parts[i], created_at: new Date().toISOString() }
                     messages.value.push(m)
                   } else {
-                    m.content = parts[i]
+                    Object.assign(m, parts[i])
                   }
                 } else {
                   const newId = uid()
                   bubbleIds.push(newId)
-                  messages.value.push({ id: newId, role: 'assistant', type: 'text', content: parts[i], created_at: new Date().toISOString() })
+                  messages.value.push({ id: newId, role: 'assistant', type: 'text', ...parts[i], created_at: new Date().toISOString() })
                 }
               }
               for (let i = bubbleIds.length - 1; i >= parts.length; i--) {
@@ -782,7 +804,10 @@ export const useChatStore = defineStore('chat', () => {
                const tempId = bubbleIds[msgSavedIdx]
                const m = messages.value.find(x => x.id === tempId)
                if (m) {
+                 // 消息落库会更换业务 ID，已显示的消息行和头像沿用原渲染键。
+                 m.renderId ??= m.id
                  m.id = d.id
+                 if (d.speaker) m.speaker = d.speaker
                  if (d.raw_id != null) m.raw_id = d.raw_id
                  m.speech_message_id = d.id
                  m.speech_auto_token = chatSpeechAutoPlay.mark(`chat:${charId}`, d.id)
@@ -928,7 +953,7 @@ export const useChatStore = defineStore('chat', () => {
     if (isCurrentStream(sessionId)) {
       if (!dialogueSaved && !admissionError) {
         recovery.error = lastSendError.value || '回应中断，可以重试'
-        if (!fullResponse.trim() && recovery.partial) messages.value.push({ id: uid(), role: 'assistant', type: 'text', content: recovery.partial, interrupted: true, recoveryKey: clientMsgId })
+        if (!fullResponse.trim() && recovery.partial) messages.value.push(...recoveredMessages(recovery))
         checkpoint()
         failedTurn.value = { ...recovery }
       } else if (admissionError) writeChatRecovery(charId, null)
@@ -954,6 +979,7 @@ export const useChatStore = defineStore('chat', () => {
     const char = characters.value.find(c => c.id === charId)
     if (char) {
       char.last_message = data.content
+      char.last_dialogue = data.segments?.filter((_, i) => data.speakers?.[i] !== 'narrator').join(' ') ?? data.content
       char.last_message_at = data.created_at
       // 重排（置顶优先 + 时间降序），让主动发消息的角色冒泡到置顶组内最前
       sortCharactersByPin()
@@ -974,6 +1000,8 @@ export const useChatStore = defineStore('chat', () => {
           role: 'assistant',
           type: 'text',
           content: segments[i],
+          speaker: data.speakers?.[i],
+          raw_id: data.raw_id,
           created_at: data.created_at,
         });
       }
@@ -1029,6 +1057,7 @@ export const useChatStore = defineStore('chat', () => {
     if (char) {
       const firstMsg = data.messages?.[0]
       char.last_message = firstMsg?.content || '(延迟回复)'
+      char.last_dialogue = data.messages?.find(m => m.speaker !== 'narrator')?.content || ''
       char.last_message_at = data.created_at
       sortCharactersByPin()
       sidebarScrollSignal.value++
@@ -1042,6 +1071,8 @@ export const useChatStore = defineStore('chat', () => {
           role: 'assistant',
           type: 'text',
           content: msg.content,
+          speaker: msg.speaker,
+          raw_id: data.raw_id,
           created_at: data.created_at,
           is_delayed_reply: true,
           speech_message_id: msg.id,

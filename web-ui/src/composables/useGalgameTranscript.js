@@ -1,4 +1,5 @@
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { useSettingsStore } from '../stores/settings.js'
 import { getDialogueTranscript } from '../api/index.js'
 import { mergeDialogueMessages } from '../utils/galgameDialogue.js'
 
@@ -57,5 +58,9 @@ export function useGalgameTranscript(characterId) {
     finally { if (ticket === generation) loadingOlder.value = false }
   }
   onBeforeUnmount(() => { generation++ })
-  return { messages, loading, loadingOlder, error, hasOlder, latestId, latestRole, refresh, loadOlder }
+  const settings = useSettingsStore()
+  const visibleMessages = computed(() => settings.privateChatNarration ? messages.value : messages.value
+    .map(row => row.dialogue_only === undefined ? row : { ...row, content: row.dialogue_only })
+    .filter(row => row.dialogue_only !== '' || row.images?.length))
+  return { messages: visibleMessages, loading, loadingOlder, error, hasOlder, latestId, latestRole, refresh, loadOlder }
 }

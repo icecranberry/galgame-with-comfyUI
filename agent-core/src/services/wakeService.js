@@ -12,6 +12,7 @@ import { prepareNarrativePrompt } from './presets/narrative.js';
 import { buildConversationLorebookContext } from './lorebook/conversationContext.js';
 import { config } from '../config.js';
 import { splitText } from '../utils/sentenceSplitter.js';
+import { privateReplyText } from './privateChatNarration.js';
 import {
   loadEmotionState, getCompositeEmotion,
   affinityToPrompt, loadAffinity,
@@ -38,6 +39,7 @@ export async function processWakeUp(characterId, mode, attempts = null) {
   if (!char) throw new Error(`Character ${characterId} not found`);
 
   const conversationId = `char_${characterId}`;
+  const narration = config.features.privateChatNarration;
   const userName = config.user.nickname || '用户';
   const tempWakeUntil = getTempWakeUntil(characterId);
 
@@ -86,6 +88,8 @@ export async function processWakeUp(characterId, mode, attempts = null) {
       temperature: 0.7,
       label: `wake-up:${char.display_name}:${mode}`,
     });
+    fullReply = privateReplyText(fullReply || '', narration && config.features.privateChatNarration, char.display_name);
+    if (!fullReply.trim()) throw new Error('叫醒回复没有可显示的台词');
   } catch (err) {
     // LLM 调用失败，恢复 reply_queue 条目状态
     // 角色已被叫醒，不能再等原 sleep_until —— 改为 3 分钟后由 replyQueueScheduler 接手
@@ -95,10 +99,6 @@ export async function processWakeUp(characterId, mode, attempts = null) {
       db.prepare(`UPDATE reply_queue SET status = 'waiting', scheduled_reply_at = datetime('now', '+3 minutes') WHERE id IN (${placeholders})`).run(...ids);
     }
     throw err;
-  }
-
-  if (!fullReply || fullReply.trim().length === 0) {
-    throw new Error('Empty reply from LLM');
   }
 
   // ── 分句 → 写入 raw_messages + messages ──

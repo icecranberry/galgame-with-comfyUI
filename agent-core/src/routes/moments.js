@@ -23,8 +23,8 @@ import { publishUserMoment } from '../services/momentUserPostService.js';
 import { handleUserComment } from '../services/momentCommentService.js';
 import { getWorldIntegrationRule } from '../builtinRules.js';
 import { DEFAULT_MOMENT_IMAGE_PROMPT, parseMomentResponse, sanitizeMomentContent } from '../services/momentResponseParser.js';
-import { MOMENT_FORMS, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentOutputFormat, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE, pickMomentFocus, buildMomentFocusDirective } from '../services/momentForms.js';
-import { MOMENT_DREAM_IMAGE_RULES, MOMENT_DREAM_IMAGE_REQUIREMENT } from '../services/momentForms.js';
+import { MOMENT_FORMS, MOMENT_POST_FORMAT, weightedPick, pickMomentImageCount, MOMENT_SINGLE_FOCUS_RULE, MOMENT_TONE_RULES, MOMENT_IMAGE_RULES, buildMomentMotiveDirective, buildMomentScheduleContext, buildMomentMultiImageRule, MOMENT_RECORD_BACKDROP_RULE, pickMomentFocus, buildMomentFocusDirective } from '../services/momentForms.js';
+import { MOMENT_DREAM_IMAGE_RULES } from '../services/momentForms.js';
 
 import { startMomentBackfill, stopMomentBackfill, isMomentBackfillRunning } from '../services/momentBackfill.js';
 
@@ -824,13 +824,13 @@ async function generateMomentPostImpl(character, opts = {}) {
   // 3. LLM 生成文案 + 配图提示词
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
-    : getSystemRules();
+    ? getSystemRulesWithWorld({ roleplay: false })
+    : getSystemRules({ roleplay: false });
 
   const multiPersonImageNote = multiPersons.length > 0 ? `
 - **多人画面**：包含你和${multiPersons.map(p => p.otherName).join('、')}，另指定同框的用户也计入人数；每人独立描述，参与同一活动。` : '';
 
-  const postingTaskIntro = '你正在发朋友圈。你就是下方人格在当前世界中的本人，现在正打开自己的账号，把此刻想分享的生活片段发给熟人。以下从你的生活处境出发，用你自己的所见、所感和说话习惯完成这条动态。';
+  const postingTaskIntro = '你正在发朋友圈。用自己的账号，把此刻想分享的生活片段发给熟人。';
 
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
@@ -840,7 +840,7 @@ async function generateMomentPostImpl(character, opts = {}) {
     'SELECT is_oath FROM user_relationships WHERE character_id = ?'
   ).pluck().get(character.id));
   const oathImageNote = isOath
-    ? '\n- **誓约画面特征**：imagePrompt 必须明确描述角色左手无名指戴着一枚清晰可见的银白细戒指；只在画面中体现，text 不提及戒指。'
+    ? '\n- **誓约画面特征**：imagePrompt 必须明确描述角色左手无名指戴着一枚清晰可见的银白细戒指；只在画面中体现，text 不提及戒指、誓约及其象征意义。'
     : '';
 
   const now = opts.postedAt || new Date();
@@ -872,11 +872,6 @@ async function generateMomentPostImpl(character, opts = {}) {
     ).get(character.id, toSQLite(now.toISOString()))?.content || '';
   } catch { /* ignore */ }
 
-  // 5% 概率保留自然的口语停顿，不靠故意错字制造生活感
-  const imperfectionNote = Math.random() < 0.05
-    ? '\n- 可留一处自然重复或停顿，不故意打错字。'
-    : '';
-
   // 10% 概率弱呼应最近一条朋友圈（自由模式不注入）
   const continuationNote = Math.random() < 0.10 && prevMomentText && !isFreeMode
     ? `\n- 如果这条朋友圈与最近一条“${prevMomentText.slice(0, 60)}...”是同一件事的自然延续，可以顺带呼应；否则忽略它。不要为了呼应而把旧内容单独写成第二段。`
@@ -891,7 +886,6 @@ async function generateMomentPostImpl(character, opts = {}) {
   const postingStablePrefix = `${postingTaskIntro}
 
 通用规则：
-- 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${appendWorldLanguageStyle(`${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}`)}
@@ -899,37 +893,24 @@ ${MOMENT_IMAGE_RULES}`)}
 
 生图格式（每个 imagePrompt 均适用）：
 ${imageFormatRule}
-`;
+${MOMENT_POST_FORMAT}`;
   const postingTask = (() => {
-    const textShape = isSpecialMode
-      ? '中文口语，第一人称，按本次内容主次决定写日程感想或梦境片段，分清梦与现实'
-      : '中文口语，只围绕一个具体中心，用你自己的语气表达';
-    const jsonFmt = buildMomentOutputFormat({
-      imageCount,
-      textRequirement: textShape,
-      textLength: pickedForm?.len || '30-320字',
-      imageRequirement: isSpecialMode ? MOMENT_DREAM_IMAGE_REQUIREMENT : '',
-    });
-
     const multiImageRule = buildMomentMultiImageRule(imageCount);
 
     // 主次判断放在动态尾部，不改变共用静态前缀。
     // 张数、形态、天气等每次不同的内容全部压在这里，静态前缀到输出格式为止。
-    const dynamicRules = `- text 用中文，imagePrompt 用英文；正文字数范围：${pickedForm?.len || '30-320字'}，不凑字，保留关键意思
+    const dynamicRules = `- 正文字数范围：${pickedForm?.len || '30-320字'}，不凑字，保留关键意思
 ${multiImageRule}
-${pickedForm ? `- **发布形态参考（可不用）**：${pickedForm.desc}。` : ''}
+- 本次配 ${imageCount} 张图，按对应字段返回。
+${pickedForm ? `- **发布形态**：${pickedForm.name}。${pickedForm.desc}` : ''}
 ${isSpecialMode ? '- **梦境采纳条件**：动因为主时可以直接分享梦境，简要日程只作背景，不必解释梦与日程的联系；日程为主时，仅在梦境动因自然契合日程时采用，否则忽略梦境及其配图建议。采用后正文分清梦与现实，配图只取梦内同一场景。' : ''}
-${imperfectionNote}
-${isOath ? '- 已缔结誓约：银白细戒指只能出现在 imagePrompt 的画面描述中，text 禁止提及戒指、誓约及其象征意义。' : ''}
 ${continuationNote}
 ${weatherHint}
 ${isSpecialMode ? MOMENT_DREAM_IMAGE_RULES : ''}
 ${multiPersonImageNote}
 ${oathImageNote}`;
 
-    return `${postingStablePrefix}${jsonFmt}
-
-本次要求（随本次情况变化，与上方通用规则同时生效）：
+    return `本次要求（随本次情况变化，与上方通用规则同时生效）：
 ${dynamicRules}`;
   })();
 
@@ -954,20 +935,16 @@ ${dynamicRules}`;
 你打开自己的朋友圈，准备把此刻想分享的东西发给熟人。哪些想说、哪些留给自己，由你决定。写下你准备发出的原话——只写你真正会发出去的那句话，不要写成说明、总结、第三人称介绍或对指令的复述；配上你想分享的画面。
 按约定的 JSON 格式返回。${styleTail}`;
 
-  // 共用固定规则 → 生效中的世界事件 → 本次输出要求 → 人设 → 场景 → user。
-  // 世界事件在生效期内逐字稳定，放在随机格式、天气与跨角色变化之前复用前缀。
+  // 固定发帖规范 → 人设 → 世界事件与在场资料 → 本轮任务。
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('moments') });
   const postingTaskIndex = msgs.length;
   const godWorldContext = getGodWorldContext([Number(character.id)]);
-  msgs.push({ role: 'system', content: godWorldContext ? postingStablePrefix : postingTask });
-  if (godWorldContext) {
-    msgs.push({ role: 'system', content: godWorldContext });
-    msgs.push({ role: 'system', content: postingTask.slice(postingStablePrefix.length) });
-  }
+  msgs.push({ role: 'system', content: postingStablePrefix });
   // 整卡人格（统一入口，含生效外观注入；输出含 imagePrompt，配图需体现当前外观）
   const lorePersona = buildCharacterPersona(character, { variant: 'full' });
   msgs.push({ role: 'system', content: lorePersona });
+  if (godWorldContext) msgs.push({ role: 'system', content: godWorldContext });
   // 日程里提到了用户（如聊天约定改写的日程）→ 用户同框：注入用户信息与关系
   if (scheduleWithUser) {
     const relRow = db.prepare(
@@ -999,7 +976,8 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
   if (selectedTopic) {
     msgs.push({ role: 'system', content: `【本次分享话题】\n名称：${selectedTopic.name}\n描述：${selectedTopic.desc || selectedTopic.name}` });
   }
-  msgs.push({ role: 'user', content: userMsg });
+  // 思考强度 low（默认），发帖口吻保留角色的即兴反应。
+  msgs.push({ role: 'user', content: [postingTask, worldSetting && '请遵循 <world_setting> 中的世界观设定。', userMsg].filter(Boolean).join('\n\n') });
 
   let text = '', imagePrompt = '', imageUrls = [];
   let imagePrompts = [];
@@ -1014,7 +992,7 @@ ${userName}的信息：${userDesc || '信息未知，按普通人处理'}
     } catch (err) { console.warn('[moments] town life records unavailable:', err?.message); }
   }
   const result = await chatWithPreset(msgs, {
-    temperature: 0.8, response_format: { type: 'json_object' }, label: '发朋友圈助手',
+    presetPlacement: 'cache', temperature: 0.8, response_format: { type: 'json_object' }, label: '发朋友圈助手',
     lorebook: {
       personaTexts: [lorePersona], staticTexts: [postingStablePrefix],
       cacheBoundary: { index: postingTaskIndex, offset: postingStablePrefix.length },
@@ -1155,8 +1133,8 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
   const userName = userNickname();
   const worldSetting = getWorldSetting();
   const permissionPrompt = worldSetting
-    ? getSystemRulesWithWorld()
-    : getSystemRules();
+    ? getSystemRulesWithWorld({ roleplay: false })
+    : getSystemRules({ roleplay: false });
 
   const imagePromptRule = getGlobalRule('image_prompt');
   const imagePromptGuide = imagePromptRule?.rule_content || '';
@@ -1178,10 +1156,9 @@ async function generateSpecialScheduleMoment({ characterId, activity }) {
   // 静态规则（含生图格式）在前，随本次变化的字段（同框人物、誓约、天气）压到后面。
   // 语言风格只在 <additional_writing_style> 中完整出现一次，这里只决定末条 user 是否带短指针。
   const hasLanguageStyle = hasActiveWorldLanguageStyle();
-  const postingTask = `你正在发朋友圈。你就是下方人格在当前世界中的本人，现在正打开自己的账号，把此刻想分享的生活片段发给熟人。以下从你的生活处境出发，用你自己的所见、所感和说话习惯完成这条动态。
+  const postingTask = `你正在发朋友圈。用自己的账号，把此刻想分享的生活片段发给熟人。
 
 通用规则：
-- 只输出 JSON，不要解释
 ${MOMENT_SINGLE_FOCUS_RULE}
 ${appendWorldLanguageStyle(`${MOMENT_TONE_RULES}
 ${MOMENT_IMAGE_RULES}`)}
@@ -1190,8 +1167,9 @@ ${MOMENT_IMAGE_RULES}`)}
 生图格式（每个 imagePrompt 均适用）：
 ${imagePromptGuide || '一段完整的自然英文，描述具体画面，避免标签堆砌。'}
 
-${buildMomentOutputFormat({ textRequirement: `中文口语，第一人称，写你和${userName}赴约时的一个细节或互动` })}
-本次要求（随本次情况变化，与上方通用规则同时生效）：
+${MOMENT_POST_FORMAT}
+赴约帖只配一张图，只返回 text 和 imagePrompt。正文写赴约时的一个细节或互动，30-320 字。`;
+  const roundRules = `本次要求（随本次情况变化，与上方通用规则同时生效）：
 - **这条朋友圈是履约现场**：只突出你们约好的这件事本身，不要扯别的话题。
 - **画面必须同框**：imagePrompt 中必须同时出现你和${userName}两个人，分别描述各自外观、动作与互动，贴合你们的关系，用句号分隔两人描述。${oathImageNote}
 ${weatherHint}`;
@@ -1200,7 +1178,7 @@ ${weatherHint}`;
   const doing = `${activity.location || ''}${activity.activity || ''}`;
   const descPart = activity.description ? `（${activity.description}）` : '';
   const styleTail = hasLanguageStyle
-    ? '\n最后：本轮正文按 <additional_writing_style> 的短文本底线写：至少 1 个具体身体部位或衣物状态、1 个身体触觉细节、1 个可见结果，禁止只写一句概括或单形容词。'
+    ? '\n最后：本轮正文按 <additional_writing_style> 的规则写作。'
     : '';
   const userMsg = `${timeTag}
 **【此刻正在做】你此刻正在${doing}${descPart}**
@@ -1222,7 +1200,7 @@ ${userDesc || '信息未知，按普通人处理。'}
 imagePrompt 中${userName}的外观以上述描述为准。`,
   });
 
-  msgs.push({ role: 'user', content: userMsg });
+  msgs.push({ role: 'user', content: [roundRules, worldSetting && '请遵循 <world_setting> 中的世界观设定。', userMsg].filter(Boolean).join('\n\n') });
 
   // 创建 generating 记录（style 标记为日程赴约，与普通帖区分）
   const postResult = db.prepare(
@@ -1235,8 +1213,8 @@ imagePrompt 中${userName}的外观以上述描述为准。`,
     const result = await chatWithPreset(msgs, {
       temperature: 0.8,
       response_format: { type: 'json_object' },
-      label: '日程赴约朋友圈',
-      lorebook:{personaTexts:[lorePersona],characterName:character.display_name,scenario:doing},
+      label: '日程赴约朋友圈', presetPlacement: 'cache',
+      lorebook:{personaTexts:[lorePersona],staticTexts:[postingTask],cacheBoundary:{index:msgs.findIndex(m=>m.content===postingTask),offset:postingTask.length},history:[doing],characterName:character.display_name,scenario:doing},
     });
     const parsed = parseMomentResponse(result);
     let text = parsed.text || '出门赴约啦～';

@@ -14,7 +14,7 @@ import { appendWorldLanguageStyle } from './worldLanguageStyle.js';
 import { getDb, getSystemRules, getSystemRulesWithWorld, getWorldSetting } from '../db/index.js';
 import { chatWithPreset } from './presets/narrative.js';
 import { config } from '../config.js';
-import { getCoreDialogueRules, getWorldIntegrationRule } from '../builtinRules.js';
+import { getWorldIntegrationRule } from '../builtinRules.js';
 import { loadEmotionState, stateToPrompt, loadAffinity, affinityToPrompt, cropPersonalityForEmotion } from './emotionEngine.js';
 import { MOMENT_COMMENT_RULES, firstMomentImagePrompt } from './momentForms.js';
 import { extractMomentImageRequest, stripMomentImageRequest } from './momentImageRequest.js';
@@ -179,7 +179,6 @@ export async function generateCharacterCommentReply(character, post, historyComm
     .join('\n');
   const mentionNote = opts.isMentioned ? `\n- ${userName}在评论里 @ 了你，先回应 ta 的这条评论。` : '';
   const threadNote = opts.isThreadReply ? `\n- 这条评论是楼中楼里的回复，回应时照顾好楼层里的上下文。` : '';
-  const momentRules = getCoreDialogueRules({ userName, identityAnchor: false });
 
   // 配图信息独立标签块；用户帖的 AI 配图需要身份隔离，防止把图中人物当成发帖人
   const imageRequest = extractMomentImageRequest(post.content);
@@ -203,11 +202,7 @@ ${visibleContent}
 
 请以角色的身份自然回复评论区的最新评论。${mentionNote}${threadNote}
 
-${latestCommentLines.join('\n')}
-
-${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
-- 可以参考评论区的上下文，但不要重复自己已经说过的话
-${momentRules}`
+${latestCommentLines.join('\n')}`
     : (() => {
         // 非帖主角色：补一段帖主的人设摘要，避免 ta 对这条朋友圈的主人一无所知
         let posterSection = '';
@@ -226,13 +221,16 @@ ${userName}在评论区${opts.isThreadReply ? '楼里回复' : '评论'}${opts.i
 
 ${latestCommentLines.join('\n')}
 
-${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
 - 看你的性格和你与${userName}的关系，决定是调侃、关心、吐槽，还是只起个哄`;
       })();
 
   // msgs[0] 舞台 → [世界观] → msgs[1] 角色+情绪 → msgs[2] 交互上下文 → msgs[3] 任务 → user
   const msgs = [{ role: 'system', content: permissionPrompt }];
   if (worldIntegrationNoteReply) msgs.push({ role: 'system', content: worldIntegrationNoteReply });
+  // 思考强度 low（默认）。同一套短评规则先于帖子、人物关系与评论历史。
+  const commentRules = appendWorldLanguageStyle(MOMENT_COMMENT_RULES);
+  const cacheBoundary = { index: msgs.length, offset: commentRules.length };
+  msgs.push({ role: 'system', content: commentRules });
 
   const charContent = [character.base_prompt, emotionPrompt].filter(Boolean).join('\n\n');
   msgs.push({ role: 'system', content: charContent });
@@ -264,11 +262,11 @@ ${appendWorldLanguageStyle(MOMENT_COMMENT_RULES)}
   const userMsg = `关于${userName}：
 ${userPersona}
 ${commentHistory ? `\n\n评论区目前的对话：\n---\n${commentHistory}\n---` : ''}
-回复这条评论：${replyImageNote}`;
+${worldSettingReply ? '请遵循 <world_setting> 中的世界观设定。\n' : ''}回复这条评论：${replyImageNote}`;
   msgs.push({ role: 'user', content: userMsg });
 
   const chat = opts.deps?.chatSync || chatWithPreset;
-  const result = await chat(msgs, { temperature: 0.7, label: '回评', lorebook:{personaTexts:[character.base_prompt],characterName:displayName,history:[{role:'user',content:visibleContent},...historyComments.map(c=>({role:c.author_type==='character'?'assistant':'user',content:formatCommentLine(c)}))],scenario:visibleContent} });
+  const result = await chat(msgs, { presetPlacement: 'cache', temperature: 0.7, label: '回评', lorebook:{staticTexts:[commentRules],cacheBoundary,personaTexts:[character.base_prompt],characterName:displayName,history:[{role:'user',content:visibleContent},...historyComments.map(c=>({role:c.author_type==='character'?'assistant':'user',content:formatCommentLine(c)}))],scenario:visibleContent} });
   return String(result || '').trim().replace(/^["']|["']$/g, '').slice(0, 200);
 }
 

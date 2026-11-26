@@ -36,7 +36,7 @@ import { RAG_TIMEOUT_FAST_MS } from '../services/imagePromptKnowledge.js';
 import { appendOathRing } from '../services/oathUtils.js';
 import { getEventVadModifier } from '../services/eventGenerator.js';
 import { computeProactiveScore, updateNextProactiveAt, resetUnansweredStreak, getUnansweredStreak } from '../services/proactiveChatScheduler.js';
-import { SentenceSplitter } from '../utils/sentenceSplitter.js';
+import { createPrivateReplySplitter, normalizePrivateReplyRows, privateReplyText } from '../services/privateChatNarration.js';
 import { invalidateGalleryCache } from '../services/galleryCache.js';
 import { saveBase64Image } from '../services/imagePaths.js';
 import { parseEmojiText, buildEmojiNote, getCharacterEmojiMap } from '../services/emojiService.js';
@@ -50,7 +50,7 @@ import { randomUUID as standingTurnId } from 'crypto';
 import { readDialogueTranscript } from '../services/dialogueTranscript.js';
 import { ensureDreamOnDemand, generateLiveDreamMurmur, decorateDreamImagePrompt } from '../services/dreamService.js';
 import { getTimeTag, getLightHint, getLightNoteWithWeather } from '../services/timeLight.js';
-import { getCoreDialogueRules, getChatRhythmRules, getWorldIntegrationRule } from '../builtinRules.js';
+import { getDialogueIdentityRule, getPrivateChatRules, withPrivateChatSpeaker, getWorldIntegrationRule } from '../builtinRules.js';
 import { matchAll } from '../services/characterSearch.js';
 import { getUserName, matchUser } from '../services/userSearch.js';
 import { buildChatContext, getSplitHistory, applyContextBudget } from '../services/contextAssembler.js';
@@ -287,13 +287,15 @@ router.get('/characters/:id/messages', (req, res) => {
   const db = getDb();
   const conversationId = convId(req.params.id);
 
-  const messages = db.prepare(`
-    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id, r.client_msg_id
+  const characterName = db.prepare('SELECT display_name FROM characters WHERE id=?').get(req.params.id)?.display_name;
+  const rows = db.prepare(`
+    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.speaker, m.images, m.created_at, m.event_id, r.client_msg_id
     FROM messages m
     LEFT JOIN raw_messages r ON r.id = m.raw_id
     WHERE m.conversation_id = ?
     ORDER BY COALESCE((SELECT MIN(part.id) FROM messages part WHERE part.raw_id=m.raw_id),m.id), m.seq, m.id
-  `).all(conversationId).map(m => ({
+  `).all(conversationId);
+  const messages = normalizePrivateReplyRows(rows, characterName).map(m => ({
     ...m,
     created_at: toISODate(m.created_at),
   }));
@@ -596,9 +598,10 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     // 完成确认丢失后的重试只回放已存回复，不再请求模型或生成第二轮。
     if (completedReply) {
       for (const { id, p } of completedReply.saved) {
-        send('token', { content: p.content, ...(p.images.length ? { images: p.images } : {}) });
+        if (!config.features.privateChatNarration && p.speaker === 'narrator') continue;
+        send('token', { content: p.content, speaker: p.speaker, ...(p.images.length ? { images: p.images } : {}) });
         send('bubble_break', {});
-        send('msg_saved', { id, raw_id: completedReply.rawId, role: 'assistant', content: p.content, images: p.images });
+        send('msg_saved', { id, raw_id: completedReply.rawId, role: 'assistant', content: p.content, speaker: p.speaker, images: p.images });
       }
       send('response_end', {});
       send('dialogue_saved', { raw_id: completedReply.rawId });
@@ -705,13 +708,7 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
     const worldSetting = getWorldSetting();
     const stageContent = [jailbreak, worldSetting].filter(Boolean).join('\n\n');
 
-    // ── 稳定块 [1]：角色基础人格（不含日程、不含奇遇）+ 道具临时状态 ──
-    let charBaseContent = character?.base_prompt || getDefaultPrompt();
-    const buffBlock = getActiveBuffBlock(characterId);
-    if (buffBlock) charBaseContent = `${charBaseContent}\n\n${buffBlock}`;
-    // 小镇世界状态（当日《邻舍日报》15% 概率产出）：影响全镇所有人，注入位与道具 buff 同位
-    const worldStateBlock = getWorldStateBlock();
-    if (worldStateBlock) charBaseContent = `${charBaseContent}\n\n${worldStateBlock}`;
+    const charBaseContent = character?.base_prompt || getDefaultPrompt();
 
     // ── 稳定块 [2]：用户上下文 + 关系 + 固定格式规则 ──
     const chatUserName = config.user.nickname || '用户';
@@ -757,35 +754,12 @@ router.post('/characters/:id/chat', createCharacterTownChatGuard({ getDb, getTow
       userInfoParts.push(`<character_relations>你与其他角色的关系：\n${relLines}\n\n请在对话中自然体现这些关系，不必刻意说明，但当提到或遇到这些角色时，行为举止应符合你们的关系。</character_relations>`);
     }
 
-    // 固定格式规则保持在稳定前缀（<dialogue_format_rules>）；
-    // 静态活人感规则（<dialogue_rules>）与表情包清单（<emoji_stickers>）走下方 preSummarySystem，
-    // 独立成一条 system 紧贴摘要之上；
-    // 随好感度变化的长度条（<reply_length>）不进稳定层（见下方 dynamicBlocks），避免换档时挪动缓存前缀。
-    // 配置了语言风格时，稳定前缀里的“不是写舞台剧本/禁止旁白”也要换成风格变体，
-    // 不能只靠后面的风格块覆盖——实测模型会把前排的硬禁止当成不可违背的规则。
+    const narration = config.features.privateChatNarration;
+    const characterName = character?.display_name || '角色';
     const hasLanguageStyle = hasActiveWorldLanguageStyle();
-    const coreRules = getCoreDialogueRules({ userName: chatUserName || '用户', allowNarration: hasLanguageStyle });
-    userInfoParts.push(`<dialogue_format_rules>
-${coreRules}
-- **在合适的时机，你会想要和用户分享照片或者给他看某些事物。**
-- {"prompt":"Description of the scene"}：对话历史中若出现这种格式，意味着这里出现了一张这样的图片，继续自然对话即可。
-</dialogue_format_rules>`);
-
-    const formatContextBlock = userInfoParts.length > 0 ? userInfoParts.join('\n\n') : '';
-
-    // 世界事件只在生效期内复用，置于跨角色变化之前；不认证为永久静态世界书边界。
-    const godWorldContext = getGodWorldContext([Number(characterId)]);
-    const stableBlocks = [stageContent, godWorldContext, charBaseContent, formatContextBlock].filter(Boolean);
-    const chatCacheBoundary = godWorldContext
-      ? { index: stableBlocks.indexOf(godWorldContext), offset: 0 }
-      : { index: stableBlocks.indexOf(charBaseContent), offset: (character?.base_prompt || getDefaultPrompt()).length };
-
-    // Memory v3 阶段二：@memory 主动回想协议（仅 1v1 聊天，群聊明确排除）。
-    // 放 stableBlocks 尾部：稳定前缀之外，开关关闭时不进 prompt（零影响，方案 §5.1）。
     const activeSearchConfig = config.features.memory ? getActiveSearchConfig() : { enabled: false, timeoutMs: 4000 };
     const recallGateEnabled = activeSearchConfig.enabled;
-    if (recallGateEnabled) {
-      stableBlocks.push(`<recall_tool>
+    const recallRule = recallGateEnabled ? `<recall_tool>
 如果你需要回想过去的对话细节——对方提起一件“你应该记得”的事、时间较久远的事、
 或下方提供的记忆片段不足以回应时——你可以在回复的第一行输出检索指令：
 
@@ -793,8 +767,18 @@ ${coreRules}
 
 输出指令后立即停止，系统会替你回想并把结果反馈给你，你再继续正常回复。
 每轮最多使用一次；只是闲聊或记忆片段已够用时不要使用。
-</recall_tool>`);
-    }
+</recall_tool>` : '';
+
+    const privateRules = appendWorldLanguageStyle(getPrivateChatRules({ narration, allowNarration: hasLanguageStyle }), { narration });
+    const identityRule = getDialogueIdentityRule(chatUserName);
+    userInfoParts.push(identityRule);
+
+    const formatContextBlock = userInfoParts.length > 0 ? userInfoParts.join('\n\n') : '';
+
+    const worldRule = worldSetting ? getWorldIntegrationRule('interaction') : '';
+    const personaBlock = withPrivateChatSpeaker(charBaseContent, characterName, narration);
+    const stableBlocks = [stageContent, worldRule, recallRule, privateRules, personaBlock, formatContextBlock].filter(Boolean);
+    const chatCacheBoundary = { index: stableBlocks.indexOf(personaBlock), offset: personaBlock.length };
 
     // ── 摘要块 ──
     const summaries = getRecentSummaries(conversationId, 1);
@@ -816,7 +800,7 @@ ${coreRules}
     }
 
     // ── 动态尾部块（将附加到最新 user 消息） ──
-    const dynamicBlocks = [];
+    const dynamicBlocks = [getGodWorldContext([Number(characterId)]), getActiveBuffBlock(characterId), getWorldStateBlock()].filter(Boolean);
     const memorySnapshot = [];
 
     // 1. 最近信箱往来
@@ -878,12 +862,7 @@ ${coreRules}
       dynamicBlocks.push(`<user_portrait>${chatUserName}在你眼中的印象：\n${portraitStrs.join('\n')}</user_portrait>`);
     }
 
-    // 7. 活人感节奏规则：静态规则 + 表情包清单（跨轮不变，可缓存）拼成一条独立 system，
-    //    由 buildChatContext 插在稳定前缀之后、摘要之上，作为缓存前缀的收尾；
-    //    随好感度变化的长度条单独降为 dynamicBlocks 首项——好感度换档只动提示词末尾那一小块，
-    //    前面的大段（世界观、人格、格式规则、活人感规则、表情包）不再跟着重算。
-    //    灵魂系统开启时长度档位由 ExpressionDesire 主导（灵魂优先），affinity 三档不再参与长度判定；
-    //    显式生图意图的「15 字以内」硬规则始终优先。灵魂取值失败时静默回退到 affinity 三档。
+    // 长度按本轮状态决定，三段式只对台词计数。
     let soulLengthHint = null;
     if (soulEnabled) {
       try { soulLengthHint = soulReplyLengthHint(characterId); } catch { soulLengthHint = null; }
@@ -894,16 +873,10 @@ ${coreRules}
       if (affinity < 80) return '10~40个汉字';
       return '10~60个汉字';
     })();
-    // 配置了语言风格时，节奏规则换成允许第一人称叙述的变体；
-    // 长度条保持原样，不因风格放大或缩小任何字数限制。
-    const preSummarySystem = [
-      appendWorldLanguageStyle(getChatRhythmRules({ allowNarration: hasLanguageStyle })),
-      emojiNote,
-    ];
-    // 长度条放动态块最前，仍紧跟在规则区之后（<dynamic_context> 顶部）
+    const preSummarySystem = [emojiNote];
     // 单独用 <reply_length>，与上方静态 <dialogue_rules> 区分：静态管怎么说话，这条只改本轮长度
     dynamicBlocks.push(`<reply_length>
-- **回复控制在${sentenceHint}，保持口语化轻快节奏**
+- **${narration ? `台词总量控制在${sentenceHint}（旁白不占这个额度）` : `回复控制在${sentenceHint}`}**
 </reply_length>`);
 
     // 8. VAD 三维情绪描述
@@ -918,7 +891,7 @@ ${coreRules}
 
     // 9.5 临时表达风格：小概率注入，紧跟历史聊天之后，只影响本轮回复
     //     誓约状态时偏向更亲近的风格（俏皮/撒娇），低好感（<40）时用敌意风格池，一般时用基础池
-    if (Math.random() < 0.12) {
+    if (!hasLanguageStyle && Math.random() < 0.12) {
       const pool = (affinity != null && affinity < 40) ? TEMP_STYLE_POOL_HOSTILE
         : (userRel && userRel.is_oath) ? TEMP_STYLE_POOL_OATH : TEMP_STYLE_POOL;
       const style = pool[Math.floor(Math.random() * pool.length)];
@@ -1064,7 +1037,7 @@ ${coreRules}
       }
     }
 
-    // ── 语言风格重申已并入上方 preSummarySystem 的稳定 system 末尾，
+    // ── 世界观语言风格已并入角色卡前的 privateRules，
     //    不再作为 dynamicBlock 追加到末条 user，避免每轮全价重算。
 
     // ── 关系深度一句话重申（固定动态块最末）：档位全文在第 5 位按变动频率排序，
@@ -1076,8 +1049,17 @@ ${coreRules}
     }
 
     // ── 阶段四：dynamicBlocks token 预算（默认关；降级顺序有日志，无静默截断）──
-    const imageStates = db.prepare(`SELECT p.scene,t.status,t.error_message FROM private_chat_image_turns p JOIN image_tasks t ON t.id=p.task_id WHERE p.conversation_id=? ORDER BY p.user_raw_id DESC LIMIT 3`).all(conversationId);
-    if (imageStates.length) dynamicBlocks.push('【最近图片任务真实状态】\n' + imageStates.map(t => `${t.scene || '最后一轮对话配图'}：${t.status === 'done' ? '图片已完成' : t.status === 'failed' ? '生成失败' : '已受理，图片尚未完成'}`).join('\n'));
+    const recentImage = db.prepare(`
+      SELECT p.scene, t.status FROM private_chat_image_turns p
+      JOIN image_tasks t ON t.id = p.task_id
+      WHERE p.conversation_id = ? AND t.created_at > datetime('now', '-10 minutes')
+      ORDER BY t.created_at DESC, t.id DESC LIMIT 1
+    `).get(conversationId);
+    if (recentImage) {
+      const status = recentImage.status === 'done' ? '图片已完成' : recentImage.status === 'failed' ? '生成失败' : '已受理，图片尚未完成';
+      dynamicBlocks.push(`【最近图片任务真实状态】\n${recentImage.scene || '最后一轮对话配图'}：${status}`);
+    }
+    if (worldSetting) dynamicBlocks.push('请遵循 <world_setting> 中的世界观设定。');
     const budgetConfig = config.features.memory ? getContextBudgetConfig() : { enabled: false, dynamicTokens: 8000 };
     const budgetedBlocks = budgetConfig.enabled
       ? applyBudgetToBlocks(dynamicBlocks, budgetConfig.dynamicTokens)
@@ -1094,7 +1076,7 @@ ${coreRules}
       }
     }
     // ── 通过 buildChatContext 组装基础请求 ──
-    // 摘要之上另有一条独立 system：静态活人感规则 + <emoji_stickers> 清单（跨轮不变；长度条已降为动态块）
+    // 角色表情包清单置于摘要之前，长度与场景随本轮消息传入。
     const { messages: originalBaseMsgs, metadata } = buildChatContext({
       stableBlocks,
       preSummarySystem,
@@ -1106,10 +1088,10 @@ ${coreRules}
     const lorebookTurn = await prepareNarrativePrompt(originalBaseMsgs, {
       ...buildConversationLorebookContext(db, {conversationId, character, kind:'chat', userName:chatUserName, throughId:userRawMsgId, turnKey:String(userRawMsgId)}),
       protectedPrefix:stableBlocks.length, maxOutputTokens:4096,
-      personaTexts:[character?.base_prompt || getDefaultPrompt()],
-      cacheBoundary:chatCacheBoundary,
+      personaTexts:[charBaseContent],
+      staticTexts:[stageContent, worldRule, recallRule, privateRules].filter(Boolean), cacheBoundary:chatCacheBoundary,
       activeSegments, historyStart:originalBaseMsgs.length-checkpointHistory.length, historyEnd:originalBaseMsgs.length,
-    });
+    }, { presetPlacement: 'cache' });
     const baseMsgs = lorebookTurn.messages;
     if (lorebookTurn.report) send('lorebook',lorebookTurn.report);
 
@@ -1121,8 +1103,8 @@ ${coreRules}
     }
 
     // 6. 流式生成（温度 0.72）
-    // SentenceSplitter 内置 <pr 闸门 + 20 字分句，字符先过闸门再过标点规则
-    const streamState = { splitter: new SentenceSplitter(), fullContent: '', collectedSegments: [], wasStopped: false };
+    // 普通聊天按原规则分句，三段式以完整的旁白或台词行为一个显示单元。
+    const streamState = { splitter: createPrivateReplySplitter(narration, characterName), fullContent: '', collectedSegments: [], wasStopped: false };
 
     // 客户端断开 SSE 时中止上游 LLM 请求，避免继续空烧 token。
     // 必须监听 res 的 'close'，不能监听 req 的：Node ≥16 里 IncomingMessage 的 'close'
@@ -1180,6 +1162,17 @@ ${coreRules}
     }
 
     // 流式消费 + flush（一次调用 = 一段 LLM 流；@memory 触发时会被复用跑第二段）
+    function emitSegment({ text, speaker }) {
+      if (speaker === 'narrator' && !(narration && config.features.privateChatNarration)) return;
+      const cleaned = stripTags(stripBracketActions(text)).trim();
+      const parsed = { speaker, ...parseEmojiText(cleaned, emojiMap) };
+      if (!parsed.content && !parsed.images.length) return;
+      streamState.collectedSegments.push(parsed);
+      send('token', { content: parsed.content, speaker, emojiKeys: parsed.keys, images: parsed.images, leadingSticker: parsed.leadingSticker });
+      send('bubble_break', {});
+    }
+
+    // 思考强度 low（默认），保留自然接话节奏和流式响应速度。
     async function consumeStream(streamMessages, signal) {
       // 仅主聊天流的本轮 user 头部增加模式偏好；重试和回想续写都从原始消息组装，避免重复叠加。
       const requestMessages = withGalgameEmojiPreference(streamMessages, { galgameMode: galgame_mode === true, hasEmojis: emojiMap.size > 0 });
@@ -1210,36 +1203,18 @@ ${coreRules}
         checkRecallGate();
         if (recallQuery) return; // 首行即检索指令：放弃当前流，转回想流程
 
-        const { segments, stopped } = streamState.splitter.feed(cleanChunk);
+        const { segments } = streamState.splitter.feed(cleanChunk);
 
-        for (const segText of segments) {
-          const parsedSeg = parseEmojiText(segText, emojiMap);
-          send('token', {
-            content: parsedSeg.content,
-            emojiKeys: parsedSeg.keys,
-            ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
-            ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
-          });
-          streamState.collectedSegments.push(segText);
-          send('bubble_break', {});
-          await sleep(typingDelay(segText));
+        for (const segment of segments) {
+          emitSegment(segment);
+          await sleep(typingDelay(segment.text));
         }
         // stopped=true 后 feed() 不再产出 segment，但 fullContent 继续累积
       }
 
       // 释放缓冲剩余 + flush 分句队列
       const { segments: lastSegs, stopped: wasStopped } = streamState.splitter.flushAll();
-      for (const segText of lastSegs) {
-        const parsedSeg = parseEmojiText(segText, emojiMap);
-        send('token', {
-          content: parsedSeg.content,
-            emojiKeys: parsedSeg.keys,
-          ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
-          ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
-        });
-        streamState.collectedSegments.push(segText);
-        send('bubble_break', {});
-      }
+      lastSegs.forEach(emitSegment);
       streamState.wasStopped = streamState.wasStopped || wasStopped;
     }
 
@@ -1264,7 +1239,7 @@ ${coreRules}
       && streamState.collectedSegments.length === 0) {
       console.warn('[chat] 主聊天流返回空正文，重试一次');
       streamState.fullContent = '';
-      streamState.splitter = new SentenceSplitter();
+      streamState.splitter = createPrivateReplySplitter(narration, characterName);
       streamState.wasStopped = false;
       try {
         await consumeStream(msgs, upstreamAbort.signal);
@@ -1328,7 +1303,7 @@ ${coreRules}
         streamState.collectedSegments.length = 0;
       }
       streamState.fullContent = '';
-      streamState.splitter = new SentenceSplitter();
+      streamState.splitter = createPrivateReplySplitter(narration, characterName);
       streamState.wasStopped = false;
 
       // 同上：二次续写这一段同样只能在“真正的断开”时中止（req 的 close 在请求体读完就触发）
@@ -1347,9 +1322,7 @@ ${coreRules}
         if (streamState.collectedSegments.length === 0) {
           const fallbackText = '……抱歉，刚刚走了一下神。你想说的是？';
           streamState.fullContent = fallbackText;
-          streamState.collectedSegments.push(fallbackText);
-          send('token', { content: fallbackText });
-          send('bubble_break', {});
+          emitSegment({ text: fallbackText, speaker: 'character' });
         }
       }
     }
@@ -1360,23 +1333,10 @@ ${coreRules}
     if (streamState.wasStopped && streamState.collectedSegments.length === 0) {
       const textOnly = stripTags(streamState.fullContent).trim();
       if (textOnly) {
-        const lateSplitter = new SentenceSplitter();
+        const lateSplitter = createPrivateReplySplitter(narration, characterName);
         const { segments: lateSegs1 } = lateSplitter.feed(textOnly);
         const { segments: lateSegs2 } = lateSplitter.flushAll();
-        const lateSegments = [...lateSegs1, ...lateSegs2]
-          .map(s => stripBracketActions(s).trim())
-          .filter(Boolean);
-        for (const segText of lateSegments) {
-          const parsedSeg = parseEmojiText(segText, emojiMap);
-          send('token', {
-            content: parsedSeg.content,
-            emojiKeys: parsedSeg.keys,
-            ...(parsedSeg.images.length > 0 ? { images: parsedSeg.images } : {}),
-            ...(parsedSeg.leadingSticker ? { leadingSticker: true } : {}),
-          });
-          streamState.collectedSegments.push(segText);
-          send('bubble_break', {});
-        }
+        [...lateSegs1, ...lateSegs2].forEach(emitSegment);
       }
     }
 
@@ -1387,27 +1347,32 @@ ${coreRules}
     //    stripTags 兜底清洗；如有 prompt 标签则在 fullContent 上提取
     const tags = extractImageTags(fullContent);
     const hasNeedImageTag = !tags.prompt && hasNeedImage(fullContent);
-    const parsedSegments = streamState.collectedSegments
-      .map(s => {
-        const cleaned = stripTags(stripBracketActions(s)).trim();
-        return { raw: cleaned, ...parseEmojiText(cleaned, emojiMap) };
-      })
-      .filter(p => p.content || p.images.length > 0);
+    const keepNarration = narration && config.features.privateChatNarration;
+    const cleanedReply = privateReplyText(fullContent, keepNarration, characterName);
+    const strippedNarration = fullContent !== cleanedReply;
+    fullContent = cleanedReply;
+    const parsedSegments = keepNarration ? streamState.collectedSegments : streamState.collectedSegments.filter(p => p.speaker !== 'narrator');
     const displayContent = parsedSegments.map(p => p.content).filter(Boolean).join('\n\n');
 
     // gate 命中或模型有生图标签时，前端气泡可能不完整，用清洗结果覆盖
-    if (streamState.wasStopped || tags.prompt || hasNeedImageTag) {
-      send('context_update', { content: displayContent });
+    if (streamState.wasStopped || tags.prompt || hasNeedImageTag || parsedSegments.length !== streamState.collectedSegments.length) {
+      send('context_update', { content: displayContent, segments: parsedSegments.map(p => ({ content: p.content, speaker: p.speaker })) });
     }
     // 8.5 图片载体与正文共用一条 raw，避免空图片占用额外历史轮数。
     const rawContent = stripTags(fullContent).trim();
-    const reply = savePrivateChatReply(db, { conversationId, userRawId: userRawMsgId, content: rawContent, segments: parsedSegments });
+    if (!rawContent && !parsedSegments.length && strippedNarration
+        && !hadToolCalls && imageMode !== 'force' && !tags.prompt && !hasNeedImageTag) {
+      getStandingDisplay().complete(standingTurn);
+      throw new Error('本轮没有可显示的台词，请重试');
+    }
+    const reply = savePrivateChatReply(db, { conversationId, userRawId: userRawMsgId, content: rawContent, segments: parsedSegments,
+      emptyImageCarrier: strippedNarration && !rawContent && imageMode === 'force' });
     const rawMsgId = reply.rawId;
     lorebookTurn.commit();
     send('dialogue_saved', { raw_id: rawMsgId });
 
     for (const { id, p } of reply.saved) {
-      send('msg_saved', { id, raw_id: rawMsgId, role: 'assistant', content: p.content, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
+      send('msg_saved', { id, raw_id: rawMsgId, role: 'assistant', content: p.content, speaker: p.speaker, images: p.images.length > 0 ? p.images : undefined, leadingSticker: p.leadingSticker, created_at: new Date().toISOString() });
     }
     const lastInsertRowid = reply.lastMessageId;
     getStandingDisplay().complete(standingTurn);
@@ -2102,6 +2067,7 @@ export function clearImageJudgeCounter(charId) {
  */
 async function handleDreamTalkReply(res, characterId, conversationId, userMsgId, character, userMessage) {
   const db = getDb();
+  const narration = config.features.privateChatNarration;
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -2138,7 +2104,9 @@ async function handleDreamTalkReply(res, characterId, conversationId, userMsgId,
     // 3. 当场 LLM 现编新鲜梦话（无预置）；失败抛错 → 走 Zzz 兜底
     const murmured = await generateLiveDreamMurmur(characterId, userMessage);
     if (!murmured) throw new Error('live dream murmur generation failed');
-    const { talk, imagePrompt } = murmured;
+    const { imagePrompt } = murmured;
+    const talk = privateReplyText(murmured.talk || '', narration && config.features.privateChatNarration, character.display_name);
+    if (!talk.trim()) throw new Error('梦话没有可显示的台词');
 
     // 3. 双表写入（raw 带语境包裹，LLM 后续知道"我说过这个？我不记得了"；messages 展示纯文本），
     //    梦话文字先发出去

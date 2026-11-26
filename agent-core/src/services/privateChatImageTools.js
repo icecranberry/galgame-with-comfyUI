@@ -1,4 +1,5 @@
 import { detectImageIntent } from '../builtinRules.js';
+import { normalizePrivateReplyRows } from './privateChatNarration.js';
 
 export const CHAT_IMAGE_TOOLS = [{ type: 'function', function: {
   name: 'request_chat_image',
@@ -118,7 +119,7 @@ export async function* streamPrivateChatImages(messages, { nativeStream, textStr
       if (error.code !== 'CHAT_TOOL_TEXT' || signal?.aborted || spoke) throw error;
       // The accepted image remains independent. Recover text once, without
       // replaying the call or asking the image assistant to invent dialogue.
-      yield* spokenText(textStream([...continuation, { role: 'system', content: '刚才的文字回复格式错误。图片工具已关闭，不要调用或模拟任何工具。只写一句自然的角色聊天正文回应用户，禁止输出 DSML、XML、JSON 或后台说明。' }], { ...opts, signal }));
+      yield* spokenText(textStream([...continuation, { role: 'system', content: '刚才的文字回复格式错误。图片工具已关闭，不要调用或模拟任何工具。按前面的私聊格式自然回应用户，禁止输出 DSML、XML、JSON 或后台说明。' }], { ...opts, signal }));
     }
   }
 }
@@ -194,30 +195,32 @@ export function retryPrivateImage(db, { conversationId, taskId, execute, notify 
 // A queued picture and its spoken reply are one assistant turn. Preserve the
 // image carrier ID even if generation finishes before the text continuation.
 export function getSavedPrivateChatReply(db, userRawId) {
-  const row = db.prepare('SELECT p.raw_id FROM private_chat_replies p JOIN raw_messages r ON r.id=p.raw_id WHERE p.user_raw_id=?').get(userRawId);
+  const row = db.prepare(`SELECT p.raw_id, c.display_name FROM private_chat_replies p JOIN raw_messages r ON r.id=p.raw_id
+    LEFT JOIN characters c ON r.conversation_id='char_' || c.id WHERE p.user_raw_id=?`).get(userRawId);
   if (!row) return null;
-  const saved = db.prepare(`SELECT id,content,images FROM messages WHERE raw_id=?
-    AND id NOT IN (SELECT message_id FROM private_chat_image_turns WHERE user_raw_id=?) ORDER BY seq,id`).all(row.raw_id, userRawId)
-    .map(m => ({ id: m.id, p: { content: m.content, images: JSON.parse(m.images || '[]') } }));
+  const parts = db.prepare(`SELECT id,raw_id,role,content,images,speaker FROM messages WHERE raw_id=?
+    AND id NOT IN (SELECT message_id FROM private_chat_image_turns WHERE user_raw_id=?) ORDER BY seq,id`).all(row.raw_id, userRawId);
+  const saved = normalizePrivateReplyRows(parts, row.display_name)
+    .map(m => ({ id: m.id, p: { content: m.content, speaker: m.speaker, images: JSON.parse(m.images || '[]') } }));
   return { rawId: row.raw_id, saved, lastMessageId: saved.at(-1)?.id };
 }
 
-export function savePrivateChatReply(db, { conversationId, userRawId, content, segments }) {
+export function savePrivateChatReply(db, { conversationId, userRawId, content, segments, emptyImageCarrier = false }) {
   return db.transaction(() => {
     const completed = getSavedPrivateChatReply(db, userRawId);
     if (completed) return completed;
     const binding = db.prepare('SELECT raw_id,message_id FROM private_chat_image_turns WHERE user_raw_id=?').get(userRawId);
     let rawId = binding?.raw_id;
     if (rawId && db.prepare('SELECT content FROM raw_messages WHERE id=?').get(rawId)?.content?.trim()) {
-      const saved = db.prepare('SELECT id,content,images FROM messages WHERE raw_id=? AND id<>? ORDER BY seq,id').all(rawId, binding.message_id)
-        .map((m, index) => ({ id: m.id, p: { ...segments[index], content: m.content, images: JSON.parse(m.images || '[]') } }));
+      const saved = db.prepare('SELECT id,content,images,speaker FROM messages WHERE raw_id=? AND id<>? ORDER BY seq,id').all(rawId, binding.message_id)
+        .map((m, index) => ({ id: m.id, p: { ...segments[index], content: m.content, speaker: m.speaker, images: JSON.parse(m.images || '[]') } }));
       return { rawId, saved, lastMessageId: saved.at(-1)?.id || binding.message_id };
     }
     if (rawId) db.prepare('UPDATE raw_messages SET content=? WHERE id=?').run(content, rawId);
     else rawId = db.prepare("INSERT INTO raw_messages(conversation_id,role,content) VALUES (?,'assistant',?)").run(conversationId, content).lastInsertRowid;
-    const parts = segments.length || binding ? segments : [{ content: '...', images: [] }];
-    const insert = db.prepare("INSERT INTO messages(conversation_id,raw_id,role,content,images,seq) VALUES (?,?,'assistant',?,?,?)");
-    const saved = parts.map((p, seq) => ({ p, id: insert.run(conversationId, rawId, p.content, p.images.length ? JSON.stringify(p.images) : null, seq).lastInsertRowid }));
+    const parts = segments.length || binding ? segments : [{ content: emptyImageCarrier ? '' : '...', images: [] }];
+    const insert = db.prepare("INSERT INTO messages(conversation_id,raw_id,role,content,images,seq,speaker) VALUES (?,?,'assistant',?,?,?,?)");
+    const saved = parts.map((p, seq) => ({ p, id: insert.run(conversationId, rawId, p.content, p.images.length ? JSON.stringify(p.images) : null, seq, p.speaker || null).lastInsertRowid }));
     if (binding) db.prepare('UPDATE messages SET seq=? WHERE id=?').run(parts.length, binding.message_id);
     db.prepare('INSERT INTO private_chat_replies(user_raw_id,raw_id) VALUES (?,?)').run(userRawId, rawId);
     return { rawId, saved, lastMessageId: saved.at(-1)?.id || binding?.message_id };

@@ -11,6 +11,7 @@ import { resetClient, chatSync, resetFreeEggFailureCount, testLlmConnection } fr
 import { normalizeModelCapabilities } from '../llm/modelCapabilities.js';
 import { parseServiceAccount, getVertexAccessToken, listVertexModels } from '../llm/vertex-client.js';
 import { getDb, getSystemRules } from '../db/index.js';
+import { broadcast } from '../services/unifiedStreamBus.js';
 import { listWorldSettings, getActiveWorldSetting, getWorldSettingById, createWorldSetting, updateWorldSetting, deleteWorldSetting, activateWorldSetting } from '../db/index.js';
 import { DEFAULT_GLOBAL_RULES } from '../db/seedData.js';
 import { restartProactiveFreq } from '../services/proactiveChatScheduler.js';
@@ -338,6 +339,7 @@ router.put('/features', (req, res) => {
     return res.status(400).json({ error: `Invalid feature key: ${key}` });
   }
   updateFeatureFlag(key, value);
+  if (key === 'privateChatNarration') broadcast('private_chat_narration', { enabled: config.features.privateChatNarration });
   if (key === 'proactiveChat') restartProactiveFreq();
   if (key === 'serializeBackgroundLLM') {
     applyFromConfig(config);

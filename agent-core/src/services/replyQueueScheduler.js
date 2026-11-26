@@ -1,3 +1,4 @@
+import { appendWorldLanguageStyle, hasActiveWorldLanguageStyle } from './worldLanguageStyle.js';
 import { isMomentBackfillRunning } from './momentBackfill.js';
 /**
  * 回复队列调度器
@@ -18,7 +19,8 @@ import { config } from '../config.js';
 import { getCurrentActivity, syncSleepingState } from './scheduleManager.js';
 import { getTimeLight } from './timeLight.js';
 import { maybeStartScheduledBatch, maybeInitializeSchedule } from './scheduleBatch.js';
-import { splitText } from '../utils/sentenceSplitter.js';
+import { privateReplyText, splitPrivateReply } from './privateChatNarration.js';
+import { getPrivateChatRules, withPrivateChatSpeaker, getWorldIntegrationRule } from '../builtinRules.js';
 import {
   loadEmotionState, getCompositeEmotion,
   stateToPrompt, affinityToPrompt, loadAffinity,
@@ -148,12 +150,14 @@ async function processReplyQueue() {
     const standingTurn = getStandingDisplay().begin(characterId, `delayed:${entry.id}`);
 
     // 构建 LLM 上下文（模拟 chat.js 的关键消息层）
-    const msgs = buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream);
+    const narration = config.features.privateChatNarration;
+    const { msgs, staticTexts, personaTexts, cacheBoundary } = buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream, narration);
 
     // 调用 LLM 生成回复
     const lorebookTurn = await prepareNarrativePrompt(msgs, {
-      ...buildConversationLorebookContext(db, {conversationId, character:entry, kind:'delayed', userName:config.user.nickname || '用户'}), maxOutputTokens:512,
-    });
+      ...buildConversationLorebookContext(db, {conversationId, character:entry, kind:'delayed', userName:config.user.nickname || '用户'}), maxOutputTokens:512, staticTexts, personaTexts, cacheBoundary,
+    }, { presetPlacement: 'cache' });
+    // 思考强度 low（默认），延迟回复沿用实时私聊的自然语气。
     const fullReply = await chatSync(lorebookTurn.messages, {
       temperature: 0.72,
       label: `delayed-reply:${entry.display_name}`,
@@ -164,13 +168,16 @@ async function processReplyQueue() {
     }
 
     // 分句
-    const segments = splitText(fullReply);
+    const keepNarration = narration && config.features.privateChatNarration;
+    const segments = splitPrivateReply(fullReply, keepNarration, entry.display_name);
+    const content = privateReplyText(fullReply, keepNarration, entry.display_name);
+    if (!content.trim() && !segments.length) throw new Error('延迟回复没有可显示的台词');
 
     // 写入 raw_messages
     const rawResult = db.prepare(`
       INSERT INTO raw_messages (conversation_id, role, content)
       VALUES (?, 'assistant', ?)
-    `).run(conversationId, fullReply);
+    `).run(conversationId, content);
     lorebookTurn.commit();
 
     // 写入 messages（分句展示）
@@ -178,9 +185,9 @@ async function processReplyQueue() {
     for (let i = 0; i < segments.length; i++) {
       const seq = i; // 使用递增序号
       const msgResult = db.prepare(`
-        INSERT INTO messages (conversation_id, raw_id, role, content, seq)
-        VALUES (?, ?, 'assistant', ?, ?)
-      `).run(conversationId, rawResult.lastInsertRowid, segments[i], seq);
+        INSERT INTO messages (conversation_id, raw_id, role, content, seq, speaker)
+        VALUES (?, ?, 'assistant', ?, ?, ?)
+      `).run(conversationId, rawResult.lastInsertRowid, segments[i].text, seq, segments[i].speaker);
       msgIds.push(msgResult.lastInsertRowid);
     }
 
@@ -200,12 +207,13 @@ async function processReplyQueue() {
     getStandingDisplay().complete(standingTurn);
     broadcast('delayed_reply', {
       character_id: characterId,
+      raw_id: Number(rawResult.lastInsertRowid),
       display_name: entry.display_name,
       conversation_id: conversationId,
-      messages: segments.map((content, i) => ({
+      messages: segments.map(({ text: content, speaker }, i) => ({
         id: msgIds[i],
         role: 'assistant',
-        content,
+        content, speaker,
         seq: i,
       })),
       is_sleep_wakeup: isSleepWakeup,
@@ -239,7 +247,7 @@ async function processReplyQueue() {
  * 为延迟回复构建 LLM 上下文
  * 复用 chat.js 的关键消息层结构，但不走流式
  */
-function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null) {
+function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream, narration) {
   const db = getDb();
   const characterId = entry.character_id;
   const conversationId = entry.conversation_id;
@@ -255,7 +263,13 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null
 
   // msgs[1]: 角色人格 + 情绪
   const charParts = [];
-  charParts.push(entry.base_prompt || '');
+  if (worldSetting) msgs.push({ role: 'system', content: getWorldIntegrationRule('interaction') });
+  const rules = appendWorldLanguageStyle(getPrivateChatRules({ narration, allowNarration: hasActiveWorldLanguageStyle() }), { narration });
+  msgs.push({ role: 'system', content: rules });
+  const persona = entry.base_prompt || '';
+  const personaBlock = withPrivateChatSpeaker(persona, entry.display_name, narration);
+  if (personaBlock) msgs.push({ role: 'system', content: personaBlock });
+  const cacheBoundary = { index: msgs.length - 1, offset: msgs.at(-1).content.length };
 
   // 加载情绪状态
   try {
@@ -276,7 +290,7 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null
   } catch (err) {
     // 情绪加载失败非致命
   }
-  msgs.push({ role: 'system', content: charParts.join('\n\n') });
+  if (charParts.length) msgs.push({ role: 'system', content: charParts.join('\n\n') });
 
   // msgs[2]: 交互关系
   const relParts = [];
@@ -381,10 +395,8 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null
 
   // 历史消息（最近的对话上下文）
   const history = db.prepare(`
-    SELECT role, content FROM raw_messages
-    WHERE conversation_id = ?
-    ORDER BY id ASC
-    LIMIT 30
+    SELECT role, content FROM (SELECT id, role, content FROM raw_messages
+    WHERE conversation_id = ? ORDER BY id DESC LIMIT 30) ORDER BY id
   `).all(conversationId);
 
   const PROMPT_JSON_RE = /\s*\{["']prompt["']:\s*"(?:[^"\\]|\\.)*"\s*\}/gs;
@@ -397,5 +409,8 @@ function buildDelayedReplyContext(entry, allPending, isSleepWakeup, dream = null
     msgs.push(...cleanedHistory);
   }
 
-  return msgs;
+  const task = (worldSetting ? '请遵循 <world_setting> 中的世界观设定。' : '') + '请按前述私聊格式回复刚收到的消息。';
+  if (msgs.at(-1).role === 'user') msgs.at(-1).content += '\n\n' + task;
+  else msgs.push({ role: 'user', content: task });
+  return { msgs, staticTexts: [rules], personaTexts: persona ? [persona] : [], cacheBoundary };
 }

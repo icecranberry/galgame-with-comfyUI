@@ -35,6 +35,7 @@
   /* Galgame: screenshot-inspired cut-corner paper over the character portrait. */
   --dialogue-paper: rgba(255, 253, 250, .96);
   --dialogue-ink: #554b45;
+  --chat-narration-mark: #cfb38e;
   --dialogue-speech-ink: #a34838;
   --dialogue-speech-muted: #a56b59;
   --dialogue-menu-hover: #a34838;
@@ -232,6 +233,7 @@
   /* Galgame 暗夜：暖炭灰纸面、浅灰墨色，珊瑚高亮提高明度以保证可读。 */
   --dialogue-paper: rgba(38, 35, 34, .97);
   --dialogue-ink: #e8ded4;
+  --chat-narration-mark: #ac9173;
   --dialogue-speech-ink: #e6a086;
   --dialogue-speech-muted: #c9a18e;
   --dialogue-menu-hover: #f0ad8f;

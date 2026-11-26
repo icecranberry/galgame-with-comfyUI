@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { addClient, removeClient } from '../services/unifiedStreamBus.js';
+import { config } from '../config.js';
 
 const router = Router();
 
@@ -13,6 +14,7 @@ router.get('/', (req, res) => {
   });
 
   res.write('event: connected\ndata: {}\n\n');
+  res.write(`event: private_chat_narration\ndata: ${JSON.stringify({ enabled: config.features.privateChatNarration })}\n\n`);
   addClient(res);
 
   const heartbeat = setInterval(() => {

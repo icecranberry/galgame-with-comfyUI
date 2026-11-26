@@ -1,5 +1,5 @@
 <template>
-  <div class="chat-view" @pointerdown.capture="onSpeechPointerDown" @pointermove.capture="onSpeechPointerMove" @pointercancel="clearSpeechBubble">
+  <div class="chat-view" :class="{ 'hide-private-narration': settings.privateChatNarration !== true }" @pointerdown.capture="onSpeechPointerDown" @pointermove.capture="onSpeechPointerMove" @pointercancel="clearSpeechBubble">
     <div v-if="!chat.activeCharId" class="empty-state">
     </div>
 
@@ -17,7 +17,7 @@
         <div class="chat-header-center">
           <div class="chat-header-title-row">
             <span class="chat-title">{{ chat.activeChar?.display_name }}</span>
-            <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity" class="header-affinity">
+            <span v-if="chat.realtimeAffinity" class="header-affinity">
               <svg class="affinity-heart-icon" viewBox="0 0 1024 1024" width="14" height="14" fill="currentColor"><path d="M512.042667 193.237333a255.914667 255.914667 0 0 1 351.658666 9.728 256 256 0 0 1 10.069334 351.402667l-361.813334 362.325333-361.728-362.325333a256 256 0 0 1 361.813334-361.130667z"/></svg>{{ Math.round(chat.realtimeAffinity.affinity) }}
               <span class="affinity-delta-wrap">
                 <Transition name="roll">
@@ -47,7 +47,7 @@
             @keydown.space.prevent="openImpression"
           >
             <Transition name="roll">
-              <span v-if="realtimeAffinityEnabled && chat.realtimeAffinity?.lastReason" :key="chat.affinityKey" class="header-reason">
+              <span v-if="chat.realtimeAffinity?.lastReason" :key="chat.affinityKey" class="header-reason">
                 💬"{{ chat.realtimeAffinity.lastReason }}"
               </span>
             </Transition>
@@ -75,7 +75,7 @@
             <div v-if="item.type === 'divider'" class="time-divider">{{ item.label }}</div>
 
             <!-- Event share card (奇遇分享卡片) -->
-            <div v-else-if="item.msg.type === 'event_card'" class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
+            <div v-else-if="item.msg.type === 'event_card'" class="message assistant" :class="{ 'msg-hide-avatar': item.hideAvatar }">
               <div class="msg-avatar clickable" title="角色设置" @click="openSettings()">
                 <img v-if="chat.activeChar?.avatar_path" :src="chat.activeChar.avatar_path" class="avatar-img" alt="" />
                 <span v-else class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
@@ -92,7 +92,7 @@
             <!-- 深度思考块（可折叠） -->
 
             <!-- Text bubble (user or assistant) -->
-            <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
+            <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-hide-avatar': item.hideAvatar, 'narration-row': item.msg.speaker === 'narrator' }]">
               <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
                 <img v-if="msgAvatarSrc(item.msg.role)" :src="msgAvatarSrc(item.msg.role)" class="avatar-img" loading="lazy" decoding="async" alt="" />
                 <span v-else class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
@@ -101,7 +101,7 @@
                 </span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
+              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && (chat.showTypingDots || item.msg.waitingForDialogue)"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -112,6 +112,9 @@
                 <circle cx="52" cy="5" r="3" class="dot dot-4" />
                 <circle cx="64" cy="5" r="3" class="dot dot-5" />
               </svg>
+              <div v-else-if="item.piece.kind === 'text' && item.msg.speaker === 'narrator'" class="chat-narration">
+                {{ item.msg.content }}
+              </div>
               <!-- 表情包：独立 100×100 气泡，不再并入文本气泡 -->
               <div v-else-if="item.piece.kind === 'sticker'" class="msg-bubble msg-sticker-bubble">
                 <img
@@ -136,7 +139,7 @@
             </div>
 
             <!-- Image generation bubble -->
-            <div v-else class="message assistant" :class="{ 'msg-same-role': item.sameRole }">
+            <div v-else class="message assistant" :class="{ 'msg-hide-avatar': item.hideAvatar }">
               <div class="msg-avatar clickable" title="角色设置" @click="openSettings()">
                 <img v-if="chat.activeChar?.avatar_path" :src="chat.activeChar.avatar_path" class="avatar-img" alt="" />
                 <span v-else class="avatar-fallback">{{ chat.activeChar?.display_name?.charAt(0) }}</span>
@@ -569,11 +572,6 @@
                         💬 {{ impressionLastReason }}
                       </div>
                     </div>
-                    <!-- 实时显示开关 -->
-                    <div class="affinity-realtime-toggle">
-                      <span class="affinity-realtime-label">实时显示</span>
-                      <linshe-switch v-model="realtimeAffinityEnabled" size="sm" aria-label="实时显示好感度" />
-                    </div>
                   </div>
                 </template>
               </div>
@@ -634,7 +632,6 @@ import CharacterDetailModal from '../components/CharacterDetailModal.vue'
 import GiftPanel from '../components/GiftPanel.vue'
 import ImageLightbox from '../components/ImageLightbox.vue'
 import LinsheButton from '../components/ui/LinsheButton.vue'
-import LinsheSwitch from '../components/ui/LinsheSwitch.vue'
 import ChatModeSwitch from '../components/chat/ChatModeSwitch.vue'
 import ChatRetryNotice from '../components/chat/ChatRetryNotice.vue'
 import GalgameDialogue from '../components/chat/GalgameDialogue.vue'
@@ -782,11 +779,6 @@ const imageGenModeIcon = computed(() => {
   if (imageGenMode.value === 'force') return '🎬'
   return '🎨'
 })
-const realtimeAffinityEnabled = computed({
-  get: () => settings.realtimeAffinityDisplay,
-  set: (v) => settings.setRealtimeAffinityDisplay(v),
-})
-
 const IMAGE_GEN_MODE_CYCLE = ['smart', 'force', 'off']
 
 function cycleImageGenMode() {
@@ -936,9 +928,12 @@ async function onWakeChar() {
 
 // ── 实时好感度：拉取当前角色最新值 ──
 async function fetchRealtimeAffinity() {
-  if (!realtimeAffinityEnabled.value || !chat.activeCharId) return
+  const characterId = chat.activeCharId
+  if (!characterId) return
+  const snapshotKey = chat.affinityKey
   try {
-    const data = await getCharacterPortrait(chat.activeCharId)
+    const data = await getCharacterPortrait(characterId)
+    if (chat.activeCharId !== characterId || chat.affinityKey !== snapshotKey) return
     chat.realtimeAffinity = {
       affinity: data.affinity ?? 50,
       affinityDelta: data.lastAffinityDelta ?? 0,
@@ -946,9 +941,6 @@ async function fetchRealtimeAffinity() {
     }
   } catch {}
 }
-
-// 开关从关→开时拉取
-watch(realtimeAffinityEnabled, async (on) => { if (on) fetchRealtimeAffinity() })
 
 // 切换角色时拉取
 watch(() => chat.activeCharId, async (newId) => { if (newId) fetchRealtimeAffinity() })
@@ -1479,28 +1471,38 @@ return groups
 
 // 扁平化列表（时间正序：最旧在上，最新在下）
 const flatItems = computed(() => {
-const items = []
-for (const group of messageGroups.value) {
-items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0]?.id || group.label}` })
-let prevRole = null
-for (const msg of group.msgs) {
-// 表情包拆成独立气泡，文本和表情包分开展示
-const pieces = []
-if (msg.sticker_images?.length) {
-for (let i = 0; i < msg.sticker_images.length; i++) pieces.push({ kind: 'sticker', index: i })
-}
-if (msg.content) pieces.push({ kind: 'text' })
-if (pieces.length === 0) pieces.push({ kind: 'text' })
-  for (const piece of pieces) {
-    const sameRole = prevRole !== null && prevRole === msg.role
-    const pieceId = piece.kind === 'text' ? `${msg.id}-text` : `${msg.id}-sticker-${piece.index}`
-    items.push({ type: 'message', msg, piece, id: pieceId, sameRole })
-    // 深度思考块不参与连发头像合并——否则它后面第一条回复的头像会被当作"同角色连发"隐藏
-    prevRole = msg.role
+  const items = []
+  for (const group of messageGroups.value) {
+    items.push({ type: 'divider', label: group.label, id: `d-${group.msgs[0].id}` })
+    let previousRole = null
+    let replyRawId = null
+    let openingNarration = null
+    for (const msg of group.msgs) {
+      if (previousRole !== msg.role) replyRawId = null
+      const startsReply = previousRole !== msg.role ||
+        (replyRawId != null && msg.raw_id != null && replyRawId !== msg.raw_id)
+      if (startsReply) openingNarration = null
+      replyRawId = msg.raw_id ?? replyRawId
+      const pieces = (msg.sticker_images || []).map((_, index) => ({ kind: 'sticker', index }))
+      if (msg.content || !pieces.length) pieces.push({ kind: 'text' })
+      const rowId = msg.renderId ?? msg.id
+      for (const piece of pieces) {
+        const pieceId = piece.kind === 'text' ? `${rowId}-text` : `${rowId}-sticker-${piece.index}`
+        const item = { type: 'message', msg, piece, id: pieceId, hideAvatar: previousRole === msg.role }
+        if (piece.kind === 'text' && msg.speaker === 'narrator' && startsReply) {
+          openingNarration = item
+          item.hideAvatar = false
+        } else if (openingNarration && piece.kind === 'text' && msg.type === 'text' && msg.speaker !== 'narrator' && msg.content?.trim()) {
+          // 首句台词实际可见时，同一帧隐藏开场头像；往后的台词各自显示头像。
+          openingNarration.hideAvatar = true
+          item.hideAvatar = false
+        }
+        items.push(item)
+        previousRole = msg.role
+      }
+    }
   }
-}
-}
-return items
+  return items
 })
 
 function timeLabel(iso) {
@@ -1867,6 +1869,33 @@ function renderContent(text) {
 </script>
 
 <style scoped>
+.hide-private-narration .narration-row { display: none; }
+.chat-narration {
+  position: relative;
+  align-self: center;
+  box-sizing: border-box;
+  max-inline-size: 44em;
+  min-inline-size: 0;
+  margin-block: 5px;
+  padding-inline: 13px 3px;
+  color: var(--dialogue-ink);
+  font-family: 'Songti SC', 'Noto Serif CJK SC', 'SimSun', 'Moon Stars Kai', serif;
+  font-size: var(--fs-md);
+  font-style: italic;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-narration::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: .35em;
+  inline-size: 3px;
+  block-size: 1em;
+  border-radius: 2px;
+  background: var(--chat-narration-mark);
+}
 .chat-standard { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .chat-standing-desktop { flex-shrink: 0; }
 .chat-standing-icon { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -1960,7 +1989,7 @@ function renderContent(text) {
   opacity: 0.85;
   box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
 }
-.msg-same-role .msg-avatar { opacity: 0; pointer-events: none; }
+.msg-hide-avatar .msg-avatar { visibility: hidden; }
 .msg-avatar > .avatar-fallback {
   width: 100%; height: 100%;
   border-radius: inherit;
@@ -3179,12 +3208,6 @@ function renderContent(text) {
 }
 
 /* ── 实时显示开关 ── */
-.affinity-realtime-toggle {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0 4px; margin-top: 4px;
-  border-top: 1px solid var(--border);
-}
-.affinity-realtime-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
 
 /* ── Header 实时好感度 ── */
 .chat-header-center { display: flex; flex-direction: column; gap: 0; flex: 1; min-width: 0; }

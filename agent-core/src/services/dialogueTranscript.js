@@ -1,3 +1,5 @@
+import { hasPrivateSpeakerLabel, normalizePrivateReplyRows } from './privateChatNarration.js';
+
 function withoutPromptObjects(text) {
   const start = /\{\s*["“”']?prompt["“”']?\s*:/gi;
   let output = '', from = 0, match;
@@ -55,14 +57,21 @@ export function readDialogueTranscript(db, characterId, { before, after, limit =
   const refreshed = ids.length ? db.prepare(`SELECT id, role, content, created_at FROM raw_messages
     WHERE conversation_id = ? AND role IN ('user','assistant') AND id IN (${ids.map(() => '?').join(',')}) ORDER BY id`).all(conversationId, ...ids) : [];
   const attachmentIds = [...new Set([...page, ...refreshed].map(row => row.id))];
-  const images = new Map(), speechSegments = new Map();
+  const images = new Map(), speechSegments = new Map(), displaySegments = new Map();
+  const narratedRounds = new Set();
+  const characterName = db.prepare('SELECT display_name FROM characters WHERE id=?').get(characterId)?.display_name;
   const emojiKeys = db.prepare('SELECT emoji_key FROM emoji_categories').all().map(row => row.emoji_key);
   if (attachmentIds.length) {
-    const attachments = db.prepare(`SELECT id, raw_id, role, content, images FROM messages WHERE conversation_id = ?
-      AND raw_id IN (${attachmentIds.map(() => '?').join(',')}) ORDER BY seq, id`).all(conversationId, ...attachmentIds);
-    for (const row of attachments) {
+    const attachments = db.prepare(`SELECT id, raw_id, role, content, images, speaker FROM messages WHERE conversation_id = ?
+      AND raw_id IN (${attachmentIds.map(() => '?').join(',')}) ORDER BY raw_id, seq, id`).all(conversationId, ...attachmentIds);
+    for (const row of normalizePrivateReplyRows(attachments, characterName)) {
       const content = cleanDialogueText(row.content, { role: row.role, emojiKeys });
-      if (row.role === 'assistant' && /[\p{L}\p{N}]/u.test(content)) {
+      if (row.speaker && content) {
+        if (!displaySegments.has(row.raw_id)) displaySegments.set(row.raw_id, []);
+        displaySegments.get(row.raw_id).push({ speaker: row.speaker, content });
+        if (row.speaker === 'narrator') narratedRounds.add(row.raw_id);
+      }
+      if (row.role === 'assistant' && row.speaker !== 'narrator' && /[\p{L}\p{N}]/u.test(content)) {
         const segments = speechSegments.get(row.raw_id) || [];
         segments.push({ id: row.id, content });
         speechSegments.set(row.raw_id, segments);
@@ -82,7 +91,18 @@ export function readDialogueTranscript(db, characterId, { before, after, limit =
     }
   }
   const latest = db.prepare("SELECT id, role FROM raw_messages WHERE conversation_id=? AND role IN ('user','assistant') ORDER BY id DESC LIMIT 1").get(conversationId);
-  const present = row => ({ ...row, content: cleanDialogueText(row.content, { role: row.role, emojiKeys }), images: [...(images.get(row.id) || [])], speech_segments: row.role === 'assistant' ? speechSegments.get(row.id) || [] : [] });
+  const present = row => {
+    const content = cleanDialogueText(row.content, { role: row.role, emojiKeys });
+    const parts = displaySegments.get(row.id);
+    const tagged = parts && (narratedRounds.has(row.id) || hasPrivateSpeakerLabel(content, characterName));
+    return {
+      ...row,
+      content: tagged ? parts.map(part => part.content).join('\n\n') : content,
+      ...(tagged && { dialogue_only: parts.filter(part => part.speaker !== 'narrator').map(part => part.content).join('\n\n') }),
+      images: [...(images.get(row.id) || [])],
+      speech_segments: row.role === 'assistant' ? speechSegments.get(row.id) || [] : [],
+    };
+  };
   return {
     messages: page.map(present),
     refreshed: refreshed.map(present),
