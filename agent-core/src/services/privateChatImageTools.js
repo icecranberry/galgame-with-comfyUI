@@ -166,12 +166,29 @@ export function queuePrivateImage(db, { conversationId, userRawId, scene, snapsh
       .run(userRawId, conversationId, scene, taskId, rawId, messageId, JSON.stringify(frozen));
     return { taskId, rawId, messageId };
   })();
+  runPrivateImageTask(db, { binding, frozen, execute, notify });
+  return { ok: true, status: 'queued', task_id: binding.taskId };
+}
+
+function runPrivateImageTask(db, { binding, frozen, execute, notify }) {
   setImmediate(() => Promise.resolve().then(() => execute(binding, frozen)).catch(error => {
     db.prepare("UPDATE image_tasks SET status='failed', error_message=?, finished_at=datetime('now') WHERE id=?").run(error.message, binding.taskId);
     notify('generate_error', { taskId: binding.taskId, error: error.message });
   }));
   notify('generate_start', { taskId: binding.taskId, messageId: binding.messageId });
-  return { ok: true, status: 'queued', task_id: binding.taskId };
+}
+
+// Re-run a failed share from the snapshot frozen when it was accepted, so the
+// retry draws the same scene with the same character and image settings.
+export function retryPrivateImage(db, { conversationId, taskId, execute, notify }) {
+  const turn = db.prepare(`SELECT p.raw_id,p.message_id,p.snapshot_json,t.prompt_original FROM private_chat_image_turns p
+    JOIN image_tasks t ON t.id=p.task_id WHERE p.task_id=? AND p.conversation_id=?`).get(taskId, conversationId);
+  if (!turn) return { ok: false, status: 404, error: '找不到这张图片' };
+  const reset = db.prepare("UPDATE image_tasks SET status='pending', error_message=NULL, finished_at=NULL WHERE id=? AND status='failed'").run(taskId);
+  if (!reset.changes) return { ok: false, status: 409, error: '这张图片没有失败，不能重试' };
+  const binding = { taskId, rawId: turn.raw_id, messageId: turn.message_id, prompt: turn.prompt_original || '' };
+  runPrivateImageTask(db, { binding, frozen: JSON.parse(turn.snapshot_json), execute, notify });
+  return { ok: true };
 }
 
 // A queued picture and its spoken reply are one assistant turn. Preserve the

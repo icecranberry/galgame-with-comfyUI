@@ -110,6 +110,7 @@ export const useChatStore = defineStore('chat', () => {
       else insertImageMessage(gm)
       gm = findGenMsg(d.taskId, d.messageId)
     }
+    if (d.event === 'generate_start' && gm.genStatus === 'error') { gm.genStatus = 'pending'; gm.genError = ''; gm.genProgress = 0 }
     if (d.event === 'generate_progress') { gm.genStatus = 'generating'; gm.genProgress = d.progress; gm.genTotalSteps = d.totalSteps }
     if (d.event === 'generate_retrying') { gm.genStatus = 'retrying'; gm.genProgress = 0 }
     if (d.event === 'generate_done') { gm.genStatus = 'done'; gm.images = d.images; dialogueRevision.value++ }
@@ -1050,6 +1051,18 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  async function retryImage(gm) {
+    const charId = activeCharId.value
+    if (!charId || gm.genStatus !== 'error') return
+    const previousError = gm.genError
+    gm.genStatus = 'pending'; gm.genError = ''; gm.genProgress = 0
+    try {
+      await api.retryChatImage(charId, gm.genId)
+    } catch (err) {
+      if (gm.genStatus === 'pending') { gm.genStatus = 'error'; gm.genError = err.message || previousError }
+    }
+  }
+
   return { characters, activeCharId, messages, queuedReplies, visibleMessages, streaming, streamingContent, showTypingDots, memoryRecalling, hasMoreOlder, guesses, guessSourceRawId, dialogueRevision, responseComplete, lastSendError, failedTurn, retryFailedMessage, realtimeAffinity, affinityKey, activeChar, sidebarScrollSignal,
-    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls }
+    loadCharacters, loadMessages, expandWindow, selectChar, updateActiveCharacter, clearActiveMessages, undoLastRound, generateCharacter, uploadAvatar, getRecentChatImages, deleteActiveCharacter, sendMessage, handleProactiveMessage, handleDelayedReply, bumpImageUrls, retryImage }
 })

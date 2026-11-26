@@ -143,6 +143,8 @@ export async function listCharacters() {
 export async function getMessages(characterId) {
   return request(`/characters/${characterId}/messages`)
 }
+export const retryChatImage = (characterId, taskId) =>
+  request(`/characters/${characterId}/image-tasks/${taskId}/retry`, { method: 'POST' })
 export const getDialogueTranscript = (id, cursor = {}) => request(`/characters/${id}/dialogue?${new URLSearchParams(cursor)}`)
 export const getCharacterStandingState = id => request(`/characters/${id}/standing-display`)
 

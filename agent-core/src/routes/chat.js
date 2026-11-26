@@ -61,7 +61,7 @@ import { createCharacterTownChatGuard, buildCharacterTownSceneBlock } from '../s
 import { buildPrivateMomentContext } from '../services/privateMomentContext.js';
 import { listRecentMailboxLetters } from '../services/privateMailboxContext.js';
 import { getTownState } from '../services/town/townService.js';
-import { streamPrivateChatImages, queuePrivateImage, savePrivateChatReply, getSavedPrivateChatReply, getPrivateChatImageResume } from '../services/privateChatImageTools.js';
+import { streamPrivateChatImages, queuePrivateImage, savePrivateChatReply, getSavedPrivateChatReply, getPrivateChatImageResume, retryPrivateImage } from '../services/privateChatImageTools.js';
 import { SHARED_IMAGE_PROMPT_RULE, buildSharedImageTask } from '../services/privateChatImagePrompt.js';
 
 const router = Router();
@@ -328,6 +328,16 @@ router.get('/characters/:id/dialogue', (req, res) => {
   if (!db.prepare('SELECT id FROM characters WHERE id=?').get(req.params.id)) return res.status(404).json({ error: '角色不存在' });
   res.json(readDialogueTranscript(db, req.params.id, req.query));
 });
+router.post('/characters/:id/image-tasks/:taskId/retry', (req, res) => {
+  const characterId = Number(req.params.id);
+  const conversationId = `char_${characterId}`;
+  const notify = privateImageNotifier(characterId);
+  const result = retryPrivateImage(getDb(), { conversationId, taskId: Number(req.params.taskId), notify,
+    execute: (binding, frozen) => executePrivateImage(conversationId, binding, frozen, notify) });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true });
+});
+
 router.post('/characters/:id/dialogue/guesses', async (req, res, next) => {
   try {
     const character = getDb().prepare('SELECT * FROM characters WHERE id=?').get(req.params.id);
@@ -1152,12 +1162,7 @@ ${coreRules}
 
     const imageResume = getPrivateChatImageResume(db, userRawMsgId);
     let hadToolCalls = !!imageResume;
-    const notifyImage = (event, data) => {
-      const binding = db.prepare(`SELECT p.message_id,p.user_raw_id,r.client_msg_id,t.created_at FROM private_chat_image_turns p JOIN raw_messages r ON r.id=p.user_raw_id JOIN messages m ON m.id=p.message_id JOIN image_tasks t ON t.id=p.task_id WHERE p.task_id=?`).get(data.taskId);
-      if (!binding) return;
-      broadcast('private_chat_image', { event, characterId, ...data, messageId: binding?.message_id,
-        userRawId: binding?.user_raw_id, clientMsgId: binding?.client_msg_id, created_at: toISODate(binding.created_at) });
-    };
+    const notifyImage = privateImageNotifier(characterId);
     function acceptImage(imageRequest, assistant, binding = {}) {
       const source = imageRequest ? { kind: 'tool', ...imageRequest } : { kind: 'dialogue' };
       const scene = source.scene || '';
@@ -1170,14 +1175,7 @@ ${coreRules}
       } };
       snapshot.crossCharacters = snapshot.crossRefCharIdsForImage.map(id => db.prepare('SELECT id,name,display_name,base_prompt,loras,artist_override FROM characters WHERE id=?').get(id)).filter(Boolean);
       return queuePrivateImage(db, { conversationId, userRawId: userRawMsgId, scene, snapshot, ...binding, notify: notifyImage,
-        execute: async ({ taskId, rawId, messageId }, frozen) => {
-          const output = await requestNonEmptyImagePrompt(() => chatWithLorebook(frozen.msgs, { temperature: 0.7, label: '私聊生图', lorebook: frozen.lorebook }), { emptyRetries: 1 });
-          const prompt = extractImagePromptResponse(output);
-          if (!prompt) throw new Error('模型未返回图像描述');
-          db.prepare('UPDATE raw_messages SET prompt=? WHERE id=?').run(prompt, rawId);
-          db.prepare("UPDATE image_tasks SET prompt_original=?,prompt_refined=?,status='running' WHERE id=?").run(prompt,prompt,taskId);
-          await triggerImageGeneration(conversationId,prompt,messageId,taskId,notifyImage,frozen.crossRefCharIdsForImage,frozen.ragQuery,frozen.character,frozen.crossCharacters,frozen.imageConfig,{ includeCharacter: frozen.includeCharacter });
-        },
+        execute: (binding, frozen) => executePrivateImage(conversationId, binding, frozen, notifyImage),
       });
     }
 
@@ -1641,6 +1639,28 @@ function getDefaultPrompt() {
   return `你是一个创意图像生成助手。用户会和你聊天，描述他们想生成的图像。
 你可以帮助优化图像描述，使其更适合 AI 图像生成。
 请用中文回复，语气友好而专业。`;
+}
+
+function privateImageNotifier(characterId) {
+  return (event, data) => {
+    const binding = getDb().prepare(`SELECT p.message_id,p.user_raw_id,r.client_msg_id,t.created_at FROM private_chat_image_turns p JOIN raw_messages r ON r.id=p.user_raw_id JOIN messages m ON m.id=p.message_id JOIN image_tasks t ON t.id=p.task_id WHERE p.task_id=?`).get(data.taskId);
+    if (!binding) return;
+    broadcast('private_chat_image', { event, characterId, ...data, messageId: binding?.message_id,
+      userRawId: binding?.user_raw_id, clientMsgId: binding?.client_msg_id, created_at: toISODate(binding.created_at) });
+  };
+}
+
+// A retry passes the prompt the first attempt already wrote, and skips straight to drawing.
+async function executePrivateImage(conversationId, { taskId, rawId, messageId, prompt }, frozen, notify) {
+  const db = getDb();
+  if (!prompt) {
+    const output = await requestNonEmptyImagePrompt(() => chatWithLorebook(frozen.msgs, { temperature: 0.7, label: '私聊生图', lorebook: frozen.lorebook }), { emptyRetries: 1 });
+    prompt = extractImagePromptResponse(output);
+    if (!prompt) throw new Error('模型未返回图像描述');
+    db.prepare('UPDATE raw_messages SET prompt=? WHERE id=?').run(prompt, rawId);
+  }
+  db.prepare("UPDATE image_tasks SET prompt_original=?,prompt_refined=?,status='running' WHERE id=?").run(prompt,prompt,taskId);
+  await triggerImageGeneration(conversationId,prompt,messageId,taskId,notify,frozen.crossRefCharIdsForImage,frozen.ragQuery,frozen.character,frozen.crossCharacters,frozen.imageConfig,{ includeCharacter: frozen.includeCharacter });
 }
 
 async function triggerImageGeneration(conversationId, prompt, assistantMsgId, taskId, send, crossRefCharIds = [], ragQuery = '', frozenCharacter = null, frozenCrossCharacters = null, frozenImageConfig = {}, { includeCharacter = true } = {}) {

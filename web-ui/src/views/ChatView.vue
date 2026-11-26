@@ -147,6 +147,8 @@
               <ImageGenBubble
                 :msg="item.msg"
                 :emit-loaded-when-initially-done="!!item.msg.liveImage"
+                retryable
+                @retry="chat.retryImage(item.msg)"
                 @preview="onChatImagePreview($event)"
                 @loaded="onChatImageLoaded(item.msg)"
               />
