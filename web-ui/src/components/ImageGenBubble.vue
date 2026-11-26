@@ -49,6 +49,7 @@
       <div class="igb-placeholder igb-error">
         <div style="font-size:36px">&#x26A0;&#xFE0F;</div>
         <div class="igb-error-text">{{ msg.genError || '生成失败，请重试' }}</div>
+        <linshe-button v-if="retryable" class="igb-retry" @click="$emit('retry')">重试</linshe-button>
       </div>
     </div>
   </div>
@@ -57,14 +58,16 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useSettingsStore } from '../stores/settings.js'
+import LinsheButton from './ui/LinsheButton.vue'
 
 const settings = useSettingsStore()
 
 const props = defineProps({
   msg: { type: Object, required: true },
   emitLoadedWhenInitiallyDone: { type: Boolean, default: false },
+  retryable: { type: Boolean, default: false },
 })
-const emit = defineEmits(['preview', 'loaded'])
+const emit = defineEmits(['preview', 'loaded', 'retry'])
 
 // ── 根据系统设置的宽高比计算占位容器尺寸，与 igb-img 的 max-width/max-height 对齐 ──
 const GEN_MAX_W = 600   // 与 .igb-img max-width 一致
@@ -175,7 +178,14 @@ function scheduleTick() {
   }, 400 + Math.random() * 1200)
 }
 
-watch(genStatus, (v) => {
+watch(genStatus, (v, old) => {
+  if (old === 'error' && v !== 'done') {
+    clearTimeout(timer)
+    simulatedPct.value = 0
+    maxedOut = false
+    realPct.value = 0
+    scheduleTick()
+  }
   if (v === 'retrying') {
     // 重试时重置模拟进度，重新开始滚动
     clearTimeout(timer)
@@ -263,6 +273,7 @@ onUnmounted(() => clearTimeout(timer))
   word-break: break-word;
   line-height: 1.5;
 }
+.igb-retry { margin-top: 14px; }
 .igb-retrying {
   /* 重试中：暖橙色背景提示 */
   background: linear-gradient(
