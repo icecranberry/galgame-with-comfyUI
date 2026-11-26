@@ -1,5 +1,5 @@
 <template>
-  <linshe-modal :visible="modalVisible" title="送个礼物" :close-disabled="loading" @close="modalVisible = false" @after-leave="finishClose" panel-class="gift-modal">
+  <linshe-modal :visible="modalVisible" title="送个礼物" @close="modalVisible = false" @after-leave="finishClose" panel-class="gift-modal">
     <template #title>
       <div class="modal-heading-content">
           <span class="gift-title">
@@ -18,8 +18,8 @@
             <div class="gift-options">
               <div
                 class="gift-card"
-                :class="[cardClass('small'), { 'is-disabled': cooldowns.small > 0 || loading }]"
-                :aria-disabled="cooldowns.small > 0 || loading"
+                :class="[cardClass('small'), { 'is-disabled': cooldowns.small > 0 }]"
+                :aria-disabled="cooldowns.small > 0"
                 role="button"
                 tabindex="0"
                 @click="selectGift('small')"
@@ -42,8 +42,8 @@
 
               <div
                 class="gift-card"
-                :class="[cardClass('large'), { 'is-disabled': cooldowns.large > 0 || loading }]"
-                :aria-disabled="cooldowns.large > 0 || loading"
+                :class="[cardClass('large'), { 'is-disabled': cooldowns.large > 0 }]"
+                :aria-disabled="cooldowns.large > 0"
                 role="button"
                 tabindex="0"
                 @click="selectGift('large')"
@@ -66,8 +66,8 @@
 
               <div
                 class="gift-card gift-card-ring"
-                :class="[ringCardClass, { 'is-disabled': !ringAvailable || loading }]"
-                :aria-disabled="!ringAvailable || loading"
+                :class="[ringCardClass, { 'is-disabled': !ringAvailable }]"
+                :aria-disabled="!ringAvailable"
                 role="button"
                 tabindex="0"
                 @click="selectGift('ring')"
@@ -118,20 +118,15 @@
                 class="gift-line-input"
                 type="textarea"
                 :maxlength="GIFT_LINE_MAX"
-                :disabled="loading"
                 rows="2"
                 placeholder="比如：看到它的时候，就觉得很适合你。"
               />
               <p class="gift-line-help">这句话会随礼物一起送出，并显示在聊天中。</p>
             </div>
-            <div v-if="error" class="gift-error" role="alert">{{ error }}</div>
             <div class="confirm-actions">
-              <div class="confirm-back" :class="{ 'is-disabled': loading }" :aria-disabled="loading" role="button" tabindex="0" @click="!loading && (step = 'select')" @keydown.enter.prevent="!loading && (step = 'select')" @keydown.space.prevent="!loading && (step = 'select')">再想想</div>
-              <div class="confirm-send" :class="{ 'is-ring': selectedType === 'ring', 'is-disabled': loading }" :aria-disabled="loading" role="button" tabindex="0" @click="doSend" @keydown.enter.prevent="doSend" @keydown.space.prevent="doSend">
-                <template v-if="loading">
-                  <span class="send-loading-dots"><span>·</span><span>·</span><span>·</span></span>
-                </template>
-                <template v-else>{{ sendButtonText }}</template>
+              <div class="confirm-back" role="button" tabindex="0" @click="step = 'select'" @keydown.enter.prevent="step = 'select'" @keydown.space.prevent="step = 'select'">再想想</div>
+              <div class="confirm-send" :class="{ 'is-ring': selectedType === 'ring' }" role="button" tabindex="0" @click="doSend" @keydown.enter.prevent="doSend" @keydown.space.prevent="doSend">
+                {{ sendButtonText }}
               </div>
             </div>
           </div>
@@ -144,7 +139,7 @@
 import LinsheModal from './ui/LinsheModal.vue'
 
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { sendGift, getGiftCooldowns } from '../api/index.js'
+import { getGiftCooldowns } from '../api/index.js'
 import LinsheButton from './ui/LinsheButton.vue'
 import LinsheInput from './ui/LinsheInput.vue'
 
@@ -155,11 +150,11 @@ const props = defineProps({
   affinity: { type: Number, default: 50 },
 })
 
-const emit = defineEmits(['close', 'sent'])
+const emit = defineEmits(['close', 'send'])
 const modalVisible = ref(true)
-let sentResult = null
+let pendingSend = null
 function finishClose() {
-  if (sentResult) emit('sent', sentResult)
+  if (pendingSend) emit('send', pendingSend)
   emit('close')
 }
 
@@ -176,8 +171,6 @@ const ringCardClass = computed(() => ({
 const selectedType = ref(null)
 const GIFT_LINE_MAX = 120
 const giftLine = ref('')
-const loading = ref(false)
-const error = ref('')
 let countdownTimer = null
 
 
@@ -257,36 +250,17 @@ function formatCd(seconds) {
 }
 
 function selectGift(type) {
-  // gift-card 改为 div 后的禁用守卫（原 :disabled="cooldowns[type] > 0 || loading" / "!ringAvailable || loading"）
-  if (loading.value) return
+  // gift-card 改为 div 后的禁用守卫（原 :disabled="cooldowns[type] > 0" / "!ringAvailable"）
   if (type === 'ring' && !ringAvailable.value) return
   if (cooldowns[type] > 0) return
   selectedType.value = type
 }
 
-async function doSend() {
-  if (!selectedType.value || loading.value) return
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await sendGift(props.characterId, selectedType.value, giftLine.value.trim())
-    if (res.success) {
-      cooldowns.small = res.cooldowns?.small ?? cooldowns.small
-      cooldowns.large = res.cooldowns?.large ?? cooldowns.large
-      sentResult = res
-      modalVisible.value = false
-    } else {
-      error.value = res.error || '送礼失败'
-      if (res.cooldowns) {
-        cooldowns.small = res.cooldowns.small || 0
-        cooldowns.large = res.cooldowns.large || 0
-      }
-    }
-  } catch (err) {
-    error.value = '网络错误，请重试'
-  } finally {
-    loading.value = false
-  }
+// 角色的反应要等模型生成，交给聊天页在后台等待，弹窗立即关闭。
+function doSend() {
+  if (!selectedType.value || pendingSend) return
+  pendingSend = { giftType: selectedType.value, giftLine: giftLine.value.trim() }
+  modalVisible.value = false
 }
 </script>
 
@@ -401,11 +375,6 @@ async function doSend() {
 .gift-card-ring.is-available .gift-card-title { color: #c4973a; }
 .gift-card-ring.is-available .gift-oath-need { color: #d4a853; font-weight: 500; }
 
-.gift-error {
-  background: #fef2f2; color: #d1522c;
-  border-radius: 10px; padding: 10px 14px;
-  font-size: 13px; margin-bottom: 12px;
-}
 
 .gift-next-btn {
   display: flex; align-items: center; justify-content: center; gap: 4px;
@@ -632,15 +601,6 @@ async function doSend() {
   box-shadow: 0 6px 20px rgba(212,168,83,0.4);
 }
 
-.send-loading-dots {
-  display: inline-flex; gap: 3px; align-items: center;
-}
-.send-loading-dots span {
-  animation: dotJump 1.2s ease-in-out infinite;
-  font-size: 20px; line-height: 1;
-}
-.send-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
-.send-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes dotJump {
   0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-3px); }

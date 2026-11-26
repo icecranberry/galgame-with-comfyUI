@@ -968,7 +968,7 @@ ${imageRulesText}
   try {
     const result = await chatSync(
       [{ role: 'user', content: reactionPrompt }],
-      { temperature: 0.7, response_format: { type: 'json_object' }, label: '送礼反应' }
+      { temperature: 0.7, response_format: { type: 'json_object' }, label: '送礼反应', interactive: true }
     );
     let raw = result.trim();
     if (raw.startsWith('```')) raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');

@@ -101,7 +101,7 @@
                 </span>
               </div>
               <!-- 等待态：Agent消息内容为空时显示打字动画，不套气泡 -->
-              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && chat.streaming && chat.showTypingDots"
+              <svg v-if="item.piece.kind === 'text' && item.msg.role === 'assistant' && !item.msg.content && (item.msg.giftPending || chat.streaming && chat.showTypingDots)"
                 class="typing-dots" viewBox="0 0 72 10" width="72" height="10"
                 style="align-self:center"
               >
@@ -246,7 +246,7 @@
         :is-oath="chat.activeChar?.is_oath || 0"
         :affinity="chat.activeChar?.affinity ?? 50"
         @close="showGiftPanel = false"
-        @sent="onGiftSent"
+        @send="onGiftSend"
       />
       </div>
     </template>
@@ -794,8 +794,31 @@ function cycleImageGenMode() {
 }
 
 
+async function onGiftSend({ giftType, giftLine }) {
+  const charId = chat.activeCharId
+  const now = Date.now()
+  const line = giftLine ? { id: `gift_line_${now}`, role: 'user', content: giftLine, created_at: new Date().toISOString() } : null
+  const typing = { id: `gift_typing_${now}`, role: 'assistant', content: '', giftPending: true, created_at: new Date().toISOString() }
+  if (line) chat.messages.push(line)
+  chat.messages.push(typing)
+  nextTick(() => scrollToBottom(true))
+  const remove = (msg) => {
+    const idx = msg ? chat.messages.indexOf(msg) : -1
+    if (idx >= 0) chat.messages.splice(idx, 1)
+  }
+  try {
+    const result = await api.sendGift(charId, giftType, giftLine)
+    if (chat.activeCharId !== charId) return
+    remove(typing)
+    if (line && result.userMsgId) line.id = result.userMsgId
+    onGiftSent(result)
+  } catch (err) {
+    if (chat.activeCharId === charId) { remove(typing); remove(line) }
+    toastFn(err.message || '送礼失败', 'error')
+  }
+}
+
 function onGiftSent(result) {
-  showGiftPanel.value = false
 
   // 刷新顶部好感度显示
   chat.realtimeAffinity = {
@@ -809,16 +832,6 @@ function onGiftSent(result) {
   if (result.is_oath) {
     const char = chat.characters.find(c => c.id === chat.activeCharId)
     if (char) char.is_oath = 1
-  }
-
-  // 1. 自定义送出台词（选填）
-  if (result.giftLine) {
-    chat.messages.push({
-      id: result.userMsgId || Date.now(),
-      role: 'user',
-      content: result.giftLine,
-      created_at: new Date().toISOString(),
-    })
   }
 
   // 2. 角色文字气泡

@@ -346,6 +346,7 @@ async function _chatSyncFreeEgg(messages, opts) {
  * @param {number} opts.maxRetries - SDK 内部重试次数；与外层 retries 独立，缺省不变
  * @param {boolean} opts.returnMeta - true 时返回 { content, finishReason }（判断是否被服务端长度限制截断）；缺省仍只返回 content 字符串
  * @param {boolean} opts.freeEggFailover - false 禁止免费模型轮换/回退自有端点，缺省保持旧行为
+ * @param {boolean} opts.interactive - true 时不排后台并发队列：用户正在等待结果，与主聊天流一样直接请求
  * 单次请求用 { signal, timeout: 10000, retries: 0, maxRetries: 0, freeEggFailover: false }。
  */
 export async function chatSync(messages, opts = {}) {
@@ -499,10 +500,10 @@ function compressLogMessages(messages) {
   });
 }
 
-async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, thinkingEffort, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries, requestBudget } = {}) {
+async function _chatSyncInner(messages, { model = config.llm.model || 'deepseek-flash', temperature = 0.7, response_format, thinking, forceDisableThinking = false, forceThinkingMode, thinkingEffort, fallbackToConfiguredThinking = false, label = 'sync', retries = 2, retryDelay = 1000, signal, timeout, maxRetries, requestBudget, interactive = false } = {}) {
   throwIfSyncAborted(signal);
   if (config.features.mergeMessages && !requestBudget) messages = mergeConsecutiveRoles(messages);
-  const limited = _limitEnabled();
+  const limited = !interactive && _limitEnabled();
   if (limited) await acquireSyncSlot(signal);
   try {
   throwIfSyncAborted(signal);
