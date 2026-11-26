@@ -210,7 +210,7 @@
         <div v-if="isCharSleeping" role="button" tabindex="0" class="gift-btn wake-btn" :class="{ 'wake-shaking': wakeShaking }" @keydown.enter.prevent="onWakeChar" @keydown.space.prevent="onWakeChar" @click="onWakeChar" title="叫醒角色">
           <svg class="gift-btn-icon" viewBox="0 0 24 24" width="20" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
         </div>
-        <div v-else v-show="!(isMobile && inputFocused)" role="button" tabindex="0" class="gift-btn" @keydown.enter.prevent="showGiftPanel = true" @keydown.space.prevent="showGiftPanel = true" @click="showGiftPanel = true" title="送礼物">
+        <div v-else v-show="!(isMobile && inputFocused)" role="button" tabindex="0" class="gift-btn" :class="{ 'is-disabled': giftSending }" :aria-disabled="giftSending" @keydown.enter.prevent="openGiftPanel" @keydown.space.prevent="openGiftPanel" @click="openGiftPanel" :title="giftSending ? '礼物送出中…' : '送礼物'">
           <svg class="gift-btn-icon" viewBox="0 0 1138 1024" width="20" height="18" fill="#fff"><path d="M57.242236 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM683.272405 626.030169l397.969831 0 0 397.969831-397.969831 0 0-397.969831zM0 284.393966l455.212067 0 0 284.393966-455.212067 0 0-284.393966zM1137.575865 284.393966l0 284.393966-454.303461 0 0-284.393966 454.303461 0zM512.454303 284.393966l113.575865 0 0 739.606034-113.575865 0 0-739.606034zM683.272405 228.060337l-228.060337 0 0-170.818101 228.060337 0 0 170.818101zM1024 228.060337l-284.393966 0 111.758651-228.060337 172.635315 0 0 228.060337zM398.878438 228.060337l-284.393966 0 0-228.060337 169.909494 0z"/></svg>
         </div>
         <!-- 撤回气泡：长按发送按钮浮现 -->
@@ -707,6 +707,11 @@ const isMobile = inject('isMobile')
 const toggleMobileSidebar = inject('toggleMobileSidebar')
 const inputText = ref('')
 const showGiftPanel = ref(false)
+// 冷却要等角色回应后才在服务端记下，回应到之前不能再送
+const giftSending = ref(false)
+function openGiftPanel() {
+  if (!giftSending.value) showGiftPanel.value = true
+}
 const inputFocused = ref(false)
 const wakeShaking = ref(false)
 
@@ -795,6 +800,7 @@ function cycleImageGenMode() {
 
 
 async function onGiftSend({ giftType, giftLine }) {
+  giftSending.value = true
   const charId = chat.activeCharId
   const now = Date.now()
   const line = giftLine ? { id: `gift_line_${now}`, role: 'user', content: giftLine, created_at: new Date().toISOString() } : null
@@ -815,6 +821,8 @@ async function onGiftSend({ giftType, giftLine }) {
   } catch (err) {
     if (chat.activeCharId === charId) { remove(typing); remove(line) }
     toastFn(err.message || '送礼失败', 'error')
+  } finally {
+    giftSending.value = false
   }
 }
 
@@ -2210,6 +2218,8 @@ function renderContent(text) {
 .gift-btn:hover { transform: scale(1.08); box-shadow: 0 4px 16px rgba(249, 194, 112, 0.35); }
 .gift-btn:hover .gift-btn-icon { transform: rotate(12deg) scale(1.1); }
 .gift-btn:active { transform: scale(0.94); }
+.gift-btn.is-disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+.gift-btn.is-disabled .gift-btn-icon { transform: none; }
 
 /* ── 叫醒按钮（覆盖送礼按钮样式） ── */
 .wake-btn {
