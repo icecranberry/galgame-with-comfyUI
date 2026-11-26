@@ -111,7 +111,19 @@ export function collectCharacterImageUrls(characterId, { limit = 120 } = {}) {
   `).all(characterIdNum, limit);
   for (const row of standingRows) push(row.image_url);
 
-  // 9. 角色当前头像与旧版默认立绘（work 槽未显式设置图片时的兜底）
+  // 9. 立绘管理生成的表情立绘：每个槽位有抠图后的 image_url 和原图 source_url，相册里两张都列出
+  const expressionRows = db.prepare(`
+    SELECT image_url, source_url FROM expression_standings
+    WHERE character_id = ?
+      AND ((image_url IS NOT NULL AND image_url != '') OR (source_url IS NOT NULL AND source_url != ''))
+    LIMIT ?
+  `).all(characterIdNum, limit);
+  for (const row of expressionRows) {
+    push(row.image_url);
+    push(row.source_url);
+  }
+
+  // 10. 角色当前头像与旧版默认立绘（work 槽未显式设置图片时的兜底）
   const char = db.prepare('SELECT avatar_path, standing_url, chat_bg_path, galgame_bg_path FROM characters WHERE id = ?').get(characterIdNum);
   if (char) {
     push(char.avatar_path);
