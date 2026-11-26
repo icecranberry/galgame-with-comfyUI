@@ -82,7 +82,7 @@
     </div>
 
     <!-- 往期奇遇 -->
-    <div v-if="store.filteredHistory.length > 0" class="history-section">
+    <div v-if="store.history.length > 0" class="history-section">
       <div class="history-header" @click="showHistory = !showHistory">
         <span>📋 往期奇遇 ({{ store.filteredHistory.length }})</span>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
@@ -113,6 +113,7 @@
               </div>
             </div>
           </div>
+          <div v-if="!store.filteredHistory.length" class="history-empty">{{ store.filterEngaged ? '— 还没有参与过的奇遇 —' : '— 没有符合筛选的奇遇 —' }}</div>
           <div class="waterfall-row" :style="{ '--cols': colCount }">
             <div v-for="(col, ci) in historyColumns" :key="'hc_' + ci" class="waterfall-col">
               <div v-for="eh in col" :key="'h_' + eh.id">
@@ -535,6 +536,7 @@ function onScroll() {
 
 /* ── 往期奇遇 ── */
 .history-section { padding: 0 12px 24px; }
+.history-empty { padding: 24px 0; text-align: center; font-size: 13px; color: var(--text-secondary); }
 .history-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 4px; font-size: 14px; color: var(--text-secondary); cursor: pointer;
