@@ -119,7 +119,7 @@ defaultTimeoutMs: parseInt(process.env.VECTOR_DEFAULT_TIMEOUT_MS, 10) || 120000,
     hiresArtist: '',     // HiresFix 指定模式下的画师串
   },
   features: {
-    privateChatNarration: true,
+    privateChatNarration: false,
     emotion: true,
     memory: process.env.FEATURE_MEMORY !== 'false',
     replyGuesses: true,

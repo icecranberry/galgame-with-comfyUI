@@ -2337,7 +2337,7 @@ onMounted(async () => {
     imageProvider.value = data.comfy.imageProvider === 'novelai' ? 'novelai' : 'comfyui'
     applyNovelaiConfig(data.comfy)
     settingsStore.setComfySize(data.comfy.width, data.comfy.height)
-    settingsStore.privateChatNarration ??= data.features?.privateChatNarration ?? true
+    settingsStore.privateChatNarration ??= data.features?.privateChatNarration ?? false
     Object.assign(features, data.features)
     freqSlider.value = features.proactiveChatFreq ?? 0.5
     eventFreqSlider.value = features.eventFreq ?? 1

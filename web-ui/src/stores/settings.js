@@ -35,7 +35,7 @@ export const useSettingsStore = defineStore('settings', () => {
     if (loaded) return
     try {
       const data = await api.getConfig()
-      privateChatNarration.value ??= data.features?.privateChatNarration ?? true
+      privateChatNarration.value ??= data.features?.privateChatNarration ?? false
       comfyWidth.value = data.comfy?.width || 1600
       comfyHeight.value = data.comfy?.height || 1200
       eventWidth.value = data.comfy?.eventWidth || 1600
