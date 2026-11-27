@@ -94,6 +94,13 @@
                 <svg class="gift-notice-icon" viewBox="0 0 1138 1024" width="13" height="12" fill="currentColor" aria-hidden="true"><path d="M57.24 626.03h397.97V1024H57.24zM683.27 626.03h397.97V1024H683.27zM0 284.39h455.21v284.4H0zM1137.58 284.39v284.4H683.27v-284.4zM512.45 284.39h113.58V1024H512.45zM683.27 228.06H455.21V57.24h228.06zM1024 228.06H739.6L851.37 0H1024zM398.88 228.06H114.48V0h169.92z" /></svg>
                 你送给{{ chat.activeChar?.display_name }}{{ giftNames[item.msg.giftType]?.measure }}<b :class="['gift-notice-name', `is-${item.msg.giftType}`]">{{ giftNames[item.msg.giftType]?.name }}</b>
               </span>
+              <Transition name="gift-caption" mode="out-in">
+                <linshe-button v-if="isGiftInlineCaption(item.msg) && giftFailure" key="failed" variant="link" tone="danger" size="sm" class="gift-retry" :title="giftFailureCopy.hint" :aria-label="`${giftFailureCopy.hint}${giftFailureCopy.action}`" @click="retryGift">
+                  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>
+                  {{ giftFailureCopy.label }}，{{ giftFailureCopy.action }}
+                </linshe-button>
+                <span v-else-if="isGiftInlineCaption(item.msg) && giftRetrying" key="retrying" class="gift-caption-muted">正在重试…</span>
+              </Transition>
             </div>
 
             <!-- 深度思考块（可折叠） -->
@@ -828,17 +835,34 @@ function isGiftFailed(msg) {
   return !!turn && (msg === turn.notice || msg === turn.line)
 }
 
+// 有留言时提示挂在留言气泡下面；没留言时直接跟在礼物提示同一行。
 const giftCaptionItemId = computed(() => {
   const turn = giftFailure.value?.turn || giftRetrying.value
-  if (!turn) return null
-  return `${(turn.line || turn.notice).id}-text`
+  return turn?.line ? `${turn.line.id}-text` : null
 })
+
+function isGiftInlineCaption(msg) {
+  const turn = giftFailure.value?.turn || giftRetrying.value
+  return !!turn && !turn.line && msg === turn.notice
+}
+
+function removeChatMessage(msg) {
+  const idx = msg ? chat.messages.indexOf(msg) : -1
+  if (idx >= 0) chat.messages.splice(idx, 1)
+}
 
 const giftFailureCopy = computed(() => giftFailure.value?.kind === 'reply'
   ? { label: '送礼出错', action: '重试', hint: '礼物已送到，但处理时出错了。' }
   : { label: '发送失败', action: '重发', hint: '礼物没能送到服务器。' })
 
 async function onGiftSend({ giftType, giftLine }) {
+  // 重新从送礼弹窗送出，等于放弃之前失败的那一份
+  const stale = giftFailure.value?.turn
+  if (stale) {
+    giftFailure.value = null
+    removeChatMessage(stale.notice)
+    removeChatMessage(stale.line)
+  }
   const now = Date.now()
   const createdAt = new Date().toISOString()
   const turn = {
@@ -859,6 +883,14 @@ function retryGift() {
   if (!turn || giftSending.value) return
   giftFailure.value = null
   giftRetrying.value = turn
+  // 重发的这一轮挪到最底下，排在失败之后发的消息后面
+  const createdAt = new Date().toISOString()
+  for (const msg of [turn.notice, turn.line]) {
+    if (!msg) continue
+    removeChatMessage(msg)
+    msg.created_at = createdAt
+    chat.messages.push(msg)
+  }
   deliverGift(turn).finally(() => { if (giftRetrying.value === turn) giftRetrying.value = null })
 }
 
@@ -867,10 +899,7 @@ async function deliverGift(turn) {
   const typing = { id: `gift_typing_${Date.now()}`, role: 'assistant', content: '', giftPending: true, created_at: new Date().toISOString() }
   chat.messages.push(typing)
   nextTick(() => scrollToBottom(true))
-  const remove = (msg) => {
-    const idx = msg ? chat.messages.indexOf(msg) : -1
-    if (idx >= 0) chat.messages.splice(idx, 1)
-  }
+  const remove = removeChatMessage
   try {
     const result = await api.sendGift(turn.charId, turn.giftType, turn.giftLine, turn.clientGiftId)
     if (chat.activeCharId !== turn.charId) return
@@ -2289,7 +2318,7 @@ function renderContent(text) {
 .gift-btn.is-disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
 .gift-btn.is-disabled .gift-btn-icon { transform: none; }
 
-.gift-notice-row { display: flex; justify-content: center; margin: 10px 0 6px; transition: filter 0.3s ease, opacity 0.3s ease; }
+.gift-notice-row { display: flex; justify-content: center; align-items: center; gap: 8px; margin: 10px 0 6px; font-size: 12px; }
 .gift-notice {
   display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 10px;
   font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: rgba(255, 255, 255, 0.6);
@@ -2298,9 +2327,9 @@ function renderContent(text) {
 .gift-notice-name { color: #c0703a; font-weight: 600; }
 .gift-notice-name.is-ring { color: #b8902f; }
 .message.user .msg-bubble { transition: filter 0.3s ease, opacity 0.3s ease; }
-.gift-notice-row.msg-unsent, .message.msg-unsent .msg-bubble { filter: grayscale(1); opacity: 0.75; }
+.gift-notice { transition: filter 0.3s ease, opacity 0.3s ease; }
+.gift-notice-row.msg-unsent .gift-notice, .message.msg-unsent .msg-bubble { filter: grayscale(1); opacity: 0.75; }
 .gift-caption { display: flex; justify-content: flex-end; padding-right: 50px; font-size: 12px; line-height: 26px; }
-.gift-notice-row + .gift-caption { justify-content: center; padding-right: 0; }
 .gift-caption-muted { color: var(--text-secondary); }
 .gift-retry { text-decoration: underline; text-underline-offset: 3px; }
 .gift-caption-enter-active, .gift-caption-leave-active { transition: opacity 0.3s ease; }
