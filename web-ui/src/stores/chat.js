@@ -200,6 +200,11 @@ export const useChatStore = defineStore('chat', () => {
       const genImages = imageUrls.filter(u => !isEmojiImageUrl(u));
       if (!content && emojiImages.length === 0 && genImages.length === 0) continue;
 
+      if (msg.raw_id === null && msg.gift_type) {
+        result.push({ ...msg, role: 'gift', type: 'gift_notice', giftType: msg.gift_type });
+        continue;
+      }
+
       if (msg.raw_id === null && msg.event_id != null) {
         let eventData = null;
         try { eventData = JSON.parse(msg.content); } catch {}

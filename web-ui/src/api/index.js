@@ -91,7 +91,7 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
     if (isMissingRoute) {
       throw new Error('接口不存在：后端服务还是旧代码，请先在启动器里重启服务再试')
     }
-    throw new Error(result.error || result.message || `请求失败 (${res.status})`)
+    throw Object.assign(new Error(result.error || result.message || `请求失败 (${res.status})`), { status: res.status })
   }
   return result
 }
@@ -1261,8 +1261,8 @@ export async function imageProviderHealth(data = {}) {
 }
 
 // ── Gift 送礼 ──
-export async function sendGift(characterId, giftType, giftLine = '') {
-  return request(`/characters/${characterId}/gift`, { method: 'POST', body: { giftType, giftLine } })
+export async function sendGift(characterId, giftType, giftLine = '', clientGiftId) {
+  return request(`/characters/${characterId}/gift`, { method: 'POST', body: { giftType, giftLine, clientGiftId } })
 }
 
 export async function getGiftCooldowns() {

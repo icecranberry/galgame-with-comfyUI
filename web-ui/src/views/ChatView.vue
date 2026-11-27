@@ -89,10 +89,17 @@
               />
             </div>
 
+            <div v-else-if="item.msg.type === 'gift_notice'" class="gift-notice-row" :class="{ 'msg-unsent': isGiftFailed(item.msg) }">
+              <span class="gift-notice">
+                <svg class="gift-notice-icon" viewBox="0 0 1138 1024" width="13" height="12" fill="currentColor" aria-hidden="true"><path d="M57.24 626.03h397.97V1024H57.24zM683.27 626.03h397.97V1024H683.27zM0 284.39h455.21v284.4H0zM1137.58 284.39v284.4H683.27v-284.4zM512.45 284.39h113.58V1024H512.45zM683.27 228.06H455.21V57.24h228.06zM1024 228.06H739.6L851.37 0H1024zM398.88 228.06H114.48V0h169.92z" /></svg>
+                你送给{{ chat.activeChar?.display_name }}{{ giftNames[item.msg.giftType]?.measure }}<b :class="['gift-notice-name', `is-${item.msg.giftType}`]">{{ giftNames[item.msg.giftType]?.name }}</b>
+              </span>
+            </div>
+
             <!-- 深度思考块（可折叠） -->
 
             <!-- Text bubble (user or assistant) -->
-            <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole }]">
+            <div v-else-if="item.msg.type !== 'image_gen'" class="message" :class="[item.msg.role, { 'msg-same-role': item.sameRole, 'msg-unsent': isGiftFailed(item.msg) }]">
               <div class="msg-avatar" :class="{ 'clickable': item.msg.role === 'assistant' }" :title="item.msg.role === 'assistant' ? '角色设置' : ''" @click="item.msg.role === 'assistant' && openSettings()">
                 <img v-if="msgAvatarSrc(item.msg.role)" :src="msgAvatarSrc(item.msg.role)" class="avatar-img" loading="lazy" decoding="async" alt="" />
                 <span v-else class="avatar-fallback">{{ item.msg.role === 'user' ? '我' : chat.activeChar?.display_name?.charAt(0) }}</span>
@@ -151,6 +158,15 @@
                 @loaded="onChatImageLoaded(item.msg)"
               />
             </div>
+            <Transition name="gift-caption" mode="out-in">
+              <div v-if="item.id === giftCaptionItemId && giftFailure" key="failed" class="gift-caption">
+                <linshe-button variant="link" tone="danger" size="sm" class="gift-retry" :title="giftFailureCopy.hint" :aria-label="`${giftFailureCopy.hint}${giftFailureCopy.action}`" @click="retryGift">
+                  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>
+                  {{ giftFailureCopy.label }}，{{ giftFailureCopy.action }}
+                </linshe-button>
+              </div>
+              <div v-else-if="item.id === giftCaptionItemId && giftRetrying" key="retrying" class="gift-caption gift-caption-muted">正在重试…</div>
+            </Transition>
           </template>
         </div>
       </div>
@@ -799,13 +815,56 @@ function cycleImageGenMode() {
 }
 
 
+const giftNames = {
+  small: { measure: '一份', name: '小惊喜' },
+  large: { measure: '一份', name: '特别准备' },
+  ring: { measure: '一枚', name: '誓约之戒' },
+}
+const giftFailure = ref(null)
+const giftRetrying = ref(null)
+
+function isGiftFailed(msg) {
+  const turn = giftFailure.value?.turn
+  return !!turn && (msg === turn.notice || msg === turn.line)
+}
+
+const giftCaptionItemId = computed(() => {
+  const turn = giftFailure.value?.turn || giftRetrying.value
+  if (!turn) return null
+  return `${(turn.line || turn.notice).id}-text`
+})
+
+const giftFailureCopy = computed(() => giftFailure.value?.kind === 'reply'
+  ? { label: '送礼出错', action: '重试', hint: '礼物已送到，但处理时出错了。' }
+  : { label: '发送失败', action: '重发', hint: '礼物没能送到服务器。' })
+
 async function onGiftSend({ giftType, giftLine }) {
-  giftSending.value = true
-  const charId = chat.activeCharId
   const now = Date.now()
-  const line = giftLine ? { id: `gift_line_${now}`, role: 'user', content: giftLine, created_at: new Date().toISOString() } : null
-  const typing = { id: `gift_typing_${now}`, role: 'assistant', content: '', giftPending: true, created_at: new Date().toISOString() }
-  if (line) chat.messages.push(line)
+  const createdAt = new Date().toISOString()
+  const turn = {
+    charId: chat.activeCharId,
+    giftType,
+    giftLine,
+    clientGiftId: `gift-${now}-${Math.random().toString(36).slice(2, 10)}`,
+    notice: { id: `gift_notice_${now}`, role: 'gift', type: 'gift_notice', giftType, content: '', created_at: createdAt },
+    line: giftLine ? { id: `gift_line_${now}`, role: 'user', content: giftLine, created_at: createdAt } : null,
+  }
+  chat.messages.push(turn.notice)
+  if (turn.line) chat.messages.push(turn.line)
+  await deliverGift(turn)
+}
+
+function retryGift() {
+  const turn = giftFailure.value?.turn
+  if (!turn || giftSending.value) return
+  giftFailure.value = null
+  giftRetrying.value = turn
+  deliverGift(turn).finally(() => { if (giftRetrying.value === turn) giftRetrying.value = null })
+}
+
+async function deliverGift(turn) {
+  giftSending.value = true
+  const typing = { id: `gift_typing_${Date.now()}`, role: 'assistant', content: '', giftPending: true, created_at: new Date().toISOString() }
   chat.messages.push(typing)
   nextTick(() => scrollToBottom(true))
   const remove = (msg) => {
@@ -813,14 +872,23 @@ async function onGiftSend({ giftType, giftLine }) {
     if (idx >= 0) chat.messages.splice(idx, 1)
   }
   try {
-    const result = await api.sendGift(charId, giftType, giftLine)
-    if (chat.activeCharId !== charId) return
+    const result = await api.sendGift(turn.charId, turn.giftType, turn.giftLine, turn.clientGiftId)
+    if (chat.activeCharId !== turn.charId) return
     remove(typing)
-    if (line && result.userMsgId) line.id = result.userMsgId
+    if (result.giftMsgId) turn.notice.id = result.giftMsgId
+    if (turn.line && result.userMsgId) turn.line.id = result.userMsgId
     onGiftSent(result)
   } catch (err) {
-    if (chat.activeCharId === charId) { remove(typing); remove(line) }
-    toastFn(err.message || '送礼失败', 'error')
+    if (chat.activeCharId !== turn.charId) return
+    remove(typing)
+    // 4xx 是服务端拒收（冷却、戒指条件不满足），重发也没用：撤掉这一轮，只提示原因
+    if (err.status >= 400 && err.status < 500) {
+      remove(turn.notice)
+      remove(turn.line)
+      toastFn(err.message || '送礼失败', 'error')
+    } else {
+      giftFailure.value = { turn, kind: err.status ? 'reply' : 'send' }
+    }
   } finally {
     giftSending.value = false
   }
@@ -2220,6 +2288,23 @@ function renderContent(text) {
 .gift-btn:active { transform: scale(0.94); }
 .gift-btn.is-disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
 .gift-btn.is-disabled .gift-btn-icon { transform: none; }
+
+.gift-notice-row { display: flex; justify-content: center; margin: 10px 0 6px; transition: filter 0.3s ease, opacity 0.3s ease; }
+.gift-notice {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 10px;
+  font-size: 12px; line-height: 1.6; color: var(--text-secondary); background: rgba(255, 255, 255, 0.6);
+  user-select: none;
+}
+.gift-notice-name { color: #c0703a; font-weight: 600; }
+.gift-notice-name.is-ring { color: #b8902f; }
+.message.user .msg-bubble { transition: filter 0.3s ease, opacity 0.3s ease; }
+.gift-notice-row.msg-unsent, .message.msg-unsent .msg-bubble { filter: grayscale(1); opacity: 0.75; }
+.gift-caption { display: flex; justify-content: flex-end; padding-right: 50px; font-size: 12px; line-height: 26px; }
+.gift-notice-row + .gift-caption { justify-content: center; padding-right: 0; }
+.gift-caption-muted { color: var(--text-secondary); }
+.gift-retry { text-decoration: underline; text-underline-offset: 3px; }
+.gift-caption-enter-active, .gift-caption-leave-active { transition: opacity 0.3s ease; }
+.gift-caption-enter-from, .gift-caption-leave-to { opacity: 0; }
 
 /* ── 叫醒按钮（覆盖送礼按钮样式） ── */
 .wake-btn {

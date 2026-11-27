@@ -288,7 +288,7 @@ router.get('/characters/:id/messages', (req, res) => {
   const conversationId = convId(req.params.id);
 
   const messages = db.prepare(`
-    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id, r.client_msg_id
+    SELECT m.id, m.conversation_id, m.raw_id, m.role, m.content, m.images, m.created_at, m.event_id, m.gift_type, r.client_msg_id
     FROM messages m
     LEFT JOIN raw_messages r ON r.id = m.raw_id
     WHERE m.conversation_id = ?

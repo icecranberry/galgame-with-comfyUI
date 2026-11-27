@@ -925,8 +925,13 @@ router.post('/import-card', async (req, res) => {
   }
 });
 
+const GIFT_NOTICE_LABELS = { small: '小惊喜', large: '特别准备', ring: '誓约之戒' };
+// 连接断了但服务端已经送出时，重发同一个 clientGiftId 拿回第一次的结果，不会再送一份。
+const recentGifts = new Map();
+const RECENT_GIFT_TTL_MS = 10 * 60 * 1000;
+
 // POST /api/characters/:id/gift — 向角色赠送礼物
-// Body: { giftType: 'small' | 'large' | 'ring', giftLine?: string }
+// Body: { giftType: 'small' | 'large' | 'ring', giftLine?: string, clientGiftId?: string }
 router.post('/:id/gift', async (req, res) => {
   const db = getDb();
   const char = db.prepare('SELECT * FROM characters WHERE id = ?').get(req.params.id);
@@ -943,21 +948,42 @@ router.post('/:id/gift', async (req, res) => {
   if (normalizedGiftLine.length > 120) {
     return res.status(400).json({ error: '送出台词不能超过 120 个字符' });
   }
+  const { clientGiftId } = req.body;
+  if (clientGiftId !== undefined && (typeof clientGiftId !== 'string' || !/^[\w-]{8,64}$/.test(clientGiftId))) {
+    return res.status(400).json({ error: 'clientGiftId is invalid' });
+  }
 
+  const now = Date.now();
+  for (const [k, v] of recentGifts) if (now - v.at > RECENT_GIFT_TTL_MS) recentGifts.delete(k);
+  const key = clientGiftId ? `${char.id}:${clientGiftId}` : null;
+  let entry = key && recentGifts.get(key);
+  if (!entry) {
+    entry = { at: now, done: sendGiftOnce(db, char, giftType, normalizedGiftLine) };
+    if (key) recentGifts.set(key, entry);
+  }
+  const [status, body] = await entry.done;
+  if (key && status !== 200) recentGifts.delete(key);
+  res.status(status).json(body);
+});
+
+async function sendGiftOnce(db, char, giftType, normalizedGiftLine) {
   try {
     const userName = config.user.nickname || '你';
     const result = await giveGift(char.id, giftType, char, userName, normalizedGiftLine);
 
     if (!result.success) {
-      return res.status(409).json({
+      return [409, {
         error: result.message,
         cooldownRemaining: result.cooldownRemaining,
         cooldowns: getGiftCooldowns(),
-      });
+      }];
     }
 
     // 先写入文字消息，异步生图完成后补图片
     const conversationId = `char_${char.id}`;
+    const giftMsgId = db.prepare(
+      `INSERT INTO messages (conversation_id, raw_id, role, content, images, seq, gift_type) VALUES (?, NULL, 'user', ?, NULL, 0, ?)`
+    ).run(conversationId, `送出礼物·${GIFT_NOTICE_LABELS[giftType]}`, giftType).lastInsertRowid;
     let userMsgId = null;
     if (normalizedGiftLine) {
       const userRawResult = db.prepare(
@@ -1012,22 +1038,24 @@ router.post('/:id/gift', async (req, res) => {
     const reasonMap = { small: '收到了一份小礼物', large: '收到了一份精心准备的礼物', ring: '这份心意，比想象中更让我开心……我会记住这一刻。' };
     saveEmotionSnapshot(conversationId, msgId, emotionState, 'joy', result.newAffinity, result.affinityDelta, reasonMap[giftType] || '收到了一份礼物');
 
-    res.json({
+    return [200, {
       success: true,
       affinityDelta: result.affinityDelta,
       affinity: result.newAffinity,
       reaction: result.reaction,
+      giftType,
       giftLine: normalizedGiftLine || null,
+      giftMsgId,
       userMsgId,
       msgId,
       cooldowns: getGiftCooldowns(),
       is_oath: giftType === 'ring' ? 1 : loadOath(char.id),
-    });
+    }];
   } catch (err) {
     console.error('[characters] gift failed:', err.message);
-    res.status(500).json({ error: '送礼失败: ' + err.message });
+    return [500, { error: '送礼失败: ' + err.message }];
   }
-});
+}
 
 // DELETE /api/gift/cooldowns — 重置送礼冷却（临时调试用；chest 冷却同表，不在清理范围）
 router.delete('/gift/cooldowns', (_req, res) => {

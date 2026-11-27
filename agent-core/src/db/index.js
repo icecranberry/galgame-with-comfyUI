@@ -1999,6 +1999,11 @@ function migrateProactiveSchema(db) {
       db.exec(`ALTER TABLE messages ADD COLUMN event_id INTEGER DEFAULT NULL`);
       console.log('[db] Added messages.event_id column (nullable, no FK)');
     }
+    // messages 表：gift_type 标记送礼提示行（raw_id 为空，不进模型上下文）
+    if (!msgCols.find(c => c.name === 'gift_type')) {
+      db.exec(`ALTER TABLE messages ADD COLUMN gift_type TEXT DEFAULT NULL`);
+      console.log('[db] Added messages.gift_type column (nullable)');
+    }
   } catch (err) {
     console.log('[db] migrateProactiveSchema error:', err.message);
   }
